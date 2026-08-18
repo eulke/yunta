@@ -9,12 +9,13 @@
 
 mod config;
 mod error;
+pub mod events;
 mod ids;
 mod workflow;
 
 pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
 pub use error::{Result, YuntaError};
-pub use ids::NodeId;
+pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use workflow::{
     ArtifactKind, ArtifactSpec, Artifacts, HookStep, Hooks, Node, NodeKind, OnFailure,
     PromptSource, Workflow,

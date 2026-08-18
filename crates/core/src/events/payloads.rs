@@ -1,0 +1,453 @@
+//! Per-kind payload structs (`docs/eventos.md` §5). Field names and
+//! optionality match that document field for field; anything the document
+//! marks `[inferido]` carries the same note here.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::RunnerCandidate;
+use crate::ids::{NodeId, RunId, TaskId};
+
+/// A ledger criterion, frozen into `task_registered` (`docs/spec-ledger.md`
+/// §2.1) — the same shape the ledger parser (T5.1) will produce.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Criterion {
+    pub cmd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<CriterionType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CriterionType {
+    Guard,
+}
+
+/// One criterion's outcome inside `criteria_checked.results`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CriterionResult {
+    pub cmd: String,
+    pub exit_code: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<CriterionType>,
+    pub reused: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    Pre,
+    Post,
+}
+
+/// `[inferido]`: exact variant names are provisional pending T5.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Pending,
+    Ready,
+    Running,
+    Done,
+    Blocked,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeExpansionMode {
+    Rules,
+    Ask,
+    Deny,
+}
+
+/// `decided_by`: `rule | person` plus an identifier for the latter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Decider {
+    Rule,
+    Person { id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposedCriterion {
+    pub cmd: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookPhase {
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateOption {
+    pub option: String,
+    pub tradeoff: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    Tty,
+    Mcp,
+    Pr,
+}
+
+/// `severity`: `blocking | major | minor | note` — confirmed against the
+/// Contrato's `kind: findings` section (§4.1), not inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSeverity {
+    Blocking,
+    Major,
+    Minor,
+    Note,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Finding {
+    pub id: String,
+    pub severity: FindingSeverity,
+    pub title: String,
+    pub location: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_criterion: Option<ProposedCriterion>,
+}
+
+/// `[inferido]`: exact variant names are provisional; a `cancel` command
+/// exists (T7.1) so `Cancelled` is included alongside the obvious two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalState {
+    Done,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input: u64,
+    pub output: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached: Option<u64>,
+}
+
+/// A snapshot of adapter capabilities (Spec Adapter §2's `Capabilities`)
+/// as recorded in `agent_session_opened`. Defined here rather than in
+/// `yunta-adapters` because the event payload needs the shape before T3.1
+/// exists; T3.1 reuses this same type (adapters already depends on core)
+/// instead of redefining it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub resume_session: bool,
+    pub edit_hooks: bool,
+    pub permission_profiles: bool,
+    pub custom_agents: bool,
+    pub usage_reporting: bool,
+    pub run_tools: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiscardedCandidate {
+    pub candidate: RunnerCandidate,
+    pub reason: String,
+}
+
+/// One resolved `ContextSource` reference in `context_assembled.sources`.
+/// `kind` stays a plain string until M6 defines the closed set of builtin
+/// source kinds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextSourceRef {
+    pub source_id: String,
+    pub kind: String,
+}
+
+// --- Per-kind payloads (docs/eventos.md §5.1-§5.25) -----------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunCreatedPayload {
+    pub manifest_hash: String,
+    pub inputs: HashMap<String, serde_json::Value>,
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promoted_from: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yunta_schema: Option<String>,
+    pub base_branch: String,
+    pub base_commit: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunnerResolvedPayload {
+    pub role: String,
+    pub chosen: RunnerCandidate,
+    pub discarded: Vec<DiscardedCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BaselineCapturedPayload {
+    pub command: String,
+    pub results: BaselineResults,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BaselineResults {
+    pub exit_code: i32,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeStartedPayload {
+    pub node_id: NodeId,
+    pub attempt: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSessionOpenedPayload {
+    pub session_id: crate::ids::SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    pub model: String,
+    pub capabilities: Capabilities,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessageType {
+    ToolUse,
+    Usage,
+    Note,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentMessagePayload {
+    pub message_type: AgentMessageType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactWrittenPayload {
+    pub node_id: NodeId,
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextAssembledPayload {
+    pub node_id: NodeId,
+    pub sources: Vec<ContextSourceRef>,
+    /// Keys are `"stable" | "run-stable" | "volatile"` (§9.1's fixed
+    /// stability classes) — kept as plain strings rather than an enum key
+    /// to sidestep serde's map-key-as-enum ceremony for no real benefit.
+    pub segment_hashes: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRegisteredPayload {
+    pub task_id: TaskId,
+    pub criteria: Vec<Criterion>,
+    pub scope: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<TaskId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CriteriaCheckedPayload {
+    pub task_id: TaskId,
+    pub phase: Phase,
+    pub results: Vec<CriterionResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskStatusChangedPayload {
+    pub task_id: TaskId,
+    pub new_status: TaskStatus,
+    /// `seq` of the event that justifies this transition.
+    pub caused_by: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScopeCheckedPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    pub diff: Vec<PathBuf>,
+    pub violations: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScopeExpansionRequestedPayload {
+    pub task_id: TaskId,
+    pub paths: Vec<String>,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_criterion: Option<ProposedCriterion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_criterion_precheck: Option<ProposedCriterionPrecheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposedCriterionPrecheck {
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScopeExpansionGrantedPayload {
+    pub task_id: TaskId,
+    pub decided_by: Decider,
+    pub mode: ScopeExpansionMode,
+    pub count_this_run: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScopeExpansionDeniedPayload {
+    pub task_id: TaskId,
+    pub decided_by: Decider,
+    pub mode: ScopeExpansionMode,
+    pub count_this_run: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denial_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeFinishedPayload {
+    pub node_id: NodeId,
+    pub outcome: String,
+    pub tokens_used: TokenUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeFailedPayload {
+    pub node_id: NodeId,
+    pub outcome: String,
+    pub tokens_used: TokenUsage,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookExecutedPayload {
+    pub node_id: NodeId,
+    pub phase: HookPhase,
+    pub command: String,
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeReroutedPayload {
+    pub from_node: NodeId,
+    pub to_node: NodeId,
+    pub cause: String,
+    pub attempt: u32,
+    pub max_reroutes: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateWaitingPayload {
+    pub node_id: NodeId,
+    pub summary: String,
+    pub evidence: String,
+    pub options: Vec<GateOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateResolvedPayload {
+    pub node_id: NodeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chosen_option: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuestionsAnsweredPayload {
+    pub node_id: NodeId,
+    pub answers_hash: String,
+    pub channel: Channel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responder: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoopIterationPayload {
+    pub node_id: NodeId,
+    pub iteration: u32,
+    pub until_result: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FindingPostedPayload {
+    pub author_node_id: NodeId,
+    pub finding: Finding,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromotionSignaledPayload {
+    pub reason: String,
+    pub evidence: String,
+    pub suggested_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildRunCreatedPayload {
+    pub node_id: NodeId,
+    pub child_run_id: RunId,
+    pub child_workflow_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildRunFinishedPayload {
+    pub node_id: NodeId,
+    pub child_run_id: RunId,
+    pub child_workflow_hash: String,
+    pub terminal_state: TerminalState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityDegradedPayload {
+    pub capability: String,
+    pub adapter: String,
+    pub policy_applied: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPausedPayload {
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunResumedPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_policy_applied: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunFinishedPayload {
+    pub terminal_state: TerminalState,
+    pub metrics: RunMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cptv: Option<f64>,
+    pub tokens: TokenUsage,
+}
