@@ -10,12 +10,14 @@
 
 mod check;
 mod ledger;
+mod manifest;
 mod replay;
 mod scope;
 mod task_cycle;
 
 pub use check::{check, CheckError};
 pub use ledger::{register, LedgerError};
+pub use manifest::{build_manifest, ManifestError};
 pub use replay::{derive, NodeState, RunState};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use task_cycle::{
