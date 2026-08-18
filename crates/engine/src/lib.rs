@@ -9,8 +9,10 @@
 //! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
 
 mod check;
+mod replay;
 
 pub use check::{check, CheckError};
+pub use replay::{derive, NodeState, RunState};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-engine";

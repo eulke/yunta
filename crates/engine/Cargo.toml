@@ -11,3 +11,6 @@ yunta-core = { path = "../core" }
 yunta-storage = { path = "../storage" }
 yunta-adapters = { path = "../adapters" }
 thiserror = "2"
+
+[dev-dependencies]
+chrono = "0.4"
