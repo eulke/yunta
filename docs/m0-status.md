@@ -31,13 +31,38 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       `DispatchOutcome::BudgetExceeded` distingue el corte del engine de un `Failed`
       reportado por la sesión.
 - [x] **T1.4** (recorte) — manifest congelado con hashes canónicos
-      (`yunta_core::Manifest` + `yunta_engine::build_manifest`); sin `inputs`/`modo`.
-- [x] **T7.1** (parcial) — `yunta check <workflow> [--config <config>]` real en el
-      CLI, lee YAML de disco. `run`/`status`/`resume` **siguen sin conectar** —
-      las decisiones de diseño ya están resueltas (ver abajo); falta el scheduler
-      recortado (T4.1) y el ciclo run.dir/artifacts que lo sostiene.
+      (`yunta_core::Manifest` + `yunta_engine::build_manifest`), incluye
+      `base_branch`/`base_commit` y contenido de prompts por archivo; sin
+      `inputs`/`modo`.
+- [x] **Artifacts al cierre de nodo (§4/§4.1)** — existencia, no-vacuidad y hash
+      (`artifact_written`); `kind: task-ledger` se parsea, valida (todas las
+      violaciones juntas) y registra (`task_registered`)
+      (`yunta_engine::close_artifacts`).
+- [x] **Templates (recorte de T6.3)** — sintaxis final `{{var}}` con error duro en
+      variable indefinida (`render_template`/`template_variables`); M-0 provee
+      `{{run.dir}}` (+ `{{worktree}}` en fixtures de `yunta test`).
+- [x] **T4.1/T4.5 (recorte)** — `create_run` (run.dir + `manifest.yaml` +
+      `run_created`) y `execute_run`: scheduler secuencial por replay
+      (`pending→ready→running→done|failed`), despacho por kind
+      (`bash`/`prompt`/`loop`), hooks `before`/`after` (`hook_executed`),
+      re-rutas §11.2 (`node_rerouted`, retorno automático, `run_paused` al
+      agotarse), commit por tarea verificada (§5.5), huérfanos `running`
+      reinician al resumir (`run_resumed`, restart_node). `yunta run` y
+      `yunta resume` son la misma función sobre el log.
+- [x] **T7.1 (parcial)** — `yunta check`, `yunta run <workflow>`,
+      `yunta status <run_id>`, `yunta resume <run_id>` reales en el CLI, con
+      config en capas (repo > usuario > org, `YUNTA_HOME` como raíz de estado).
+      Un workflow con nodos `prompt`/`loop` se rechaza **antes** de crear el run
+      mientras no exista adapter real (T7.3) — el mensaje apunta a `yunta test`.
+- [x] **T7.9 (recorte)** — `yunta test`: casos en `.yunta/tests/` con
+      `workflow`/`fixture`/`expect` (final_state, nodes, tasks), sandbox por caso
+      (worktree git, runs root y DB temporales), fixture renderizado con
+      `{{run.dir}}`/`{{worktree}}`, el mock suplanta a todo adapter que la config
+      nombre. Sin `mode`/`inputs`/`events`/`never` (esperan su schema o T7.9
+      completo).
 - [ ] **T7.3** — adapter `claude-code` real (no ejercitable en este sandbox: necesita
-      el binario `claude` instalado y autenticado)
+      el binario `claude` instalado y autenticado). **Es lo único que falta para que
+      `yunta run` corra el bootstrap real.**
 
 ## Hecho de más, no nombrado explícitamente en el alcance mínimo
 
@@ -162,21 +187,26 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    parametrizarse.
 7. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
    implementar — explícitamente fuera de M-0.
-8. **El arco que cierra M-0** (orden de ejecución, según las decisiones de
-   diseño resueltas arriba):
-   1. Artifacts al cierre de nodo (§4): verificación de existencia/no-vacuidad,
-      `artifact_written` con hash, y registro de `kind: task-ledger` vía
-      `yunta_engine::register` → `task_registered`.
-   2. Mínimo de templates (recorte de T6.3): `{{run.dir}}` en nodos `bash` —
-      solo lo que el workflow de bootstrap necesita; el resto de T6.3 espera M6.
-   3. Scheduler recortado (T4.1): `pending→ready→running→done|failed`,
-      `depends_on`, despacho por `kind` (`prompt`/`bash`/`loop`), hooks
-      `before`/`after`, re-rutas `on_failure.goto`, secuencial
-      (`max_parallel_nodes` diferido). Reutiliza `run_task`/`dispatch` de
-      `task_cycle.rs`.
-   4. Creación de run: run.dir + manifest congelado en disco + `run_created`
-      con `manifest_hash`; eventos al storage durante la ejecución.
-   5. CLI: `yunta run`, `status`, `resume` (T7.1 parcial + T4.5 recortado).
-   6. `yunta test` mínimo (recorte de T7.9): casos en `.yunta/tests/` con
-      `fixture:` + `expect:` sobre estado derivado — el hogar del ruteo de
-      fixtures del mock. `run --adapter mock` sin fixture → error explícito.
+8. **El arco que cerraba M-0 está COMPLETO** (los seis pasos: artifacts al
+   cierre, templates mínimos, scheduler T4.1, creación de run, CLI
+   run/status/resume, `yunta test`). Ver la lista de alcance arriba. Deudas
+   menores que dejó, con su gatillo:
+   - **T4.2 (worktrees)**: el run corre en el árbol actual del repo; aislamiento
+     `worktree|none` con sus condiciones (§7.3) llega con T4.2. Gatillo: correr
+     dos runs a la vez o el primer bootstrap real.
+   - **T2.4 (paths congelados)**: `resume` busca run.dir bajo el `paths.runs`
+     de la config *actual* — cambiarlo entre run y resume no está soportado
+     hasta T2.4.
+   - **Eventos `agent_session_opened`/`agent_message` sin emitir**: el ciclo
+     nodo/tarea ya es auditable (runner_resolved, criteria_checked,
+     scope_checked, artifact_written); emitir el detalle por sesión requiere un
+     emitter dentro de `dispatch_session`. Gatillo: T7.3 o cuando `status`
+     necesite mostrar la sesión viva.
+   - **`node-output` como artifact (§11.2)**: el stderr de un `bash` fallido va
+     hoy en el diagnóstico de `node_failed` (acotado a 20 líneas), no como
+     artifact montable por `context:` — eso es de T4.4/M6.
+   - **Subgrafo de corrección**: la re-ruta ejecuta solo el nodo destino; "su
+     subgrafo" completo llega con T4.4.
+   - **`run_paused` por límites de presupuesto de run (§8.3)**: los budgets por
+     sesión (T3.3) están; `limits.max_tokens_per_run`/`max_loop_iterations`
+     esperan a que `limits:` entre a la config (fuera del recorte de T1.2).
