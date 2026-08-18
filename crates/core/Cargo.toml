@@ -7,3 +7,4 @@ repository.workspace = true
 description = "Shared domain types for Yunta, the deterministic workflow engine for code agents."
 
 [dependencies]
+thiserror = "2"
