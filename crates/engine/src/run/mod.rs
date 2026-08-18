@@ -7,6 +7,7 @@
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (§8.1, `restart_node`).
 
+mod loop_exec;
 mod node_exec;
 mod schedule;
 
