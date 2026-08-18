@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 
 //! Embedded, append-only event log storage (Contrato §3, D53: SQLite is the
-//! only backend — no dialect leaks past this crate's interface).
-//!
-//! Empty until T2.1; exists now so the workspace dependency graph
-//! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
+//! only backend — no dialect leaks past this crate's interface: every
+//! public method here takes and returns `yunta_core` types, never
+//! rusqlite's).
+
+mod error;
+mod store;
+
+pub use error::{Result, StorageError};
+pub use store::Storage;
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-storage";
