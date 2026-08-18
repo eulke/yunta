@@ -142,11 +142,12 @@ pub struct HookStep {
     pub run: String,
 }
 
-/// `on_failure: {goto, max_reroutes}` — node-level re-routing (§11.2,
-/// D24). Distinct from a hook's own `on_failure: fail|warn`.
+/// `on_failure: {goto, max_reroutes}` — node-level re-routing (§11.2).
+/// `max_reroutes` is mandatory (D24): a re-route without an explicit cap
+/// is how a correction cycle turns infinite, so the schema refuses it.
+/// Distinct from a hook's own `on_failure: fail|warn`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnFailure {
     pub goto: NodeId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_reroutes: Option<u32>,
+    pub max_reroutes: u32,
 }

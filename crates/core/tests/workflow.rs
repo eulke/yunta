@@ -36,7 +36,7 @@ fn parses_the_m0_schema_recorte_without_loss() {
     }
     let on_failure = lint.on_failure.as_ref().unwrap();
     assert_eq!(on_failure.goto.as_str(), "fix-lint");
-    assert_eq!(on_failure.max_reroutes, Some(2));
+    assert_eq!(on_failure.max_reroutes, 2);
 
     let fix_lint = &workflow.nodes[2];
     assert_eq!(fix_lint.scope, vec!["src/**".to_string()]);

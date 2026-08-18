@@ -87,7 +87,7 @@ fn unknown_goto_target_is_reported() {
     let mut node = bash("a", "true", &[]);
     node.on_failure = Some(OnFailure {
         goto: "ghost".into(),
-        max_reroutes: Some(1),
+        max_reroutes: 1,
     });
     let errors = check(&workflow(vec![node]), &ConfigLayer::default());
     assert!(errors.contains(&CheckError::UnknownGotoTarget {
@@ -118,7 +118,7 @@ fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
     let mut lint = bash("lint", "cargo clippy", &["implement"]);
     lint.on_failure = Some(OnFailure {
         goto: "fix-lint".into(),
-        max_reroutes: Some(2),
+        max_reroutes: 2,
     });
     let fix_lint = prompt("fix-lint", "mechanical", &["lint"]);
     let implement = prompt("implement", "executor", &[]);

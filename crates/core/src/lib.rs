@@ -8,6 +8,7 @@
 //! types (T0.3) are here from the start since every other crate needs them.
 
 mod capabilities;
+mod clock;
 mod config;
 mod error;
 pub mod events;
@@ -17,6 +18,7 @@ mod manifest;
 mod workflow;
 
 pub use capabilities::Capabilities;
+pub use clock::{Clock, SystemClock};
 pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
