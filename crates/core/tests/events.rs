@@ -31,10 +31,7 @@ fn all_kinds() -> Vec<EventPayload> {
             },
             hash: "sha256:def".to_string(),
         }),
-        EventPayload::NodeStarted(NodeStartedPayload {
-            node_id: "implement".into(),
-            attempt: 1,
-        }),
+        EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
         EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
@@ -51,12 +48,10 @@ fn all_kinds() -> Vec<EventPayload> {
             text: None,
         }),
         EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-            node_id: "implement".into(),
             path: "artifacts/ledger.yaml".into(),
             content_hash: "sha256:111".to_string(),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
-            node_id: "plan".into(),
             sources: vec![ContextSourceRef {
                 source_id: "files:docs".to_string(),
                 kind: "files".to_string(),
@@ -89,7 +84,6 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
-            node_id: None,
             diff: vec!["crates/cli/src/graph.rs".into()],
             violations: vec![],
         }),
@@ -116,7 +110,6 @@ fn all_kinds() -> Vec<EventPayload> {
             denial_reason: Some("out of declared scope".to_string()),
         }),
         EventPayload::NodeFinished(NodeFinishedPayload {
-            node_id: "lint".into(),
             outcome: "criteria green".to_string(),
             tokens_used: TokenUsage {
                 input: 10,
@@ -125,26 +118,22 @@ fn all_kinds() -> Vec<EventPayload> {
             },
         }),
         EventPayload::NodeFailed(NodeFailedPayload {
-            node_id: "lint".into(),
             outcome: "criteria red".to_string(),
             tokens_used: TokenUsage::default(),
             retryable: true,
         }),
         EventPayload::HookExecuted(HookExecutedPayload {
-            node_id: "fix-lint".into(),
             phase: HookPhase::After,
             command: "cargo fmt".to_string(),
             exit_code: 0,
         }),
         EventPayload::NodeRerouted(NodeReroutedPayload {
-            from_node: "lint".into(),
             to_node: "fix-lint".into(),
             cause: "clippy failed".to_string(),
             attempt: 1,
             max_reroutes: 2,
         }),
         EventPayload::GateWaiting(GateWaitingPayload {
-            node_id: "ship".into(),
             summary: "Ready to open the PR?".to_string(),
             evidence: "all criteria green".to_string(),
             options: vec![GateOption {
@@ -153,24 +142,20 @@ fn all_kinds() -> Vec<EventPayload> {
             }],
         }),
         EventPayload::GateResolved(GateResolvedPayload {
-            node_id: "ship".into(),
             chosen_option: Some("approve".to_string()),
             resolved_by: Some("eulke".to_string()),
             free_text: None,
         }),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
-            node_id: "grill".into(),
             answers_hash: "sha256:333".to_string(),
             channel: Channel::Tty,
             responder: Some("eulke".to_string()),
         }),
         EventPayload::LoopIteration(LoopIterationPayload {
-            node_id: "implement".into(),
             iteration: 3,
             until_result: false,
         }),
         EventPayload::FindingPosted(FindingPostedPayload {
-            author_node_id: "review".into(),
             finding: Finding {
                 id: "f-1".to_string(),
                 severity: FindingSeverity::Major,
@@ -186,12 +171,10 @@ fn all_kinds() -> Vec<EventPayload> {
             suggested_mode: "standard".to_string(),
         }),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {
-            node_id: "build".into(),
             child_run_id: "run-child-1".into(),
             child_workflow_hash: "sha256:444".to_string(),
         }),
         EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-            node_id: "build".into(),
             child_run_id: "run-child-1".into(),
             child_workflow_hash: "sha256:444".to_string(),
             terminal_state: TerminalState::Done,

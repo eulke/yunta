@@ -38,6 +38,18 @@ Todo evento comparte la misma tupla persistida (Contrato §3):
 | `payload_json` | JSON | específico de cada `kind` — detallado en §4 |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global (§2) |
 
+**Corrección post-implementación**: la primera versión de este documento repetía
+`node_id` (y en algunos casos `from_node`/`author_node_id`) dentro de varios
+payloads que ya corren en el contexto de un nodo — dato redundante con el `node_id`
+del envelope, que podía desincronizarse del real. Se corrigió en
+`NodeStartedPayload`, `ArtifactWrittenPayload`, `ContextAssembledPayload`,
+`ScopeCheckedPayload` (queda solo `task_id` opcional), `NodeFinishedPayload`,
+`NodeFailedPayload`, `HookExecutedPayload`, `NodeReroutedPayload` (queda solo
+`to_node`), `GateWaitingPayload`, `GateResolvedPayload`, `QuestionsAnsweredPayload`,
+`LoopIterationPayload`, `FindingPostedPayload`, `ChildRunCreatedPayload` y
+`ChildRunFinishedPayload`: ninguno de estos payloads vuelve a declarar `node_id`
+—se lee del envelope— y las tablas de campo de la sección 5 ya reflejan esto.
+
 Los siete campos de la tupla, **en este orden**, son también los que participan en
 `event_hash` (§3).
 
@@ -152,7 +164,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `attempt` | `u32` | sí | 1-indexado; sube con cada reintento (§5.2 del Contrato) |
 
 ### 5.5 `agent_session_opened` — adapter
@@ -182,7 +193,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `path` | string | sí | relativo a `run.dir/artifacts/` |
 | `content_hash` | string | sí | los artifacts son inmutables (I4); esto es lo que se verifica en `resume` |
 
@@ -191,7 +201,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `sources` | lista de `{source_id, kind}` | sí | qué `ContextSource` se resolvieron |
 | `segment_hashes` | mapa `stable \| run-stable \| volatile` → hash | sí | orden fijo estable→run-estable→volátil→prompt (I19); insumo directo de replay/diff (T13.1/T13.2) |
 
@@ -228,8 +237,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | `Option<string>` | uno de los dos | tareas del ledger usan `task_id`, nodos sueltos usan `node_id` |
-| `node_id` | `Option<NodeId>` | uno de los dos | — |
+| `task_id` | `Option<string>` | no | presente si el chequeo es de una tarea dentro de un `loop`; ausente para un chequeo de nodo suelto — el nodo en ambos casos es el `node_id` del envelope |
 | `diff` | lista de paths | sí | de `git diff` contra el scope declarado |
 | `violations` | lista de paths | sí (vacía si limpio) | paths fuera de todo glob declarado |
 
@@ -260,7 +268,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | sí | §1 del Contrato: el outcome del agente es telemetría, esto es el veredicto |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` (§8.4) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento (§5.2) |
@@ -270,7 +277,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `phase` | enum `before \| after` | sí | D23: hooks son ciclo del engine, no del adapter |
 | `command` | string | sí | — |
 | `exit_code` | `i32` | sí | — |
@@ -280,8 +286,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `from_node` | `NodeId` | sí | nodo que falló |
-| `to_node` | `NodeId` | sí | destino de `on_failure.goto` |
+| `to_node` | `NodeId` | sí | destino de `on_failure.goto` — el nodo que falló es el `node_id` del envelope |
 | `cause` | string | sí | — |
 | `attempt` | `u32` | sí | N de `max_reroutes` (M) — D24 |
 | `max_reroutes` | `u32` | sí | — |
@@ -291,7 +296,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `summary` | string | solo en `gate_waiting` | objeto de escalación (§5.3) |
 | `evidence` | estructura del engine | solo en `gate_waiting` | nunca prosa generada por agente (I20) |
 | `options` | lista de `{option, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción (D50) |
@@ -304,7 +308,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `answers_hash` | string | sí | hash del artifact de respuestas (D86) |
 | `channel` | enum `tty \| mcp \| pr` | sí | — |
 | `responder` | `Option<string>` | no | si el canal lo identifica |
@@ -314,7 +317,6 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | — |
 | `iteration` | `u32` | sí | — |
 | `until_result` | `bool` | sí | resultado de evaluar la condición del loop (I7: la evalúa el engine, no el agente) |
 
@@ -323,8 +325,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `author_node_id` | `NodeId` | sí | — |
-| `finding.id` | string | sí | — |
+| `finding.id` | string | sí | autor = `node_id` del envelope |
 | `finding.severity` | enum | sí | usada por `findings_gate` (D85) |
 | `finding.title` | string | sí | — |
 | `finding.location` | string | sí | usada para deduplicación (§5.12 del Plan) |
@@ -345,8 +346,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `node_id` | `NodeId` | sí | nodo `kind: workflow` del padre |
-| `child_run_id` | `RunId` | sí | referencia histórica inmutable (I28, D104) |
+| `child_run_id` | `RunId` | sí | referencia histórica inmutable (I28, D104) — el nodo `kind: workflow` del padre es el `node_id` del envelope |
 | `child_workflow_hash` | string | sí | fija qué versión del workflow hijo corrió — reproducir el padre nunca resuelve una versión nueva |
 | `terminal_state` | estado | solo en `child_run_finished` | — |
 

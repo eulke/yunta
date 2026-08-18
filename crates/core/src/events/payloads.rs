@@ -203,7 +203,6 @@ pub struct BaselineResults {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeStartedPayload {
-    pub node_id: NodeId,
     pub attempt: u32,
 }
 
@@ -243,14 +242,12 @@ pub struct AgentMessagePayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactWrittenPayload {
-    pub node_id: NodeId,
     pub path: PathBuf,
     pub content_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextAssembledPayload {
-    pub node_id: NodeId,
     pub sources: Vec<ContextSourceRef>,
     /// Keys are `"stable" | "run-stable" | "volatile"` (§9.1's fixed
     /// stability classes) — kept as plain strings rather than an enum key
@@ -282,12 +279,13 @@ pub struct TaskStatusChangedPayload {
     pub caused_by: u64,
 }
 
+/// `task_id` is present for a task's scope check within a loop node;
+/// absent for a node-level scope check — either way the envelope's own
+/// `node_id` already names the node, so it is not repeated here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScopeCheckedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<NodeId>,
     pub diff: Vec<PathBuf>,
     pub violations: Vec<PathBuf>,
 }
@@ -328,14 +326,12 @@ pub struct ScopeExpansionDeniedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeFinishedPayload {
-    pub node_id: NodeId,
     pub outcome: String,
     pub tokens_used: TokenUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeFailedPayload {
-    pub node_id: NodeId,
     pub outcome: String,
     pub tokens_used: TokenUsage,
     pub retryable: bool,
@@ -343,15 +339,15 @@ pub struct NodeFailedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookExecutedPayload {
-    pub node_id: NodeId,
     pub phase: HookPhase,
     pub command: String,
     pub exit_code: i32,
 }
 
+/// `from_node` is the envelope's own `node_id` (the node that failed) —
+/// only the re-route's destination is extra information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeReroutedPayload {
-    pub from_node: NodeId,
     pub to_node: NodeId,
     pub cause: String,
     pub attempt: u32,
@@ -360,7 +356,6 @@ pub struct NodeReroutedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateWaitingPayload {
-    pub node_id: NodeId,
     pub summary: String,
     pub evidence: String,
     pub options: Vec<GateOption>,
@@ -368,7 +363,6 @@ pub struct GateWaitingPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateResolvedPayload {
-    pub node_id: NodeId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen_option: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -379,7 +373,6 @@ pub struct GateResolvedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuestionsAnsweredPayload {
-    pub node_id: NodeId,
     pub answers_hash: String,
     pub channel: Channel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -388,14 +381,14 @@ pub struct QuestionsAnsweredPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoopIterationPayload {
-    pub node_id: NodeId,
     pub iteration: u32,
     pub until_result: bool,
 }
 
+/// The finding's author is the envelope's own `node_id` — not repeated
+/// here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FindingPostedPayload {
-    pub author_node_id: NodeId,
     pub finding: Finding,
 }
 
@@ -406,16 +399,15 @@ pub struct PromotionSignaledPayload {
     pub suggested_mode: String,
 }
 
+/// The parent's `kind: workflow` node is the envelope's own `node_id`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChildRunCreatedPayload {
-    pub node_id: NodeId,
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChildRunFinishedPayload {
-    pub node_id: NodeId,
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
     pub terminal_state: TerminalState,
