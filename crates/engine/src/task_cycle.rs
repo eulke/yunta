@@ -16,7 +16,7 @@ use thiserror::Error;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
-use yunta_core::events::CriterionType;
+use yunta_core::events::{CriterionType, TokenUsage};
 use yunta_core::{Task, TaskId, YuntaError};
 
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
@@ -83,6 +83,8 @@ pub enum DispatchOutcome {
 pub struct AttemptRecord {
     pub attempt: u32,
     pub dispatch: DispatchOutcome,
+    /// Tokens this attempt's session consumed, from its `Usage` events.
+    pub tokens: TokenUsage,
     pub post_check: Vec<CriterionRun>,
     pub scope: ScopeCheckResult,
     pub succeeded: bool,
@@ -172,45 +174,30 @@ pub async fn post_check(task: &Task, cwd: &Path) -> Result<Vec<CriterionRun>, Ta
 /// that ignores it doesn't stall the attempt.
 const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 
-async fn dispatch(
-    task: &Task,
+/// Spawns one session from `request`, drains it to a terminal outcome
+/// and reports the tokens it consumed. Shared by the task cycle and by
+/// prompt-node execution (T4.1): the request differs, the enforcement
+/// does not.
+///
+/// O4: the adapter passes `request.budget` along if its CLI supports it,
+/// but enforcement is the engine's job either way — this counts `Usage`
+/// and races the wall-clock deadline independent of that, and cuts the
+/// session with `interrupt` → grace → `kill` (A4) when either budget is
+/// exceeded.
+pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
-    cwd: &Path,
-    budget: &Budget,
-) -> Result<DispatchOutcome, TaskCycleError> {
-    let request = SessionRequest {
-        prompt: format!(
-            "Read task `{}` ({}) from the ledger and implement it within its declared scope.",
-            task.id, task.title
-        ),
-        cwd: cwd.to_path_buf(),
-        model: None,
-        agent: None,
-        permissions: PermissionProfile::Edit,
-        env: Default::default(),
-        edit_constraints: Some(task.scope.clone()),
-        budget: *budget,
-        adapter_settings: Default::default(),
-    };
+    request: SessionRequest,
+) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
+    let budget = request.budget;
+    let mut session = adapter.spawn(request).await?;
 
-    let mut session = adapter
-        .spawn(request)
-        .await
-        .map_err(|source| TaskCycleError::Spawn {
-            task: task.id.clone(),
-            source,
-        })?;
-
-    // O4: the adapter passes the budget along if its CLI supports it,
-    // but enforcement is the engine's job either way — this counts
-    // `Usage` and races the deadline independent of that.
     // Carries the timeout `Duration` alongside its computed `Instant` so
     // the timeout-exceeded branch can report it without re-deriving it
     // from `budget.timeout`.
     let deadline = budget
         .timeout
         .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
-    let mut tokens_used: u64 = 0;
+    let mut tokens = TokenUsage::default();
     let mut terminal = None;
 
     {
@@ -222,10 +209,7 @@ async fn dispatch(
                         Ok(next) => next,
                         Err(_) => {
                             terminal = Some(DispatchOutcome::BudgetExceeded {
-                                reason: format!(
-                                    "exceeded timeout of {timeout:?} for task `{}`",
-                                    task.id
-                                ),
+                                reason: format!("exceeded timeout of {timeout:?}"),
                             });
                             break;
                         }
@@ -240,15 +224,19 @@ async fn dispatch(
                 AgentEvent::Usage {
                     input_tokens,
                     output_tokens,
-                    ..
+                    cached_input_tokens,
                 } => {
-                    tokens_used += input_tokens + output_tokens;
+                    tokens.input += input_tokens;
+                    tokens.output += output_tokens;
+                    if let Some(cached) = cached_input_tokens {
+                        tokens.cached = Some(tokens.cached.unwrap_or(0) + cached);
+                    }
+                    let tokens_used = tokens.input + tokens.output;
                     if let Some(max_tokens) = budget.max_tokens {
                         if tokens_used > max_tokens {
                             terminal = Some(DispatchOutcome::BudgetExceeded {
                                 reason: format!(
-                                    "exceeded max_tokens {max_tokens} for task `{}` ({tokens_used} used)",
-                                    task.id
+                                    "exceeded max_tokens {max_tokens} ({tokens_used} used)"
                                 ),
                             });
                             break;
@@ -282,7 +270,7 @@ async fn dispatch(
         let _ = session.kill().await;
     }
 
-    Ok(terminal.unwrap_or(DispatchOutcome::Crashed))
+    Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
 }
 
 /// Runs a task through the full cycle (§5.2): pre-check once, then
@@ -294,6 +282,7 @@ async fn dispatch(
 /// diff, regardless of whether the session reported `Completed`.
 pub async fn run_task(
     task: &Task,
+    instruction: &str,
     adapter: &dyn Adapter,
     cwd: &Path,
     max_retries: u32,
@@ -321,7 +310,30 @@ pub async fn run_task(
 
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
-        let dispatch_outcome = dispatch(task, adapter, cwd, &budget).await?;
+        // §5.2 step 3: minimal brief — the node's instruction plus which
+        // task is this session's, never the plan as prose. Every attempt
+        // is a fresh session with the same request.
+        let request = SessionRequest {
+            prompt: format!(
+                "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
+                task.id, task.title
+            ),
+            cwd: cwd.to_path_buf(),
+            model: None,
+            agent: None,
+            permissions: PermissionProfile::Edit,
+            env: Default::default(),
+            edit_constraints: Some(task.scope.clone()),
+            budget,
+            adapter_settings: Default::default(),
+        };
+        let (dispatch_outcome, tokens) =
+            dispatch_session(adapter, request)
+                .await
+                .map_err(|source| TaskCycleError::Spawn {
+                    task: task.id.clone(),
+                    source,
+                })?;
         let post_runs = post_check(task, cwd).await?;
         let scope = scope_check(cwd, &task.scope).await?;
 
@@ -331,6 +343,7 @@ pub async fn run_task(
         attempts.push(AttemptRecord {
             attempt,
             dispatch: dispatch_outcome,
+            tokens,
             post_check: post_runs,
             scope,
             succeeded,

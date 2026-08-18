@@ -60,7 +60,8 @@ pub fn build_manifest(
         }
     }
 
-    let base_commit = git_head(repo)?;
+    let base_commit = git_line(repo, &["rev-parse", "HEAD"])?;
+    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
 
     Ok(Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
@@ -70,12 +71,12 @@ pub fn build_manifest(
         workflow: workflow.clone(),
         config: config.clone(),
         prompts,
+        base_branch,
         base_commit,
     })
 }
 
-fn git_head(repo: &Path) -> Result<String, ManifestError> {
-    let args = ["rev-parse", "HEAD"];
+fn git_line(repo: &Path, args: &[&str]) -> Result<String, ManifestError> {
     let git_error = |detail: String| ManifestError::Git {
         args: args.join(" "),
         cwd: repo.to_path_buf(),

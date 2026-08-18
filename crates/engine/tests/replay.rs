@@ -116,7 +116,10 @@ fn node_finished_without_a_prior_node_started_is_broken() {
 }
 
 #[test]
-fn a_double_node_started_without_an_intervening_failure_is_broken() {
+fn a_second_node_started_is_a_restart_not_a_broken_log() {
+    // §8.1 restart_node: a crash leaves node_started with no terminal
+    // event, and resume emits node_started again. The log records what
+    // happened — the restart is legal and the attempt number carries it.
     let events = vec![
         event(
             1,
@@ -131,7 +134,11 @@ fn a_double_node_started_without_an_intervening_failure_is_broken() {
     ];
 
     let state = derive(&events);
-    assert!(state.broken.is_some());
+    assert!(state.broken.is_none());
+    assert!(matches!(
+        state.nodes.get(&"lint".into()),
+        Some(yunta_engine::NodeState::Running { attempt: 2 })
+    ));
 }
 
 #[test]

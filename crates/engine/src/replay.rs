@@ -70,18 +70,16 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
     match &event.payload {
         EventPayload::NodeStarted(p) => {
             let node_id = require_node_id(event)?;
-            match state.nodes.get(&node_id) {
-                None | Some(NodeState::Failed { .. }) => {
-                    state
-                        .nodes
-                        .insert(node_id, NodeState::Running { attempt: p.attempt });
-                    Ok(())
-                }
-                Some(_) => Err(format!(
-                    "seq {}: node `{node_id}` got node_started while already running/finished",
-                    event.seq
-                )),
-            }
+            // Any prior state is a legal starting point: a `Failed` node
+            // re-runs after its re-route resolves (§11.2), a `Finished`
+            // corrective node re-runs on the next re-route to it, and a
+            // `Running` node restarts when resume finds it orphaned
+            // (§8.1, `restart_node`). The log records what happened; the
+            // attempt number carries the history.
+            state
+                .nodes
+                .insert(node_id, NodeState::Running { attempt: p.attempt });
+            Ok(())
         }
         EventPayload::NodeFinished(p) => {
             let node_id = require_node_id(event)?;

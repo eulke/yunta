@@ -69,9 +69,16 @@ outcome: { type: completed, summary: "wrote it" }
     )
     .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        2,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(report.outcome, TaskOutcome::Done);
     assert_eq!(report.attempts.len(), 1);
@@ -101,9 +108,16 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
             .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        0,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert_ne!(report.outcome, TaskOutcome::Done);
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
@@ -119,9 +133,16 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        2,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert!(
         report.attempts.is_empty(),
@@ -146,9 +167,16 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
     );
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        2,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert!(report.attempts.is_empty());
     match report.outcome {
@@ -180,9 +208,16 @@ outcome: { type: completed, summary: "done" }
     )
     .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        0,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
     assert!(report.attempts[0]
@@ -214,9 +249,16 @@ sessions:
     )
     .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        2,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(report.attempts.len(), 3); // 1 initial + 2 retries
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
@@ -230,9 +272,16 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
-        .await
-        .unwrap();
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        &adapter,
+        dir.path(),
+        0,
+        Budget::default(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(report.attempts[0].dispatch, DispatchOutcome::Crashed);
     assert!(!report.attempts[0].succeeded);
@@ -270,7 +319,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     // never blocks the engine forever.
     let report = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        run_task(&t, &adapter, dir.path(), 0, budget),
+        run_task(&t, "Implement your task.", &adapter, dir.path(), 0, budget),
     )
     .await
     .expect("run_task must return once its own budget timeout elapses")
@@ -308,7 +357,9 @@ outcome: { type: completed, summary: "should never be reached" }
         ..Default::default()
     };
 
-    let report = run_task(&t, &adapter, dir.path(), 0, budget).await.unwrap();
+    let report = run_task(&t, "Implement your task.", &adapter, dir.path(), 0, budget)
+        .await
+        .unwrap();
 
     match &report.attempts[0].dispatch {
         DispatchOutcome::BudgetExceeded { reason } => assert!(reason.contains("max_tokens")),

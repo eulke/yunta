@@ -33,6 +33,9 @@ pub struct Manifest {
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
     pub prompts: BTreeMap<NodeId, String>,
+    /// Branch the run starts from (`git rev-parse --abbrev-ref HEAD` at
+    /// creation; `"HEAD"` when detached).
+    pub base_branch: String,
     /// Commit the run starts from (`git rev-parse HEAD` at creation).
     pub base_commit: String,
     pub workflow_hash: String,

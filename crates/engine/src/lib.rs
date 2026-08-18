@@ -13,6 +13,7 @@ mod check;
 mod ledger;
 mod manifest;
 mod replay;
+mod run;
 mod runner;
 mod scope;
 mod task_cycle;
@@ -23,6 +24,7 @@ pub use check::{check, CheckError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
 pub use replay::{derive, NodeState, RunState};
+pub use run::{create_run, execute_run, RunError, RunReport, RunTerminal};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use task_cycle::{

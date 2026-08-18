@@ -1153,6 +1153,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
  "yunta-adapters",
  "yunta-core",
  "yunta-storage",
