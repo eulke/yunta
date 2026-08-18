@@ -30,9 +30,12 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       contra `budget.timeout`, corte con `interrupt()` → grace period → `kill()` (A4).
       `DispatchOutcome::BudgetExceeded` distingue el corte del engine de un `Failed`
       reportado por la sesión.
+- [x] **T1.4** (recorte) — manifest congelado con hashes canónicos
+      (`yunta_core::Manifest` + `yunta_engine::build_manifest`); sin `inputs`/`modo`.
 - [x] **T7.1** (parcial) — `yunta check <workflow> [--config <config>]` real en el
-      CLI, lee YAML de disco. `run`/`status`/`resume` **siguen sin conectar — hay
-      preguntas de diseño abiertas, ver más abajo, antes de seguir ahí.**
+      CLI, lee YAML de disco. `run`/`status`/`resume` **siguen sin conectar** —
+      las decisiones de diseño ya están resueltas (ver abajo); falta el scheduler
+      recortado (T4.1) y el ciclo run.dir/artifacts que lo sostiene.
 - [ ] **T7.3** — adapter `claude-code` real (no ejercitable en este sandbox: necesita
       el binario `claude` instalado y autenticado)
 
@@ -104,32 +107,29 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - **T7.1 (check)**: sin flags de formato de salida (`--json`) ni de verbosidad —
   agregar cuando algo los necesite.
 
-## ⚠️ Decisión pendiente tuya antes de seguir con `yunta run`
+## Decisiones de diseño resueltas (con el usuario, 2026-08-18)
 
-No la resolví sola porque son decisiones de diseño genuinamente nuevas, no
-recortes de algo ya especificado — inventar acá sería exactamente lo que CLAUDE.md
-pide no hacer ("ante ambigüedad: ADRs → preguntar, jamás inventar"):
+Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
+**nada custom — se incluyen las piezas normativas que faltaban**:
 
-1. **¿Cómo encuentra un nodo `loop` su ledger?** M-0 dice explícitamente "durante
-   el bootstrap no hay nodo de planificación: las tareas del plan se convierten a
-   ledger a mano" — o sea, el ledger ya existe como archivo antes de `yunta run`.
-   Pero el schema de `loop` (T1.1) no tiene un campo que apunte a ese archivo. ¿Se
-   agrega un campo (`ledger: <path>`) al nodo, se usa una convención de path fija
-   (`.yunta/ledger.yaml`), o algo distinto?
-2. **¿Cómo sabe una invocación real de `yunta run --adapter mock` qué fixture usar
-   para cada nodo `prompt`/`loop`?** `MockAdapter` (T3.2) necesita un fixture YAML
-   por sesión — perfecto para tests donde el test lo construye a mano, pero
-   `yunta run` desde la terminal no tiene de dónde sacarlo todavía. ¿Es esto
-   territorio de `yunta test` (T7.9, con casos en `.yunta/tests/`) y `yunta run`
-   con mock simplemente no es un modo pensado para invocación manual — o falta
-   diseñar un mecanismo de fixtures por nodo?
-3. **T1.4 (manifest)**: sin él no hay `manifest_hash` para `run_created`
-   (`docs/eventos.md` §5.1). ¿Construyo una versión mínima ahora (solo lo que M-0
-   necesita: hash del workflow, config, commit base — sin `modo`/`inputs`, que no
-   existen) o esperamos a que haga falta con más contexto tuyo?
-
-Mientras tanto seguí con todo lo que no dependa de esto — quedan varios ítems
-abajo que sí son seguros.
+1. **El `loop` encuentra su ledger por el mecanismo normativo (Contrato §5)**:
+   un nodo anterior lo produce como artifact `kind: task-ledger`
+   (`artifacts.produces`); al cerrar ese nodo el engine lo parsea, valida
+   (`yunta_engine::register`, T5.1) y registra cada tarea (`task_registered`).
+   El `loop` consulta el estado derivado — nunca un path propio en el schema.
+   En el bootstrap, donde el ledger se escribe a mano (sin nodo de planificación
+   LLM), el nodo productor es un `bash` que copia el archivo escrito a mano a
+   `artifacts/`. Requiere entrar al recorte: verificación de artifacts al cierre
+   de nodo (§4) + registro de `task-ledger` + el mínimo de templates de T6.3 que
+   el bootstrap necesita (`{{run.dir}}`).
+2. **El ruteo de fixtures del mock es territorio de `yunta test` (T7.9 / §14)**:
+   cada caso en `.yunta/tests/` declara su `fixture:`. Se incluye un recorte
+   mínimo de T7.9 en M-0. `yunta run --adapter mock` sin fixture disponible
+   degrada con error explícito que apunta a `yunta test` — jamás emulación.
+3. **T1.4 manifest**: se construyó la versión normativa recortada (workflow
+   resuelto + config mergeada + contenido de prompts por archivo + commit base,
+   con hashes canónicos SHA-256). `inputs`/`modo` esperan a que existan en el
+   schema. Hecho — ver commit `3e44a45`.
 
 ## Pendiente explícito (para retomar sin adivinar)
 
@@ -159,9 +159,21 @@ abajo que sí son seguros.
    parametrizarse.
 7. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
    implementar — explícitamente fuera de M-0.
-8. **T4.1/T4.x (scheduler del DAG)**: no está en el alcance recortado de M-0 que
-    veníamos siguiendo, pero es lo que le falta al motor para que `yunta run`
-    orqueste un workflow completo (orden por `depends_on`, despacho por `kind` de
-    nodo, hooks, re-rutas). Lo que sí existe y ya es reutilizable cuando se
-    construya: `run_task` (ciclo de una tarea del ledger) y `dispatch`/dráin de
-    eventos del adapter (`task_cycle.rs`, hoy privado a ese módulo).
+8. **El arco que cierra M-0** (orden de ejecución, según las decisiones de
+   diseño resueltas arriba):
+   1. Artifacts al cierre de nodo (§4): verificación de existencia/no-vacuidad,
+      `artifact_written` con hash, y registro de `kind: task-ledger` vía
+      `yunta_engine::register` → `task_registered`.
+   2. Mínimo de templates (recorte de T6.3): `{{run.dir}}` en nodos `bash` —
+      solo lo que el workflow de bootstrap necesita; el resto de T6.3 espera M6.
+   3. Scheduler recortado (T4.1): `pending→ready→running→done|failed`,
+      `depends_on`, despacho por `kind` (`prompt`/`bash`/`loop`), hooks
+      `before`/`after`, re-rutas `on_failure.goto`, secuencial
+      (`max_parallel_nodes` diferido). Reutiliza `run_task`/`dispatch` de
+      `task_cycle.rs`.
+   4. Creación de run: run.dir + manifest congelado en disco + `run_created`
+      con `manifest_hash`; eventos al storage durante la ejecución.
+   5. CLI: `yunta run`, `status`, `resume` (T7.1 parcial + T4.5 recortado).
+   6. `yunta test` mínimo (recorte de T7.9): casos en `.yunta/tests/` con
+      `fixture:` + `expect:` sobre estado derivado — el hogar del ruteo de
+      fixtures del mock. `run --adapter mock` sin fixture → error explícito.
