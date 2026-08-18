@@ -9,7 +9,7 @@
 mod mock;
 mod session;
 
-pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep};
+pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
     ProbeReport, SessionRequest,

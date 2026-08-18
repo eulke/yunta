@@ -202,7 +202,17 @@ async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
         &["output.txt"],
         vec![cmd("test -f output.txt")],
     );
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+    // Every retry is a fresh session (§5.2), so the fixture scripts one
+    // session per expected attempt.
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: completed, summary: "attempt 1" }
+  - outcome: { type: completed, summary: "attempt 2" }
+  - outcome: { type: completed, summary: "attempt 3" }
+"#,
+    )
+    .unwrap();
 
     let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
         .await

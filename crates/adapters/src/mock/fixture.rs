@@ -1,19 +1,82 @@
 //! The `mock` adapter's fixture format (T3.2) — a YAML script of events
 //! plus filesystem effects, parsed once and replayed on `spawn()`.
+//!
+//! A fixture scripts a whole run, not a single session (Contrato §14: a
+//! workflow test declares one fixture for everything its run spawns).
+//! Two forms parse:
+//!
+//! - **multi-session**: `sessions:` lists one script per spawn, consumed
+//!   in spawn order — deterministic because M-0 execution is sequential;
+//! - **single-session**: the script's fields at the top level — sugar
+//!   for a one-entry `sessions:`.
+//!
+//! Spawning past the end of the script is an explicit adapter error,
+//! never a silent replay of the last session.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use yunta_core::Capabilities;
 
-#[derive(Debug, Clone, Deserialize)]
+/// A parsed fixture: adapter-level capabilities plus one script per
+/// expected `spawn()`, in order.
+#[derive(Debug, Clone)]
 pub struct MockFixture {
+    pub capabilities: Capabilities,
+    pub sessions: Vec<SessionScript>,
+}
+
+impl<'de> Deserialize<'de> for MockFixture {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        // The two forms are told apart structurally — by the presence of
+        // a `sessions` key — never by guessing from what parses.
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let has_sessions = value
+            .as_mapping()
+            .is_some_and(|m| m.contains_key(serde_yaml::Value::from("sessions")));
+
+        if has_sessions {
+            #[derive(Deserialize)]
+            struct Multi {
+                #[serde(default)]
+                capabilities: Capabilities,
+                sessions: Vec<SessionScript>,
+            }
+            let multi: Multi = serde_yaml::from_value(value).map_err(D::Error::custom)?;
+            Ok(MockFixture {
+                capabilities: multi.capabilities,
+                sessions: multi.sessions,
+            })
+        } else {
+            #[derive(Deserialize)]
+            struct Single {
+                #[serde(default)]
+                capabilities: Capabilities,
+                #[serde(flatten)]
+                script: SessionScript,
+            }
+            let single: Single = serde_yaml::from_value(value).map_err(D::Error::custom)?;
+            Ok(MockFixture {
+                capabilities: single.capabilities,
+                sessions: vec![single.script],
+            })
+        }
+    }
+}
+
+/// What one spawned session does: its announced model/agent, the events
+/// it emits, the files it writes, and how its stream ends.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionScript {
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default)]
     pub agent: Option<String>,
-    #[serde(default)]
-    pub capabilities: Capabilities,
     #[serde(default)]
     pub steps: Vec<MockStep>,
     #[serde(default)]

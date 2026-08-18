@@ -3,14 +3,15 @@
 //! of events plus filesystem effects), with injectable failures and
 //! latency, so the engine's whole cycle — tasks, degradation,
 //! cancellation, resume, eventually paralelismo — is testable without an
-//! LLM (A8).
+//! LLM (A8). A fixture scripts every session of a run in spawn order;
+//! see [`MockFixture`].
 
 mod fixture;
 
-pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep};
+pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,24 +28,29 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub struct MockAdapter {
     fixture: MockFixture,
+    /// Index of the next session script `spawn()` consumes.
+    next_session: AtomicUsize,
 }
 
 impl MockAdapter {
     pub fn new(fixture: MockFixture) -> Self {
-        Self { fixture }
+        Self {
+            fixture,
+            next_session: AtomicUsize::new(0),
+        }
     }
 
     pub fn from_yaml(yaml: &str) -> std::result::Result<Self, serde_yaml::Error> {
         Ok(Self::new(serde_yaml::from_str(yaml)?))
     }
 
-    /// Applies the fixture's filesystem effects under `cwd`, honoring
+    /// Applies one session's filesystem effects under `cwd`, honoring
     /// `blocked` + `edit_hooks` (O5: a hook-capable adapter installs the
     /// block before the edit ever lands; without the capability, the
-    /// engine's own post-check scope diff — T5.3, not built yet — is
-    /// what would have caught it instead).
-    fn apply_effects(&self, cwd: &std::path::Path) -> Result<()> {
-        for effect in &self.fixture.effects {
+    /// engine's own post-check scope diff — T5.3 — is what catches it
+    /// instead).
+    fn apply_effects(&self, script: &SessionScript, cwd: &std::path::Path) -> Result<()> {
+        for effect in &script.effects {
             if effect.blocked && self.fixture.capabilities.edit_hooks {
                 continue;
             }
@@ -85,15 +91,29 @@ impl Adapter for MockAdapter {
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
-        self.apply_effects(&req.cwd)?;
+        let index = self.next_session.fetch_add(1, Ordering::SeqCst);
+        let script = self
+            .fixture
+            .sessions
+            .get(index)
+            .ok_or_else(|| YuntaError::Adapter {
+                adapter: "mock".to_string(),
+                message: format!(
+                    "fixture exhausted: {} scripted session(s), spawn #{} requested — \
+                     add a session to the fixture for every session the run opens",
+                    self.fixture.sessions.len(),
+                    index + 1
+                ),
+            })?;
+
+        self.apply_effects(script, &req.cwd)?;
 
         let session_id = SessionId::from(format!(
             "mock-session-{}",
             SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
 
-        let blocked_markers: Vec<PathBuf> = self
-            .fixture
+        let blocked_markers: Vec<PathBuf> = script
             .effects
             .iter()
             .filter(|e| e.blocked && self.fixture.capabilities.edit_hooks)
@@ -104,9 +124,9 @@ impl Adapter for MockAdapter {
         let notify = Arc::new(Notify::new());
         let task_notify = Arc::clone(&notify);
 
-        let model = self.fixture.model.clone();
-        let steps = self.fixture.steps.clone();
-        let outcome = self.fixture.outcome.clone();
+        let model = script.model.clone();
+        let steps = script.steps.clone();
+        let outcome = script.outcome.clone();
 
         tokio::spawn(async move {
             // O1: SessionOpened is always the first event, unconditionally.

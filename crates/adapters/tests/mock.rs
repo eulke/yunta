@@ -231,3 +231,104 @@ outcome: { type: completed, summary: ok }
     assert!(caps.run_tools);
     assert!(!caps.edit_hooks);
 }
+
+#[tokio::test]
+async fn a_multi_session_fixture_scripts_each_spawn_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: completed, summary: "first session" }
+  - outcome: { type: failed, message: "second session", retryable: false }
+"#,
+    )
+    .unwrap();
+
+    let first = drain(
+        adapter
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(matches!(
+        first.last().unwrap(),
+        AgentEvent::Completed { result } if result.summary == "first session"
+    ));
+
+    let second = drain(
+        adapter
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(matches!(
+        second.last().unwrap(),
+        AgentEvent::Failed { error, retryable: false } if error.message == "second session"
+    ));
+}
+
+#[tokio::test]
+async fn an_exhausted_fixture_refuses_further_spawns_explicitly() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: completed, summary: "only one" }
+"#,
+    )
+    .unwrap();
+
+    let _ = adapter
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    match adapter.spawn(request(dir.path().to_path_buf())).await {
+        Ok(_) => panic!("expected the exhausted fixture to refuse the spawn"),
+        Err(err) => assert!(err.to_string().contains("exhausted"), "got: {err}"),
+    }
+}
+
+#[tokio::test]
+async fn each_scripted_session_applies_only_its_own_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - effects: [{ path: first.txt, content: "1" }]
+    outcome: { type: completed, summary: "one" }
+  - effects: [{ path: second.txt, content: "2" }]
+    outcome: { type: completed, summary: "two" }
+"#,
+    )
+    .unwrap();
+
+    let _ = adapter
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    assert!(dir.path().join("first.txt").exists());
+    assert!(!dir.path().join("second.txt").exists());
+
+    let _ = adapter
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    assert!(dir.path().join("second.txt").exists());
+}
+
+#[tokio::test]
+async fn a_single_session_fixture_still_scripts_exactly_one_spawn() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
+
+    let _ = adapter
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    match adapter.spawn(request(dir.path().to_path_buf())).await {
+        Ok(_) => panic!("expected the exhausted fixture to refuse the spawn"),
+        Err(err) => assert!(err.to_string().contains("exhausted"), "got: {err}"),
+    }
+}

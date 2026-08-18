@@ -21,6 +21,12 @@ pub enum YuntaError {
         #[source]
         source: std::io::Error,
     },
+
+    /// An adapter refused an operation for a reason of its own that is
+    /// not an OS error — e.g. `mock` asked to spawn more sessions than
+    /// its fixture scripts. The message says what to fix.
+    #[error("adapter `{adapter}`: {message}")]
+    Adapter { adapter: String, message: String },
 }
 
 /// Convenience alias for the workspace's typed `Result`.
