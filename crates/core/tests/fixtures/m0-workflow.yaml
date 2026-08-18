@@ -1,0 +1,31 @@
+# Minimal illustrative workflow exercising the full M-0 schema recorte:
+# prompt/bash/loop nodes, depends_on, scope, artifacts.produces (kind:
+# task-ledger), hooks.after and on_failure.goto/max_reroutes.
+name: fix-lint-loop
+description: "Implement via loop, verify with bash, re-route on failure."
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: |
+      Read your task from the ledger and implement it within its scope.
+    artifacts:
+      produces:
+        - { name: ledger.yaml, kind: task-ledger }
+
+  - id: lint
+    kind: bash
+    depends_on: [implement]
+    run: "cargo clippy --workspace -- -D warnings"
+    on_failure: { goto: fix-lint, max_reroutes: 2 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    depends_on: [lint]
+    scope: ["src/**"]
+    prompt: "Fix exclusively the clippy errors reported."
+    hooks:
+      after:
+        - run: "cargo fmt"

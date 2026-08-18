@@ -8,8 +8,15 @@
 //! types (T0.3) are here from the start since every other crate needs them.
 
 mod error;
+mod ids;
+mod workflow;
 
 pub use error::{Result, YuntaError};
+pub use ids::NodeId;
+pub use workflow::{
+    ArtifactKind, ArtifactSpec, Artifacts, HookStep, Hooks, Node, NodeKind, OnFailure,
+    PromptSource, Workflow,
+};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-core";

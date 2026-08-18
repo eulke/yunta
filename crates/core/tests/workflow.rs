@@ -1,0 +1,90 @@
+use yunta_core::{ArtifactKind, ArtifactSpec, NodeKind, PromptSource, Workflow};
+
+const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
+
+#[test]
+fn parses_the_m0_schema_recorte_without_loss() {
+    let workflow: Workflow = serde_yaml::from_str(FIXTURE).expect("fixture should parse");
+
+    assert_eq!(workflow.name, "fix-lint-loop");
+    assert_eq!(workflow.nodes.len(), 3);
+
+    let implement = &workflow.nodes[0];
+    assert_eq!(implement.id.as_str(), "implement");
+    assert_eq!(implement.runner.as_deref(), Some("executor"));
+    match &implement.kind {
+        NodeKind::Loop { until, prompt } => {
+            assert_eq!(until, "all_tasks_complete");
+            assert!(matches!(prompt, PromptSource::Inline(_)));
+        }
+        other => panic!("expected Loop, got {other:?}"),
+    }
+    let produces = &implement.artifacts.as_ref().unwrap().produces;
+    assert_eq!(
+        produces[0],
+        ArtifactSpec::Typed {
+            name: "ledger.yaml".to_string(),
+            kind: ArtifactKind::TaskLedger,
+        }
+    );
+
+    let lint = &workflow.nodes[1];
+    assert_eq!(lint.depends_on[0].as_str(), "implement");
+    match &lint.kind {
+        NodeKind::Bash { run } => assert_eq!(run, "cargo clippy --workspace -- -D warnings"),
+        other => panic!("expected Bash, got {other:?}"),
+    }
+    let on_failure = lint.on_failure.as_ref().unwrap();
+    assert_eq!(on_failure.goto.as_str(), "fix-lint");
+    assert_eq!(on_failure.max_reroutes, Some(2));
+
+    let fix_lint = &workflow.nodes[2];
+    assert_eq!(fix_lint.scope, vec!["src/**".to_string()]);
+    let hooks = fix_lint.hooks.as_ref().unwrap();
+    assert_eq!(hooks.after[0].run, "cargo fmt");
+    assert!(hooks.before.is_empty());
+}
+
+#[test]
+fn round_trips_through_serialization() {
+    let first: Workflow = serde_yaml::from_str(FIXTURE).unwrap();
+    let re_serialized = serde_yaml::to_string(&first).unwrap();
+    let second: Workflow = serde_yaml::from_str(&re_serialized).unwrap();
+
+    assert_eq!(first, second);
+}
+
+#[test]
+fn a_path_looking_scalar_prompt_is_always_literal_text_never_a_file() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "prompts/plan.md"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Prompt { prompt } => {
+            assert_eq!(prompt, PromptSource::Inline("prompts/plan.md".to_string()));
+        }
+        other => panic!("expected Prompt, got {other:?}"),
+    }
+}
+
+#[test]
+fn explicit_file_mapping_is_a_file_reference() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: { file: prompts/plan.md }
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Prompt { prompt } => {
+            assert_eq!(
+                prompt,
+                PromptSource::File(std::path::PathBuf::from("prompts/plan.md"))
+            );
+        }
+        other => panic!("expected Prompt, got {other:?}"),
+    }
+}

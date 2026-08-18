@@ -8,3 +8,7 @@ description = "Shared domain types for Yunta, the deterministic workflow engine 
 
 [dependencies]
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_yaml = "0.9"
