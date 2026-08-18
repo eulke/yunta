@@ -12,12 +12,14 @@ mod config;
 mod error;
 pub mod events;
 mod ids;
+mod ledger;
 mod workflow;
 
 pub use capabilities::Capabilities;
 pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
+pub use ledger::{Ledger, Task};
 pub use workflow::{
     ArtifactKind, ArtifactSpec, Artifacts, HookStep, Hooks, Node, NodeKind, OnFailure,
     PromptSource, Workflow,

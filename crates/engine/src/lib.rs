@@ -9,9 +9,11 @@
 //! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
 
 mod check;
+mod ledger;
 mod replay;
 
 pub use check::{check, CheckError};
+pub use ledger::{register, LedgerError};
 pub use replay::{derive, NodeState, RunState};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
