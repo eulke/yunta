@@ -16,8 +16,11 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - [x] **T2.1** — storage: SQLite WAL, event log append/read/list (`yunta-storage`)
 - [x] **T2.2** — los 31 tipos de payload de evento (`yunta_core::events`)
 - [x] **T2.3** — derivación de estado por replay (`yunta_engine::derive`)
-- [ ] **T3.1** — trait `Adapter`/`AgentSession` + adapter `mock` ← **próximo paso**
-- [ ] **T7.3** — adapter `claude-code` real
+- [x] **T3.1** — trait `Adapter`/`AgentSession` (M-0 cut: sin `context`/`skills`/MCP en
+      `SessionRequest`) en `yunta-adapters`
+- [x] **T3.2** — adapter `mock`: fixtures YAML, sesión exitosa/fallida/colgada,
+      ediciones fuera de scope con `edit_hooks`
+- [ ] **T7.3** — adapter `claude-code` real ← **próximo paso**
 - [ ] **T5.1–T5.3** — ciclo del ledger: parseo/registro, pre-check en rojo, post-check,
       scope check
 - [ ] **T7.1** (parcial) — `yunta run`/`check`/`status`/`resume` de verdad. Hoy: el
@@ -60,50 +63,60 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
   (última `task_status_changed`) y tokens totales. No deriva gates ni presupuestos
   más allá del conteo de tokens — no hay `kind: gate` ni enforcement de `limits.*`
   todavía (T3.3), así que no hay nada que derivar de eso hasta que existan.
+- **T3.1**: `SessionRequest` sin `context: ResolvedContext` (M6), `skills: Vec<PathBuf>`
+  (fuera del recorte de T1.1) ni `run_tools_endpoint` (MCP, M8). `AgentOutcome` y
+  `AgentError` quedan `[inferido]` — la spec los nombra sin detallar sus campos;
+  minimalistas a propósito hasta que T7.3 (adapter real) muestre qué información hay
+  de verdad disponible para reportar.
+- **T3.2**: el mock enforce `edit_hooks` sobre un flag `blocked: bool` que el propio
+  fixture declara por efecto, no con glob-matching real — evita traer una dependencia
+  de globs solo para el mock; el matching real de scope (T5.3) sí lo va a necesitar.
 
 ## Pendiente explícito (para retomar sin adivinar)
 
-1. **T3.1** — trait `Adapter`/`AgentSession` (Spec Adapter v0.2) + adapter `mock`
-   completo: fixtures YAML (guión de eventos + efectos de filesystem), fallos y
-   latencias inyectables, respeta O1–O6. **Esto sigue ahora.**
-2. **T7.3** — adapter `claude-code` real: probe (binario, versión, auth), spawn
+1. **T7.3** — adapter `claude-code` real: probe (binario, versión, auth), spawn
    headless streaming, `resume`, `permission_profiles`, `edit_hooks`,
-   `custom_agents`, skills.
-3. **T5.1–T5.3** — ciclo del ledger completo: parseo y registro (usa
+   `custom_agents`, skills. Requiere el binario `claude` instalado y autenticado en
+   el entorno donde se corra — no ejercitable en este sandbox.
+2. **T5.1–T5.3** — ciclo del ledger completo: parseo y registro (usa
    `docs/spec-ledger.md`), pre-check en rojo, brief mínimo, post-check, scope check
-   por `git diff` contra los globs de `scope`.
-4. **T7.1 (parcial)** — subcomandos reales `yunta run/check/status/resume` en el
-   CLI. `check()` (T1.3) y `derive()` (T2.3) necesitan conectarse ahí; falta además
-   cargar el YAML del workflow y de la config desde disco, y abrir el `Storage`
-   (T2.1) real — hoy todo se ejercita solo vía tests, el binario sigue imprimiendo
-   solo la versión.
-5. **Grupos de config diferidos de T1.2**: `mcp_servers`, `skills`,
+   por `git diff` contra los globs de `scope`. **Candidato a seguir ahora**, ya que
+   T3.1/T3.2 (mock) dan con qué ejercitarlo end-to-end.
+3. **T7.1 (parcial)** — subcomandos reales `yunta run/check/status/resume` en el
+   CLI. `check()` (T1.3), `derive()` (T2.3) y `MockAdapter` (T3.2) necesitan
+   conectarse ahí; falta además cargar el YAML del workflow y de la config desde
+   disco, y abrir el `Storage` (T2.1) real — hoy todo se ejercita solo vía tests, el
+   binario sigue imprimiendo solo la versión.
+4. **Grupos de config diferidos de T1.2**: `mcp_servers`, `skills`,
    `baseline`/`coverage`, `secrets`, `permissions` (merge invertido, org manda).
    Implementar recién cuando algo los consuma: `baseline`/`coverage` con T5.4
    (`baseline_compare`), `permissions` con T5.7, `skills` con M6, `mcp_servers` con
    M8.
-6. **Node kinds diferidos de T1.1**: `gate`, `check`, `parallel`, `executor`,
+5. **Node kinds diferidos de T1.1**: `gate`, `check`, `parallel`, `executor`,
    `workflow` (composición). Cada uno llega con su milestone correspondiente (M5
    para `check` builtins y gates, M9 para composición) — no antes.
-7. **Reglas de `yunta check` diferidas de T1.3**: coherencia de modos, scopes
+6. **Reglas de `yunta check` diferidas de T1.3**: coherencia de modos, scopes
    disjuntos en `parallel`/`inherit`, templates, profundidad/aciclicidad del grafo
    de workflows, techos de `permissions`, warning de push directo a la rama base.
-8. **Event kinds sin consumidor en replay (T2.3)**: `gate_waiting`/`gate_resolved`,
+7. **Event kinds sin consumidor en replay (T2.3)**: `gate_waiting`/`gate_resolved`,
    `questions_answered`, `finding_posted`, `child_run_*`, ampliación de scope,
    `promotion_signaled` — existen como tipos (T2.2) pero `derive()` los ignora
    porque nada los emite todavía. Sumarlos a `RunState` cuando su schema/ciclo
    llegue (gates: M5/T7.2; composición: M9; findings: T5.12).
-9. **T1.4** — manifest: resolución y congelado con hashes (workflow+config+
+8. **T1.4** — manifest: resolución y congelado con hashes (workflow+config+
    inputs+modo+runners resueltos+commit base). No nombrada en el alcance mínimo de
    M-0, pero el evento `run_created` (`docs/eventos.md` §5.1) necesita
    `manifest_hash` — en algún punto del ciclo `run`/`resume` hace falta al menos una
    versión recortada (sin `modo`/`inputs`, que no existen todavía).
-10. **T1.5** — validación de inputs al crear el run. Depende de `inputs:` en el
-    schema, que T1.1 no implementó (fuera del recorte). Diferir hasta que algo
-    necesite inputs reales — probablemente cuando el workflow de bootstrap necesite
-    parametrizarse.
-11. **CI real**: `.github/workflows/ci.yml` no se verificó corriendo en GitHub
+9. **T1.5** — validación de inputs al crear el run. Depende de `inputs:` en el
+   schema, que T1.1 no implementó (fuera del recorte). Diferir hasta que algo
+   necesite inputs reales — probablemente cuando el workflow de bootstrap necesite
+   parametrizarse.
+10. **CI real**: `.github/workflows/ci.yml` no se verificó corriendo en GitHub
     Actions de verdad todavía (solo se replicaron sus pasos localmente antes de cada
     commit). Confirmar en el primer push/PR que dispare el workflow.
-12. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
+11. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
     implementar — explícitamente fuera de M-0.
+12. **T3.3** — enforcement de presupuesto (conteo de `Usage`, timeout,
+    `interrupt → kill`). El mock (T3.2) ya sabe simular una sesión colgada
+    justamente para que esta tarea tenga con qué probar el timeout cuando llegue.
