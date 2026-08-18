@@ -25,6 +25,11 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - [x] **T5.2** — ciclo de la tarea: pre-check en rojo, dispatch, post-check,
       reintentos con sesión nueva, `blocked` (`yunta_engine::run_task`)
 - [x] **T5.3** — scope check por `git diff` con glob-matching real (`globset`)
+- [x] **T3.3** — enforcement de presupuesto en `dispatch` (`yunta_engine::task_cycle`):
+      conteo de tokens vía eventos `Usage` contra `max_tokens`, timeout de wall-clock
+      contra `budget.timeout`, corte con `interrupt()` → grace period → `kill()` (A4).
+      `DispatchOutcome::BudgetExceeded` distingue el corte del engine de un `Failed`
+      reportado por la sesión.
 - [x] **T7.1** (parcial) — `yunta check <workflow> [--config <config>]` real en el
       CLI, lee YAML de disco. `run`/`status`/`resume` **siguen sin conectar — hay
       preguntas de diseño abiertas, ver más abajo, antes de seguir ahí.**
@@ -34,9 +39,18 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 ## Hecho de más, no nombrado explícitamente en el alcance mínimo
 
 - [x] **T0.2** — CI (`fmt` + `clippy -D warnings` + build/test, `.github/workflows/ci.yml`).
-      Pendiente confirmar que corre verde en GitHub real (no verificado desde acá).
+      Confirmado corriendo verde en GitHub Actions real (run `32094336162`, rama
+      `claude/yunta-m0-bootstrap-60o1u2`) — ver nota de corrección abajo.
 - [x] **T1.2** (recorte) — config en capas: `runners`/`adapters`/`storage`/`paths`.
 - [x] **T1.3** (recorte) — `yunta check` como función pura en `yunta-engine`.
+- [x] **Revisión de calidad autoiniciada** (regla de CLAUDE.md "nada de unwrap()/expect()
+      fuera de tests"): 4 violaciones encontradas por grep en código de librería,
+      las 4 corregidas — `ledger.rs`/`check.rs` (detección de ciclos: el enum `Color`
+      ahora carga la posición en el stack en vez de buscarla con `.position().expect()`),
+      `task_cycle.rs` (el branch de timeout ahora carga su propio `Duration` en vez de
+      re-derivarlo con `budget.timeout.expect(...)`), `mock/mod.rs` (`events()` llamado
+      dos veces ahora degrada a un stream vacío en vez de entrar en panic). Commit
+      `7aad540`.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
@@ -143,15 +157,9 @@ abajo que sí son seguros.
    schema, que T1.1 no implementó (fuera del recorte). Diferir hasta que algo
    necesite inputs reales — probablemente cuando el workflow de bootstrap necesite
    parametrizarse.
-7. **CI real**: `.github/workflows/ci.yml` no se verificó corriendo en GitHub
-   Actions de verdad todavía (solo se replicaron sus pasos localmente antes de cada
-   commit). Confirmar en el primer push/PR que dispare el workflow.
-8. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
+7. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
    implementar — explícitamente fuera de M-0.
-9. **T3.3** — enforcement de presupuesto (conteo de `Usage`, timeout,
-   `interrupt → kill`). El mock (T3.2) ya sabe simular una sesión colgada
-   justamente para que esta tarea tenga con qué probar el timeout cuando llegue.
-10. **T4.1/T4.x (scheduler del DAG)**: no está en el alcance recortado de M-0 que
+8. **T4.1/T4.x (scheduler del DAG)**: no está en el alcance recortado de M-0 que
     veníamos siguiendo, pero es lo que le falta al motor para que `yunta run`
     orqueste un workflow completo (orden por `depends_on`, despacho por `kind` de
     nodo, hooks, re-rutas). Lo que sí existe y ya es reutilizable cuando se
