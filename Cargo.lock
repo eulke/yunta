@@ -493,6 +493,7 @@ dependencies = [
 name = "yunta-engine"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
  "yunta-adapters",
  "yunta-core",
  "yunta-storage",

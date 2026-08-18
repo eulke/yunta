@@ -10,3 +10,4 @@ description = "The Yunta workflow engine: scheduler, verification cycle, resumab
 yunta-core = { path = "../core" }
 yunta-storage = { path = "../storage" }
 yunta-adapters = { path = "../adapters" }
+thiserror = "2"

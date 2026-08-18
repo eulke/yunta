@@ -8,6 +8,10 @@
 //! Empty until T4.x; exists now so the workspace dependency graph
 //! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
 
+mod check;
+
+pub use check::{check, CheckError};
+
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-engine";
 
