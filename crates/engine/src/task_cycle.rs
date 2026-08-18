@@ -204,9 +204,12 @@ async fn dispatch(
     // O4: the adapter passes the budget along if its CLI supports it,
     // but enforcement is the engine's job either way — this counts
     // `Usage` and races the deadline independent of that.
+    // Carries the timeout `Duration` alongside its computed `Instant` so
+    // the timeout-exceeded branch can report it without re-deriving it
+    // from `budget.timeout`.
     let deadline = budget
         .timeout
-        .map(|timeout| tokio::time::Instant::now() + timeout);
+        .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
     let mut tokens_used: u64 = 0;
     let mut terminal = None;
 
@@ -214,19 +217,20 @@ async fn dispatch(
         let mut stream = session.events();
         loop {
             let next = match deadline {
-                Some(deadline) => match tokio::time::timeout_at(deadline, stream.next()).await {
-                    Ok(next) => next,
-                    Err(_) => {
-                        terminal = Some(DispatchOutcome::BudgetExceeded {
-                            reason: format!(
-                                "exceeded timeout of {:?} for task `{}`",
-                                budget.timeout.expect("deadline implies a timeout"),
-                                task.id
-                            ),
-                        });
-                        break;
+                Some((deadline, timeout)) => {
+                    match tokio::time::timeout_at(deadline, stream.next()).await {
+                        Ok(next) => next,
+                        Err(_) => {
+                            terminal = Some(DispatchOutcome::BudgetExceeded {
+                                reason: format!(
+                                    "exceeded timeout of {timeout:?} for task `{}`",
+                                    task.id
+                                ),
+                            });
+                            break;
+                        }
                     }
-                },
+                }
                 None => stream.next().await,
             };
 

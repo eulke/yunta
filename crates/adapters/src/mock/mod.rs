@@ -198,13 +198,14 @@ pub struct MockSession {
 #[async_trait]
 impl AgentSession for MockSession {
     fn events(&mut self) -> BoxStream<'_, AgentEvent> {
-        let rx = self
-            .receiver
-            .take()
-            .expect("events() called more than once on a MockSession");
-        Box::pin(stream::unfold(rx, |mut rx| async move {
-            rx.recv().await.map(|event| (event, rx))
-        }))
+        match self.receiver.take() {
+            Some(rx) => Box::pin(stream::unfold(rx, |mut rx| async move {
+                rx.recv().await.map(|event| (event, rx))
+            })),
+            // A second call gets an already-exhausted stream rather than a
+            // panic — the caller's misuse, not a reason to crash the run.
+            None => Box::pin(stream::empty()),
+        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {
