@@ -11,7 +11,12 @@ yunta-core = { path = "../core" }
 yunta-storage = { path = "../storage" }
 yunta-adapters = { path = "../adapters" }
 thiserror = "2"
+futures = "0.3"
+globset = "0.4"
+tokio = { version = "1", features = ["process", "rt", "macros"] }
 
 [dev-dependencies]
 chrono = "0.4"
 serde_yaml = "0.9"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
