@@ -1105,14 +1105,19 @@ dependencies = [
 name = "yunta"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "serde",
  "serde_yaml",
  "tempfile",
+ "thiserror",
+ "tokio",
  "tracing",
  "tracing-subscriber",
+ "yunta-adapters",
  "yunta-core",
  "yunta-engine",
+ "yunta-storage",
 ]
 
 [[package]]

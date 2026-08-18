@@ -13,9 +13,18 @@ path = "src/main.rs"
 [dependencies]
 yunta-core = { path = "../core" }
 yunta-engine = { path = "../engine" }
+yunta-adapters = { path = "../adapters" }
+yunta-storage = { path = "../storage" }
 clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
 serde = "1"
 serde_yaml = "0.9"
+# `yunta test` sandboxes each case in a throwaway worktree/runs root.
+tempfile = "3"
+thiserror = "2"
+# `yunta run`/`resume`/`test` drive the async engine; a current-thread
+# runtime is all the sequential M-0 scheduler needs.
+tokio = { version = "1", features = ["rt", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

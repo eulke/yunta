@@ -1,13 +1,11 @@
 #![forbid(unsafe_code)]
 
 //! `yunta` binary entrypoint. Stays thin by design (D04): parse args with
-//! clap, delegate everything else to the library crates.
-//!
-//! Only `check` is wired so far. `run`/`status`/`resume` need pieces
-//! `yunta check` doesn't (a manifest/`run_created`, T1.4; and for `run`,
-//! how a `loop` node finds its ledger and how a real invocation would
-//! route adapter fixtures — neither is settled yet) — see
-//! `docs/m0-status.md` for the open questions before wiring them.
+//! clap, delegate everything else to the library crates and the command
+//! modules.
+
+mod commands;
+mod project;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -33,9 +31,28 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Creates a run from a workflow and executes it.
+    Run {
+        /// Path to the workflow YAML file.
+        workflow: PathBuf,
+    },
+    /// Shows a run's derived state: nodes, tasks and tokens.
+    Status {
+        /// The run id (as printed by `yunta run`).
+        run_id: String,
+    },
+    /// Resumes a run from its event log, restarting orphaned nodes.
+    Resume {
+        /// The run id to resume.
+        run_id: String,
+    },
+    /// Runs the workflow test cases under .yunta/tests/ with the mock
+    /// adapter.
+    Test,
 }
 
-fn main() -> ExitCode {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -49,10 +66,17 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Command::Check { workflow, config }) => run_check(&workflow, config.as_deref()),
+        Some(Command::Run { workflow }) => commands::run::run(&workflow).await,
+        Some(Command::Status { run_id }) => commands::status::status(&run_id),
+        Some(Command::Resume { run_id }) => commands::resume::resume(&run_id).await,
+        Some(Command::Test) => commands::test::test().await,
     }
 }
 
-fn load_yaml<T: serde::de::DeserializeOwned>(path: &Path, what: &str) -> Result<T, ExitCode> {
+pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    what: &str,
+) -> Result<T, ExitCode> {
     let contents = std::fs::read_to_string(path).map_err(|e| {
         eprintln!("error: failed to read {what} at {}: {e}", path.display());
         ExitCode::FAILURE
