@@ -13,8 +13,10 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - [x] **T0.1** — workspace de Cargo
 - [x] **T0.3** — tipos de error (`YuntaError`) + `tracing`
 - [x] **T1.1** (recorte) — schema `prompt`/`bash`/`loop` en `yunta-core`
-- [ ] **T2.1–T2.3** — storage: SQLite WAL, event log, replay ← **próximo paso**
-- [ ] **T3.1** — trait `Adapter`/`AgentSession` + adapter `mock`
+- [x] **T2.1** — storage: SQLite WAL, event log append/read/list (`yunta-storage`)
+- [x] **T2.2** — los 31 tipos de payload de evento (`yunta_core::events`)
+- [x] **T2.3** — derivación de estado por replay (`yunta_engine::derive`)
+- [ ] **T3.1** — trait `Adapter`/`AgentSession` + adapter `mock` ← **próximo paso**
 - [ ] **T7.3** — adapter `claude-code` real
 - [ ] **T5.1–T5.3** — ciclo del ledger: parseo/registro, pre-check en rojo, post-check,
       scope check
@@ -51,36 +53,46 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - **CLAUDE.md**: dice "I1–I22" en un lugar e "I1–I30" en otro, dentro de la misma
   página de Notion. El usuario va a corregirlo en Notion; mientras tanto se trabaja
   con I1–I30 (el rango real del Contrato).
+- **T2.2 corrección post-implementación**: varios payloads repetían `node_id` (o
+  `from_node`/`author_node_id`) ya presente en el envelope del evento. Corregido en
+  `yunta_core::events` y en `docs/eventos.md` — ver commit `a488b06`.
+- **T2.3**: deriva nodos (lifecycle vía `node_started`/`finished`/`failed`), tareas
+  (última `task_status_changed`) y tokens totales. No deriva gates ni presupuestos
+  más allá del conteo de tokens — no hay `kind: gate` ni enforcement de `limits.*`
+  todavía (T3.3), así que no hay nada que derivar de eso hasta que existan.
 
 ## Pendiente explícito (para retomar sin adivinar)
 
-1. **T2.1–T2.3** — storage: SQLite en modo WAL, tabla de eventos append-only
-   `(run_id, seq, ts, node_id?, kind, payload_json, schema_version)`, interfaz
-   mínima (~5 métodos, sin dialectismo SQL fuera del crate), tipos serde de los 31
-   `kind` de `docs/eventos.md`, derivación de estado por replay. **Esto sigue ahora.**
-2. **T3.1** — trait `Adapter`/`AgentSession` (Spec Adapter v0.2) + adapter `mock`
+1. **T3.1** — trait `Adapter`/`AgentSession` (Spec Adapter v0.2) + adapter `mock`
    completo: fixtures YAML (guión de eventos + efectos de filesystem), fallos y
-   latencias inyectables, respeta O1–O6.
-3. **T7.3** — adapter `claude-code` real: probe (binario, versión, auth), spawn
+   latencias inyectables, respeta O1–O6. **Esto sigue ahora.**
+2. **T7.3** — adapter `claude-code` real: probe (binario, versión, auth), spawn
    headless streaming, `resume`, `permission_profiles`, `edit_hooks`,
    `custom_agents`, skills.
-4. **T5.1–T5.3** — ciclo del ledger completo: parseo y registro (usa
+3. **T5.1–T5.3** — ciclo del ledger completo: parseo y registro (usa
    `docs/spec-ledger.md`), pre-check en rojo, brief mínimo, post-check, scope check
    por `git diff` contra los globs de `scope`.
-5. **T7.1 (parcial)** — subcomandos reales `yunta run/check/status/resume` en el
-   CLI. `check()` (T1.3) necesita conectarse ahí; falta además cargar el YAML del
-   workflow y de la config desde disco (hoy todo se ejercita solo vía tests).
-6. **Grupos de config diferidos de T1.2**: `mcp_servers`, `skills`,
+4. **T7.1 (parcial)** — subcomandos reales `yunta run/check/status/resume` en el
+   CLI. `check()` (T1.3) y `derive()` (T2.3) necesitan conectarse ahí; falta además
+   cargar el YAML del workflow y de la config desde disco, y abrir el `Storage`
+   (T2.1) real — hoy todo se ejercita solo vía tests, el binario sigue imprimiendo
+   solo la versión.
+5. **Grupos de config diferidos de T1.2**: `mcp_servers`, `skills`,
    `baseline`/`coverage`, `secrets`, `permissions` (merge invertido, org manda).
    Implementar recién cuando algo los consuma: `baseline`/`coverage` con T5.4
    (`baseline_compare`), `permissions` con T5.7, `skills` con M6, `mcp_servers` con
    M8.
-7. **Node kinds diferidos de T1.1**: `gate`, `check`, `parallel`, `executor`,
+6. **Node kinds diferidos de T1.1**: `gate`, `check`, `parallel`, `executor`,
    `workflow` (composición). Cada uno llega con su milestone correspondiente (M5
    para `check` builtins y gates, M9 para composición) — no antes.
-8. **Reglas de `yunta check` diferidas de T1.3**: coherencia de modos, scopes
+7. **Reglas de `yunta check` diferidas de T1.3**: coherencia de modos, scopes
    disjuntos en `parallel`/`inherit`, templates, profundidad/aciclicidad del grafo
    de workflows, techos de `permissions`, warning de push directo a la rama base.
+8. **Event kinds sin consumidor en replay (T2.3)**: `gate_waiting`/`gate_resolved`,
+   `questions_answered`, `finding_posted`, `child_run_*`, ampliación de scope,
+   `promotion_signaled` — existen como tipos (T2.2) pero `derive()` los ignora
+   porque nada los emite todavía. Sumarlos a `RunState` cuando su schema/ciclo
+   llegue (gates: M5/T7.2; composición: M9; findings: T5.12).
 9. **T1.4** — manifest: resolución y congelado con hashes (workflow+config+
    inputs+modo+runners resueltos+commit base). No nombrada en el alcance mínimo de
    M-0, pero el evento `run_created` (`docs/eventos.md` §5.1) necesita
@@ -93,3 +105,5 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 11. **CI real**: `.github/workflows/ci.yml` no se verificó corriendo en GitHub
     Actions de verdad todavía (solo se replicaron sus pasos localmente antes de cada
     commit). Confirmar en el primer push/PR que dispare el workflow.
+12. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
+    implementar — explícitamente fuera de M-0.
