@@ -1041,8 +1041,12 @@ name = "yunta"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
+ "serde_yaml",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
+ "yunta-core",
  "yunta-engine",
 ]
 
