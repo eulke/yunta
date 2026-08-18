@@ -1,0 +1,127 @@
+# Spec — Schema del ledger de tareas (T1.0)
+
+**Estado:** normativo v0.1 · **Alcance:** schema formal del artifact `kind: task-ledger`
+(Contrato §5.1), sus reglas de validación y sus errores. Tarea **T1.0**: se escribe
+antes del código que lo parsea, por la misma razón que T2.0 precede a los tipos de
+evento — es el formato con el que se le da trabajo al sistema, y va a escribirse a
+mano desde el primer día.
+
+> Espejo local de la página de Notion "Spec — Schema del ledger de tareas (T1.0)"
+> (BD Docs, dentro de "Yunta"). La fuente canónica es Notion; este archivo se
+> actualiza si la spec evoluciona ahí.
+
+## 1. Estructura
+
+Un ledger es un documento YAML con una única clave de nivel superior:
+
+```yaml
+tasks:
+  - id: graph-cmd
+    title: "yunta graph emits the DAG as Mermaid"
+    scope: ["crates/cli/src/graph.rs", "crates/cli/src/main.rs"]
+    criteria:
+      - cmd: "test -f crates/cli/src/graph.rs"
+      - cmd: "cargo test -p yunta --test graph"
+      - cmd: "cargo clippy --workspace -- -D warnings"
+        type: guard
+    notes: "Mermaid por default; aristas de re-ruta con estilo distinto."
+```
+
+Sin metadatos de cabecera: nada de referencias al brief, al modo o al run. Cuanto más
+chico el schema, menos hay que validar — y todo ese contexto ya vive en el manifest y
+en el event log.
+
+## 2. Campos
+
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| `id` | string `^[A-Za-z][A-Za-z0-9_-]*$` | sí | único en el ledger. **Sin patrón impuesto**: `T001` es convención, no regla — un id descriptivo (`graph-cmd`) sobrevive mejor a un re-plan (§5.7) que un número de orden. |
+| `title` | string no vacío | sí | qué se hace, en una línea |
+| `scope` | lista de globs, ≥1 | sí | qué puede tocar la tarea (§6) |
+| `criteria` | lista de objetos, ≥1 | sí | ver §2.1 |
+| `depends_on` | lista de ids | no | default vacío |
+| `notes` | string | no | contexto mínimo para un runner sin historial |
+| `manual_review` | bool | no | requiere `justification` |
+| `justification` | string no vacío | solo si `manual_review` | por qué no es verificable por comando |
+
+### 2.1 `criteria[]`
+
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| `cmd` | string no vacío | sí | comando ejecutable; exit 0 = pasa |
+| `type` | enum `guard` | no | ausente = criterio normal (debe fallar en el pre-check); `guard` = línea de no-regresión (debe pasar antes y después) |
+
+Toda tarea necesita **al menos un criterio no-`guard`**: sin él no hay nada que pueda
+estar en rojo antes del trabajo, y el pre-check pierde sentido (§5.2).
+
+## 3. Validación al registrar
+
+El engine rechaza el ledger completo — y falla el nodo que lo produjo — si:
+
+1. Un `id` se repite, o no cumple el patrón.
+2. Un `depends_on` referencia un id inexistente.
+3. El grafo de `depends_on` tiene ciclos.
+4. Dos tareas sin dependencia entre sí declaran scopes que se solapan (impediría el
+   paralelismo de §5.5 y hace ambiguo el diff).
+5. Una tarea no tiene criterios, o todos son `guard`.
+6. `manual_review: true` sin `justification`.
+7. Un campo obligatorio falta o está vacío.
+
+Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
+lo dice el pre-check en rojo al ejecutarlos (§5.2), que es donde un criterio trivial o
+roto se delata.
+
+## 4. Errores
+
+Como estos archivos se escriben a mano, cada rechazo nombra tarea, campo y expectativa:
+
+```
+ledger: 3 errors
+  graph-cmd: `scope` is empty — every task must declare at least one glob
+  parse-events: `depends_on` references unknown task `storage-init`
+  T004: all criteria are `guard` — at least one must be able to fail before the work
+```
+
+Todos los errores del ledger se reportan juntos, no de a uno: quien escribe a mano
+corrige una vez, no siete veces.
+
+## 5. Ejemplo: una tarea del propio plan de Yunta
+
+```yaml
+tasks:
+  - id: context-sources
+    title: "ContextSource trait with files, command and artifact builtins"
+    scope: ["crates/engine/src/context/**"]
+    criteria:
+      - cmd: "cargo test -p yunta-engine context::"
+      - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
+      - cmd: "cargo clippy --workspace -- -D warnings"
+        type: guard
+    notes: "Plan T6.1. Materializar en context/<hash>/; fuente caída = nodo failed."
+
+  - id: context-assembly
+    title: "Stable-first context assembly with per-segment hashes"
+    depends_on: [context-sources]
+    scope: ["crates/engine/src/context/**", "crates/core/src/events.rs"]
+    criteria:
+      - cmd: "cargo test -p yunta-engine --test context_stability"
+      - cmd: "cargo clippy --workspace -- -D warnings"
+        type: guard
+    notes: "Plan T6.4, Contrato §9.1. Property test: dos rehidrataciones con distinto estado volátil comparten prefijo byte-idéntico."
+```
+
+## 6. Alcance y límites conocidos
+
+El formato cubre bien las tareas con salida verificable por comando — la enorme
+mayoría del plan de Yunta (M1–M7). Dos zonas donde no alcanza, reconocidas y sin
+intento de forzarlas:
+
+- **Tareas que exigen entorno externo** — los adapters reales (T7.3, T7.4) necesitan
+  un CLI instalado y autenticado; la distribución (T12.x) necesita cinco plataformas.
+  No son verificables por un criterio local y se hacen a mano.
+- **Tareas de juicio** — documentación, revisión de redacción. Ahí `manual_review` es
+  la salida honesta.
+
+Que el schema tenga una salida explícita para lo no verificable es deliberado: sin
+ella, esas tareas tentarían a inventar criterios falsos — exactamente los criterios
+triviales que el pre-check en rojo existe para rechazar.
