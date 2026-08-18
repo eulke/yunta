@@ -10,6 +10,17 @@ pub enum YuntaError {
     /// emulating or degrading in silence.
     #[error("adapter `{adapter}` does not support `{what}`")]
     Unsupported { adapter: String, what: &'static str },
+
+    /// An adapter operation failed at the I/O boundary — e.g. `mock`
+    /// (T3.2) applying a fixture's filesystem effects, or a real adapter
+    /// (T7.3) failing to spawn its CLI subprocess.
+    #[error("adapter `{adapter}` failed to {action}")]
+    AdapterIo {
+        adapter: String,
+        action: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Convenience alias for the workspace's typed `Result`.

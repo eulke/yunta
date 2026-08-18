@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
 use crate::ids::{NodeId, RunId, TaskId};
+use crate::Capabilities;
 
 /// A ledger criterion, frozen into `task_registered` (`docs/spec-ledger.md`
 /// §2.1) — the same shape the ledger parser (T5.1) will produce.
@@ -134,21 +135,6 @@ pub struct TokenUsage {
     pub output: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached: Option<u64>,
-}
-
-/// A snapshot of adapter capabilities (Spec Adapter §2's `Capabilities`)
-/// as recorded in `agent_session_opened`. Defined here rather than in
-/// `yunta-adapters` because the event payload needs the shape before T3.1
-/// exists; T3.1 reuses this same type (adapters already depends on core)
-/// instead of redefining it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct Capabilities {
-    pub resume_session: bool,
-    pub edit_hooks: bool,
-    pub permission_profiles: bool,
-    pub custom_agents: bool,
-    pub usage_reporting: bool,
-    pub run_tools: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

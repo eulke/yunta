@@ -1,0 +1,219 @@
+//! The `mock` adapter (T3.2) — a first-class adapter, not a test helper
+//! (Spec Adapter §6): it reproduces sessions from YAML fixtures (a script
+//! of events plus filesystem effects), with injectable failures and
+//! latency, so the engine's whole cycle — tasks, degradation,
+//! cancellation, resume, eventually paralelismo — is testable without an
+//! LLM (A8).
+
+mod fixture;
+
+pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep};
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use futures::stream::{self, BoxStream};
+use tokio::sync::{mpsc, Notify};
+use yunta_core::{Capabilities, Result, SessionId, YuntaError};
+
+use crate::session::{
+    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, ProbeReport, SessionRequest,
+};
+
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+pub struct MockAdapter {
+    fixture: MockFixture,
+}
+
+impl MockAdapter {
+    pub fn new(fixture: MockFixture) -> Self {
+        Self { fixture }
+    }
+
+    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, serde_yaml::Error> {
+        Ok(Self::new(serde_yaml::from_str(yaml)?))
+    }
+
+    /// Applies the fixture's filesystem effects under `cwd`, honoring
+    /// `blocked` + `edit_hooks` (O5: a hook-capable adapter installs the
+    /// block before the edit ever lands; without the capability, the
+    /// engine's own post-check scope diff — T5.3, not built yet — is
+    /// what would have caught it instead).
+    fn apply_effects(&self, cwd: &std::path::Path) -> Result<()> {
+        for effect in &self.fixture.effects {
+            if effect.blocked && self.fixture.capabilities.edit_hooks {
+                continue;
+            }
+            let full_path = cwd.join(&effect.path);
+            let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
+                adapter: "mock".to_string(),
+                action,
+                source,
+            };
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    io_err(format!("create directories for {}", full_path.display()), e)
+                })?;
+            }
+            std::fs::write(&full_path, &effect.content)
+                .map_err(|e| io_err(format!("write {}", full_path.display()), e))?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Adapter for MockAdapter {
+    fn id(&self) -> &'static str {
+        "mock"
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        self.fixture.capabilities
+    }
+
+    async fn probe(&self) -> Result<ProbeReport> {
+        Ok(ProbeReport {
+            healthy: true,
+            version: Some("mock-0.1".to_string()),
+            diagnostic: None,
+        })
+    }
+
+    async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
+        self.apply_effects(&req.cwd)?;
+
+        let session_id = SessionId::from(format!(
+            "mock-session-{}",
+            SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        let blocked_markers: Vec<PathBuf> = self
+            .fixture
+            .effects
+            .iter()
+            .filter(|e| e.blocked && self.fixture.capabilities.edit_hooks)
+            .map(|e| e.path.clone())
+            .collect();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let notify = Arc::new(Notify::new());
+        let task_notify = Arc::clone(&notify);
+
+        let model = self.fixture.model.clone();
+        let steps = self.fixture.steps.clone();
+        let outcome = self.fixture.outcome.clone();
+
+        tokio::spawn(async move {
+            // O1: SessionOpened is always the first event, unconditionally.
+            if tx
+                .send(AgentEvent::SessionOpened { session_id, model })
+                .is_err()
+            {
+                return;
+            }
+
+            for path in blocked_markers {
+                if tx
+                    .send(AgentEvent::ToolUse {
+                        name: "edit".to_string(),
+                        target_digest: format!("blocked:{}", path.display()),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+
+            for step in steps {
+                let delay = Duration::from_millis(step.after_ms());
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = task_notify.notified() => return, // interrupted/killed mid-stream
+                }
+                let event = match step {
+                    fixture::MockStep::ToolUse {
+                        name,
+                        target_digest,
+                        ..
+                    } => AgentEvent::ToolUse {
+                        name,
+                        target_digest,
+                    },
+                    fixture::MockStep::Usage {
+                        input_tokens,
+                        output_tokens,
+                        cached_input_tokens,
+                        ..
+                    } => AgentEvent::Usage {
+                        input_tokens,
+                        output_tokens,
+                        cached_input_tokens,
+                    },
+                    fixture::MockStep::Note { text, .. } => AgentEvent::Note { text },
+                };
+                if tx.send(event).is_err() {
+                    return;
+                }
+            }
+
+            match outcome {
+                MockOutcome::Completed { summary } => {
+                    let _ = tx.send(AgentEvent::Completed {
+                        result: AgentOutcome { summary },
+                    });
+                }
+                MockOutcome::Failed { message, retryable } => {
+                    let _ = tx.send(AgentEvent::Failed {
+                        error: AgentError { message },
+                        retryable,
+                    });
+                }
+                // Both end with no terminal event — a real crash (O2: the
+                // engine synthesizes Failed{retryable:true}, not the
+                // adapter). Hang additionally waits for interrupt/kill
+                // before ending, simulating a stuck session a timeout
+                // (T3.3) would have to act on.
+                MockOutcome::Crash => {}
+                MockOutcome::Hang => task_notify.notified().await,
+            }
+        });
+
+        Ok(Box::new(MockSession {
+            receiver: Some(rx),
+            notify,
+        }))
+    }
+}
+
+pub struct MockSession {
+    receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
+    notify: Arc<Notify>,
+}
+
+#[async_trait]
+impl AgentSession for MockSession {
+    fn events(&mut self) -> BoxStream<'_, AgentEvent> {
+        let rx = self
+            .receiver
+            .take()
+            .expect("events() called more than once on a MockSession");
+        Box::pin(stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|event| (event, rx))
+        }))
+    }
+
+    async fn interrupt(&mut self) -> Result<()> {
+        self.notify.notify_one();
+        Ok(())
+    }
+
+    async fn kill(&mut self) -> Result<()> {
+        self.notify.notify_one();
+        Ok(())
+    }
+}

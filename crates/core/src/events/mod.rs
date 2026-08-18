@@ -19,6 +19,11 @@ mod payloads;
 
 pub use payloads::*;
 
+// Re-exported for convenience: `agent_session_opened`'s payload uses this
+// type, but it is defined at the crate root (`capabilities.rs`) since the
+// `Adapter` trait (T3.1) shares the same definition.
+pub use crate::Capabilities;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{NodeId, RunId};

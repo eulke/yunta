@@ -3,8 +3,17 @@
 //! The `Adapter`/`AgentSession` traits and their implementations
 //! (`claude-code`, `codex`, `mock`) — Spec Adapter v0.2.
 //!
-//! Empty until T3.1; exists now so the workspace dependency graph
-//! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
+//! `claude-code` (T7.3) and `codex` (out of M-0 scope) aren't built yet;
+//! `mock` (T3.2) is, and is what CI exercises the engine against (A8).
+
+mod mock;
+mod session;
+
+pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep};
+pub use session::{
+    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
+    ProbeReport, SessionRequest,
+};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-adapters";

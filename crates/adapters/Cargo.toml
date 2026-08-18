@@ -8,3 +8,14 @@ description = "Adapter trait and CLI integrations (claude-code, codex, mock) for
 
 [dependencies]
 yunta-core = { path = "../core" }
+async-trait = "0.1"
+futures = "0.3"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
