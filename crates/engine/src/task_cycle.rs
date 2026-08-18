@@ -9,6 +9,7 @@
 //! still leaves the task not-done.
 
 use std::path::Path;
+use std::time::Duration;
 
 use futures::StreamExt;
 use thiserror::Error;
@@ -69,6 +70,13 @@ pub enum DispatchOutcome {
     /// No terminal event at all (O2) — the engine synthesizes this, the
     /// adapter never emits it.
     Crashed,
+    /// The engine cut the session via `interrupt` → `kill` (T3.3, O4):
+    /// the token count from `Usage` events or the wall-clock timeout
+    /// demanded it, independent of whether the adapter itself honored
+    /// `SessionRequest.budget`.
+    BudgetExceeded {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,10 +166,17 @@ pub async fn post_check(task: &Task, cwd: &Path) -> Result<Vec<CriterionRun>, Ta
     run_all_criteria(task, cwd).await
 }
 
+/// Grace period between `interrupt` and the follow-up `kill` once a
+/// budget has been exceeded — long enough for a session that closes
+/// cleanly on interrupt to actually do so, short enough that a session
+/// that ignores it doesn't stall the attempt.
+const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
+
 async fn dispatch(
     task: &Task,
     adapter: &dyn Adapter,
     cwd: &Path,
+    budget: &Budget,
 ) -> Result<DispatchOutcome, TaskCycleError> {
     let request = SessionRequest {
         prompt: format!(
@@ -174,7 +189,7 @@ async fn dispatch(
         permissions: PermissionProfile::Edit,
         env: Default::default(),
         edit_constraints: Some(task.scope.clone()),
-        budget: Budget::default(),
+        budget: *budget,
         adapter_settings: Default::default(),
     };
 
@@ -186,23 +201,81 @@ async fn dispatch(
             source,
         })?;
 
+    // O4: the adapter passes the budget along if its CLI supports it,
+    // but enforcement is the engine's job either way — this counts
+    // `Usage` and races the deadline independent of that.
+    let deadline = budget
+        .timeout
+        .map(|timeout| tokio::time::Instant::now() + timeout);
+    let mut tokens_used: u64 = 0;
     let mut terminal = None;
+
     {
         let mut stream = session.events();
-        while let Some(event) = stream.next().await {
+        loop {
+            let next = match deadline {
+                Some(deadline) => match tokio::time::timeout_at(deadline, stream.next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        terminal = Some(DispatchOutcome::BudgetExceeded {
+                            reason: format!(
+                                "exceeded timeout of {:?} for task `{}`",
+                                budget.timeout.expect("deadline implies a timeout"),
+                                task.id
+                            ),
+                        });
+                        break;
+                    }
+                },
+                None => stream.next().await,
+            };
+
+            let Some(event) = next else { break };
+
             match event {
+                AgentEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    ..
+                } => {
+                    tokens_used += input_tokens + output_tokens;
+                    if let Some(max_tokens) = budget.max_tokens {
+                        if tokens_used > max_tokens {
+                            terminal = Some(DispatchOutcome::BudgetExceeded {
+                                reason: format!(
+                                    "exceeded max_tokens {max_tokens} for task `{}` ({tokens_used} used)",
+                                    task.id
+                                ),
+                            });
+                            break;
+                        }
+                    }
+                }
                 AgentEvent::Completed {
                     result: AgentOutcome { summary },
-                } => terminal = Some(DispatchOutcome::Completed { summary }),
+                } => {
+                    terminal = Some(DispatchOutcome::Completed { summary });
+                    break;
+                }
                 AgentEvent::Failed { error, retryable } => {
                     terminal = Some(DispatchOutcome::Failed {
                         message: error.message,
                         retryable,
-                    })
+                    });
+                    break;
                 }
                 _ => {}
             }
         }
+    } // the stream's borrow of `session` ends here — interrupt/kill need &mut self too.
+
+    if matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
+        // A4: never leave anything running. Ordered termination first,
+        // then forceful — mock has nothing to distinguish them, but a
+        // real adapter's session may still close cleanly on interrupt.
+        let _ = session.interrupt().await;
+        tokio::time::sleep(INTERRUPT_GRACE_PERIOD).await;
+        let _ = session.kill().await;
     }
 
     Ok(terminal.unwrap_or(DispatchOutcome::Crashed))
@@ -220,6 +293,7 @@ pub async fn run_task(
     adapter: &dyn Adapter,
     cwd: &Path,
     max_retries: u32,
+    budget: Budget,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     let (pre_runs, pre_outcome) = pre_check(task, cwd).await?;
 
@@ -243,7 +317,7 @@ pub async fn run_task(
 
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
-        let dispatch_outcome = dispatch(task, adapter, cwd).await?;
+        let dispatch_outcome = dispatch(task, adapter, cwd, &budget).await?;
         let post_runs = post_check(task, cwd).await?;
         let scope = scope_check(cwd, &task.scope).await?;
 

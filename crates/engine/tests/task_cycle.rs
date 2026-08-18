@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use yunta_adapters::MockAdapter;
+use yunta_adapters::{Budget, MockAdapter};
 use yunta_core::events::Criterion;
 use yunta_core::Task;
 use yunta_engine::{run_task, DispatchOutcome, PreCheckOutcome, TaskOutcome};
@@ -69,7 +69,9 @@ outcome: { type: completed, summary: "wrote it" }
     )
     .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
+        .await
+        .unwrap();
 
     assert_eq!(report.outcome, TaskOutcome::Done);
     assert_eq!(report.attempts.len(), 1);
@@ -99,7 +101,9 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
             .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
+        .await
+        .unwrap();
 
     assert_ne!(report.outcome, TaskOutcome::Done);
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
@@ -115,7 +119,9 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
+        .await
+        .unwrap();
 
     assert!(
         report.attempts.is_empty(),
@@ -140,7 +146,9 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
     );
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
+        .await
+        .unwrap();
 
     assert!(report.attempts.is_empty());
     match report.outcome {
@@ -172,7 +180,9 @@ outcome: { type: completed, summary: "done" }
     )
     .unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
+        .await
+        .unwrap();
 
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
     assert!(report.attempts[0]
@@ -194,7 +204,9 @@ async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
     );
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 2).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 2, Budget::default())
+        .await
+        .unwrap();
 
     assert_eq!(report.attempts.len(), 3); // 1 initial + 2 retries
     assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
@@ -208,7 +220,9 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
 
-    let report = run_task(&t, &adapter, dir.path(), 0).await.unwrap();
+    let report = run_task(&t, &adapter, dir.path(), 0, Budget::default())
+        .await
+        .unwrap();
 
     assert_eq!(report.attempts[0].dispatch, DispatchOutcome::Crashed);
     assert!(!report.attempts[0].succeeded);
@@ -227,4 +241,67 @@ async fn pre_check_and_post_check_run_every_criterion() {
     let (runs, outcome) = yunta_engine::pre_check(&t, dir.path()).await.unwrap();
     assert_eq!(runs.len(), 2);
     assert_eq!(outcome, PreCheckOutcome::Red);
+}
+
+#[tokio::test]
+async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
+    let adapter = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let budget = Budget {
+        timeout: Some(std::time::Duration::from_millis(50)),
+        ..Default::default()
+    };
+
+    // The test itself times out (failing loudly) if run_task doesn't
+    // return promptly — T3.3's whole point is that a stuck session
+    // never blocks the engine forever.
+    let report = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_task(&t, &adapter, dir.path(), 0, budget),
+    )
+    .await
+    .expect("run_task must return once its own budget timeout elapses")
+    .unwrap();
+
+    match &report.attempts[0].dispatch {
+        DispatchOutcome::BudgetExceeded { reason } => assert!(reason.contains("timeout")),
+        other => panic!("expected BudgetExceeded, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let t = task(
+        "token-limit",
+        &["marker.txt"],
+        vec![cmd("test -f marker.txt")],
+    );
+    // Two usage steps totalling 150 tokens, then a completion that
+    // dispatch must never see because the budget is 100.
+    let adapter = MockAdapter::from_yaml(
+        r#"
+steps:
+  - { type: usage, input_tokens: 60, output_tokens: 20 }
+  - { type: usage, input_tokens: 50, output_tokens: 20 }
+outcome: { type: completed, summary: "should never be reached" }
+"#,
+    )
+    .unwrap();
+    let budget = Budget {
+        max_tokens: Some(100),
+        ..Default::default()
+    };
+
+    let report = run_task(&t, &adapter, dir.path(), 0, budget).await.unwrap();
+
+    match &report.attempts[0].dispatch {
+        DispatchOutcome::BudgetExceeded { reason } => assert!(reason.contains("max_tokens")),
+        other => panic!("expected BudgetExceeded, got {other:?}"),
+    }
 }
