@@ -1,0 +1,15 @@
+[package]
+name = "yunta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Yunta — a deterministic workflow engine for code agents."
+
+[[bin]]
+name = "yunta"
+path = "src/main.rs"
+
+[dependencies]
+yunta-engine = { path = "../engine" }
+clap = { version = "4", features = ["derive"] }

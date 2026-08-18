@@ -1,0 +1,12 @@
+[package]
+name = "yunta-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Yunta workflow engine: scheduler, verification cycle, resumability."
+
+[dependencies]
+yunta-core = { path = "../core" }
+yunta-storage = { path = "../storage" }
+yunta-adapters = { path = "../adapters" }

@@ -1,0 +1,9 @@
+[package]
+name = "yunta-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared domain types for Yunta, the deterministic workflow engine for code agents."
+
+[dependencies]

@@ -1,0 +1,10 @@
+[package]
+name = "yunta-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Adapter trait and CLI integrations (claude-code, codex, mock) for Yunta."
+
+[dependencies]
+yunta-core = { path = "../core" }
