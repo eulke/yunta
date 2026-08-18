@@ -61,7 +61,14 @@ pub fn content_hash<T: Serialize>(value: &T) -> String {
     let mut canonical = String::new();
     write_canonical(&value, &mut canonical);
 
-    let digest = Sha256::digest(canonical.as_bytes());
+    sha256_hex(canonical.as_bytes())
+}
+
+/// Lowercase-hex SHA-256 of raw bytes — what `artifact_written` records
+/// for a file's content (§4: artifacts are verified by existence and
+/// hash, never by format).
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write;

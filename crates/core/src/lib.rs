@@ -21,7 +21,7 @@ pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, Sto
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use ledger::{Ledger, Task};
-pub use manifest::{content_hash, Manifest};
+pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use workflow::{
     ArtifactKind, ArtifactSpec, Artifacts, HookStep, Hooks, Node, NodeKind, OnFailure,
     PromptSource, Workflow,

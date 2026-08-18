@@ -8,6 +8,7 @@
 //! Empty until T4.x; exists now so the workspace dependency graph
 //! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
 
+mod artifacts;
 mod check;
 mod ledger;
 mod manifest;
@@ -15,6 +16,7 @@ mod replay;
 mod scope;
 mod task_cycle;
 
+pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use check::{check, CheckError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};

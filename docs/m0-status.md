@@ -117,11 +117,14 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    (`artifacts.produces`); al cerrar ese nodo el engine lo parsea, valida
    (`yunta_engine::register`, T5.1) y registra cada tarea (`task_registered`).
    El `loop` consulta el estado derivado — nunca un path propio en el schema.
-   En el bootstrap, donde el ledger se escribe a mano (sin nodo de planificación
-   LLM), el nodo productor es un `bash` que copia el archivo escrito a mano a
-   `artifacts/`. Requiere entrar al recorte: verificación de artifacts al cierre
-   de nodo (§4) + registro de `task-ledger` + el mínimo de templates de T6.3 que
-   el bootstrap necesita (`{{run.dir}}`).
+   **El bootstrap incluye el nodo de planificación real** (`kind: prompt` que
+   produce `plan.yaml` como `task-ledger`), por decisión explícita del usuario
+   que amplía el recorte original del Plan ("las tareas se convierten a ledger
+   a mano") — nada custom ni transitorio; el flujo es el final. Requiere entrar
+   al recorte: verificación de artifacts al cierre de nodo (§4) + registro de
+   `task-ledger` + el mínimo de templates de T6.3 que el bootstrap necesita
+   (`{{run.dir}}`). *(Divergencia con la prosa del Plan en Notion — corregirla
+   allá es tuyo; Notion es de solo lectura para mí.)*
 2. **El ruteo de fixtures del mock es territorio de `yunta test` (T7.9 / §14)**:
    cada caso en `.yunta/tests/` declara su `fixture:`. Se incluye un recorte
    mínimo de T7.9 en M-0. `yunta run --adapter mock` sin fixture disponible

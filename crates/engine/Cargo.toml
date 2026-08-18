@@ -13,6 +13,9 @@ yunta-adapters = { path = "../adapters" }
 thiserror = "2"
 futures = "0.3"
 globset = "0.4"
+# The engine interprets `kind: task-ledger` artifacts at node close
+# (Contrato §4.1) — runtime YAML parsing, not just test fixtures.
+serde_yaml = "0.9"
 tokio = { version = "1", features = ["process", "rt", "macros"] }
 
 [dev-dependencies]
