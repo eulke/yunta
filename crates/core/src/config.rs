@@ -1,0 +1,185 @@
+//! Layered config types (T1.2) — **M-0 cut only**.
+//!
+//! Full T1.2 covers eight groups (`runners`, `adapters`, `mcp_servers`,
+//! `skills`, `baseline`/`coverage`, `storage`, `limits`, `paths`,
+//! `secrets`, `permissions` with its inverted merge, D51/§6.1). M-0 is not
+//! named in the Plan's own M-0 scope section at all, so this only builds
+//! the four groups something already planned for M-0 actually consumes:
+//! `runners` (resolves `Node.runner`, T1.1), `adapters` (T3.1/T7.3
+//! settings), `storage` (T2.1's SQLite path) and `paths` (run.dir/worktree
+//! locations for T7.1's real `resume`). The rest extends this module when
+//! its own consumer lands — not before (CLAUDE.md: "scope chico y
+//! declarado").
+//!
+//! Merge semantics (§2.2, D52): maps merge key by key, more specific layer
+//! wins per key; arrays (like a role's candidate list) replace wholesale
+//! rather than concatenate. Precedence for these four groups is
+//! repo > usuario > org — `permissions`' inverted precedence (org wins)
+//! is out of scope until `permissions` itself is implemented.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+/// One binding candidate for a role in `runners:` (Contrato §13.1, I17).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunnerCandidate {
+    pub adapter: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+/// Adapter-specific settings that have a portable expression (D29): for
+/// now just a binary path override, matching the reference config.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdapterSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary: Option<PathBuf>,
+}
+
+/// `storage:` (D53 — SQLite is the only backend).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StorageConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_days: Option<u32>,
+}
+
+/// `paths:` (§2.2, D52) — where run/worktree state lives. `YUNTA_HOME` is
+/// an environment override applied when resolving the merged config, not
+/// a field of it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PathsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktrees: Option<PathBuf>,
+}
+
+/// One config layer as parsed from a single file (project/user/org), and
+/// also the type of the merged result — merging never needs to invent
+/// fields, only combine what layers actually set.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConfigLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runners: Option<HashMap<String, Vec<RunnerCandidate>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapters: Option<HashMap<String, AdapterSettings>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<StorageConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<PathsConfig>,
+}
+
+impl ConfigLayer {
+    /// Merges layers in increasing order of precedence — pass
+    /// `[org, user, repo]` so the last one's keys win (D52/§2.2's default
+    /// precedence; `permissions` will invert this once it exists).
+    pub fn merge_layers(layers: impl IntoIterator<Item = ConfigLayer>) -> ConfigLayer {
+        layers.into_iter().fold(ConfigLayer::default(), merge)
+    }
+}
+
+fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
+    ConfigLayer {
+        runners: merge_map_replacing_values(base.runners, more_specific.runners),
+        adapters: merge_map_of_fields(
+            base.adapters,
+            more_specific.adapters,
+            merge_adapter_settings,
+        ),
+        storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
+        paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
+    }
+}
+
+/// A map whose values are arrays: per §2.2 "arrays reemplazan", a key
+/// present in the more specific layer replaces the base's value for that
+/// key wholesale, rather than concatenating the two arrays.
+fn merge_map_replacing_values<K, V>(
+    base: Option<HashMap<K, Vec<V>>>,
+    more_specific: Option<HashMap<K, Vec<V>>>,
+) -> Option<HashMap<K, Vec<V>>>
+where
+    K: Eq + std::hash::Hash,
+{
+    merge_maps(base, more_specific, |_base_value, override_value| {
+        override_value
+    })
+}
+
+/// A map whose values are themselves mergeable structs (field by field).
+fn merge_map_of_fields<K, V>(
+    base: Option<HashMap<K, V>>,
+    more_specific: Option<HashMap<K, V>>,
+    merge_value: impl Fn(V, V) -> V,
+) -> Option<HashMap<K, V>>
+where
+    K: Eq + std::hash::Hash,
+{
+    merge_maps(base, more_specific, merge_value)
+}
+
+fn merge_maps<K, V>(
+    base: Option<HashMap<K, V>>,
+    more_specific: Option<HashMap<K, V>>,
+    merge_value: impl Fn(V, V) -> V,
+) -> Option<HashMap<K, V>>
+where
+    K: Eq + std::hash::Hash,
+{
+    match (base, more_specific) {
+        (None, None) => None,
+        (Some(base), None) => Some(base),
+        (None, Some(more_specific)) => Some(more_specific),
+        (Some(mut base), Some(more_specific)) => {
+            for (key, value) in more_specific {
+                let merged = match base.remove(&key) {
+                    Some(base_value) => merge_value(base_value, value),
+                    None => value,
+                };
+                base.insert(key, merged);
+            }
+            Some(base)
+        }
+    }
+}
+
+fn merge_fields<T>(
+    base: Option<T>,
+    more_specific: Option<T>,
+    merge_value: impl Fn(T, T) -> T,
+) -> Option<T> {
+    match (base, more_specific) {
+        (None, None) => None,
+        (Some(base), None) => Some(base),
+        (None, Some(more_specific)) => Some(more_specific),
+        (Some(base), Some(more_specific)) => Some(merge_value(base, more_specific)),
+    }
+}
+
+fn merge_adapter_settings(
+    base: AdapterSettings,
+    more_specific: AdapterSettings,
+) -> AdapterSettings {
+    AdapterSettings {
+        binary: more_specific.binary.or(base.binary),
+    }
+}
+
+fn merge_storage_config(base: StorageConfig, more_specific: StorageConfig) -> StorageConfig {
+    StorageConfig {
+        path: more_specific.path.or(base.path),
+        retention_days: more_specific.retention_days.or(base.retention_days),
+    }
+}
+
+fn merge_paths_config(base: PathsConfig, more_specific: PathsConfig) -> PathsConfig {
+    PathsConfig {
+        runs: more_specific.runs.or(base.runs),
+        worktrees: more_specific.worktrees.or(base.worktrees),
+    }
+}

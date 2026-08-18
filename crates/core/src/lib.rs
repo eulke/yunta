@@ -7,10 +7,12 @@
 //! Newtyped identifiers and the `Clock` trait land in later tasks; error
 //! types (T0.3) are here from the start since every other crate needs them.
 
+mod config;
 mod error;
 mod ids;
 mod workflow;
 
+pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
 pub use error::{Result, YuntaError};
 pub use ids::NodeId;
 pub use workflow::{
