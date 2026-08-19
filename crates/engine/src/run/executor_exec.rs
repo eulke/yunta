@@ -93,7 +93,17 @@ pub(super) async fn execute_executor(
     let ExecutorKind::Binary = registration.kind;
     let path = resolve_path(ctx.worktree, registration);
 
-    let stdin_bytes = serde_json::to_vec(&build_stdin(ctx, with)).unwrap_or_default();
+    let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
+        Ok(bytes) => bytes,
+        Err(source) => {
+            return fail(
+                ctx,
+                node,
+                format!("failed to serialize executor `{executor}`'s stdin: {source}"),
+                false,
+            );
+        }
+    };
 
     let mut std_cmd = std::process::Command::new(&path);
     std_cmd
@@ -116,7 +126,15 @@ pub(super) async fn execute_executor(
             source,
         })?;
 
-    let mut stdin = child.stdin.take().expect("piped stdin");
+    let Some(mut stdin) = child.stdin.take() else {
+        // Unreachable given `Stdio::piped()` above, but a typed error
+        // beats a panic (CLAUDE.md: no unwrap/expect outside tests) —
+        // this crate never trusts "can't happen" enough to crash on it.
+        return Err(RunError::Io {
+            context: format!("executor `{executor}` for node `{}`", node.id),
+            source: std::io::Error::other("spawned child has no stdin pipe"),
+        });
+    };
     let write_task = tokio::spawn(async move {
         let _ = stdin.write_all(&stdin_bytes).await;
         // Dropping `stdin` here closes the pipe, signaling EOF.
