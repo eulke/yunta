@@ -177,6 +177,84 @@ fn a_malformed_ledger_yaml_is_a_typed_error_not_a_panic() {
     ));
 }
 
+const REVIEW_NODE: &str = r#"
+id: review
+kind: prompt
+prompt: "Review the changes."
+artifacts:
+  produces:
+    - { name: findings.yaml, kind: findings }
+"#;
+
+const VALID_FINDINGS: &str = r#"
+findings:
+  - id: f1
+    severity: major
+    title: "Unchecked error"
+    location: "src/lib.rs:10"
+    detail: "The Result is discarded silently."
+  - id: f2
+    severity: note
+    title: "Style nit"
+    location: "src/lib.rs:20"
+    detail: "Prefer the idiomatic form here."
+"#;
+
+#[test]
+fn a_valid_findings_artifact_is_parsed_and_returned() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "findings.yaml", VALID_FINDINGS);
+
+    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap();
+    let findings = verified[0].findings.as_ref().expect("parsed findings");
+    let ids: Vec<&str> = findings.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(ids, ["f1", "f2"]);
+}
+
+#[test]
+fn duplicate_finding_ids_report_every_violation_together() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(
+        run_dir.path(),
+        "findings.yaml",
+        r#"
+findings:
+  - id: f1
+    severity: major
+    title: "First"
+    location: "a.rs:1"
+    detail: "detail"
+  - id: f1
+    severity: minor
+    title: ""
+    location: "b.rs:2"
+    detail: "detail"
+"#,
+    );
+
+    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap_err();
+    match &errors[..] {
+        [ArtifactError::InvalidFindings { node, name, errors }] => {
+            assert_eq!(node.as_str(), "review");
+            assert_eq!(name, "findings.yaml");
+            assert_eq!(errors.len(), 2, "duplicate id + empty title");
+        }
+        other => panic!("expected one InvalidFindings error, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "findings.yaml", "findings: [not, valid");
+
+    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap_err();
+    assert!(matches!(
+        &errors[..],
+        [ArtifactError::MalformedFindings { .. }]
+    ));
+}
+
 #[test]
 fn a_node_that_declares_no_artifacts_verifies_nothing() {
     let run_dir = tempfile::tempdir().unwrap();

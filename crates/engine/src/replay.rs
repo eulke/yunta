@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use yunta_core::events::{Event, EventPayload, TaskStatus, TokenUsage};
+use yunta_core::events::{Event, EventPayload, Finding, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, TaskId};
 
 /// One node's derived lifecycle state. An enum, not booleans (CLAUDE.md):
@@ -44,6 +44,11 @@ pub struct RunState {
     pub nodes: HashMap<NodeId, NodeState>,
     pub tasks: HashMap<TaskId, TaskStatus>,
     pub total_tokens: TokenUsage,
+    /// Every `finding_posted` entry, in log order, never deduplicated
+    /// here — the raw log keeps every contributing posting (§4.1's "sin
+    /// perder autorías"); [`dedup_findings`] is the query-side view for
+    /// counting/display, not something replay bakes in.
+    pub findings: Vec<Finding>,
     /// `Some(diagnostic)` once the log has proven insufficient to derive
     /// further state — the point where a `yunta resume`/`status` would
     /// report the run as `broken`.
@@ -139,6 +144,10 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
             state.tasks.insert(p.task_id.clone(), p.new_status);
             Ok(())
         }
+        EventPayload::FindingPosted(p) => {
+            state.findings.push(p.finding.clone());
+            Ok(())
+        }
         // Every other kind is either run-scoped bookkeeping that does not
         // change node/task/budget state (runner_resolved, baseline_captured,
         // agent_session_opened, agent_message, artifact_written,
@@ -146,11 +155,32 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
         // expansion, hook_executed, node_rerouted, promotion_signaled,
         // capability_degraded, run_paused/resumed/finished), or belongs to
         // schema M-0 doesn't have yet (gate_waiting/resolved, loop_iteration
-        // beyond what tasks already cover, questions_answered, finding_posted,
+        // beyond what tasks already cover, questions_answered,
         // child_run_*). Nothing to derive from them until their own task
         // adds the state they'd feed.
         _ => Ok(()),
     }
+}
+
+/// Query-side view of `RunState.findings` (§4.1): "findings entre
+/// reviewers se deduplican por `location` + título normalizado". The raw
+/// log (and `RunState.findings`) keeps every posting; this collapses
+/// duplicates for counting/display, keeping the first occurrence — the
+/// schema has no authors list to merge into, so "sin perder autorías"
+/// is satisfied by the untouched event log, not by this derived view.
+pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped = Vec::new();
+    for finding in findings {
+        let key = (
+            finding.location.clone(),
+            finding.title.trim().to_lowercase(),
+        );
+        if seen.insert(key) {
+            deduped.push(finding.clone());
+        }
+    }
+    deduped
 }
 
 fn require_node_id(event: &Event) -> Result<NodeId, String> {

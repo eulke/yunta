@@ -1,9 +1,20 @@
 use yunta_core::events::{
-    Event, EventPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage,
+    Event, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
+    NodeFinishedPayload, NodeStartedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
-use yunta_engine::{derive, NodeState};
+use yunta_engine::{dedup_findings, derive, NodeState};
+
+fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> Finding {
+    Finding {
+        id: id.to_string(),
+        severity,
+        title: title.to_string(),
+        location: location.to_string(),
+        detail: "detail".to_string(),
+        proposed_criterion: None,
+    }
+}
 
 fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> Event {
     Event {
@@ -196,6 +207,66 @@ fn task_lifecycle_derives_its_latest_status() {
         state.tasks.get(&"graph-cmd".into()),
         Some(&TaskStatus::Done)
     );
+}
+
+#[test]
+fn finding_posted_events_accumulate_in_run_state() {
+    let events = vec![
+        event(
+            1,
+            Some("review"),
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding(
+                    "f1",
+                    FindingSeverity::Major,
+                    "unchecked error",
+                    "src/lib.rs:10",
+                ),
+            }),
+        ),
+        event(
+            2,
+            Some("review"),
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("f2", FindingSeverity::Note, "style nit", "src/lib.rs:20"),
+            }),
+        ),
+    ];
+
+    let state = derive(&events);
+    assert_eq!(state.broken, None);
+    assert_eq!(state.findings.len(), 2);
+    assert_eq!(state.findings[0].id, "f1");
+    assert_eq!(state.findings[1].id, "f2");
+}
+
+#[test]
+fn dedup_findings_merges_same_location_and_normalized_title_keeping_the_first() {
+    let findings = vec![
+        finding(
+            "reviewer-a-1",
+            FindingSeverity::Major,
+            "Unchecked Error",
+            "src/lib.rs:10",
+        ),
+        finding(
+            "reviewer-b-1",
+            FindingSeverity::Major,
+            "unchecked error", // same title, different case
+            "src/lib.rs:10",   // same location
+        ),
+        finding(
+            "reviewer-a-2",
+            FindingSeverity::Minor,
+            "different finding",
+            "src/lib.rs:10",
+        ),
+    ];
+
+    let deduped = dedup_findings(&findings);
+    assert_eq!(deduped.len(), 2);
+    assert_eq!(deduped[0].id, "reviewer-a-1", "keeps the first occurrence");
+    assert_eq!(deduped[1].id, "reviewer-a-2");
 }
 
 #[test]

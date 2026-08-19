@@ -629,6 +629,48 @@ que aparece.
         y los de `loop_exec`/`run.rs` que dependen de `run_task`
         transitivamente siguen en verde sin tocar su lógica.
 
+- [x] **T5.12 — `kind: findings` (§4.1, D79/D80).** También adelantada:
+      `findings_gate` (parte de T5.4) necesita que `derive()` sepa
+      contar hallazgos, y `Finding`/`FindingSeverity`/`FindingPostedPayload`
+      ya existían desde T2.2 sin consumidor.
+      - `ArtifactKind::Findings` (`crates/core/src/workflow.rs`) +
+        `FindingsFile { findings: Vec<Finding> }` (nuevo, junto a
+        `Finding` en `events/payloads.rs`) — mismo shape que `Ledger`
+        (`tasks:` como única clave de tope), esta vez `findings:`.
+      - `crates/engine/src/findings.rs` (nuevo módulo, espejo de
+        `ledger.rs`): valida id único, `title`/`location`/`detail` no
+        vacíos — junta todas las violaciones, nunca la primera sola.
+      - `close_artifacts` (`artifacts.rs`) gana la rama `Findings`
+        simétrica a `TaskLedger`; `VerifiedArtifact.findings:
+        Option<Vec<Finding>>`. Al cerrar el nodo, `close_node`
+        (`node_exec.rs`) emite un `finding_posted` por entrada — mismo
+        patrón que un `task_registered` por tarea de un `task-ledger`.
+      - `RunState.findings: Vec<Finding>` en `replay.rs`: acumula **cada**
+        posteo, nunca deduplicado ahí — el log crudo conserva toda
+        autoría (§4.1: "sin perder autorías"). La deduplicación
+        ("entre reviewers por `location` + título normalizado") vive en
+        una función pura aparte, `dedup_findings()`, de consulta — quien
+        cuente/muestre hallazgos la llama, replay no la hornea adentro.
+        El schema de `Finding` no tiene lista de autores para fusionar
+        ahí — por eso "sin perder autorías" se satisface dejando el log
+        crudo intacto, no intentando fusionar autorías en la vista
+        deduplicada.
+      - **Fuera de este recorte, explícito**: la vía en caliente
+        (`yunta_post_finding`, MCP por-run, M8) — el Contrato es
+        explícito en que ambas vías comparten un solo schema, así que
+        cuando M8 la construya, reusa `Finding`/`FindingsError`
+        directamente, no un tipo paralelo. Tampoco se tocó `status`/el
+        recibo para mostrar "3 findings: 1 blocking, 2 minor" — eso es
+        UI de T7.1/T7.5, la data ya está en `RunState.findings` lista
+        para que la consuman.
+      - Tests: 3 en `crates/engine/tests/artifacts.rs` (parseo válido,
+        ids duplicados + título vacío reportados juntos, YAML malformado
+        como error tipado), 2 en `crates/engine/tests/replay.rs`
+        (acumulación en `RunState`, dedup por location+título
+        normalizado conservando la primera aparición), 1 end-to-end en
+        `crates/engine/tests/run.rs` (nodo `prompt` con mock que produce
+        `findings.yaml`, el run termina y `derive()` ve el finding).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6. Sin

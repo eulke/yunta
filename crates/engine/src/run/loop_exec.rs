@@ -292,7 +292,9 @@ fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> 
             let yunta_core::ArtifactSpec::Typed { name, kind } = spec else {
                 continue;
             };
-            let yunta_core::ArtifactKind::TaskLedger = kind;
+            if !matches!(kind, yunta_core::ArtifactKind::TaskLedger) {
+                continue;
+            }
             let path = ctx.run_dir.join("artifacts").join(name);
             if !path.exists() {
                 continue;

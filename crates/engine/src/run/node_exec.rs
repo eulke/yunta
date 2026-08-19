@@ -435,6 +435,16 @@ pub(super) async fn close_node(
                         )?;
                     }
                 }
+                if let Some(findings) = &artifact.findings {
+                    for finding in findings {
+                        ctx.emit(
+                            Some(&node.id),
+                            EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
+                                finding: finding.clone(),
+                            }),
+                        )?;
+                    }
+                }
             }
             ctx.emit(
                 Some(&node.id),

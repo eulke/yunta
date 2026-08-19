@@ -536,6 +536,39 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
+#[tokio::test]
+async fn a_findings_artifact_emits_finding_posted_events_consumable_by_replay() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: review
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review the changes."
+    artifacts:
+      produces:
+        - { name: findings.yaml, kind: findings }
+"#;
+
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: major\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
+    outcome: {{ type: completed, summary: "reviewed" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.findings.len(), 1);
+    assert_eq!(state.findings[0].id, "f1");
+}
+
 fn interval(worktree: &std::path::Path, id: &str) -> (i128, i128) {
     let start = std::fs::read_to_string(worktree.join(format!("{id}-start.txt"))).unwrap();
     let end = std::fs::read_to_string(worktree.join(format!("{id}-end.txt"))).unwrap();

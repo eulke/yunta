@@ -13,8 +13,10 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use yunta_core::events::{Finding, FindingsFile};
 use yunta_core::{sha256_hex, ArtifactKind, ArtifactSpec, Ledger, Node, NodeId};
 
+use crate::findings::FindingsError;
 use crate::ledger::LedgerError;
 
 #[derive(Debug, Error)]
@@ -48,11 +50,26 @@ pub enum ArtifactError {
         name: String,
         errors: Vec<LedgerError>,
     },
+
+    #[error("node `{node}`: findings `{name}` is not valid YAML: {detail}")]
+    MalformedFindings {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    #[error("node `{node}`: findings `{name}` failed validation with {} error(s)", errors.len())]
+    InvalidFindings {
+        node: NodeId,
+        name: String,
+        errors: Vec<FindingsError>,
+    },
 }
 
 /// One declared artifact that passed verification — the data
 /// `artifact_written` needs (run-dir-relative path + content hash), plus
-/// the parsed ledger when the artifact is a `task-ledger`.
+/// the parsed ledger or findings when the artifact carries one of those
+/// interpreted kinds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedArtifact {
     pub name: String,
@@ -60,6 +77,7 @@ pub struct VerifiedArtifact {
     pub path: PathBuf,
     pub content_hash: String,
     pub ledger: Option<Ledger>,
+    pub findings: Option<Vec<Finding>>,
 }
 
 /// Verifies every artifact a node declared, collecting every violation
@@ -112,15 +130,24 @@ pub fn close_artifacts(
             continue;
         }
 
-        let ledger = match kind {
+        let mut ledger = None;
+        let mut findings = None;
+        match kind {
             Some(ArtifactKind::TaskLedger) => match parse_ledger(&node.id, name, &bytes) {
-                Ok(ledger) => Some(ledger),
+                Ok(parsed) => ledger = Some(parsed),
                 Err(error) => {
                     errors.push(error);
                     continue;
                 }
             },
-            None => None,
+            Some(ArtifactKind::Findings) => match parse_findings(&node.id, name, &bytes) {
+                Ok(parsed) => findings = Some(parsed),
+                Err(error) => {
+                    errors.push(error);
+                    continue;
+                }
+            },
+            None => {}
         };
 
         verified.push(VerifiedArtifact {
@@ -128,6 +155,7 @@ pub fn close_artifacts(
             path: relative,
             content_hash: sha256_hex(&bytes),
             ledger,
+            findings,
         });
     }
 
@@ -135,6 +163,26 @@ pub fn close_artifacts(
         Ok(verified)
     } else {
         Err(errors)
+    }
+}
+
+fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding>, ArtifactError> {
+    let file: FindingsFile =
+        serde_yaml::from_slice(bytes).map_err(|e| ArtifactError::MalformedFindings {
+            node: node.clone(),
+            name: name.to_string(),
+            detail: e.to_string(),
+        })?;
+
+    let violations = crate::findings::register(&file);
+    if violations.is_empty() {
+        Ok(file.findings)
+    } else {
+        Err(ArtifactError::InvalidFindings {
+            node: node.clone(),
+            name: name.to_string(),
+            errors: violations,
+        })
     }
 }
 

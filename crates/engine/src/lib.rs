@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod check;
+mod findings;
 mod ledger;
 mod manifest;
 mod replay;
@@ -22,9 +23,10 @@ mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use check::{check, check_warnings, CheckError, CheckWarning};
+pub use findings::{register as register_findings, FindingsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
-pub use replay::{derive, NodeState, RunState};
+pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{create_run, execute_run, RunError, RunReport, RunTerminal};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};

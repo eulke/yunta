@@ -177,9 +177,9 @@ impl Serialize for PromptSource {
     }
 }
 
-/// `artifacts.produces` (Contrato §4). M-0 only needs `kind: task-ledger`
-/// interpreted — `findings`/`questions` belong to gates/review flows that
-/// are out of scope; a plain string stays an opaque artifact.
+/// `artifacts.produces` (Contrato §4). `task-ledger` and `findings` are
+/// interpreted (T5.1/T5.12); `questions` waits for T5.14. A plain string
+/// stays opaque.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifacts {
     pub produces: Vec<ArtifactSpec>,
@@ -196,6 +196,7 @@ pub enum ArtifactSpec {
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactKind {
     TaskLedger,
+    Findings,
 }
 
 /// `hooks: {before, after}` (D81, §11.1).
