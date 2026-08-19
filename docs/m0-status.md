@@ -181,7 +181,7 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       tarea vehículo del criterio de éxito de M-0, ver arriba. Commits `79c2f39`
       (implementación, escrita por un `claude-code` real) + `f1a0bed` (test).
 
-## M4 — Engine core (en progreso)
+## M4 — Engine core (completo: T4.1–T4.6)
 
 - [x] **T4.2 — aislamiento de working tree (§7.3).** `defaults.isolation:
       worktree|none` en la config (`yunta_core::Isolation`, default `worktree`,
@@ -558,7 +558,7 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         recorte tocó — sin tarea asignada, gatillo: alguien necesita de
         verdad un `loop` corriendo dentro de un grupo `parallel`.
 
-## M5 — Verificación (en progreso)
+## M5 — Verificación (completo: T5.1–T5.14)
 
 T5.1–T5.3 (parseo/registro del ledger, ciclo de tarea, scope check) ya
 estaban hechos desde el bootstrap de M-0 — ver "Alcance mínimo" arriba.
