@@ -799,6 +799,85 @@ que aparece.
         en disco tras un run real y trae la descripción declarada; un
         nodo con artifact lo lista).
 
+- [x] **T5.6 — runtime de executors, `kind: executor` (D47/D87).** El
+      punto de extensión para lo que ni `bash` (solo exit code) ni la
+      lista cerrada de `check` cubren — código externo con un contrato
+      JSON por stdio.
+      - **Gap real, no una interpretación mía**: D47 fija la forma de alto
+        nivel ("JSON por stdin con `with:`, paths del run, env declarado;
+        JSON de resultado por stdout; exit code es el veredicto; timeout
+        del engine") pero **nunca baja a nombre de campo** — cero
+        ejemplos de un nodo `kind: executor` en ningún fixture de Notion,
+        cero shape de JSON con campos nombrados, cero sintaxis de
+        `timeout` propia. Investigado a fondo en Notion (Contrato, ADRs,
+        RFC-0002, "Config y workflows de referencia", Deuda) antes de
+        escribir una sola línea de código — confirmado que el gap es real,
+        no una lectura apurada. Consultado con el usuario, que pidió una
+        propuesta concreta documentada acá en vez de una nueva pregunta o
+        de inventar en silencio; **este bloque ES esa propuesta — pendiente
+        de que alguien la suba a Notion como revisión real de D47.**
+      - **Schema del nodo** (`NodeKind::Executor`, `crates/core/src/workflow.rs`):
+        ```yaml
+        id: coverage-gate
+        kind: executor
+        executor: coverage-gate   # nombre en skills.executors
+        with: { threshold: 80 }   # opaco, default {}
+        timeout_seconds: 30       # opcional
+        ```
+        `timeout_seconds` ausente = sin enforcement — mismo convenio que
+        `HookStep.timeout_seconds` ya usa (T4.3), reutilizado en vez de
+        inventar un default nuevo de la nada; D47 solo dice "timeout del
+        engine" sin fijar cuánto ni si es opcional.
+      - **Registro** (`SkillsConfig`/`ExecutorRegistration`/`ExecutorKind`,
+        `crates/core/src/config.rs`), bajo `skills.executors:` — la única
+        sintaxis de registro que sí aparece literal en Notion ("Config y
+        workflows de referencia"):
+        ```yaml
+        skills:
+          executors:
+            - { name: coverage-gate, kind: binary, path: .yunta/bin/coverage-gate }
+        ```
+        `kind: binary` es un enum de una sola variante hoy, no un string —
+        D47 reserva `wasm` como aditivo futuro explícito, así que un
+        `match` exhaustivo sobre el tipo revienta en compilación el día
+        que se agregue esa variante, en vez de correrla en silencio como
+        binario. `skills.paths`/`skills.always` (descubrimiento de skills,
+        inyección en contexto) no entran — M6, sin consumidor acá.
+      - **stdin** (`build_stdin`, `crates/engine/src/run/executor_exec.rs`):
+        ```json
+        { "with": {...}, "run": { "dir": "...", "worktree": "..." }, "env": {} }
+        ```
+        `run.dir`/`run.worktree` reusan los mismos dos nombres que
+        `{{run.dir}}`/`{{run.worktree}}` ya exponen en templates
+        (`node_exec::template_vars`) en vez de inventar otros. `env`
+        siempre presente pero vacío — el schema no tiene `env:` declarado
+        a nivel nodo todavía (nada que declarar), pero la clave queda para
+        que un executor nunca tenga que ramificar por su ausencia.
+      - **stdout**: `{"summary": "..."}`, opcional. El exit code es el
+        veredicto (texto literal de D47) — stdout vacío, no-JSON, o sin
+        `summary` nunca falla el nodo por sí solo, cae a un outcome
+        genérico (`` executor `<name>` exited 0 ``). `artifacts.produces`
+        se reusa tal cual (mismo `close_node` que bash/check) — el
+        executor que quiere producir un `task-ledger`/`findings` escribe
+        el archivo él mismo, sin plumbing nuevo stdout→artifact.
+      - **Proceso**: mismo patrón A4 de todo el engine — `process_group(0)`
+        al spawn, `kill -KILL -- -<pgid>` en timeout o cancelación (T4.6's
+        `join: any`). Verificado con `ps` tras el test de timeout: cero
+        procesos `python3` huérfanos.
+      - **Resolución de `path`**: relativo a `ctx.worktree` cuando no es
+        absoluto (mismo *cwd* que hooks/bash ya usan), no al directorio
+        desde el que corre `yunta`.
+      - Tests: 4 de schema en `crates/core/tests/workflow.rs`/`config.rs`
+        (parseo del nodo con/sin `with`/`timeout_seconds`, `skills.executors`
+        parsea `name`/`kind`/`path`, `kind: wasm` rechazado por no existir
+        todavía, merge reemplaza `skills.executors` completo). 4 end-to-end
+        en `crates/engine/tests/run.rs` con un executor real en Python sin
+        dependencias (criterio de aceptación del Plan): ciclo completo
+        feliz (`with.threshold` llega, `run.dir` llega, `summary` se lee
+        como outcome), exit no-cero falla el nodo citando stderr, timeout
+        excedido falla con diagnóstico, nombre no registrado en
+        `skills.executors` falla con diagnóstico.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

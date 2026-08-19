@@ -93,9 +93,9 @@ pub enum OnInterrupt {
     FailIfUncertain,
 }
 
-/// The four node kinds M4 needs (Plan, sección M-0/M4). `gate`, `check`,
-/// `executor` and `workflow` are the rest of the full T1.1 catalogue and
-/// stay out until their own milestone.
+/// The node kinds built so far (Plan, milestones M4/M5). `gate` and
+/// `workflow` are the rest of the full T1.1 catalogue and stay out until
+/// their own milestone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
@@ -129,6 +129,25 @@ pub enum NodeKind {
     Check {
         #[serde(flatten)]
         builtin: CheckBuiltin,
+    },
+    /// The extension point when neither `bash` (exit code only, no
+    /// structured input) nor `check`'s closed builtin list covers it
+    /// (§7.1/D85's own rationale for why this exists) — external code, a
+    /// JSON contract over stdio (D47/D87, T5.6). `executor` names an
+    /// entry in `skills.executors:`; `with` is opaque, executor-defined
+    /// input. `D47`/`D87` fix the high-level shape (JSON in, JSON out,
+    /// exit code is the verdict) but stop short of naming fields —
+    /// `docs/m0-status.md`'s T5.6 entry documents the concrete contract
+    /// this recorte adds on top, pending a real ADR revision.
+    Executor {
+        executor: String,
+        #[serde(default)]
+        with: serde_json::Map<String, serde_json::Value>,
+        /// Absent means unenforced, same convention as `HookStep`'s own
+        /// `timeout_seconds` — D47 only says "timeout del engine" without
+        /// fixing a default or a field name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<u64>,
     },
 }
 

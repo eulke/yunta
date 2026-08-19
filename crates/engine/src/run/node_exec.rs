@@ -81,6 +81,23 @@ pub(super) async fn execute_node(
         // T4.6's scope was bash/prompt only. A `check` child of a `join:
         // any` group runs to completion even after a sibling wins.
         NodeKind::Check { builtin } => super::check_exec::execute_check(ctx, node, builtin).await?,
+        // Not cancel-aware beyond the top-level `join: any` race passed in
+        // here — same recorte as `check`/`loop` children above.
+        NodeKind::Executor {
+            executor,
+            with,
+            timeout_seconds,
+        } => {
+            super::executor_exec::execute_executor(
+                ctx,
+                node,
+                executor,
+                with,
+                *timeout_seconds,
+                cancel,
+            )
+            .await?
+        }
     };
     Ok(end)
 }
@@ -330,7 +347,7 @@ async fn run_hook(
 /// Sends `SIGKILL` to `pid`'s whole process group (A4) — the `--` before
 /// the negative pid is load-bearing, see `claude_code::signal_group`'s
 /// doc comment for the procps-ng behavior this avoids.
-async fn kill_process_group(pid: u32) {
+pub(super) async fn kill_process_group(pid: u32) {
     let _ = tokio::process::Command::new("kill")
         .arg("-KILL")
         .arg("--")

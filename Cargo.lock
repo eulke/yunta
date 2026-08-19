@@ -1168,6 +1168,8 @@ dependencies = [
  "chrono",
  "futures",
  "globset",
+ "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror",

@@ -1347,3 +1347,153 @@ sessions:
     assert!(progress.contains("artifact:"));
     assert!(progress.contains("findings.yaml"));
 }
+
+const CONFIG_WITH_EXECUTOR: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+skills:
+  executors:
+    - { name: probe, kind: binary, path: probe.py }
+"#;
+
+fn write_executable_script(path: &std::path::Path, contents: &str) {
+    std::fs::write(path, contents).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_executor_node_completes_the_full_cycle_with_a_dependency_free_python_script() {
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        r#"#!/usr/bin/env python3
+import json, sys
+data = json.load(sys.stdin)
+threshold = data["with"]["threshold"]
+run_dir = data["run"]["dir"]
+assert run_dir, "run.dir must be present in stdin"
+print(json.dumps({"summary": f"threshold was {threshold}"}))
+sys.exit(0)
+"#,
+    );
+
+    let workflow = r#"
+name: executor-happy-path
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+    with:
+      threshold: 80
+"#;
+
+    let (terminal, state) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    match state.nodes.get(&"probe".into()) {
+        Some(NodeState::Finished { outcome, .. }) => {
+            assert_eq!(outcome, "threshold was 80");
+        }
+        other => panic!("expected probe to finish, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_executor_node_that_exits_non_zero_fails_the_node_with_its_stderr() {
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        r#"#!/usr/bin/env python3
+import sys
+sys.stderr.write("threshold not met\n")
+sys.exit(1)
+"#,
+    );
+
+    let workflow = r#"
+name: executor-failure
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("exited 1"), "unexpected reason: {reason}");
+            assert!(
+                reason.contains("threshold not met"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_executor_node_that_exceeds_its_timeout_fails_with_a_diagnostic() {
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        r#"#!/usr/bin/env python3
+import time
+time.sleep(5)
+"#,
+    );
+
+    let workflow = r#"
+name: executor-timeout
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+    timeout_seconds: 1
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("timeout"), "unexpected reason: {reason}");
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_executor_node_referencing_an_unregistered_name_fails_with_a_diagnostic() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: executor-unregistered
+nodes:
+  - id: probe
+    kind: executor
+    executor: does-not-exist
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(
+                reason.contains("skills.executors"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}

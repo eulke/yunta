@@ -20,8 +20,8 @@ mod workflow;
 pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    AdapterSettings, BaselineConfig, ConfigLayer, CoverageConfig, DefaultsConfig, Isolation,
-    PathsConfig, RunnerCandidate, StorageConfig,
+    AdapterSettings, BaselineConfig, ConfigLayer, CoverageConfig, DefaultsConfig, ExecutorKind,
+    ExecutorRegistration, Isolation, PathsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};

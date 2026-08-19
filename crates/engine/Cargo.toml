@@ -16,6 +16,11 @@ globset = "0.4"
 # The engine interprets `kind: task-ledger` artifacts at node close
 # (Contrato §4.1) — runtime YAML parsing, not just test fixtures.
 serde_yaml = "0.9"
+# `kind: executor`'s stdin/stdout contract is JSON by definition (D47) —
+# already a dependency of yunta-core/yunta-adapters/yunta-storage at the
+# same version, not a new one to the workspace.
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tokio = { version = "1", features = ["process", "rt", "macros", "time"] }
 # CancellationToken (T4.6, `join: any`'s interrupt→kill of the losing

@@ -251,6 +251,55 @@ builtin: something_undefined
 }
 
 #[test]
+fn an_executor_node_parses_with_default_empty_with_and_no_timeout() {
+    let yaml = r#"
+id: coverage-gate
+kind: executor
+executor: coverage-gate
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Executor {
+            executor,
+            with,
+            timeout_seconds,
+        } => {
+            assert_eq!(executor, "coverage-gate");
+            assert!(with.is_empty());
+            assert_eq!(timeout_seconds, None);
+        }
+        other => panic!("expected Executor, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_executor_node_parses_with_params_and_a_timeout() {
+    let yaml = r#"
+id: coverage-gate
+kind: executor
+executor: coverage-gate
+with:
+  threshold: 80
+  suite: unit
+timeout_seconds: 30
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Executor {
+            executor,
+            with,
+            timeout_seconds,
+        } => {
+            assert_eq!(executor, "coverage-gate");
+            assert_eq!(with.get("threshold").unwrap(), &serde_json::json!(80));
+            assert_eq!(with.get("suite").unwrap(), &serde_json::json!("unit"));
+            assert_eq!(timeout_seconds, Some(30));
+        }
+        other => panic!("expected Executor, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_node_s_description_defaults_to_absent() {
     let yaml = r#"
 id: implement

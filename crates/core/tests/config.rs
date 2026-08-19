@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use yunta_core::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, OnInterrupt, PathsConfig,
-    RunnerCandidate, StorageConfig,
+    AdapterSettings, ConfigLayer, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation,
+    OnInterrupt, PathsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
@@ -268,4 +268,58 @@ fn on_interrupt_parses_fail_if_uncertain_from_defaults() {
     let layer: ConfigLayer =
         serde_yaml::from_str("defaults:\n  on_interrupt: fail_if_uncertain\n").unwrap();
     assert_eq!(layer.resolved_on_interrupt(), OnInterrupt::FailIfUncertain);
+}
+
+#[test]
+fn skills_executors_parses_name_kind_and_path() {
+    let yaml = "skills:\n  executors:\n    - { name: coverage-gate, kind: binary, path: .yunta/bin/coverage-gate }\n";
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    let executors = layer.skills.unwrap().executors;
+    assert_eq!(
+        executors,
+        vec![ExecutorRegistration {
+            name: "coverage-gate".to_string(),
+            kind: ExecutorKind::Binary,
+            path: PathBuf::from(".yunta/bin/coverage-gate"),
+        }]
+    );
+}
+
+#[test]
+fn an_unknown_executor_kind_fails_to_parse() {
+    let yaml = "skills:\n  executors:\n    - { name: x, kind: wasm, path: x }\n";
+    let result: Result<ConfigLayer, _> = serde_yaml::from_str(yaml);
+    assert!(
+        result.is_err(),
+        "`wasm` is reserved by D47 but not built yet — must not silently parse as binary"
+    );
+}
+
+#[test]
+fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
+    let org = ConfigLayer {
+        skills: Some(SkillsConfig {
+            executors: vec![ExecutorRegistration {
+                name: "org-tool".to_string(),
+                kind: ExecutorKind::Binary,
+                path: PathBuf::from("org-tool"),
+            }],
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        skills: Some(SkillsConfig {
+            executors: vec![ExecutorRegistration {
+                name: "repo-tool".to_string(),
+                kind: ExecutorKind::Binary,
+                path: PathBuf::from("repo-tool"),
+            }],
+        }),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]);
+    let executors = merged.skills.unwrap().executors;
+    assert_eq!(executors.len(), 1);
+    assert_eq!(executors[0].name, "repo-tool");
 }

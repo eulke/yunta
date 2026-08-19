@@ -8,6 +8,7 @@
 //! happened; everything else re-runs (§8.1, `restart_node`).
 
 mod check_exec;
+mod executor_exec;
 mod loop_exec;
 mod node_exec;
 mod schedule;

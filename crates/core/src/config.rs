@@ -119,6 +119,36 @@ pub struct CoverageConfig {
     pub threshold: f64,
 }
 
+/// `skills:` (D47/D87, T5.6) — M-0 cut carries only `executors`, the one
+/// sub-field `kind: executor` needs to resolve its own `executor:` name
+/// to a binary on disk. `paths`/`always` (skill discovery and injection
+/// into a node's assembled context) are M6's context-assembly work, with
+/// no consumer yet in this recorte.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillsConfig {
+    #[serde(default)]
+    pub executors: Vec<ExecutorRegistration>,
+}
+
+/// One `skills.executors:` entry — `name` is what a `kind: executor`
+/// node's own `executor:` field references.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutorRegistration {
+    pub name: String,
+    pub kind: ExecutorKind,
+    pub path: PathBuf,
+}
+
+/// Closed at `binary` today — D47 explicitly reserves `wasm` as a future
+/// additive variant ("`kind: wasm` queda como extensión aditiva futura si
+/// los datos la piden"), so this is an enum even with a single variant,
+/// not a bare string that would silently accept anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutorKind {
+    Binary,
+}
+
 /// One config layer as parsed from a single file (project/user/org), and
 /// also the type of the merged result — merging never needs to invent
 /// fields, only combine what layers actually set.
@@ -138,6 +168,8 @@ pub struct ConfigLayer {
     pub baseline: Option<BaselineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<SkillsConfig>,
 }
 
 impl ConfigLayer {
@@ -195,6 +227,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         // whole group wholesale, same as `runners`' candidate arrays.
         baseline: more_specific.baseline.or(base.baseline),
         coverage: more_specific.coverage.or(base.coverage),
+        skills: more_specific.skills.or(base.skills),
     }
 }
 
