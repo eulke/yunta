@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use yunta_adapters::Adapter;
+use yunta_adapters::{Adapter, ClaudeCodeAdapter};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
@@ -28,13 +28,35 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
     }
 }
 
-/// The adapter registry a real invocation can offer today. The
-/// `claude-code` adapter is T7.3 (not built yet) and mock fixtures are
-/// routed by `yunta test`, so a workflow that needs an agent session
-/// cannot run from here yet — that limitation is reported up front,
-/// before any run is created, never discovered halfway through one.
-pub(crate) fn real_adapters() -> HashMap<String, Arc<dyn Adapter>> {
-    HashMap::new()
+/// The adapter registry a real invocation can offer: `claude-code` (T7.3)
+/// when `runners:` names it as a candidate somewhere in the merged
+/// config, built with that adapter's settings (a `binary` override, if
+/// declared). Mock fixtures stay routed through `yunta test` only — real
+/// invocations never touch the mock (A8 the other way around: a real run
+/// never gets a simulated agent either).
+pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Adapter>> {
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+
+    let names_claude_code = config
+        .runners
+        .iter()
+        .flatten()
+        .flat_map(|(_, candidates)| candidates.iter())
+        .any(|candidate| candidate.adapter == "claude-code");
+    if names_claude_code {
+        let settings = config
+            .adapters
+            .as_ref()
+            .and_then(|adapters| adapters.get("claude-code"))
+            .cloned()
+            .unwrap_or_default();
+        adapters.insert(
+            "claude-code".to_string(),
+            Arc::new(ClaudeCodeAdapter::new(&settings)),
+        );
+    }
+
+    adapters
 }
 
 /// Refuses early when `workflow` needs agent sessions no available
@@ -51,9 +73,10 @@ pub(crate) fn refuse_unrunnable(
     });
     if needs_sessions && adapters.is_empty() {
         eprintln!(
-            "error: this workflow has prompt/loop nodes and no agent adapter is available yet.\n\
-             The `claude-code` adapter arrives with T7.3. To exercise a workflow with the\n\
-             `mock` adapter, declare a test case under .yunta/tests/ and run `yunta test`."
+            "error: this workflow has prompt/loop nodes but `runners:` in the merged config\n\
+             names no adapter this binary can run (only `claude-code` is built, T7.3). To\n\
+             exercise this workflow with the `mock` adapter instead, declare a test case\n\
+             under .yunta/tests/ and run `yunta test`."
         );
         return Err(ExitCode::FAILURE);
     }

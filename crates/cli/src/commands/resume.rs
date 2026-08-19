@@ -46,7 +46,9 @@ pub async fn resume(run_id: &str) -> ExitCode {
         Err(code) => return code,
     };
 
-    let adapters = super::real_adapters();
+    // The manifest's own frozen config, not the project's current one
+    // (§2.1: a run never re-reads config after it's created).
+    let adapters = super::real_adapters(&manifest.config);
     if let Err(code) = super::refuse_unrunnable(&manifest.workflow, &adapters) {
         return code;
     }

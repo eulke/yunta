@@ -1,10 +1,16 @@
 //! End-to-end CLI flows: `yunta run` on a bash-only workflow (no agent
-//! adapter needed), `status` over its log, `resume` idempotence, and
+//! adapter needed), `status` over its log, `resume` idempotence,
 //! `yunta test` driving a workflow with the mock adapter from a case
-//! file — the designed home for mock fixtures (§14).
+//! file (the designed home for mock fixtures, §14), and `yunta run`
+//! actually spawning the real `claude-code` adapter (T7.3) against a
+//! scripted fake `claude` binary — no network, no cost (A8).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
+
+fn claude_code_stub() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
+}
 
 fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
     std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
@@ -113,12 +119,16 @@ fn a_workflow_needing_agents_is_refused_before_creating_any_run() {
     init_repo(&repo);
     let home = root.path().join("state");
 
+    // `codex` names a real adapter in the schema but has no built
+    // implementation (out of M-0 scope) — exactly the case this refusal
+    // exists for. `claude-code` itself is built (T7.3), so it can no
+    // longer stand in for "an adapter this binary can't run" here.
     write(
         &repo.join(".yunta/config.yaml"),
         r#"
 runners:
   executor:
-    - { adapter: claude-code, model: some-model }
+    - { adapter: codex, model: some-model }
 "#,
     );
     write(
@@ -258,4 +268,58 @@ expect:
     let text = stdout(&output);
     assert!(text.contains("FAILED"), "got: {text}");
     assert!(text.contains("final_state"), "got: {text}");
+}
+
+#[test]
+fn yunta_run_actually_spawns_the_real_claude_code_adapter() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            r#"
+runners:
+  executor:
+    - {{ adapter: claude-code, model: some-model }}
+adapters:
+  claude-code:
+    binary: {binary}
+"#,
+            binary = claude_code_stub().display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: real-adapter-smoke
+nodes:
+  - id: implement
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#,
+    );
+    // Read by the stub's fallback path (relative to the worktree it runs
+    // in, since a real run's SessionRequest.env carries only secrets).
+    write(
+        &repo.join(".claude-stub-lines.jsonl"),
+        &format!(
+            "{}\n{}\n",
+            r#"{"type":"system","subtype":"init","session_id":"sess-cli","model":"claude-sonnet-5"}"#,
+            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":3,"output_tokens":2}}"#,
+        ),
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
 }

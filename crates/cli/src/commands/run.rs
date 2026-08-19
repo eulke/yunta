@@ -38,7 +38,7 @@ pub async fn run(workflow_path: &Path) -> ExitCode {
     if let Err(code) = super::check_or_refuse(&workflow, &project.config) {
         return code;
     }
-    let adapters = super::real_adapters();
+    let adapters = super::real_adapters(&project.config);
     if let Err(code) = super::refuse_unrunnable(&workflow, &adapters) {
         return code;
     }
