@@ -23,9 +23,13 @@
 //!   from, right after the process exits, success or failure alike —
 //!   exactly the lint→fix-lint→lint case §11.2 describes). `executor`
 //!   node output capture is real debt, not yet wired.
-//! - Stable-first ordering/serialization (§9.1) is T6.4's job: sources
-//!   are assembled in declaration order, and `context_assembled`'s own
-//!   `segment_hashes` stays empty until stability classification exists.
+//! - Stable-first assembly (§9.1, T6.4): every source is classified
+//!   `stable | run-stable | volatile` (`stability_class`, straight from
+//!   §9.1's own examples) and the final text is always segment-ordered
+//!   that way, regardless of `context:`'s own declaration order — the
+//!   ordering a provider's prompt cache needs a byte-stable prefix to
+//!   help at all. `context_assembled.segment_hashes` carries one hash
+//!   per non-empty class, over exactly that class's own canonical text.
 //! - `mcp:` (T6.2) speaks streamable-HTTP only, matching the reference
 //!   config's own `mcp_servers:` shape (`{ url, auth_env }` — a bearer
 //!   token's env var *name*, never the token itself, I12/O3). No stdio
@@ -202,8 +206,10 @@ pub(super) async fn resolve_and_assemble(
 }
 
 async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextResolveError> {
-    let mut blocks = Vec::with_capacity(node.context.len());
     let mut sources = Vec::with_capacity(node.context.len());
+    let mut stable_blocks = Vec::new();
+    let mut run_stable_blocks = Vec::new();
+    let mut volatile_blocks = Vec::new();
 
     for spec in &node.context {
         let source_id = source_id_for(spec);
@@ -217,7 +223,12 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
                 source,
             })?;
 
-        blocks.push(render_block(&source_id, kind, &content, &path));
+        let block = render_block(&source_id, kind, &content, &path);
+        match stability_class(spec) {
+            StabilityClass::Stable => stable_blocks.push(block),
+            StabilityClass::RunStable => run_stable_blocks.push(block),
+            StabilityClass::Volatile => volatile_blocks.push(block),
+        }
         sources.push(ContextSourceRef {
             source_id,
             kind: kind.to_string(),
@@ -225,13 +236,33 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
         });
     }
 
+    // §9.1/T6.4: always assembled stable → run-stable → volatile,
+    // regardless of `context:`'s own declaration order — the ordering a
+    // provider's prompt cache needs a byte-stable prefix to actually
+    // help. Each non-empty class's own canonical text (same order,
+    // same separators, every time) gets its own `segment_hashes` entry
+    // — comparing that hash across sessions is the mechanical check
+    // that the prefix really held.
+    let mut segment_hashes = std::collections::HashMap::new();
+    let mut assembled = Vec::new();
+    for (key, class_blocks) in [
+        ("stable", &stable_blocks),
+        ("run-stable", &run_stable_blocks),
+        ("volatile", &volatile_blocks),
+    ] {
+        if class_blocks.is_empty() {
+            continue;
+        }
+        let segment_text = class_blocks.join("\n");
+        segment_hashes.insert(key.to_string(), sha256_hex(segment_text.as_bytes()));
+        assembled.push(segment_text);
+    }
+
     ctx.emit(
         Some(&node.id),
         EventPayload::ContextAssembled(ContextAssembledPayload {
             sources,
-            // §9.1/T6.4: stability classification doesn't exist yet —
-            // populated once it does, never guessed at here.
-            segment_hashes: std::collections::HashMap::new(),
+            segment_hashes,
         }),
     )
     .map_err(|source| ContextResolveError::Io {
@@ -241,7 +272,7 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
         source: std::io::Error::other(source.to_string()),
     })?;
 
-    Ok(blocks.join("\n"))
+    Ok(assembled.join("\n"))
 }
 
 async fn resolve_one(
@@ -627,6 +658,36 @@ fn render_block(source_id: &str, kind: &str, content: &[u8], materialized_path: 
             content.len(),
             materialized_path.display()
         )
+    }
+}
+
+/// §9.1's own three fixed classes, in assembly order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StabilityClass {
+    Stable,
+    RunStable,
+    Volatile,
+}
+
+/// §9.1's own examples, applied literally: `files`/`knowledge` are
+/// "archivos del repo que el run no toca"/"conocimiento durable" —
+/// `stable`; `artifact` is "artifacts congelados: brief, plan" —
+/// `run-stable` (I3 already makes every artifact immutable once
+/// written, so this is the class its own guarantee already earns);
+/// `command`/`run-events`/`node-output`/the aggregate `ledger` view are
+/// named `volatile` verbatim. `mcp` isn't in any of §9.1's own lists —
+/// classified `volatile` here since a live external server's response
+/// is never something this recorte can promise is byte-stable between
+/// sessions.
+fn stability_class(spec: &ContextSpec) -> StabilityClass {
+    match spec {
+        ContextSpec::Files { .. } | ContextSpec::Knowledge { .. } => StabilityClass::Stable,
+        ContextSpec::Artifact { .. } => StabilityClass::RunStable,
+        ContextSpec::Command { .. }
+        | ContextSpec::RunEvents { .. }
+        | ContextSpec::Ledger { .. }
+        | ContextSpec::NodeOutput { .. }
+        | ContextSpec::Mcp { .. } => StabilityClass::Volatile,
     }
 }
 

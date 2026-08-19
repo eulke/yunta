@@ -3214,3 +3214,97 @@ nodes:
         other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
     }
 }
+
+// --- T6.4: ensamblado estable-primero (§9.1) --------------------------------
+
+fn stable_first_workflow(volatile_command_output: &str) -> String {
+    format!(
+        "name: stable-first\nnodes:\n  - id: grill\n    kind: prompt\n    runner: executor\n    prompt: \"Write the brief.\"\n    artifacts:\n      produces: [brief.md]\n  - id: plan\n    kind: prompt\n    runner: executor\n    depends_on: [grill]\n    prompt: \"Plan from context.\"\n    context:\n      - command: \"echo {volatile_command_output}\"\n      - artifact: {{ node: grill, name: brief.md }}\n      - files: [\"stable.txt\"]\n"
+    )
+}
+
+async fn run_stable_first(
+    bench: &Bench,
+    volatile_command_output: &str,
+) -> (
+    yunta_core::events::ContextSourceRef,
+    yunta_core::events::ContextSourceRef,
+    HashMap<String, String>,
+) {
+    std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display(),
+    );
+    let workflow = stable_first_workflow(volatile_command_output);
+
+    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let payload = events
+        .iter()
+        .find_map(|e| match (&e.node_id, &e.payload) {
+            (Some(n), yunta_core::events::EventPayload::ContextAssembled(p))
+                if n.as_str() == "plan" =>
+            {
+                Some(p.clone())
+            }
+            _ => None,
+        })
+        .expect("context_assembled event for `plan`");
+
+    let stable = payload
+        .sources
+        .iter()
+        .find(|s| s.kind == "files")
+        .unwrap()
+        .clone();
+    let run_stable = payload
+        .sources
+        .iter()
+        .find(|s| s.kind == "artifact")
+        .unwrap()
+        .clone();
+    (stable, run_stable, payload.segment_hashes)
+}
+
+#[tokio::test]
+async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_different_volatile_content(
+) {
+    // ✓ del Plan (D42/§9.1): "comparar hashes entre sesiones es la
+    // verificación mecánica de que el prefijo se mantuvo estable" —
+    // `command:` (volatile) cambia entre las dos corridas; `files:`
+    // (stable) y `artifact:` (run-stable) no.
+    let bench_a = Bench::new();
+    let (stable_a, run_stable_a, segments_a) = run_stable_first(&bench_a, "VOLATILE-A").await;
+
+    let bench_b = Bench::new();
+    let (stable_b, run_stable_b, segments_b) = run_stable_first(&bench_b, "VOLATILE-B").await;
+
+    assert_eq!(
+        stable_a.content_hash, stable_b.content_hash,
+        "the `files:` source itself must hash identically — its own content never changed"
+    );
+    assert_eq!(run_stable_a.content_hash, run_stable_b.content_hash);
+
+    assert_eq!(
+        segments_a["stable"], segments_b["stable"],
+        "the stable segment's own canonical text must be byte-identical across runs"
+    );
+    assert_eq!(segments_a["run-stable"], segments_b["run-stable"]);
+    assert_ne!(
+        segments_a["volatile"], segments_b["volatile"],
+        "the volatile segment must differ when the command's own output differs"
+    );
+    assert_eq!(
+        segments_a.keys().collect::<std::collections::HashSet<_>>(),
+        std::collections::HashSet::from([
+            &"stable".to_string(),
+            &"run-stable".to_string(),
+            &"volatile".to_string()
+        ]),
+        "all three classes are in play for this workflow, so all three must be recorded"
+    );
+}

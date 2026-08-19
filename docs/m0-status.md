@@ -1456,7 +1456,7 @@ que aparece.
         T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
         cierra este ítem — no antes.
 
-## M6 — Contexto (en progreso: T6.1–T6.3)
+## M6 — Contexto (en progreso: T6.1–T6.4)
 
 - [x] **T6.1 — trait `ContextSource` + builtins (§9). Alcance recortado
       con varias llamadas de ingeniería documentadas, no un gap único
@@ -1697,6 +1697,61 @@ que aparece.
         config real; `{{inputs.idea}}` sigue fallando limpio, citando el
         nombre, confirmando el recorte de arriba en lugar de solo
         documentarlo).
+
+- [x] **T6.4 — ensamblado estable-primero (§9.1). Clasificación de
+      estabilidad más reordenamiento del ensamblado; sin cambios al
+      resolver de cada builtin.** §9.1 pide que el prompt final ordene
+      sus fuentes stable → run-stable → volatile — nunca en el orden en
+      que `context:` las declara — para que el prefijo compartido entre
+      sesiones del mismo run (y entre runs con el mismo repo) sea
+      byte-idéntico y cacheable por el proveedor del LLM; y que
+      `segment_hashes` permita verificar eso mecánicamente en vez de
+      confiar en la memoria.
+      - **Clasificación por variante, no por config nueva**: `enum
+        StabilityClass { Stable, RunStable, Volatile }` con una función
+        pura `stability_class(&ContextSpec) -> StabilityClass` —
+        `files:`/`knowledge:` son `Stable` (contenido del repo, no
+        cambia dentro de un run); `artifact:` es `RunStable` (un
+        artifact ya verificado y congelado por I3/I4, fijo desde que se
+        escribió pero nuevo en cada run); `command:`/`run-events:`/
+        `ledger:`/`node-output:`/`mcp:` son `Volatile` (leen estado que
+        cambia mientras el run avanza, o una fuente externa viva). Sin
+        tabla de config: la clase es una propiedad del *tipo* de fuente,
+        no algo que un workflow declare.
+      - **`mcp:` es `Volatile`, decisión explícita.** §9.1 no lo nombra
+        en ninguna de sus tres listas de ejemplo (es de T6.2, posterior
+        al texto que describe el ensamblado). Se clasificó `Volatile`
+        por el mismo principio que ya rige `command:`: una respuesta de
+        un servidor externo vivo nunca se puede asumir estable entre
+        sesiones, así que asumir lo contrario sería inventar una
+        garantía que nadie ofrece.
+      - **`resolve_all` reordena, no reordena la resolución en sí**: cada
+        fuente se sigue resolviendo en el orden declarado por
+        `context:` (ningún cambio de orden de ejecución ni de qué falla
+        primero); lo que cambia es a qué balde (`stable_blocks`/
+        `run_stable_blocks`/`volatile_blocks`) va cada bloque ya
+        renderizado antes de unirlos. El evento `context_assembled`
+        sigue listando `sources` en el orden de resolución original —
+        solo el texto final ensamblado (lo que ve el LLM) respeta el
+        orden por clase.
+      - **`segment_hashes` puebla una entrada por clase no vacía**: hash
+        del texto canónico ya unido de esa clase (no de cada fuente por
+        separado — eso ya lo cubre `content_hash` por fuente desde
+        T6.1). Una clase sin ninguna fuente de ese tipo no aparece en el
+        mapa — así un test puede afirmar exactamente qué clases entraron
+        en juego, sin inventar un hash de string vacío para una clase
+        que el nodo ni siquiera declaró.
+      - Tests: 1 end-to-end en `crates/engine/tests/run.rs` — dos runs
+        del mismo workflow (`files:`+`artifact:`+`command:`) con salida
+        de `command:` deliberadamente distinta entre corridas; el
+        `content_hash` de la fuente `files:` y el de la fuente
+        `artifact:` coinciden bit a bit entre ambos runs (su propio
+        contenido nunca cambió), igual que `segment_hashes["stable"]` y
+        `["run-stable"]`; `segment_hashes["volatile"]` sí difiere,
+        confirmando que el mecanismo distingue clases y no solo repite
+        el mismo hash; y las tres claves (`stable`/`run-stable`/
+        `volatile`) están presentes porque el workflow de prueba
+        ejercita las tres.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
