@@ -98,8 +98,14 @@ impl ClaudeCodeAdapter {
             message: "the claude subprocess exited before it could be tracked".to_string(),
         })?;
 
-        let stdout = child.stdout.take().expect("stdout was piped at spawn");
-        let stderr = child.stderr.take().expect("stderr was piped at spawn");
+        let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
+            adapter: "claude-code".to_string(),
+            message: "the claude subprocess has no stdout pipe".to_string(),
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| YuntaError::Adapter {
+            adapter: "claude-code".to_string(),
+            message: "the claude subprocess has no stderr pipe".to_string(),
+        })?;
 
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
