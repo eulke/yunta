@@ -5,8 +5,7 @@
 //! "el hash identifica, no sustituye").
 //!
 //! Scope of this recorte, deliberate and documented in
-//! `docs/m0-status.md`'s T6.1 entry rather than left silent:
-//! - The seven non-`mcp` builtins (`mcp` is T6.2).
+//! `docs/m0-status.md`'s T6.1/T6.2 entries rather than left silent:
 //! - Resolved for `kind: prompt` nodes only — `check` (T6.1) rejects
 //!   `context:` on any other kind. A loop node's own per-task sessions
 //!   don't go through `execute_prompt` at all (`run_task`'s own dispatch,
@@ -24,18 +23,32 @@
 //!   from, right after the process exits, success or failure alike —
 //!   exactly the lint→fix-lint→lint case §11.2 describes). `executor`
 //!   node output capture is real debt, not yet wired.
-//! - No literal `trait ContextSource` — the Contrato names one, but with
-//!   a single set of builtins and no second implementer (packs are M11),
-//!   a trait object buys nothing CLAUDE.md would call a real boundary.
-//!   Every builtin is a plain resolver function behind one `match`; nothing
-//!   here stops a future dynamic-dispatch version once a pack actually
-//!   needs to plug in its own source.
 //! - Stable-first ordering/serialization (§9.1) is T6.4's job: sources
 //!   are assembled in declaration order, and `context_assembled`'s own
 //!   `segment_hashes` stays empty until stability classification exists.
+//! - `mcp:` (T6.2) speaks streamable-HTTP only, matching the reference
+//!   config's own `mcp_servers:` shape (`{ url, auth_env }` — a bearer
+//!   token's env var *name*, never the token itself, I12/O3). No stdio
+//!   MCP transport exists here; `mcp_servers:` never declares a launch
+//!   command, only a URL, so there is nothing to spawn.  The Contrato
+//!   fixes neither which MCP verb `query:` maps to nor a tool name —
+//!   resolved as a `tools/call` on a tool literally named `query`, the
+//!   simplest reading of the field's own name; the toy server this
+//!   recorte's own tests spawn implements exactly that tool.
+//! - No literal `trait ContextSource` — the Contrato names one, but with
+//!   a single set of builtins and no second implementer (packs are M11),
+//!   a trait object buys nothing CLAUDE.md would call a real boundary.
+//!   Every builtin is a plain resolver function behind one `match`;
+//!   nothing here stops a future dynamic-dispatch version once a pack
+//!   actually needs to plug in its own source.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use rmcp::model::CallToolRequestParams;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::ServiceExt;
 use thiserror::Error;
 use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload};
 use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
@@ -51,6 +64,12 @@ use super::{RunCtx, RunError};
 /// "umbral configurable" without a number) — the same treatment T5.11
 /// gave `MAX_EXPANSION_FILES`.
 const INLINE_THRESHOLD_BYTES: usize = 4096;
+
+/// Bound on how long any single external call (`command:`'s subprocess,
+/// `mcp:`'s round trip) may run before this recorte gives up and fails
+/// the node — §9 says "command: stdout con timeout" but names no number;
+/// same treatment as `INLINE_THRESHOLD_BYTES` above.
+const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
 pub(super) enum ContextResolveError {
@@ -75,6 +94,15 @@ pub(super) enum ContextResolveError {
         cmd: String,
         status: i32,
         stderr: String,
+    },
+    #[error(
+        "context `{source_id}` on node `{node}`: command `{cmd}` did not finish within {}s",
+        EXTERNAL_CALL_TIMEOUT.as_secs()
+    )]
+    CommandTimedOut {
+        node: NodeId,
+        source_id: String,
+        cmd: String,
     },
     #[error(
         "context `{source_id}` on node `{node}`: node `{referenced}`'s artifact `{name}` was \
@@ -110,6 +138,42 @@ pub(super) enum ContextResolveError {
         node: NodeId,
         source_id: String,
         layer: String,
+    },
+    #[error(
+        "context `{source_id}` on node `{node}`: mcp server `{server}` is not declared in \
+         `mcp_servers:`"
+    )]
+    UnknownMcpServer {
+        node: NodeId,
+        source_id: String,
+        server: String,
+    },
+    #[error(
+        "context `{source_id}` on node `{node}`: mcp server `{server}` declares `auth_env: \
+         {var}`, but that environment variable isn't set"
+    )]
+    MissingAuthEnv {
+        node: NodeId,
+        source_id: String,
+        server: String,
+        var: String,
+    },
+    #[error("context `{source_id}` on node `{node}`: mcp server `{server}`: {detail}")]
+    McpFailed {
+        node: NodeId,
+        source_id: String,
+        server: String,
+        detail: String,
+    },
+    #[error(
+        "context `{source_id}` on node `{node}`: mcp server `{server}` did not respond within \
+         {}s",
+        EXTERNAL_CALL_TIMEOUT.as_secs()
+    )]
+    McpTimedOut {
+        node: NodeId,
+        source_id: String,
+        server: String,
     },
 }
 
@@ -202,6 +266,7 @@ async fn resolve_one(
         ContextSpec::NodeOutput { node_output } => {
             resolve_node_output(ctx, node, source_id, node_output).await
         }
+        ContextSpec::Mcp { mcp } => resolve_mcp(ctx, node, source_id, mcp).await,
     }
 }
 
@@ -250,12 +315,18 @@ async fn resolve_command(
         source_id: source_id.to_string(),
         detail: e.to_string(),
     })?;
-    let output = tokio::process::Command::new("sh")
+    let child = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(&rendered)
         .current_dir(ctx.worktree)
-        .output()
+        .output();
+    let output = tokio::time::timeout(EXTERNAL_CALL_TIMEOUT, child)
         .await
+        .map_err(|_elapsed| ContextResolveError::CommandTimedOut {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            cmd: rendered.clone(),
+        })?
         .map_err(|source| ContextResolveError::Io {
             node: node.id.clone(),
             source_id: source_id.to_string(),
@@ -400,6 +471,112 @@ fn node_output_path(run_dir: &Path, node_id: &NodeId) -> PathBuf {
         .join(format!("{}.txt", node_id.as_str()))
 }
 
+/// `mcp: { server, query }` (§9, T6.2): looks `server` up in the merged
+/// config's `mcp_servers:`, connects over streamable-HTTP (bearer token
+/// read from the env var `auth_env` names, never from config itself),
+/// and calls a tool literally named `query` with the rendered `query:`
+/// text as its sole argument — see the module doc for why that specific
+/// mapping. The whole round trip (connect, handshake, call) is bounded
+/// by `EXTERNAL_CALL_TIMEOUT`; the connection is always closed before
+/// returning, success or failure alike.
+async fn resolve_mcp(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    source_id: &str,
+    params: &yunta_core::McpQueryParams,
+) -> Result<Vec<u8>, ContextResolveError> {
+    let server = ctx
+        .manifest
+        .config
+        .mcp_servers
+        .as_ref()
+        .and_then(|servers| servers.get(&params.server))
+        .ok_or_else(|| ContextResolveError::UnknownMcpServer {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            server: params.server.clone(),
+        })?;
+
+    let vars = template_vars(ctx);
+    let query =
+        render_template(&params.query, &vars).map_err(|e| ContextResolveError::Template {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            detail: e.to_string(),
+        })?;
+
+    let auth_header = match &server.auth_env {
+        Some(var) => Some(
+            std::env::var(var).map_err(|_| ContextResolveError::MissingAuthEnv {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                server: params.server.clone(),
+                var: var.clone(),
+            })?,
+        ),
+        None => None,
+    };
+
+    let call = call_mcp_query(server.url.clone(), auth_header, query);
+    let text = tokio::time::timeout(EXTERNAL_CALL_TIMEOUT, call)
+        .await
+        .map_err(|_elapsed| ContextResolveError::McpTimedOut {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            server: params.server.clone(),
+        })?
+        .map_err(|detail| ContextResolveError::McpFailed {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            server: params.server.clone(),
+            detail,
+        })?;
+    Ok(text.into_bytes())
+}
+
+/// Connects, calls the `query` tool once, and disconnects — isolated from
+/// `resolve_mcp` only so the `?`-heavy rmcp error plumbing collapses to a
+/// single `String` before it meets `ContextResolveError`.
+async fn call_mcp_query(
+    url: String,
+    auth_header: Option<String>,
+    query: String,
+) -> Result<String, String> {
+    let mut config = StreamableHttpClientTransportConfig::with_uri(url);
+    if let Some(token) = auth_header {
+        config = config.auth_header(token);
+    }
+    let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
+    let client = ().serve(transport).await.map_err(|e| e.to_string())?;
+
+    let mut arguments = rmcp::model::JsonObject::new();
+    arguments.insert("query".to_string(), serde_json::Value::String(query));
+    let result = client
+        .call_tool_once(CallToolRequestParams::new("query").with_arguments(arguments))
+        .await;
+    let _ = client.cancel().await;
+
+    match result.map_err(|e| e.to_string())? {
+        rmcp::model::CallToolResponse::Complete(result) => {
+            let text: String = result
+                .content
+                .into_iter()
+                .filter_map(|block| match block {
+                    rmcp::model::ContentBlock::Text(t) => Some(t.text),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if result.is_error == Some(true) {
+                Err(format!("tool `query` returned an error: {text}"))
+            } else {
+                Ok(text)
+            }
+        }
+        other => Err(format!("unexpected tools/call response: {other:?}")),
+    }
+}
+
 /// Captures a `kind: bash` node's own stdout/stderr right after it exits
 /// (§9/§11.2) — called regardless of exit status, since a *failing*
 /// node's output is exactly what a corrective node's `node-output`
@@ -473,6 +650,7 @@ fn source_id_for(spec: &ContextSpec) -> String {
             }
         }
         ContextSpec::NodeOutput { node_output } => format!("node-output:{}", node_output.node),
+        ContextSpec::Mcp { mcp } => format!("mcp:{}/{}", mcp.server, mcp.query),
     }
 }
 
@@ -485,5 +663,6 @@ fn kind_name(spec: &ContextSpec) -> &'static str {
         ContextSpec::Ledger { .. } => "ledger",
         ContextSpec::Knowledge { .. } => "knowledge",
         ContextSpec::NodeOutput { .. } => "node-output",
+        ContextSpec::Mcp { .. } => "mcp",
     }
 }

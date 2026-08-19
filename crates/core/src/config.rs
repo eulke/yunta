@@ -34,6 +34,18 @@ pub struct RunnerCandidate {
     pub agent: Option<String>,
 }
 
+/// One server in `mcp_servers:` (§9.2, T6.2) — the reference config's own
+/// shape: a streamable-HTTP endpoint plus the *name* of an env var
+/// carrying the bearer token, never the token itself (I12/O3: secrets are
+/// env var names in config, values only ever come from the process
+/// environment at resolve time).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_env: Option<String>,
+}
+
 /// Adapter-specific settings that have a portable expression (D29): for
 /// now just a binary path override, matching the reference config.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -245,6 +257,8 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapters: Option<HashMap<String, AdapterSettings>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<StorageConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<PathsConfig>,
@@ -306,6 +320,11 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
             base.adapters,
             more_specific.adapters,
             merge_adapter_settings,
+        ),
+        mcp_servers: merge_maps(
+            base.mcp_servers,
+            more_specific.mcp_servers,
+            |_base, more| more,
         ),
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),

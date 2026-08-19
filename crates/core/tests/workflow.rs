@@ -517,9 +517,10 @@ context:
   - knowledge: {}
   - node-output: { node: lint }
   - run-events: { filter: failed }
+  - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(node.context.len(), 7);
+    assert_eq!(node.context.len(), 8);
 
     use yunta_core::ContextSpec;
     match &node.context[0] {
@@ -559,6 +560,13 @@ context:
             assert_eq!(run_events.filter.as_deref(), Some("failed"))
         }
         other => panic!("expected RunEvents, got {other:?}"),
+    }
+    match &node.context[7] {
+        ContextSpec::Mcp { mcp } => {
+            assert_eq!(mcp.server, "internal-docs");
+            assert_eq!(mcp.query, "{{inputs.idea}}");
+        }
+        other => panic!("expected Mcp, got {other:?}"),
     }
 }
 

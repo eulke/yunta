@@ -102,11 +102,10 @@ pub struct Node {
 }
 
 /// One `context:` entry (§9): a builtin `ContextSource` plus its own
-/// parameters. `mcp` isn't here — T6.2 adds it separately. Untagged: each
-/// variant's own (unique) field name is the discriminant, exactly
-/// matching the Contrato's own YAML — `- files: [...]`, `- command:
-/// "..."`, `- artifact: { node: ..., name: ... }`, and so on; there is no
-/// separate `kind:` key to introduce.
+/// parameters. Untagged: each variant's own (unique) field name is the
+/// discriminant, exactly matching the Contrato's own YAML — `- files:
+/// [...]`, `- command: "..."`, `- artifact: { node: ..., name: ... }`,
+/// and so on; there is no separate `kind:` key to introduce.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContextSpec {
@@ -118,6 +117,9 @@ pub enum ContextSpec {
     },
     Artifact {
         artifact: ArtifactContextRef,
+    },
+    Mcp {
+        mcp: McpQueryParams,
     },
     RunEvents {
         #[serde(rename = "run-events")]
@@ -133,6 +135,18 @@ pub enum ContextSpec {
         #[serde(rename = "node-output")]
         node_output: NodeOutputParams,
     },
+}
+
+/// `mcp: { server: ..., query: ... }` (§9, T6.2) — `server` names an
+/// entry in the merged config's `mcp_servers:`; `query` is free-form text
+/// (the Contrato's only example passes `{{inputs.idea}}` verbatim) sent
+/// to the server as the resolver's own choice of MCP call (T6.2:
+/// `tools/call` on a tool literally named `query`, since the Contrato
+/// fixes neither the MCP verb nor a tool name).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpQueryParams {
+    pub server: String,
+    pub query: String,
 }
 
 /// `artifact: { node: ..., name: ... }` (§9) — the referenced node's own

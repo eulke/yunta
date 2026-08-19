@@ -27,8 +27,36 @@ tokio = { version = "1", features = ["process", "rt", "macros", "time"] }
 # siblings) — the propagated-cancellation primitive CLAUDE.md's own
 # "Concurrencia estructurada" section names, not a new idiom.
 tokio-util = "0.7"
+# `mcp:` context source (§9, T6.2) — an outbound streamable-HTTP MCP
+# client, the transport the reference config's own `mcp_servers:` shape
+# uses (a `url:` + bearer `auth_env:`, never stdio). `client` +
+# `transport-streamable-http-client-reqwest` only: no server-side
+# feature here, so nothing from this ships tower/hyper into the release
+# binary — those stay dev-only, for the toy server tests spawn (below).
+rmcp = { version = "3", default-features = false, features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+# `reqwest::Client` is named directly in `context_resolve.rs` to build the
+# streamable-HTTP transport rmcp's own reqwest feature only wires
+# internally — rustls (not native-tls/OpenSSL), matching the TLS backend
+# the `reqwest` feature above already selects for rmcp's side.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 chrono = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
+# Toy MCP server (T6.2's own ✓: "test contra server MCP de juguete") —
+# server-side features only, additive on the same `rmcp` dependency edge;
+# cargo unifies them for test builds and drops them entirely from
+# `cargo build --release` of the real `yunta` binary.
+rmcp = { version = "3", default-features = false, features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+# Binds the toy server's `StreamableHttpService` (a tower `Service`) to a
+# real `127.0.0.1:0` listener for the T6.2 test — dev-only, same as the
+# `rmcp` server features above; never reaches the release binary.
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }

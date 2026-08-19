@@ -1456,7 +1456,7 @@ que aparece.
         T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
         cierra este ítem — no antes.
 
-## M6 — Contexto (en progreso: T6.1)
+## M6 — Contexto (en progreso: T6.1–T6.2)
 
 - [x] **T6.1 — trait `ContextSource` + builtins (§9). Alcance recortado
       con varias llamadas de ingeniería documentadas, no un gap único
@@ -1570,6 +1570,82 @@ que aparece.
         `depends_on` explícito; y un `artifact:` que referencia un nodo
         real que nunca produjo el artifact falla el nodo con un mensaje
         que nombra el artifact, nunca contenido vacío.
+
+- [x] **T6.2 — builtin `mcp` (§9). Investigado en la Config y workflows de
+      referencia antes de escribir una sola línea de cliente — cambió el
+      diseño por completo.** La lectura ingenua de §9 (`mcp: { server,
+      query }`) sugiere cualquier transporte; la referencia canónica es
+      explícita y distinta de lo que T5.11/T6.1 venían asumiendo para
+      "lanzar un proceso": `mcp_servers: { internal-docs: { url:
+      "https://...", auth_env: DOCS_TOKEN } }` — streamable-HTTP con
+      bearer token, nunca stdio. Sin ese chequeo se habría construido un
+      cliente stdio/`transport-child-process` correcto en sí mismo pero
+      incompatible con el propio schema que T1.2 ya fija.
+      - **Dependencia real, con costo defendido**: `rmcp` (la misma
+        librería que T8.1 ya nombra para el lado servidor) con
+        `client` + `transport-streamable-http-client-reqwest` +
+        `reqwest` (rustls, no OpenSSL) en `[dependencies]` de
+        `yunta-engine` — la única forma real de hablar HTTPS con
+        MCP desde Rust hoy. `cargo tree -e normal` confirma que esto
+        no arrastra ningún componente de *servidor* (`axum` no aparece
+        en el árbol normal en absoluto); `tower`/`tower-http`/`hyper`
+        sí aparecen, pero son inherentes a `reqwest` mismo — el costo de
+        hablar HTTPS en absoluto, no algo que este task eligió de más.
+        Ningún `[[bin]]` nuevo, ningún subproceso: el binario de
+        `yunta` real solo gana lo que un cliente HTTPS siempre pesa.
+      - **Servidor de juguete, deuda cero en el binario real**: `rmcp`
+        con `server` + `transport-streamable-http-server`, más `axum`
+        (para enrutar el `tower::Service` de rmcp a un
+        `TcpListener` real) viven en `[dev-dependencies]` — mismo
+        `Cargo.toml`, mismo nombre de crate `rmcp` con features
+        distintas por sección; cargo unifica el feature-set para
+        `cargo test` pero **`cargo build --release` del binario `yunta`
+        nunca las ve** (verificado con `cargo tree -e normal`, que no
+        lista `axum`). El servidor de juguete corre in-process, sobre
+        `127.0.0.1:0` (puerto asignado por el SO), en el mismo test
+        `#[tokio::test]` que lo consume — nada de subproceso stdio, dado
+        que el transporte real ya es HTTP.
+      - **`query:` → `tools/call` sobre una tool llamada `query`**: ni
+        §9 ni la referencia fijan qué verbo MCP dispara `query:`. Se
+        interpretó como la lectura más simple del propio nombre del
+        campo — invocar `tools/call` con `name: "query"` y el texto
+        renderizado como único argumento (`{"query": "..."}`) — y el
+        servidor de juguete implementa exactamente esa tool, así que el
+        contrato cliente↔servidor de este recorte es autoconsistente
+        aunque no esté escrito en ningún doc todavía. Cualquier otra
+        tool responde con un `CallToolResult::error`, nunca contenido
+        silenciosamente vacío.
+      - **`auth_env`, nunca el secreto en config** (I12/O3, ya el
+        patrón de `secrets:`): el campo guarda el *nombre* de la
+        variable de entorno; el token se lee de `std::env::var` recién
+        al resolver, y su ausencia es un error tipado
+        (`MissingAuthEnv`) que nombra la variable, chequeado **antes**
+        de intentar conectar — mismo orden que `UnknownMcpServer`
+        (server no declarado en `mcp_servers:`), ambos verificados sin
+        red real de por medio.
+      - **Timeout que T6.1 debía y no tenía**: al tocar este archivo se
+        notó que `command:` ("stdout con timeout", texto literal de §9)
+        nunca había recibido un timeout real en T6.1 — `tokio::process`
+        podía colgar el nodo indefinidamente. Corregido acá mismo
+        (`EXTERNAL_CALL_TIMEOUT = 30s`, mismo tratamiento sin-número-en-
+        el-Contrato que `INLINE_THRESHOLD_BYTES`), compartido con
+        `mcp:`. Vicio de T6.1 que no se dejó arrastrar.
+      - Tests: 3 end-to-end en `crates/engine/tests/mcp_context.rs`
+        (servidor de juguete real vía streamable-HTTP: la respuesta se
+        resuelve, se inyecta en el prompt —el fixture mock solo matchea
+        si el contenido de la respuesta del servidor aparece
+        literalmente ahí— y es replayable con el mismo criterio que
+        T6.1; un server no declarado en `mcp_servers:` falla el nodo sin
+        ningún intento de red, verificado con un fixture sin sesiones
+        disponibles; un `auth_env` cuya variable no existe falla igual
+        de temprano, contra una URL que ni siquiera resuelve, probando
+        que el chequeo ocurre antes de cualquier conexión) + 1 de schema
+        en `crates/core/tests/workflow.rs` (el builtin `mcp` agregado al
+        ejemplo completo de los ocho builtins) + 3 en
+        `crates/core/tests/config.rs` (`mcp_servers:` parsea la forma de
+        la referencia, `auth_env` ausente es un servidor público válido,
+        una capa repo reemplaza una entrada entera de `mcp_servers:` sin
+        tocar las demás — mismo merge que `runners:`).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

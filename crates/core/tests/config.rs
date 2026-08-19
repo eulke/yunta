@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use yunta_core::{
     permission_layer_conflicts, AdapterSettings, CommandPermissions, ConfigLayer, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, Isolation, NetworkPermissions, OnInterrupt,
-    PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig, RunnerCandidate,
-    SkillsConfig, StorageConfig,
+    ExecutorKind, ExecutorRegistration, Isolation, McpServerConfig, NetworkPermissions,
+    OnInterrupt, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
+    RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
@@ -475,4 +475,70 @@ fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
     let executors = merged.skills.unwrap().executors;
     assert_eq!(executors.len(), 1);
     assert_eq!(executors[0].name, "repo-tool");
+}
+
+#[test]
+fn mcp_servers_parses_the_reference_config_shape() {
+    let yaml = r#"
+mcp_servers:
+  internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
+"#;
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    let servers = layer.mcp_servers.unwrap();
+    assert_eq!(
+        servers["internal-docs"].url,
+        "https://docs.interna.example/mcp"
+    );
+    assert_eq!(
+        servers["internal-docs"].auth_env.as_deref(),
+        Some("DOCS_TOKEN")
+    );
+}
+
+#[test]
+fn mcp_servers_auth_env_defaults_to_absent_for_a_public_server() {
+    let yaml = r#"
+mcp_servers:
+  public-docs: { url: "https://docs.example.com/mcp" }
+"#;
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(layer.mcp_servers.unwrap()["public-docs"].auth_env, None);
+}
+
+#[test]
+fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
+    let org = ConfigLayer {
+        mcp_servers: Some(HashMap::from([
+            (
+                "internal-docs".to_string(),
+                McpServerConfig {
+                    url: "https://org.example.com/mcp".to_string(),
+                    auth_env: Some("ORG_TOKEN".to_string()),
+                },
+            ),
+            (
+                "other".to_string(),
+                McpServerConfig {
+                    url: "https://other.example.com/mcp".to_string(),
+                    auth_env: None,
+                },
+            ),
+        ])),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        mcp_servers: Some(HashMap::from([(
+            "internal-docs".to_string(),
+            McpServerConfig {
+                url: "http://localhost:8000/mcp".to_string(),
+                auth_env: None,
+            },
+        )])),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]).mcp_servers.unwrap();
+    assert_eq!(merged["internal-docs"].url, "http://localhost:8000/mcp");
+    assert_eq!(merged["internal-docs"].auth_env, None);
+    assert_eq!(merged["other"].url, "https://other.example.com/mcp");
 }

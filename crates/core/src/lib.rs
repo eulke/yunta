@@ -22,7 +22,7 @@ pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, AdapterSettings, BaselineConfig, CommandPermissions, ConfigLayer,
-    CoverageConfig, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation,
+    CoverageConfig, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
     PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };
@@ -33,8 +33,8 @@ pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use questions::{AnswerType, Question, QuestionsFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, ContextSpec,
-    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeParams, LedgerParams, Node,
-    NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnInterrupt,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeParams, LedgerParams, McpQueryParams,
+    Node, NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnInterrupt,
     PromptSource, RunEventsParams, ScopeExpansion, Workflow,
 };
 
