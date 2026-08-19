@@ -60,6 +60,30 @@ pub struct Node {
     pub hooks: Option<Hooks>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<OnFailure>,
+    /// How a `running` node with no terminal event is treated on resume
+    /// after a crash (§8.1, D99, T4.5). Absent means the schema's own
+    /// default (`restart_node`) applies, resolved the same way
+    /// `defaults.isolation` is (config, then hardcoded default) — this
+    /// field is the node's own override of that default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_interrupt: Option<OnInterrupt>,
+}
+
+/// A node's crash-recovery policy (§8.1, D99). `resume_session` (continue
+/// the same agent conversation via its `session_id`, degrading to
+/// `restart_node` with a warning when the adapter lacks the capability)
+/// is real per the Contrato but has no consumer in this recorte — nothing
+/// in `node_exec`'s dispatch path resumes a session on crash recovery
+/// yet, only on an in-run retryable failure (T3.3), a different case. It
+/// stays out of the enum rather than being accepted and silently ignored
+/// — the same "no está diseñado, no entra al schema" treatment §7.3 gives
+/// `isolation: container`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnInterrupt {
+    #[default]
+    RestartNode,
+    FailIfUncertain,
 }
 
 /// The three node kinds M-0 needs (Plan, sección M-0). `gate`, `check`,

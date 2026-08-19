@@ -226,7 +226,12 @@ pub async fn execute_run(
 
     loop {
         let events = ctx.load_events()?;
-        match schedule::next_step(&manifest.workflow, &events, manifest.max_parallel_nodes) {
+        match schedule::next_step(
+            &manifest.workflow,
+            &events,
+            manifest.max_parallel_nodes,
+            manifest.config.resolved_on_interrupt(),
+        ) {
             ScheduleStep::Broken { diagnostic } => {
                 return Err(RunError::Broken { diagnostic });
             }

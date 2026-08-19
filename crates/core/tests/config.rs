@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use yunta_core::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, PathsConfig, RunnerCandidate,
-    StorageConfig,
+    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, OnInterrupt, PathsConfig,
+    RunnerCandidate, StorageConfig,
 };
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
@@ -255,4 +255,17 @@ fn repo_max_parallel_nodes_overrides_org_max_parallel_nodes() {
     };
     let merged = ConfigLayer::merge_layers([org, repo]);
     assert_eq!(merged.resolved_max_parallel_nodes(), 8);
+}
+
+#[test]
+fn on_interrupt_defaults_to_restart_node_when_unset() {
+    let layer = ConfigLayer::default();
+    assert_eq!(layer.resolved_on_interrupt(), OnInterrupt::RestartNode);
+}
+
+#[test]
+fn on_interrupt_parses_fail_if_uncertain_from_defaults() {
+    let layer: ConfigLayer =
+        serde_yaml::from_str("defaults:\n  on_interrupt: fail_if_uncertain\n").unwrap();
+    assert_eq!(layer.resolved_on_interrupt(), OnInterrupt::FailIfUncertain);
 }

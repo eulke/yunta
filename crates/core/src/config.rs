@@ -22,6 +22,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::workflow::OnInterrupt;
+
 /// One binding candidate for a role in `runners:` (Contrato §13.1, I17).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunnerCandidate {
@@ -90,6 +92,11 @@ pub struct DefaultsConfig {
     /// should discover parallel token spend by reading the bill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallel_nodes: Option<u32>,
+    /// Fallback `on_interrupt` (§8.1, T4.5) a node without its own
+    /// override resolves to. Same default (`restart_node`) as the
+    /// schema's own, so absent here changes nothing either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_interrupt: Option<OnInterrupt>,
 }
 
 /// One config layer as parsed from a single file (project/user/org), and
@@ -136,6 +143,16 @@ impl ConfigLayer {
             .and_then(|defaults| defaults.max_parallel_nodes)
             .unwrap_or(1)
     }
+
+    /// `defaults.on_interrupt`, with the schema's own default
+    /// (`restart_node`) applied — a node's own `on_interrupt` still wins
+    /// over this when it declares one (T4.5's per-node override).
+    pub fn resolved_on_interrupt(&self) -> OnInterrupt {
+        self.defaults
+            .as_ref()
+            .and_then(|defaults| defaults.on_interrupt)
+            .unwrap_or_default()
+    }
 }
 
 fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -156,6 +173,7 @@ fn merge_defaults_config(base: DefaultsConfig, more_specific: DefaultsConfig) ->
     DefaultsConfig {
         isolation: more_specific.isolation.or(base.isolation),
         max_parallel_nodes: more_specific.max_parallel_nodes.or(base.max_parallel_nodes),
+        on_interrupt: more_specific.on_interrupt.or(base.on_interrupt),
     }
 }
 

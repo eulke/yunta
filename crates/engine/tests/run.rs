@@ -733,6 +733,71 @@ nodes:
 }
 
 #[tokio::test]
+async fn a_node_with_on_interrupt_fail_if_uncertain_pauses_instead_of_restarting() {
+    let bench = Bench::new();
+
+    let workflow_yaml = r#"
+name: uncertain-on-crash
+nodes:
+  - id: only
+    kind: bash
+    run: "test -f present.txt"
+    on_interrupt: fail_if_uncertain
+"#;
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    // Same simulated crash as the restart_node test: node_started with no
+    // terminal event.
+    bench
+        .storage
+        .append_event(&yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("only".into()),
+            payload: yunta_core::events::EventPayload::NodeStarted(
+                yunta_core::events::NodeStartedPayload { attempt: 1 },
+            ),
+        })
+        .unwrap();
+
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &HashMap::new(),
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+
+    match report.terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("only"), "got: {reason}"),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+    // Never restarted: no second node_started attempt was ever emitted.
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let starts = events
+        .iter()
+        .filter(|e| matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_)))
+        .count();
+    assert_eq!(starts, 1, "fail_if_uncertain must never blindly restart");
+}
+
+#[tokio::test]
 async fn a_blocked_task_fails_the_loop_and_pauses_the_run() {
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");

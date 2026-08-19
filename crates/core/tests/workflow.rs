@@ -1,4 +1,6 @@
-use yunta_core::{ArtifactKind, ArtifactSpec, HookFailurePolicy, NodeKind, PromptSource, Workflow};
+use yunta_core::{
+    ArtifactKind, ArtifactSpec, HookFailurePolicy, NodeKind, OnInterrupt, PromptSource, Workflow,
+};
 
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
 
@@ -120,6 +122,29 @@ nodes:
     let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
     let defaults = workflow.node_defaults.unwrap();
     assert_eq!(defaults.hooks.unwrap().after[0].run, "cargo fmt");
+}
+
+#[test]
+fn a_node_s_on_interrupt_defaults_to_absent_not_a_forced_choice() {
+    let yaml = r#"
+id: implement
+kind: bash
+run: "true"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.on_interrupt, None);
+}
+
+#[test]
+fn a_node_can_declare_fail_if_uncertain() {
+    let yaml = r#"
+id: implement
+kind: prompt
+prompt: "do it"
+on_interrupt: fail_if_uncertain
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.on_interrupt, Some(OnInterrupt::FailIfUncertain));
 }
 
 #[test]

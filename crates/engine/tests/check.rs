@@ -15,6 +15,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         artifacts: None,
         hooks: None,
         on_failure: None,
+        on_interrupt: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         artifacts: None,
         hooks: None,
         on_failure: None,
+        on_interrupt: None,
     }
 }
 

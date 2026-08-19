@@ -9,15 +9,17 @@
 //!
 //! M-0/M4 cut: node states are `pending→ready→running→done|failed` only —
 //! `skipped`/`waiting` wait for modes (M9) and gates (M5/T7.2), neither of
-//! which exists yet. `on_interrupt: restart_node` is the only resume
-//! policy (D99's alternatives arrive with T4.5 proper). Concurrency is
-//! DAG-shaped fan-out only (independent nodes with no `depends_on`
-//! relation to each other); it does not cover `kind: parallel`'s named
-//! groups (T4.6) or a loop's own task `concurrency:` (T5.10), both
-//! separate mechanisms per §5.5/§5.8.
+//! which exists yet. `on_interrupt: restart_node | fail_if_uncertain`
+//! (T4.5, D99) — `resume_session` is real per the Contrato but has no
+//! consumer (nothing resumes a session on crash recovery yet), so it
+//! isn't in the schema at all rather than being accepted and ignored.
+//! Concurrency is DAG-shaped fan-out only (independent nodes with no
+//! `depends_on` relation to each other); it does not cover `kind:
+//! parallel`'s named groups (T4.6) or a loop's own task `concurrency:`
+//! (T5.10), both separate mechanisms per §5.5/§5.8.
 
 use yunta_core::events::{Event, EventPayload};
-use yunta_core::{NodeId, Workflow};
+use yunta_core::{Node, NodeId, OnInterrupt, Workflow};
 
 use crate::replay::{derive, NodeState};
 
@@ -59,7 +61,12 @@ struct NodeHistory {
     last_reroute: Option<(u64, NodeId)>,
 }
 
-pub fn next_step(workflow: &Workflow, events: &[Event], max_parallel_nodes: u32) -> ScheduleStep {
+pub fn next_step(
+    workflow: &Workflow,
+    events: &[Event],
+    max_parallel_nodes: u32,
+    default_on_interrupt: OnInterrupt,
+) -> ScheduleStep {
     let state = derive(events);
     if let Some(diagnostic) = state.broken {
         return ScheduleStep::Broken { diagnostic };
@@ -93,16 +100,44 @@ pub fn next_step(workflow: &Workflow, events: &[Event], max_parallel_nodes: u32)
     let hist = |id: &NodeId| history.get(id).cloned().unwrap_or_default();
 
     // 1. Every orphaned `running` node (crash/Ctrl-C with no terminal
-    //    event) restarts together — §8.1, restart_node. They were already
-    //    committed to running concurrently before the crash, so capacity
-    //    doesn't retroactively apply to how many of them come back.
-    let orphans: Vec<(NodeId, u32)> = workflow
+    //    event) is resolved per its own `on_interrupt` (§8.1, D99): a node
+    //    with no override inherits `default_on_interrupt`. Any orphan
+    //    resolving to `fail_if_uncertain` pauses the whole resume rather
+    //    than restarting even the `restart_node` orphans alongside it —
+    //    "never assume, never guess" (§8.1) applies to the batch as a
+    //    whole, not node by node. Orphans that DO restart go together,
+    //    already committed to running concurrently before the crash, so
+    //    capacity doesn't retroactively apply to how many come back.
+    let orphaned: Vec<&Node> = workflow
         .nodes
         .iter()
         .filter(|node| matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. })))
-        .map(|node| (node.id.clone(), hist(&node.id).starts + 1))
         .collect();
-    if !orphans.is_empty() {
+    if !orphaned.is_empty() {
+        let resolved = |node: &Node| node.on_interrupt.unwrap_or(default_on_interrupt);
+        let uncertain: Vec<&NodeId> = orphaned
+            .iter()
+            .filter(|node| resolved(node) == OnInterrupt::FailIfUncertain)
+            .map(|node| &node.id)
+            .collect();
+        if !uncertain.is_empty() {
+            let names = uncertain
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return ScheduleStep::Pause {
+                reason: format!(
+                    "node(s) `{names}` were running with no terminal event when the engine \
+                     last stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether \
+                     they finished; verify manually before resuming"
+                ),
+            };
+        }
+        let orphans: Vec<(NodeId, u32)> = orphaned
+            .iter()
+            .map(|node| (node.id.clone(), hist(&node.id).starts + 1))
+            .collect();
         return ScheduleStep::Execute(orphans);
     }
 

@@ -385,6 +385,75 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         hooks propios, y un nodo con hooks propios los usa en vez de
         concatenar con el default.
 
+- [x] **T4.4 — re-rutas: criterio de aceptación ya cumplido, sin código
+      nuevo.** A diferencia de T4.1/T4.3, revisar el ✓ real de la tarea
+      ("el ejemplo lint→fix-lint→lint del Contrato §11.2 pasa con mock")
+      contra lo ya construido mostró que **ya estaba hecho** —
+      `node_rerouted`, retorno automático y `max_reroutes` se
+      implementaron durante el bootstrap de M-0 original (`on_failure.goto`
+      era parte del schema recortado desde el principio: "sin re-rutas el
+      bootstrap no funciona", ver "Alcance mínimo" arriba), y el test
+      `a_failing_bash_node_reroutes_to_its_corrective_node_and_returns`
+      (`crates/engine/tests/run.rs`) es exactamente ese ejemplo, ya en
+      verde. Las dos piezas de la prosa completa de T4.4 que **no**
+      alcanzan a construirse en este recorte siguen bloqueadas, ya
+      documentadas en "Pendiente explícito" #8 más abajo: escalación a
+      `kind: gate` real (M5/T7.2 — hoy el `run_paused` genérico con razón
+      en texto es el único mecanismo de "esperar a un humano" en toda la
+      base de código, no una carencia nueva de T4.4) y `node-output` como
+      artifact montable por `context:` (M6). Ninguna deuda nueva agregada;
+      T4.4 no necesitó tocar código.
+- [x] **T4.5 — `on_interrupt: restart_node | fail_if_uncertain` por nodo.**
+      `resume_session` (la tercera opción del Contrato, §8.1: retomar la
+      conversación del agente vía `session_id`, degradando a
+      `restart_node` con warning si el adapter no tiene la capacidad)
+      **no** entra al schema en este recorte — nada en el dispatch de
+      `node_exec` resume una sesión en recuperación de crash todavía (el
+      único resume de sesión que existe hoy es el reintento automático de
+      T3.3 dentro de un mismo intento, un caso distinto); aceptar el valor
+      en el schema y degradarlo siempre en silencio a `restart_node`
+      habría sido emular una capacidad ausente en vez de no ofrecerla —
+      justo lo que "degradación explícita, nunca emulación" prohíbe. Mismo
+      tratamiento que `isolation: container` en T4.2: no está diseñado
+      acá, no entra al enum.
+      - `Node.on_interrupt: Option<OnInterrupt>` (nuevo campo de nodo, no
+        solo de config — el Contrato es explícito: "cada nodo `prompt`/
+        `loop` declara `on_interrupt`"). Este recorte lo aplica a **todos**
+        los kinds, `bash` incluido: el riesgo que motiva `fail_if_uncertain`
+        (reintentar a ciegas un efecto no-idempotente tras un crash a mitad
+        de ejecución) es tan real para un `bash run: "git push && gh pr
+        create"` como para una sesión de agente — restringirlo a
+        `prompt`/`loop` habría sido más fiel a la letra del Contrato pero
+        menos fiel a su propio razonamiento (I13 extendido a "todo nodo
+        bajo `restart_node`", texto de §8.1). `defaults.on_interrupt` en
+        config es el fallback cuando el nodo no declara el suyo —
+        `node.on_interrupt.unwrap_or(config.resolved_on_interrupt())`,
+        resuelto en el momento (no se congela un escalar único en el
+        manifest como `isolation`/`max_parallel_nodes`, porque acá el
+        override es por nodo — el manifest ya congela workflow y config
+        completos, alcanza).
+      - `schedule::next_step`, etapa 1 (nodos `running` huérfanos):
+        antes reiniciaba todos los huérfanos sin condición; ahora, si
+        **alguno** de los huérfanos resuelve a `fail_if_uncertain`, el
+        resume completo pausa (nombrando esos nodos) en vez de reiniciar
+        ninguno — ni siquiera a los huérfanos que sí son `restart_node` en
+        el mismo lote. Simplificación deliberada ante una situación de
+        crash rara (varios nodos huérfanos con políticas mixtas a la vez):
+        "nunca asumas, nunca reintentes con un efecto potencialmente ya
+        aplicado" (§8.1) se aplica al lote entero, no nodo por nodo.
+      - Verificación de integridad de run.dir/worktree por hashes de
+        artifacts (mencionada en §8.1 para el resume a nivel run) sigue
+        sin implementar — depende de T2.5 (`event_hash`), ya fuera de
+        M-0 (ver "Pendiente explícito" #7).
+      - Tests: `a_node_with_on_interrupt_fail_if_uncertain_pauses_instead_of_restarting`
+        (mismo crash simulado que el test de `restart_node` ya existente —
+        `node_started` sin evento terminal — pero ahora pausa y **nunca**
+        emite un segundo `node_started`) más 4 tests de schema/config
+        (`crates/core/tests/{workflow,config}.rs`: default ausente,
+        parseo de `fail_if_uncertain`, resolución de config). El test
+        preexistente de `restart_node` (`a_run_interrupted_mid_node_resumes_by_restarting_the_orphan`)
+        sigue en verde sin tocarlo, confirmando que el default no cambió.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: solo nodos `prompt`/`bash`/`loop`. Sin `gate`/`check`/`parallel`/
