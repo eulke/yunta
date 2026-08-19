@@ -558,6 +558,77 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         recorte tocó — sin tarea asignada, gatillo: alguien necesita de
         verdad un `loop` corriendo dentro de un grupo `parallel`.
 
+## M5 — Verificación (en progreso)
+
+T5.1–T5.3 (parseo/registro del ledger, ciclo de tarea, scope check) ya
+estaban hechos desde el bootstrap de M-0 — ver "Alcance mínimo" arriba.
+Empezando por el resto (T5.4–T5.14) con el mismo criterio de "full scope"
+confirmado por el usuario para T4.6: sin recortar de antemano, documentando
+cada decisión de diseño no escrita explícitamente en el Contrato a medida
+que aparece.
+
+- [x] **T5.9 — memoización de criterios (§5.4).** Se adelantó respecto del
+      orden del Plan porque T5.4 (`baseline_compare`/`coverage_gate`) la
+      necesita como dependencia real, no solo la menciona — "ambos entran
+      en la memoización de §5.4".
+      - `Memo` (`crates/engine/src/task_cycle.rs`), nuevo tipo público:
+        cache **dentro del run únicamente** (`Mutex<HashMap<clave,
+        exit_code>>`), nunca cross-run — un resume arranca con cache fría
+        en vez de intentar sobrevivir el cierre del proceso. Es una
+        elección de recorte deliberada: sobrevivir al resume exigiría
+        persistir `tree_hash` en `criteria_checked` (cambio de schema de
+        evento, con su propio versionado) para poder reconstruir la cache
+        por replay; en cambio, cache fría tras un resume solo significa
+        volver a verificar una vez más de lo estrictamente necesario —
+        seguro (sobre-verificar), nunca el error peligroso
+        (sub-verificar con un resultado viejo).
+      - **Clave** = `hash(cmd + tree_hash + config_hash)`. El Contrato
+        pide además "env declarado" — cae del recorte porque `Criterion`
+        no tiene campo `env:` todavía (nada que declarar); documentado en
+        el propio doc del tipo, no un silencio.
+      - **`tree_hash`**: fingerprint propio (no litado tal cual en el
+        Contrato, que deja la implementación abierta — "árbol del índice,
+        o commit + diff sucio"): `HEAD` + `git diff HEAD` (tracked) + hash
+        de contenido de cada archivo sin trackear (`git ls-files --others
+        --exclude-standard`, leído a mano). Deliberadamente conservador:
+        una lista de nombres sin contenido (lo que da `git status` solo)
+        dejaría pasar un archivo sin trackear que cambia de contenido sin
+        cambiar de nombre entre dos checks — el mismo principio de "más
+        falsos-recompute que falsos-reuse" que ya rige el heurístico de
+        scopes solapados.
+      - Aplica **a todo criterio**, no solo a `guard` — el Contrato es
+        explícito ("no hay opt-out por criterio"); los criterios propios
+        de tarea casi nunca pegan en cache porque su comando es único, y
+        eso es exactamente el comportamiento esperado, no un caso
+        especial.
+      - `CriterionRun.reused: bool` (antes no existía en el tipo interno;
+        solo el evento `CriterionResult` ya lo tenía, siempre en
+        `false` — `loop_exec.rs`'s `to_results()` lo copiaba a ciegas).
+        Ahora `reused` viaja desde la ejecución real hasta el evento.
+      - `RunCtx` ahora posee un `Memo` propio (`Memo::new(manifest.config_hash)`,
+        construido una vez por `execute_run`) — no un parámetro nuevo en
+        `execute_run`, ya tenía todo lo necesario.
+      - **`run_task`/`pre_check`/`post_check` cambian de firma pública**
+        (nuevo parámetro `memo: &Memo`) — afecta a los ~9 call sites de su
+        propia suite de tests (`crates/engine/tests/task_cycle.rs`), todos
+        actualizados.
+      - **Deuda no cubierta**: el short-circuit con "orden aprendido"
+        (ordenar criterios por duración histórica del log, §5.4 párrafo
+        final) no se construyó — depende de tener duraciones históricas
+        accesibles desde el log, que hoy no se registran por criterio.
+        Es una optimización de UX/velocidad, no de corrección (el
+        Contrato es explícito: "la heurística solo afecta el orden de
+        evaluación — nunca el veredicto"), así que se puede sumar después
+        sin tocar la semántica ya construida acá.
+      - Tests: 3 nuevos en `crates/engine/tests/task_cycle.rs` (primer
+        check ejecuta de verdad, segundo check sobre árbol sin cambios
+        reusa — verificado contando líneas en un marker **fuera** del
+        repo, para no auto-invalidar el propio tree_hash con el efecto
+        secundario del criterio; un cambio real en el árbol invalida y
+        fuerza re-ejecución). Los 9 tests preexistentes de `task_cycle.rs`
+        y los de `loop_exec`/`run.rs` que dependen de `run_task`
+        transitivamente siguen en verde sin tocar su lógica.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6. Sin

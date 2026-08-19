@@ -146,6 +146,7 @@ async fn run_one_task(
         ctx.worktree,
         ctx.max_task_retries,
         Budget::default(),
+        &ctx.memo,
     )
     .await?;
 
@@ -263,7 +264,7 @@ fn to_results(runs: &[crate::task_cycle::CriterionRun]) -> Vec<CriterionResult> 
             cmd: run.cmd.clone(),
             exit_code: run.exit_code,
             r#type: run.is_guard.then_some(CriterionType::Guard),
-            reused: false, // memoization is T5.9, out of M-0
+            reused: run.reused,
         })
         .collect()
 }

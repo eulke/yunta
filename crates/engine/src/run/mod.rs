@@ -27,7 +27,7 @@ use yunta_storage::{Storage, StorageError};
 
 use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
-use crate::task_cycle::TaskCycleError;
+use crate::task_cycle::{Memo, TaskCycleError};
 use schedule::ScheduleStep;
 
 #[derive(Debug, Error)]
@@ -83,6 +83,10 @@ pub(crate) struct RunCtx<'a> {
     pub storage: &'a Storage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
+    /// Criteria memoization (§5.4, T5.9) — one cache per `execute_run`
+    /// call, never persisted: a resume simply starts cold, which is safe
+    /// (over-verifying) rather than risking a stale cross-run hit.
+    pub memo: Memo,
 }
 
 impl RunCtx<'_> {
@@ -195,6 +199,7 @@ pub async fn execute_run(
         storage,
         clock,
         max_task_retries,
+        memo: Memo::new(manifest.config_hash.clone()),
     };
 
     let events = ctx.load_events()?;

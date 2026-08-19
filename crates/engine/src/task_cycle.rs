@@ -8,7 +8,9 @@
 //! session reported — an agent that claims success with red criteria
 //! still leaves the task not-done.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -39,6 +41,12 @@ pub enum TaskCycleError {
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
+    #[error("failed to compute the working tree's hash for memoization: git {args} in `{cwd}`: {detail}")]
+    TreeHash {
+        args: String,
+        cwd: std::path::PathBuf,
+        detail: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +54,97 @@ pub struct CriterionRun {
     pub cmd: String,
     pub exit_code: i32,
     pub is_guard: bool,
+    /// Whether this result came from §5.4's memoization cache instead of
+    /// an actual execution — `criteria_checked` records it so recibo/replay
+    /// show what ran versus what was reused, nothing verified in silence.
+    pub reused: bool,
+}
+
+/// Per-run memoization cache (§5.4): a criterion's result is reused when
+/// its command, the working tree's content, and the resolved config are
+/// all unchanged since the last time it ran *in this run*. Never
+/// cross-run — a fresh `Memo` per `execute_run` call is correct, not a
+/// gap: a resumed run simply starts with a cold cache and re-verifies
+/// once more than strictly necessary, which is safe (over-verifying),
+/// unlike a stale cross-run cache (which would risk under-verifying).
+///
+/// The full key the Contrato names is `cmd + tree_hash + declared env +
+/// resolved config` — `declared env` drops out here because criteria
+/// have no `env:` field in this schema recorte (nothing to declare yet).
+pub struct Memo {
+    config_hash: String,
+    cache: Mutex<HashMap<String, i32>>,
+}
+
+impl Memo {
+    pub fn new(config_hash: impl Into<String>) -> Self {
+        Self {
+            config_hash: config_hash.into(),
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn key(&self, cmd: &str, tree_hash: &str) -> String {
+        yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
+    }
+
+    fn get(&self, cmd: &str, tree_hash: &str) -> Option<i32> {
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.get(&self.key(cmd, tree_hash)).copied()
+    }
+
+    fn put(&self, cmd: &str, tree_hash: &str, exit_code: i32) {
+        let key = self.key(cmd, tree_hash);
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(key, exit_code);
+    }
+}
+
+/// A fingerprint of `cwd`'s current content (§5.4): the commit it's on,
+/// its full diff against that commit (tracked changes), and every
+/// untracked file's own content hash — conservative on purpose. Missing
+/// an untracked file's content from the fingerprint would let two
+/// genuinely different trees hash the same and wrongly reuse a stale
+/// result; a bare filename list (from `git status`) isn't enough since a
+/// file can change content without its name changing.
+async fn tree_hash(cwd: &Path) -> Result<String, TaskCycleError> {
+    let git_error = |args: &str, detail: String| TaskCycleError::TreeHash {
+        args: args.to_string(),
+        cwd: cwd.to_path_buf(),
+        detail,
+    };
+    let run_git = |args: &'static [&'static str]| async move {
+        let output = tokio::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .await
+            .map_err(|e| git_error(&args.join(" "), e.to_string()))?;
+        if !output.status.success() {
+            return Err(git_error(
+                &args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
+        Ok::<_, TaskCycleError>(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+
+    let head = run_git(&["rev-parse", "HEAD"]).await?;
+    let diff = run_git(&["diff", "HEAD"]).await?;
+    let untracked = run_git(&["ls-files", "--others", "--exclude-standard"]).await?;
+
+    let mut untracked_fingerprint = String::new();
+    for path in untracked.lines() {
+        let bytes = std::fs::read(cwd.join(path)).unwrap_or_default();
+        untracked_fingerprint.push_str(path);
+        untracked_fingerprint.push(':');
+        untracked_fingerprint.push_str(&yunta_core::sha256_hex(&bytes));
+        untracked_fingerprint.push('\n');
+    }
+
+    Ok(yunta_core::sha256_hex(
+        format!("{head}\n{diff}\n{untracked_fingerprint}").as_bytes(),
+    ))
 }
 
 /// The pre-check's verdict (§5.2 step 2): "esta fase valida al
@@ -123,14 +222,30 @@ async fn run_criterion(task_id: &TaskId, cwd: &Path, cmd: &str) -> Result<i32, T
     Ok(status.code().unwrap_or(-1))
 }
 
-async fn run_all_criteria(task: &Task, cwd: &Path) -> Result<Vec<CriterionRun>, TaskCycleError> {
+/// Tree hash computed once per call and shared across every criterion in
+/// it (§5.4) — criteria are read-only, so the tree can't change between
+/// them, and one `git` round-trip beats N.
+async fn run_all_criteria(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
+    let tree_hash = tree_hash(cwd).await?;
     let mut runs = Vec::with_capacity(task.criteria.len());
     for criterion in &task.criteria {
-        let exit_code = run_criterion(&task.id, cwd, &criterion.cmd).await?;
+        let (exit_code, reused) = match memo.get(&criterion.cmd, &tree_hash) {
+            Some(exit_code) => (exit_code, true),
+            None => {
+                let exit_code = run_criterion(&task.id, cwd, &criterion.cmd).await?;
+                memo.put(&criterion.cmd, &tree_hash, exit_code);
+                (exit_code, false)
+            }
+        };
         runs.push(CriterionRun {
             cmd: criterion.cmd.clone(),
             exit_code,
             is_guard: criterion.r#type == Some(CriterionType::Guard),
+            reused,
         });
     }
     Ok(runs)
@@ -142,8 +257,9 @@ async fn run_all_criteria(task: &Task, cwd: &Path) -> Result<Vec<CriterionRun>, 
 pub async fn pre_check(
     task: &Task,
     cwd: &Path,
+    memo: &Memo,
 ) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
-    let runs = run_all_criteria(task, cwd).await?;
+    let runs = run_all_criteria(task, cwd, memo).await?;
 
     let mut outcome = PreCheckOutcome::Red;
     for run in &runs {
@@ -165,8 +281,12 @@ pub async fn pre_check(
 
 /// Post-check (§5.2 step 4): every criterion, guard or not, must now
 /// pass.
-pub async fn post_check(task: &Task, cwd: &Path) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    run_all_criteria(task, cwd).await
+pub async fn post_check(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
+    run_all_criteria(task, cwd, memo).await
 }
 
 /// Grace period between `interrupt` and the follow-up `kill` once a
@@ -313,6 +433,7 @@ pub(crate) async fn dispatch_session(
 /// Never trusts the session's own outcome (I5): `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
 /// diff, regardless of whether the session reported `Completed`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_task(
     task: &Task,
     instruction: &str,
@@ -320,8 +441,9 @@ pub async fn run_task(
     cwd: &Path,
     max_retries: u32,
     budget: Budget,
+    memo: &Memo,
 ) -> Result<TaskCycleReport, TaskCycleError> {
-    let (pre_runs, pre_outcome) = pre_check(task, cwd).await?;
+    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo).await?;
 
     if !matches!(pre_outcome, PreCheckOutcome::Red) {
         let reason = match pre_outcome {
@@ -370,7 +492,7 @@ pub async fn run_task(
                     task: task.id.clone(),
                     source,
                 })?;
-        let post_runs = post_check(task, cwd).await?;
+        let post_runs = post_check(task, cwd, memo).await?;
         let scope = scope_check(cwd, &task.scope).await?;
 
         let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);

@@ -29,8 +29,8 @@ pub use run::{create_run, execute_run, RunError, RunReport, RunTerminal};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use task_cycle::{
-    post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, PreCheckOutcome,
-    TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
+    post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,
+    PreCheckOutcome, TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};
 pub use worktree::{prepare_worktree, release_worktree, WorktreeError};
