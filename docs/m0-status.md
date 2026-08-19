@@ -181,6 +181,62 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       tarea vehículo del criterio de éxito de M-0, ver arriba. Commits `79c2f39`
       (implementación, escrita por un `claude-code` real) + `f1a0bed` (test).
 
+## M4 — Engine core (en progreso)
+
+- [x] **T4.2 — aislamiento de working tree (§7.3).** `defaults.isolation:
+      worktree|none` en la config (`yunta_core::Isolation`, default `worktree`,
+      congelado en el manifest vía `ConfigLayer::resolved_isolation()` — sin
+      parámetro nuevo en `build_manifest`, para no romper sus ~8 call sites
+      existentes). Mecanismo en `yunta_engine::worktree`:
+      - `worktree` (default): `prepare_worktree` corre `git worktree add
+        <path> -b yunta/<run_id> <base_commit>` — cada run tiene su propia
+        rama descartable desde el commit congelado del manifest; dos runs
+        concurrentes sobre el mismo repo nunca chocan porque cada uno recibe
+        un path bajo `paths.worktrees` (default `~/.yunta/worktrees/<run_id>`)
+        distinto. `release_worktree` es un no-op — el worktree queda en disco
+        para inspección; `on_finish.cleanup` no existe todavía en el schema
+        (fuera de M-0).
+      - `none`: exige árbol limpio (`git status --porcelain` vacío) antes de
+        arrancar — sin eso, scope-by-diff (T5.3) no puede distinguir el
+        trabajo del agente del que ya estaba. Toma un lock file atómico
+        (`OpenOptions::create_new`, sin condición de carrera entre dos
+        procesos) junto a los metadatos de git (`--git-common-dir`, nunca
+        dentro del working tree — si viviera ahí, ensuciaría el propio chequeo
+        que lo requiere) para que un segundo run concurrente sobre el mismo
+        checkout se rechace explícitamente en vez de pisarse con el primero.
+        `release_worktree` borra el lock solo cuando el run termina
+        (`RunTerminal::Finished`) — un run pausado retiene el lock porque un
+        futuro `resume` es el mismo run lógico, no uno nuevo.
+      - `container` no existe como valor del schema (confirmado con el
+        usuario en la sesión de M-0 original) — solo `worktree`/`none`.
+      - `{{run.worktree}}` sumado a `template_vars` (`crates/engine/src/run/
+        node_exec.rs`) junto al ya existente `{{run.dir}}` — con aislamiento
+        real, el cwd de ejecución (`ctx.worktree`) y el directorio de estado
+        del run (`ctx.run_dir`) dejan de coincidir por primera vez, así que
+        un nodo `bash` necesita poder referenciar cuál es cuál.
+      - `yunta run`/`yunta resume` (`crates/cli/src/commands/{run,resume}.rs`):
+        `run` deriva el path del worktree del `manifest.isolation` recién
+        congelado, llama `prepare_worktree` **antes** de crear el run (un
+        árbol sucio bajo `none`, o un lock ya tomado, nunca deja un run
+        huérfano a medio crear) y pasa ese path — no `cwd` — a `execute_run`.
+        `resume` deriva el mismo path por la misma regla desde el manifest ya
+        congelado (nunca vuelve a llamar `prepare_worktree`: el worktree o el
+        lock ya existen desde el `run` original) y llama `release_worktree`
+        en el mismo punto que `run` si el resume termina el run.
+      - Tests: 6 en `crates/engine/tests/worktree.rs` (worktree real en
+        `base_commit`, dos runs aislados sin colisión, `none` limpio
+        bloquea/libera, `none` sucio se rechaza, liberar `worktree` no borra
+        nada), 2 en `crates/engine/tests/manifest.rs` (default y explícito se
+        congelan), 4 en `crates/core/tests/config.rs` (parseo/merge/rechazo de
+        valores desconocidos), 1 en `crates/engine/tests/run.rs`
+        (`{{run.worktree}}` resuelve al cwd real del nodo bash), 5 en
+        `crates/cli/tests/run_flow.rs` end-to-end (edición del agente nunca
+        llega al checkout original bajo `worktree`; dos runs obtienen
+        worktrees independientes; `none` rechaza árbol sucio antes de crear
+        ningún run; `none` opera directo y libera su lock al terminar;
+        **`resume` continúa en el mismo worktree que `run` creó** — no uno
+        nuevo, ni el checkout original).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: solo nodos `prompt`/`bash`/`loop`. Sin `gate`/`check`/`parallel`/
@@ -291,9 +347,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    cierre, templates mínimos, scheduler T4.1, creación de run, CLI
    run/status/resume, `yunta test`). Ver la lista de alcance arriba. Deudas
    menores que dejó, con su gatillo:
-   - **T4.2 (worktrees)**: el run corre en el árbol actual del repo; aislamiento
-     `worktree|none` con sus condiciones (§7.3) llega con T4.2. Gatillo: correr
-     dos runs a la vez o el primer bootstrap real.
+   - **T4.2 (worktrees) — hecho**, ver detalle en la sección "M4" abajo.
    - **T2.4 (paths congelados)**: `resume` busca run.dir bajo el `paths.runs`
      de la config *actual* — cambiarlo entre run y resume no está soportado
      hasta T2.4.

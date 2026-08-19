@@ -372,6 +372,25 @@ nodes:
 }
 
 #[tokio::test]
+async fn a_bash_node_can_reference_the_run_s_worktree_by_template() {
+    let bench = Bench::new();
+
+    let workflow = format!(
+        r#"
+name: worktree-template
+nodes:
+  - id: only
+    kind: bash
+    run: "test -d {{{{run.worktree}}}} && test $(pwd) = '{worktree}'"
+"#,
+        worktree = bench.worktree.display()
+    );
+
+    let (terminal, _) = bench.run(&workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
 async fn a_run_interrupted_mid_node_resumes_by_restarting_the_orphan() {
     let bench = Bench::new();
 

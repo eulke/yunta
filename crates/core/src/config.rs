@@ -59,6 +59,31 @@ pub struct PathsConfig {
     pub worktrees: Option<PathBuf>,
 }
 
+/// How a first-level run isolates its working tree from the checkout
+/// that started it (§7.3, T4.2). `worktree` (default) gives each run its
+/// own `git worktree`; `none` operates directly on the given checkout,
+/// legitimate for watching an agent edit live or for CI already inside
+/// an ephemeral container. `inherit` (§12, sub-runs only) isn't a value
+/// here — a first-level run has no parent to inherit from — and
+/// `container` isn't a schema value at all (A-09, undesigned).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    #[default]
+    Worktree,
+    None,
+}
+
+/// `defaults:` — **M-0 cut**: only `isolation` (T4.2's consumer). The
+/// reference config's `runner`/`timeout_minutes`/`max_parallel_nodes`/
+/// `on_failure`/`on_interrupt` wait for their own consumers (T4.1/T4.4/
+/// T4.5) — same "extend when consumed" rule as every other group here.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DefaultsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<Isolation>,
+}
+
 /// One config layer as parsed from a single file (project/user/org), and
 /// also the type of the merged result — merging never needs to invent
 /// fields, only combine what layers actually set.
@@ -72,6 +97,8 @@ pub struct ConfigLayer {
     pub storage: Option<StorageConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<PathsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<DefaultsConfig>,
 }
 
 impl ConfigLayer {
@@ -80,6 +107,16 @@ impl ConfigLayer {
     /// precedence; `permissions` will invert this once it exists).
     pub fn merge_layers(layers: impl IntoIterator<Item = ConfigLayer>) -> ConfigLayer {
         layers.into_iter().fold(ConfigLayer::default(), merge)
+    }
+
+    /// `defaults.isolation`, with the schema's own default (`worktree`)
+    /// applied — the one place that default lives, so nothing downstream
+    /// re-invents "absent means what?".
+    pub fn resolved_isolation(&self) -> Isolation {
+        self.defaults
+            .as_ref()
+            .and_then(|defaults| defaults.isolation)
+            .unwrap_or_default()
     }
 }
 
@@ -93,6 +130,13 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         ),
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
+        defaults: merge_fields(base.defaults, more_specific.defaults, merge_defaults_config),
+    }
+}
+
+fn merge_defaults_config(base: DefaultsConfig, more_specific: DefaultsConfig) -> DefaultsConfig {
+    DefaultsConfig {
+        isolation: more_specific.isolation.or(base.isolation),
     }
 }
 

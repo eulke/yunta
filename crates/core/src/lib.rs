@@ -19,7 +19,10 @@ mod workflow;
 
 pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
-pub use config::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
+pub use config::{
+    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, PathsConfig, RunnerCandidate,
+    StorageConfig,
+};
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use ledger::{Ledger, Task};

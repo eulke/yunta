@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use yunta_core::{AdapterSettings, ConfigLayer, PathsConfig, RunnerCandidate, StorageConfig};
+use yunta_core::{
+    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, PathsConfig, RunnerCandidate,
+    StorageConfig,
+};
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
     RunnerCandidate {
@@ -181,4 +184,41 @@ paths:
         layer.paths.as_ref().unwrap().runs,
         Some(PathBuf::from("~/.yunta/runs"))
     );
+}
+
+#[test]
+fn isolation_defaults_to_worktree_when_unset() {
+    let layer = ConfigLayer::default();
+    assert_eq!(layer.resolved_isolation(), Isolation::Worktree);
+}
+
+#[test]
+fn isolation_parses_from_defaults_and_none_is_a_real_choice() {
+    let layer: ConfigLayer = serde_yaml::from_str("defaults:\n  isolation: none\n").unwrap();
+    assert_eq!(layer.resolved_isolation(), Isolation::None);
+}
+
+#[test]
+fn an_unknown_isolation_value_is_a_parse_error_not_silently_ignored() {
+    let err =
+        serde_yaml::from_str::<ConfigLayer>("defaults:\n  isolation: container\n").unwrap_err();
+    assert!(err.to_string().contains("container") || err.to_string().contains("unknown"));
+}
+
+#[test]
+fn repo_isolation_overrides_org_isolation() {
+    let org = ConfigLayer {
+        defaults: Some(DefaultsConfig {
+            isolation: Some(Isolation::None),
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        defaults: Some(DefaultsConfig {
+            isolation: Some(Isolation::Worktree),
+        }),
+        ..Default::default()
+    };
+    let merged = ConfigLayer::merge_layers([org, repo]);
+    assert_eq!(merged.resolved_isolation(), Isolation::Worktree);
 }

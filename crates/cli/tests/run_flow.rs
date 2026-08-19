@@ -305,6 +305,8 @@ nodes:
     );
     // Read by the stub's fallback path (relative to the worktree it runs
     // in, since a real run's SessionRequest.env carries only secrets).
+    // Isolation `worktree` checks out the run's own dedicated worktree
+    // from the base commit, so the fixture must be committed to reach it.
     write(
         &repo.join(".claude-stub-lines.jsonl"),
         &format!(
@@ -313,6 +315,8 @@ nodes:
             r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":3,"output_tokens":2}}"#,
         ),
     );
+    git(&repo, &["add", ".claude-stub-lines.jsonl"]);
+    git(&repo, &["commit", "-q", "-m", "stub fixture"]);
 
     let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
     assert!(
@@ -322,4 +326,212 @@ nodes:
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
+}
+
+#[test]
+fn worktree_isolation_is_the_default_and_agent_edits_never_touch_the_original_checkout() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: touches-a-file
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    // The default (`worktree`) isolation must never let the agent's edit
+    // land in the checkout the user is looking at.
+    assert!(!repo.join("made.txt").exists());
+    // It lives in a dedicated worktree under the state root instead.
+    let worktrees_dir = home.join("worktrees");
+    let made_somewhere = std::fs::read_dir(&worktrees_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|entry| entry.path().join("made.txt").exists());
+    assert!(
+        made_somewhere,
+        "expected made.txt inside some worktree under {}",
+        worktrees_dir.display()
+    );
+}
+
+#[test]
+fn two_runs_on_the_same_repo_get_independent_worktrees() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: touches-a-file
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+"#,
+    );
+
+    let run1 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run1.status.success(), "run1: {}", stdout(&run1));
+    let run2 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run2.status.success(), "run2: {}", stdout(&run2));
+
+    let worktree_dirs: Vec<_> = std::fs::read_dir(home.join("worktrees"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        worktree_dirs.len(),
+        2,
+        "expected one dedicated worktree per run"
+    );
+}
+
+#[test]
+fn isolation_none_refuses_a_dirty_tree_before_creating_any_run() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: needs-clean-tree
+nodes:
+  - id: touch
+    kind: bash
+    run: "true"
+"#,
+    );
+    // Dirty the tree.
+    write(&repo.join("uncommitted.txt"), "dirty");
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(!run.status.success());
+    assert!(
+        !home.join("runs").exists(),
+        "no run must be created when isolation refuses the dirty tree"
+    );
+}
+
+#[test]
+fn isolation_none_operates_directly_on_the_checkout_and_releases_its_lock_when_finished() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: no-op
+nodes:
+  - id: noop
+    kind: bash
+    run: "true"
+"#,
+    );
+    // Isolation `none` requires a clean tree — commit the fixtures
+    // themselves so only the workflow's own effects could dirty it.
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run1 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run1.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run1),
+        String::from_utf8_lossy(&run1.stderr)
+    );
+    // Finishing must release the lock so a second run on the same
+    // (still clean) checkout can proceed.
+    let run2 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run2.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run2),
+        String::from_utf8_lossy(&run2.stderr)
+    );
+    // `none` never creates a dedicated worktree.
+    assert!(!home.join("worktrees").exists());
+}
+
+#[test]
+fn resuming_a_paused_run_continues_in_the_same_worktree_the_run_created() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: pauses-on-a-failing-node
+nodes:
+  - id: setup
+    kind: bash
+    run: "echo hello > marker.txt"
+  - id: always-fails
+    kind: bash
+    depends_on: [setup]
+    run: "touch attempt-marker.txt && exit 1"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(stdout(&run).contains("paused"), "got: {}", stdout(&run));
+    let run_id = run_id_from(&run);
+
+    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    assert!(
+        stdout(&resume).contains("paused"),
+        "got: {}",
+        stdout(&resume)
+    );
+
+    // Resume must operate on the very worktree `run` created — never a
+    // second one, and never the original checkout.
+    assert!(!repo.join("attempt-marker.txt").exists());
+    let worktree_dirs: Vec<_> = std::fs::read_dir(home.join("worktrees"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        worktree_dirs.len(),
+        1,
+        "resume must reuse the run's own worktree, not create another"
+    );
+    assert!(worktree_dirs[0].path().join("marker.txt").exists());
+    assert!(worktree_dirs[0].path().join("attempt-marker.txt").exists());
 }

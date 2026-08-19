@@ -195,3 +195,25 @@ fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
     assert_eq!(manifest.manifest_hash(), reread.manifest_hash());
     assert_eq!(manifest, reread);
 }
+
+#[test]
+fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let manifest =
+        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+
+    assert_eq!(manifest.isolation, yunta_core::Isolation::Worktree);
+}
+
+#[test]
+fn an_explicit_none_isolation_freezes_as_none() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let cfg = config("defaults:\n  isolation: none\n");
+
+    let manifest = build_manifest(&workflow(WORKFLOW), &cfg, dir.path(), dir.path()).unwrap();
+
+    assert_eq!(manifest.isolation, yunta_core::Isolation::None);
+}

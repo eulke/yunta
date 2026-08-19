@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{ConfigLayer, NodeId, Workflow};
+use crate::{ConfigLayer, Isolation, NodeId, Workflow};
 
 /// Everything a run needs frozen at creation time (Contrato §2.1). The
 /// engine never re-reads workflow, config or prompt files during a run —
@@ -38,6 +38,9 @@ pub struct Manifest {
     pub base_branch: String,
     /// Commit the run starts from (`git rev-parse HEAD` at creation).
     pub base_commit: String,
+    /// Resolved `defaults.isolation` (§7.3, T4.2) — a run's own mode
+    /// never changes after creation, even if config does.
+    pub isolation: Isolation,
     pub workflow_hash: String,
     pub config_hash: String,
 }

@@ -18,6 +18,7 @@ mod runner;
 mod scope;
 mod task_cycle;
 mod template;
+mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use check::{check, CheckError};
@@ -32,6 +33,7 @@ pub use task_cycle::{
     TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};
+pub use worktree::{prepare_worktree, release_worktree, WorktreeError};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-engine";

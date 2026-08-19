@@ -8,8 +8,8 @@
 
 use std::process::ExitCode;
 
-use yunta_core::{Manifest, RunId, SystemClock};
-use yunta_engine::DEFAULT_MAX_RETRIES;
+use yunta_core::{Isolation, Manifest, RunId, SystemClock};
+use yunta_engine::{RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
 use crate::load_yaml;
@@ -61,19 +61,36 @@ pub async fn resume(run_id: &str) -> ExitCode {
         }
     };
 
-    match yunta_engine::execute_run(
+    // The worktree (or the checkout itself, for `none`) was already
+    // prepared by the `run` that created this run — resume finds it by
+    // the same rule, it never prepares a fresh one (T4.2, §7.3).
+    let worktree = match manifest.isolation {
+        Isolation::Worktree => project.worktrees_root.join(run_id.as_str()),
+        Isolation::None => cwd.clone(),
+    };
+
+    let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
         &run_dir,
-        &cwd,
+        &worktree,
         &adapters,
         &storage,
         &SystemClock,
         DEFAULT_MAX_RETRIES,
     )
-    .await
-    {
-        Ok(report) => super::report_outcome(run_id.as_str(), &report),
+    .await;
+
+    match outcome {
+        Ok(report) => {
+            if matches!(report.terminal, RunTerminal::Finished) {
+                if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            super::report_outcome(run_id.as_str(), &report)
+        }
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE

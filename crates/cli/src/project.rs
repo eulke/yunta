@@ -14,6 +14,7 @@ use yunta_core::ConfigLayer;
 pub struct Project {
     pub config: ConfigLayer,
     pub runs_root: PathBuf,
+    pub worktrees_root: PathBuf,
     pub storage_path: PathBuf,
 }
 
@@ -92,6 +93,11 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
         .as_ref()
         .and_then(|paths| paths.runs.clone())
         .unwrap_or_else(|| user_root.join("runs"));
+    let worktrees_root = config
+        .paths
+        .as_ref()
+        .and_then(|paths| paths.worktrees.clone())
+        .unwrap_or_else(|| user_root.join("worktrees"));
     let storage_path = config
         .storage
         .as_ref()
@@ -110,6 +116,7 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
     Ok(Project {
         config,
         runs_root,
+        worktrees_root,
         storage_path,
     })
 }

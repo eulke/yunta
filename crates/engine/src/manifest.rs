@@ -73,6 +73,7 @@ pub fn build_manifest(
         prompts,
         base_branch,
         base_commit,
+        isolation: config.resolved_isolation(),
     })
 }
 

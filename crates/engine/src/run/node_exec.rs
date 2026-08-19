@@ -63,7 +63,13 @@ pub(super) async fn execute_node(
 }
 
 fn template_vars(ctx: &RunCtx<'_>) -> BTreeMap<String, String> {
-    BTreeMap::from([("run.dir".to_string(), ctx.run_dir.display().to_string())])
+    BTreeMap::from([
+        ("run.dir".to_string(), ctx.run_dir.display().to_string()),
+        (
+            "run.worktree".to_string(),
+            ctx.worktree.display().to_string(),
+        ),
+    ])
 }
 
 /// Renders `input` or fails the node with a diagnostic naming the
