@@ -5,6 +5,7 @@
 //! modules.
 
 mod commands;
+mod graph;
 mod project;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +47,15 @@ enum Command {
         /// The run id to resume.
         run_id: String,
     },
+    /// Renders a workflow's DAG as Mermaid — optionally annotated with a
+    /// run's derived state.
+    Graph {
+        /// Path to the workflow YAML file.
+        workflow: PathBuf,
+        /// Annotate each node with its derived state from this run.
+        #[arg(long)]
+        run: Option<String>,
+    },
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
     Test,
@@ -69,6 +79,7 @@ async fn main() -> ExitCode {
         Some(Command::Run { workflow }) => commands::run::run(&workflow).await,
         Some(Command::Status { run_id }) => commands::status::status(&run_id),
         Some(Command::Resume { run_id }) => commands::resume::resume(&run_id).await,
+        Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,
     }
 }
