@@ -1,5 +1,40 @@
 # M-0 — Estado de implementación
 
+## ✅ Criterio de éxito de M-0 — cumplido
+
+> "La primera tarea del plan implementada por Yunta sobre sí mismo, con criterios
+> en verde y scope limpio." (Plan de implementación, sección M-0)
+
+Ejecutado el 2026-08-19 con **T7.8 `yunta graph`** (candidata sugerida por el propio
+Plan), recortado al schema de M-0 (Mermaid únicamente, `depends_on` + `on_failure.goto`
+diferenciados, `--run <id>` con estado derivado — sin `parallel`/`gate`/composición,
+que no existen en el recorte de T1.1):
+
+1. Escribí a mano el ledger (`plan.yaml`, una tarea `T7008`) y el test de aceptación
+   (`crates/cli/tests/graph_cmd.rs`) — el pre-check en rojo lo confirmó: 2 de 3
+   sub-tests fallaban porque `graph` ni siquiera era un subcomando reconocido.
+2. Corrí `yunta run` de verdad, con el adapter `claude-code` real (modelo
+   `claude-sonnet-5`) apuntado a un **worktree aislado** (`git worktree add`, rama
+   descartable) — nunca al checkout de esta sesión — para que una sesión real
+   implementara la tarea sin que yo escribiera el código.
+3. El engine nunca confió en el reporte del agente (I5): re-corrió los criterios él
+   mismo. Pasaron los tres — el test de aceptación, `clippy -D warnings` y `fmt
+   --check` (ambos `guard`) — y el propio mecanismo de `run_task`/§5.5 hizo el commit
+   local automáticamente al completarse la tarea.
+4. Revisé el diff a mano (código idiomático, reutiliza `check_or_refuse` existente,
+   sigue el patrón de `status.rs`), corrí la suite completa del workspace de forma
+   independiente en el worktree (fmt/clippy/tests/aislamiento por crate — todo verde,
+   sin regresiones fuera del scope de la tarea) y traje el commit verificado a la
+   rama real por cherry-pick (`79c2f39`) + el test de aceptación (`f1a0bed`).
+
+Esto valida la tesis central del bootstrap: el ciclo pre-check en rojo → dispatch →
+post-check → commit funciona de punta a punta con un agente real, sin intervención
+humana en la implementación. Las tres preguntas que M-0 debía responder (pre-check
+practicable, scope por diff sin ruido excesivo, — la tercera, ledgers válidos
+generados por un agente, queda para cuando exista el nodo de planificación, ya que acá
+el ledger lo escribí yo a mano) tienen ahora evidencia real, no solo con mock.
+
+
 Documento de seguimiento, no normativo — se actualiza en cada sesión de trabajo para
 que retomar el bootstrap no dependa de memoria de conversación. La fuente de verdad
 del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto es
@@ -140,6 +175,11 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       re-derivarlo con `budget.timeout.expect(...)`), `mock/mod.rs` (`events()` llamado
       dos veces ahora degrada a un stream vacío en vez de entrar en panic). Commit
       `7aad540`.
+- [x] **T7.8 (recorte)** — `yunta graph <workflow> [--run <id>]`: DAG como Mermaid,
+      `depends_on` vs. `on_failure.goto` visualmente diferenciados, estado derivado
+      con `--run`. No es scope mínimo de M-0 (es M7 en el Plan completo) — es la
+      tarea vehículo del criterio de éxito de M-0, ver arriba. Commits `79c2f39`
+      (implementación, escrita por un `claude-code` real) + `f1a0bed` (test).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
