@@ -719,6 +719,7 @@ pub(super) async fn close_node(
                     tokens_used: tokens,
                 }),
             )?;
+            write_progress(ctx)?;
             Ok(NodeEnd::Finished)
         }
         Err(errors) => {
@@ -739,6 +740,19 @@ pub(super) fn fail(
     retryable: bool,
 ) -> Result<NodeEnd, RunError> {
     fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default())
+}
+
+/// Regenerates `progress.md` at `run.dir`'s root (§2, §8.2, T5.5) — the
+/// engine's own call, right after the `node_finished` that triggers it
+/// (§8.2's literal text names only `node_finished`, not `node_failed`, as
+/// the regeneration point).
+fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let events = ctx.load_events()?;
+    let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
+    std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {
+        context: "write progress.md".to_string(),
+        source,
+    })
 }
 
 pub(super) fn fail_with_tokens(

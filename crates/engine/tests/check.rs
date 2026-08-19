@@ -18,6 +18,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         hooks: None,
         on_failure: None,
         on_interrupt: None,
+        description: None,
     }
 }
 
@@ -34,6 +35,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         hooks: None,
         on_failure: None,
         on_interrupt: None,
+        description: None,
     }
 }
 
@@ -54,6 +56,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         hooks: None,
         on_failure: None,
         on_interrupt: None,
+        description: None,
     }
 }
 

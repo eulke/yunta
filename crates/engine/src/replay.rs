@@ -17,6 +17,7 @@
 //! accumulated up to that point is still returned.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use yunta_core::events::{Event, EventPayload, Finding, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, TaskId};
@@ -49,6 +50,11 @@ pub struct RunState {
     /// perder autorías"); [`dedup_findings`] is the query-side view for
     /// counting/display, not something replay bakes in.
     pub findings: Vec<Finding>,
+    /// Every `artifact_written` path, grouped by the node that wrote it,
+    /// in log order (§8.2, T5.5 — `progress.md`'s own "qué produjo cada
+    /// nodo"). A node with no artifact has no entry here at all, not an
+    /// empty `Vec`.
+    pub artifacts: HashMap<NodeId, Vec<PathBuf>>,
     /// `Some(diagnostic)` once the log has proven insufficient to derive
     /// further state — the point where a `yunta resume`/`status` would
     /// report the run as `broken`.
@@ -148,9 +154,18 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
             state.findings.push(p.finding.clone());
             Ok(())
         }
+        EventPayload::ArtifactWritten(p) => {
+            let node_id = require_node_id(event)?;
+            state
+                .artifacts
+                .entry(node_id)
+                .or_default()
+                .push(p.path.clone());
+            Ok(())
+        }
         // Every other kind is either run-scoped bookkeeping that does not
         // change node/task/budget state (runner_resolved, baseline_captured,
-        // agent_session_opened, agent_message, artifact_written,
+        // agent_session_opened, agent_message,
         // context_assembled, criteria_checked, scope_checked, scope
         // expansion, hook_executed, node_rerouted, promotion_signaled,
         // capability_degraded, run_paused/resumed/finished), or belongs to

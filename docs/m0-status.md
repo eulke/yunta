@@ -743,6 +743,62 @@ que aparece.
         regresión real en la segunda; `coverage_gate` pasa/falla contra
         el threshold; `findings_gate` pasa/falla contra `max_severity`).
 
+- [x] **T5.5 — `progress.md` derivado del log tras cada nodo (§8.2).** Uno
+      de los cuatro insumos exactos del contexto de un nodo al arrancar
+      ("su prompt renderizado, sus fuentes de contexto, `progress.md`, sus
+      skills — nada más", §8.2) — lo escribe el engine, nunca un agente
+      (I20). El texto de §8.2 ata la regeneración específicamente a cada
+      `node_finished` (no a `node_failed`); el Plan lo dice más suelto
+      ("tras cada nodo"), pero el Contrato es la fuente #1 en el orden de
+      CLAUDE.md, así que su redacción literal es la que se implementó.
+      - **Gap real encontrado, resuelto preguntando, no inventando**: §8.2
+        pide que cada entrada lleve "la descripción de una línea declarada
+        en el workflow" para ese nodo, pero ningún campo `description:` a
+        nivel nodo existía en el schema (solo `Workflow.description`, a
+        nivel workflow completo). Consultado con el usuario antes de
+        tocar código; eligió agregar el campo. `Node.description:
+        Option<String>` nuevo en `crates/core/src/workflow.rs` — un nodo
+        sin descripción cae a su propio `id` en `progress.md`.
+      - `render_progress(workflow, events)` (`crates/engine/src/progress.rs`,
+        nuevo módulo, núcleo funcional puro sin IO): re-deriva el archivo
+        **completo** desde `derive()` cada vez, nunca un apéndice
+        incremental — mismo principio "el estado es una función pura del
+        log" que ya rige todo lo demás en Yunta (I2). §8.2 no usa
+        literalmente la palabra "regenerar"/"sobrescribir", pero es la
+        única lectura consistente con cómo se deriva cualquier otro
+        artifact acá.
+      - Tres secciones mecánicas — `## Finished` (con la descripción, el
+        `outcome` y cada `artifact:` que produjo, satisfaciendo el
+        criterio de aceptación del Plan: "contiene todos los nodos
+        terminados con sus artifacts"), `## Failed` (con su `outcome`),
+        `## Next` (todo lo que no llegó a terminal, incluyendo los
+        `Running` marcados `(running)`) — sin intentar distinguir "listo
+        para correr" de "todavía bloqueado por `depends_on`", que exigiría
+        traer el grafo del scheduler a una función que hoy solo necesita
+        el log; se puede sumar después sin romper el formato.
+      - `RunState` gana `artifacts: HashMap<NodeId, Vec<PathBuf>>`
+        (`replay.rs`), acumulado desde `artifact_written` — mismo patrón
+        que `findings: Vec<Finding>` de T5.12, un nodo sin artifact
+        simplemente no tiene entrada.
+      - **Punto de escritura imperativo**: un único `write_progress(ctx)`
+        en `node_exec.rs`, llamado justo después del `emit` de
+        `NodeFinished` dentro de `close_node` — el único funnel real de
+        `node_finished` en todo el engine (bash, prompt, `parallel`
+        completo y cada hijo, `check`, y el nodo `loop` vía
+        `loop_exec::execute_loop` también terminan ahí), así que un solo
+        call site cubre a todos los `kind` sin duplicar el gancho por
+        cada uno.
+      - `progress.md` se escribe en la raíz de `run.dir`, junto a
+        `manifest.yaml` — la ubicación que fija el diagrama de layout de
+        §2.
+      - Tests: 5 puros en `crates/engine/tests/progress.rs` (sin eventos
+        → todo bajo `Next`; nodo terminado con descripción/outcome/
+        artifact; nodo fallido; nodo `Running` marcado `(running)`; hijos
+        de `parallel` listados en los mismos términos que un nodo de tope)
+        + 2 end-to-end en `crates/engine/tests/run.rs` (el archivo existe
+        en disco tras un run real y trae la descripción declarada; un
+        nodo con artifact lo lista).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

@@ -1284,3 +1284,66 @@ sessions:
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
+
+#[tokio::test]
+async fn progress_md_is_regenerated_at_run_dir_after_each_node_finished() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: two-nodes
+nodes:
+  - id: write
+    kind: bash
+    run: "touch out.txt"
+    description: "Writes the output file"
+  - id: verify
+    kind: bash
+    run: "test -f out.txt"
+    depends_on: [write]
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
+    assert!(progress.contains("- **write** — Writes the output file"));
+    assert!(progress.contains("- **verify** — verify"));
+    assert!(progress.contains("_none_"), "nothing should have failed");
+}
+
+#[tokio::test]
+async fn progress_md_lists_a_node_s_artifacts_after_it_finishes() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: findings-progress
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review the changes."
+    description: "Reviews the diff for issues"
+    artifacts:
+      produces:
+        - { name: findings.yaml, kind: findings }
+"#;
+
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/findings.yaml", content: "findings: []\n" }}
+    outcome: {{ type: completed, summary: "reviewed" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
+    assert!(progress.contains("- **review** — Reviews the diff for issues"));
+    assert!(progress.contains("artifact:"));
+    assert!(progress.contains("findings.yaml"));
+}

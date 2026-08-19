@@ -251,6 +251,32 @@ builtin: something_undefined
 }
 
 #[test]
+fn a_node_s_description_defaults_to_absent() {
+    let yaml = r#"
+id: implement
+kind: bash
+run: "true"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.description, None);
+}
+
+#[test]
+fn a_node_can_declare_a_one_line_description_for_progress_md() {
+    let yaml = r#"
+id: implement
+kind: bash
+run: "true"
+description: "Wires up the CLI's graph command"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(
+        node.description.as_deref(),
+        Some("Wires up the CLI's graph command")
+    );
+}
+
+#[test]
 fn explicit_file_mapping_is_a_file_reference() {
     let yaml = r#"
 id: plan
