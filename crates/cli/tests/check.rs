@@ -116,3 +116,82 @@ fn malformed_yaml_is_a_clean_error_not_a_panic() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("failed to parse workflow"));
 }
+
+#[test]
+fn a_repo_re_allowing_an_org_denied_pattern_fails_check_citing_the_layer() {
+    // T5.7 ✓1: the org layer denies `sudo *`; the repo layer tries to
+    // re-allow it. `yunta check` (no --config: the project's real layers)
+    // must refuse, naming both layers and the pattern.
+    let root = tempfile::tempdir().unwrap();
+    let org_config = write(
+        root.path(),
+        "org.yaml",
+        "permissions:\n  commands:\n    deny: [\"sudo *\"]\n",
+    );
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    std::fs::write(
+        repo.join(".yunta/config.yaml"),
+        "permissions:\n  commands:\n    allow: [\"sudo *\"]\n",
+    )
+    .unwrap();
+    let workflow = write(
+        &repo,
+        "workflow.yaml",
+        "name: fixture\nnodes:\n  - id: lint\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["check", workflow.to_str().unwrap()])
+        .current_dir(&repo)
+        .env("YUNTA_ORG_CONFIG", &org_config)
+        .env("YUNTA_HOME", &home)
+        .output()
+        .expect("failed to run the yunta binary");
+
+    assert!(!output.status.success(), "check must refuse the re-allow");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("org"),
+        "must cite the ceiling layer: {stderr}"
+    );
+    assert!(
+        stderr.contains("repo"),
+        "must cite the lower layer: {stderr}"
+    );
+    assert!(stderr.contains("sudo *"), "must cite the pattern: {stderr}");
+}
+
+#[test]
+fn a_workflow_command_denied_by_the_org_layer_fails_check() {
+    let root = tempfile::tempdir().unwrap();
+    let org_config = write(
+        root.path(),
+        "org.yaml",
+        "permissions:\n  commands:\n    deny: [\"sudo *\"]\n",
+    );
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let workflow = write(
+        &repo,
+        "workflow.yaml",
+        "name: fixture\nnodes:\n  - id: escalate\n    kind: bash\n    run: \"sudo make install\"\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["check", workflow.to_str().unwrap()])
+        .current_dir(&repo)
+        .env("YUNTA_ORG_CONFIG", &org_config)
+        .env("YUNTA_HOME", &home)
+        .output()
+        .expect("failed to run the yunta binary");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("sudo *"), "must cite the rule: {stderr}");
+}

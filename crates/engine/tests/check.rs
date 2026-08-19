@@ -19,6 +19,8 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         on_failure: None,
         on_interrupt: None,
         description: None,
+        permissions: None,
+        network: None,
     }
 }
 
@@ -36,6 +38,8 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         on_failure: None,
         on_interrupt: None,
         description: None,
+        permissions: None,
+        network: None,
     }
 }
 
@@ -57,6 +61,8 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         on_failure: None,
         on_interrupt: None,
         description: None,
+        permissions: None,
+        network: None,
     }
 }
 
@@ -314,5 +320,100 @@ fn every_error_message_names_its_rule() {
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` defines with zero candidates"
+    );
+}
+
+fn config_with_denied(patterns: &[&str]) -> ConfigLayer {
+    ConfigLayer {
+        permissions: Some(yunta_core::PermissionsConfig {
+            commands: Some(yunta_core::CommandPermissions {
+                deny: patterns.iter().map(|s| s.to_string()).collect(),
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_bash_command_matching_a_denied_pattern_is_a_check_error_citing_the_rule() {
+    let wf = workflow(vec![bash("escalate", "sudo make install", &[])]);
+    let errors = check(&wf, &config_with_denied(&["sudo *"]));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CommandDenied { node, rule } if node.as_str() == "escalate" && rule.contains("sudo *")
+        )),
+        "expected a CommandDenied error citing the pattern, got {errors:?}"
+    );
+}
+
+#[test]
+fn a_hook_command_matching_a_denied_pattern_is_a_check_error() {
+    let mut node = bash("build", "cargo build", &[]);
+    node.hooks = Some(yunta_core::Hooks {
+        before: vec![yunta_core::HookStep {
+            run: "sudo sysctl -w net.core.x=1".to_string(),
+            timeout_seconds: None,
+            on_failure: Default::default(),
+        }],
+        after: vec![],
+    });
+    let errors = check(&workflow(vec![node]), &config_with_denied(&["sudo *"]));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CommandDenied { node, .. } if node.as_str() == "build"
+        )),
+        "expected a CommandDenied error, got {errors:?}"
+    );
+}
+
+#[test]
+fn a_denied_command_inside_a_parallel_child_is_found_by_the_static_scan() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![bash("child", "sudo true", &[])],
+    )]);
+    let errors = check(&wf, &config_with_denied(&["sudo *"]));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CommandDenied { node, .. } if node.as_str() == "child"
+        )),
+        "expected the scan to recurse into the group, got {errors:?}"
+    );
+}
+
+#[test]
+fn a_command_built_from_a_template_is_not_a_static_error() {
+    // The static scan sees the literal YAML text; `{{run.worktree}}` only
+    // becomes a real path at runtime — which is exactly where the second
+    // enforcement moment catches it (§6.1's two moments).
+    let wf = workflow(vec![bash("templated", "ls {{run.worktree}}", &[])]);
+    let errors = check(&wf, &config_with_denied(&["sudo *"]));
+    assert_eq!(errors, Vec::new());
+}
+
+#[test]
+fn a_read_only_parallel_child_does_not_count_toward_the_write_collision_warning() {
+    // D100's real condition is "two or more children WITH WRITE
+    // permissions" — now that `permissions: read-only` exists (T5.7), a
+    // read-only child is out of the collision count by declaration.
+    let mut reader = bash("reader", "cat notes.md", &[]);
+    reader.permissions = Some(yunta_core::NodePermissions::ReadOnly);
+    let writer = bash("writer", "touch out.txt", &[]);
+
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![reader, writer],
+    )]);
+    let warnings = check_warnings(&wf);
+    assert!(
+        warnings.is_empty(),
+        "one writer alone cannot collide: {warnings:?}"
     );
 }

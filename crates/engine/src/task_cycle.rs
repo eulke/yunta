@@ -433,6 +433,15 @@ pub(crate) async fn dispatch_session(
 /// Never trusts the session's own outcome (I5): `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
 /// diff, regardless of whether the session reported `Completed`.
+///
+/// `permissions` is §6.1's runtime moment for criteria: every criterion
+/// command is checked against the merged model before anything runs — a
+/// violating criterion blocks the whole task citing the rule (a policy
+/// outcome in the report, never an engine abort). The scan happens here,
+/// at the cycle's single entry point, so the standalone
+/// [`pre_check`]/[`post_check`] helpers stay pure building blocks.
+/// `profile` is the node's own rung of the same ladder, forwarded to
+/// every session this cycle opens.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_task(
     task: &Task,
@@ -442,7 +451,20 @@ pub async fn run_task(
     max_retries: u32,
     budget: Budget,
     memo: &Memo,
+    permissions: Option<&yunta_core::PermissionsConfig>,
+    profile: PermissionProfile,
 ) -> Result<TaskCycleReport, TaskCycleError> {
+    for criterion in &task.criteria {
+        if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
+            return Ok(TaskCycleReport {
+                task_id: task.id.clone(),
+                pre_check: Vec::new(),
+                attempts: Vec::new(),
+                outcome: TaskOutcome::Blocked { reason: rule },
+            });
+        }
+    }
+
     let (pre_runs, pre_outcome) = pre_check(task, cwd, memo).await?;
 
     if !matches!(pre_outcome, PreCheckOutcome::Red) {
@@ -476,7 +498,7 @@ pub async fn run_task(
             cwd: cwd.to_path_buf(),
             model: None,
             agent: None,
-            permissions: PermissionProfile::Edit,
+            permissions: profile,
             env: Default::default(),
             edit_constraints: Some(task.scope.clone()),
             budget,

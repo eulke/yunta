@@ -93,6 +93,15 @@ pub(super) async fn execute_executor(
     let ExecutorKind::Binary = registration.kind;
     let path = resolve_path(ctx.worktree, registration);
 
+    // §6.1 names executors among the four command surfaces the model
+    // covers; an executor's "command" is its resolved binary path.
+    if let Some(rule) = crate::permissions::command_violation(
+        &path.display().to_string(),
+        ctx.manifest.config.permissions.as_ref(),
+    ) {
+        return fail(ctx, node, rule, false);
+    }
+
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
         Ok(bytes) => bytes,
         Err(source) => {

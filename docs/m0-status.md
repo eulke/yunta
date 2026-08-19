@@ -878,6 +878,102 @@ que aparece.
         excedido falla con diagnóstico, nombre no registrado en
         `skills.executors` falla con diagnóstico.
 
+- [x] **T5.7 — modelo unificado de permisos (§6.1, D51, D72, D105, I18).**
+      UN modelo de techos, no mecanismos sueltos: cada nivel solo estrecha
+      al anterior, con la inversión de precedencia deliberada (org manda;
+      "sin esta inversión, la gobernanza es teatro"). Gobernanza, no
+      sandbox — el límite honesto de §6.1 está citado en el rustdoc del
+      tipo, no escondido.
+      - **Cuatro gaps reales confirmados contra Notion antes de codear**
+        (§6.1/D51 fijan el modelo pero no el dialecto de patrones, ni el
+        algoritmo concreto de merge, ni el evento de violación, ni el
+        `network:` a nivel nodo que el ✓3 del Plan exige). Mismo
+        tratamiento que eligió el usuario para T5.6: propuesta concreta
+        documentada acá como addendum pendiente de subirse a Notion como
+        revisión de D51.
+      - **Propuesta 1 — dialecto de patrones** (`crates/engine/src/permissions.rs`):
+        glob de string completo, anclado en ambos extremos; `*` matchea
+        cualquier secuencia (espacios, pipes y newlines incluidos — el
+        propio ejemplo `"curl * | *"` lo exige); todo lo demás literal;
+        case-sensitive; sin clases de caracteres ni `?`. `"sudo *"`
+        bloquea `sudo rm` y nunca `echo sudo` — mencionar no es escalar.
+        Matcher a mano (~30 líneas, backtracking iterativo), sin
+        dependencia nueva.
+      - **Propuesta 2 — merge invertido** (`crates/core/src/config.rs`):
+        el merge computa el modelo más restrictivo de forma conservadora
+        (denies se UNEN entre capas — única lista de toda la config que
+        acumula en vez de reemplazar; allows no vacíos se intersecan;
+        `packs.executors` conserva el más estricto; `network.default` es
+        AND). El intento de aflojar NO se traga en silencio:
+        `permission_layer_conflicts(capas ordenadas con nombre)` lo
+        reporta como error citando ambas capas y el patrón — comparación
+        textual a propósito, mecánica y predecible, sin heurística sobre
+        solapamiento de globs. Así el runtime nunca corre lo que el techo
+        negó incluso si nadie corrió check, y check cumple el ✓1 literal.
+      - **Propuesta 3 — el evento de violación ES `node_failed`**: la
+        lista de 31 kinds está cerrada (T2.0) y no tiene evento de
+        permisos; §6.1 pide "nodo failed citando la regla, con evento".
+        La regla viaja en `node_failed.outcome` — cero schema nuevo,
+        cumple el texto literal.
+      - **Propuesta 4 — `Node.network: Option<bool>`**: el ✓3 del Plan
+        nombra "un nodo con `network: false`" pero ningún schema de Notion
+        muestra la clave a nivel nodo (solo `permissions.network.default`
+        en config y `declares.network` en packs). Mismo caso que
+        `Node.description` en T5.5. Declarativa pura (D105): el test E2E
+        documenta que el engine NO bloquea — "test que documenta el
+        límite, no un bug", palabras del Plan.
+      - **Los dos momentos de enforcement**: `check` estático
+        (`CheckError::CommandDenied` — bash `run`, hooks de nodo y de
+        `node_defaults`, hijos de `parallel` recursivos; matchea el texto
+        literal del YAML) y runtime justo antes de ejecutar (bash tras
+        render de template — ✓2 cubierto —, hooks con la violación POR
+        ENCIMA de `on_failure: warn` (un hook no puede optar por salirse
+        de la gobernanza declarándose warn), criterios de tarea (pre-scan
+        en `run_task` → tarea `Blocked` citando la regla → el loop cita
+        cada razón de bloqueo en su propio fallo — de paso mejora el
+        diagnóstico genérico preexistente de tareas bloqueadas), y
+        executors (su "comando" es el path resuelto del binario).
+        Criterios se escanean en `run_task` (el único punto de entrada
+        del ciclo que usa el engine); los helpers sueltos
+        `pre_check`/`post_check` quedan como building blocks puros,
+        documentado en el rustdoc.
+      - **Nivel nodo**: `permissions: read-only|edit|full` (escalar, la
+        grafía literal del Contrato) mapeado 1:1 al `PermissionProfile`
+        del adapter en `prompt` y `loop` (antes hardcodeado `Edit`).
+        Validación de capability (`read_only` sin `permission_profiles`
+        del adapter → error en check) queda para el trabajo de resolución
+        de runners con capacidades; hoy el perfil viaja en el request.
+      - **Refinamiento D100 de regalo**: `check_warnings` ya no cuenta a
+        un hijo `permissions: read-only` como escritor — la condición
+        real de D100 ("dos o más hijos CON permisos de escritura") por
+        fin es expresable; el comentario que lo dejaba anotado como
+        placeholder de T5.7 se retiró.
+      - **`yunta check` con capas reales**: sin `--config`, check carga
+        las mismas capas org→user→repo que un run (`load_named_layers`,
+        compartido con `resolve`) y corre el chequeo de conflictos antes
+        del merge. Con `--config` explícito (un solo archivo ya mergeado)
+        no hay capas que puedan conflictuar.
+      - **Fuera de alcance, explícito**: enforcement de `packs.*` (M11 —
+        acá solo se parsea y mergea, incluida la política `prompt` que se
+        ejerce en `pack add`, nunca en medio de un run); contradicción
+        auditable pack-vs-nodo de `network` (M11, necesita `declares`);
+        `pack add` sin TTY bajo `executors: prompt` (indocumentado,
+        anotado como pregunta).
+      - Tests: 5 de config en `crates/core/tests/config.rs` (parseo del
+        shape de referencia, unión de denies, más-estricto para
+        executors/network, conflicto re-permitir citando capas, narrowing
+        sin conflicto), 4 de schema de nodo en `workflow.rs`, 9 del
+        matcher en `crates/engine/tests/permissions.rs`, 5 estáticos en
+        `tests/check.rs` (bash/hook/hijo de parallel denegados, template
+        no es error estático, read-only fuera del conteo D100), 5 E2E en
+        `tests/run.rs` (✓2 template-en-runtime citando regla, hook con
+        warn no escapa, criterio denegado bloquea citando regla, ✓3
+        network declarativa, executor denegado por path) y 2 del binario
+        real en `crates/cli/tests/check.rs` (✓1 re-permitir rechazado
+        citando ambas capas; comando denegado por capa org). El ✓3 pasa
+        sin cambio de comportamiento — es exactamente lo que el Plan pide
+        de ese test: documentar el límite.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

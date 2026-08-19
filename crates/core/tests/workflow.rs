@@ -1,6 +1,6 @@
 use yunta_core::{
-    ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, NodeKind, OnInterrupt,
-    PromptSource, Workflow,
+    ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, NodeKind,
+    NodePermissions, OnInterrupt, PromptSource, Workflow,
 };
 
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
@@ -297,6 +297,54 @@ timeout_seconds: 30
         }
         other => panic!("expected Executor, got {other:?}"),
     }
+}
+
+#[test]
+fn a_node_can_declare_a_permissions_profile() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+permissions: read-only
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.permissions, Some(NodePermissions::ReadOnly));
+}
+
+#[test]
+fn a_node_s_permissions_profile_defaults_to_absent() {
+    let yaml = r#"
+id: implement
+kind: bash
+run: "true"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.permissions, None);
+    assert_eq!(node.network, None);
+}
+
+#[test]
+fn a_node_can_declare_network_false_as_a_pure_declaration() {
+    let yaml = r#"
+id: offline-lint
+kind: bash
+run: "cargo clippy"
+network: false
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.network, Some(false));
+}
+
+#[test]
+fn an_unknown_permissions_profile_fails_to_parse() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+permissions: unrestricted
+"#;
+    let result: Result<yunta_core::Node, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "unknown profile must not parse");
 }
 
 #[test]

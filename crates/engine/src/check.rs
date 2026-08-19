@@ -66,6 +66,13 @@ pub enum CheckError {
         glob_a: String,
         glob_b: String,
     },
+
+    /// §6.1's first enforcement moment (T5.7): the command as written in
+    /// the YAML already violates the merged `permissions` model. The scan
+    /// matches the *literal* text — a command assembled by template gets
+    /// caught by the second moment, at runtime, right before execution.
+    #[error("node `{node}`: {rule}")]
+    CommandDenied { node: NodeId, rule: String },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -99,6 +106,28 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     collect_ids(&workflow.nodes, &mut known_ids, &mut errors);
 
     check_parallel_scopes(&workflow.nodes, &mut errors);
+
+    if let Some(permissions) = &config.permissions {
+        check_commands(&workflow.nodes, permissions, &mut errors);
+        if let Some(default_hooks) = workflow
+            .node_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.hooks.as_ref())
+        {
+            // node_defaults hooks run on every node that declares none of
+            // its own — their commands are as real as any node's.
+            for step in default_hooks.before.iter().chain(&default_hooks.after) {
+                if let Some(rule) =
+                    crate::permissions::command_violation(&step.run, Some(permissions))
+                {
+                    errors.push(CheckError::CommandDenied {
+                        node: "node_defaults".into(),
+                        rule,
+                    });
+                }
+            }
+        }
+    }
 
     for node in &workflow.nodes {
         for dep in &node.depends_on {
@@ -154,13 +183,10 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 /// "must be empty to proceed" has to learn to filter by severity.
 ///
 /// D100's real condition is "two or more children **with write
-/// permissions**" — `permissions:` doesn't exist in this recorte's schema
-/// (T5.7), so every node is implicitly write-capable today (`bash` always
-/// runs unrestricted; `prompt`/`loop` always dispatch with
-/// `PermissionProfile::Edit`, `node_exec.rs`). This warns on any group of
-/// two or more children rather than filtering by a permission that can't
-/// be declared yet — honest given the schema, not a narrower rule than
-/// D100 intends.
+/// permissions**" — and since T5.7 gave nodes `permissions:
+/// read-only|edit|full`, a child declaring `read-only` is out of the
+/// collision count by declaration. A child without the field stays
+/// implicitly write-capable (the engine's default profile is `edit`).
 pub fn check_warnings(workflow: &Workflow) -> Vec<CheckWarning> {
     let mut warnings = Vec::new();
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
@@ -184,13 +210,11 @@ fn collect_ids(nodes: &[Node], known_ids: &mut HashSet<NodeId>, errors: &mut Vec
 }
 
 /// One `parallel` group's scope-collision status (D100): every pair of
-/// children whose declared scopes might overlap, and whether every child
-/// declared a scope at all — the two facts `check`'s error and
-/// `check_warnings`' warning each need, computed once so they can never
-/// disagree with each other.
+/// children whose declared scopes might overlap — computed in one place
+/// so `check`'s error and `check_warnings`' warning can never disagree
+/// about what overlaps.
 struct GroupScope<'a> {
     overlaps: Vec<(&'a Node, &'a Node, &'a str, &'a str)>,
-    all_declared: bool,
 }
 
 fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
@@ -207,9 +231,46 @@ fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
             }
         }
     }
-    GroupScope {
-        overlaps,
-        all_declared: children.iter().all(|child| !child.scope.is_empty()),
+    GroupScope { overlaps }
+}
+
+/// Static half of §6.1's runtime rule: every literal command in the
+/// workflow — bash `run`, hook steps — against the merged model, parallel
+/// children included. Criteria live in the runtime ledger and executors
+/// resolve through config, so both are runtime-moment territory.
+fn check_commands(
+    nodes: &[Node],
+    permissions: &yunta_core::PermissionsConfig,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        let mut commands: Vec<&str> = Vec::new();
+        if let NodeKind::Bash { run } = &node.kind {
+            commands.push(run);
+        }
+        if let Some(hooks) = &node.hooks {
+            commands.extend(
+                hooks
+                    .before
+                    .iter()
+                    .chain(&hooks.after)
+                    .map(|s| s.run.as_str()),
+            );
+        }
+        for command in commands {
+            if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
+                errors.push(CheckError::CommandDenied {
+                    node: node.id.clone(),
+                    rule,
+                });
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_commands(children, permissions, errors);
+        }
     }
 }
 
@@ -240,9 +301,16 @@ fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<CheckWarning>) {
             nodes: children, ..
         } = &node.kind
         {
-            if children.len() >= 2 {
+            // Only write-capable children can collide (D100): a child
+            // declaring `permissions: read-only` is out by declaration.
+            let writers: Vec<&Node> = children
+                .iter()
+                .filter(|child| child.permissions != Some(yunta_core::NodePermissions::ReadOnly))
+                .collect();
+            if writers.len() >= 2 {
                 let group = evaluate_group_scope(children);
-                if group.overlaps.is_empty() && !group.all_declared {
+                let all_writers_declared = writers.iter().all(|child| !child.scope.is_empty());
+                if group.overlaps.is_empty() && !all_writers_declared {
                     warnings.push(CheckWarning::UndeclaredParallelScope {
                         group: node.id.clone(),
                     });

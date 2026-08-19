@@ -71,6 +71,27 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
     Ok(Some(layer))
 }
 
+/// The project's config layers as actually present on disk, org first —
+/// named so `permissions` conflicts can cite which layer tried to loosen
+/// which (§6.1, T5.7). Shared by [`resolve`] and by `yunta check`'s
+/// layered path.
+pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
+    let user_root = user_root()?;
+    let candidates = [
+        ("org", org_config_path()),
+        ("user", user_root.join("config.yaml")),
+        ("repo", cwd.join(".yunta/config.yaml")),
+    ];
+
+    let mut layers = Vec::new();
+    for (name, path) in candidates {
+        if let Some(layer) = load_layer(&path)? {
+            layers.push((name, layer));
+        }
+    }
+    Ok(layers)
+}
+
 /// Resolves the merged config and state paths for a project rooted at
 /// `cwd`. Missing layers are simply absent — an empty config is valid;
 /// a malformed one is an error, never silently skipped.
@@ -78,14 +99,7 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
     let user_root = user_root()?;
 
     // merge_layers folds most-specific-last, so feed org → user → repo.
-    let layers = [
-        org_config_path(),
-        user_root.join("config.yaml"),
-        cwd.join(".yunta/config.yaml"),
-    ]
-    .iter()
-    .filter_map(|path| load_layer(path).transpose())
-    .collect::<Result<Vec<_>, _>>()?;
+    let layers = load_named_layers(cwd)?.into_iter().map(|(_, layer)| layer);
     let config = ConfigLayer::merge_layers(layers);
 
     let runs_root = config

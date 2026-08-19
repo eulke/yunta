@@ -104,12 +104,43 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
         Err(code) => return code,
     };
 
+    // Without `--config`, check sees the project's real layers (§2.2) —
+    // the same ones a run would — including the `permissions` layer
+    // conflict check (§6.1: a lower layer re-permitting what a higher one
+    // denied is refused here, citing both layers). An explicit `--config`
+    // is a single already-merged file: nothing layered to conflict.
     let config: ConfigLayer = match config_path {
         Some(path) => match load_yaml(path, "config") {
             Ok(c) => c,
             Err(code) => return code,
         },
-        None => ConfigLayer::default(),
+        None => {
+            let cwd = match std::env::current_dir() {
+                Ok(cwd) => cwd,
+                Err(e) => {
+                    eprintln!("error: cannot determine the current directory: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let layers = match project::load_named_layers(&cwd) {
+                Ok(layers) => layers,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let named: Vec<(&str, &ConfigLayer)> =
+                layers.iter().map(|(name, layer)| (*name, layer)).collect();
+            let conflicts = yunta_core::permission_layer_conflicts(&named);
+            if !conflicts.is_empty() {
+                eprintln!("{}: {} error(s)", workflow_path.display(), conflicts.len());
+                for conflict in &conflicts {
+                    eprintln!("  {conflict}");
+                }
+                return ExitCode::FAILURE;
+            }
+            ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer))
+        }
     };
 
     let errors = yunta_engine::check(&workflow, &config);

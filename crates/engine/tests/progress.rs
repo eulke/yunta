@@ -23,6 +23,8 @@ fn node(id: &str, description: Option<&str>) -> Node {
         on_failure: None,
         on_interrupt: None,
         description: description.map(str::to_string),
+        permissions: None,
+        network: None,
     }
 }
 

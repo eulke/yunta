@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use yunta_core::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation,
-    OnInterrupt, PathsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
+    permission_layer_conflicts, AdapterSettings, CommandPermissions, ConfigLayer, DefaultsConfig,
+    ExecutorKind, ExecutorRegistration, Isolation, NetworkPermissions, OnInterrupt,
+    PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig, RunnerCandidate,
+    SkillsConfig, StorageConfig,
 };
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
@@ -268,6 +270,157 @@ fn on_interrupt_parses_fail_if_uncertain_from_defaults() {
     let layer: ConfigLayer =
         serde_yaml::from_str("defaults:\n  on_interrupt: fail_if_uncertain\n").unwrap();
     assert_eq!(layer.resolved_on_interrupt(), OnInterrupt::FailIfUncertain);
+}
+
+#[test]
+fn permissions_parses_the_reference_config_shape() {
+    let yaml = r#"
+permissions:
+  commands:
+    deny: ["curl * | *", "sudo *"]
+  packs:
+    executors: prompt
+    publishers: { allow: [acme] }
+  network:
+    default: true
+"#;
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    let perms = layer.permissions.unwrap();
+    let commands = perms.commands.unwrap();
+    assert_eq!(commands.deny, vec!["curl * | *", "sudo *"]);
+    assert!(commands.allow.is_empty(), "absent allow = denylist mode");
+    let packs = perms.packs.unwrap();
+    assert_eq!(packs.executors, Some(PackExecutorPolicy::Prompt));
+    assert_eq!(packs.publishers.unwrap().allow, vec!["acme"]);
+    assert!(perms.network.unwrap().default);
+}
+
+#[test]
+fn permissions_merge_unions_deny_lists_instead_of_replacing() {
+    // §6.1's inversion: adding denies is narrowing, always legal — unlike
+    // every other config array, deny lists accumulate across layers.
+    let org = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec!["sudo *".to_string()],
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec!["rm -rf *".to_string()],
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]);
+    let commands = merged.permissions.unwrap().commands.unwrap();
+    assert_eq!(commands.deny, vec!["sudo *", "rm -rf *"]);
+}
+
+#[test]
+fn permissions_merge_keeps_the_stricter_executors_policy_and_network_default() {
+    let org = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            packs: Some(PackPermissions {
+                executors: Some(PackExecutorPolicy::Deny),
+                publishers: None,
+            }),
+            network: Some(NetworkPermissions { default: false }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            packs: Some(PackPermissions {
+                executors: Some(PackExecutorPolicy::Allow),
+                publishers: None,
+            }),
+            network: Some(NetworkPermissions { default: true }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]);
+    let perms = merged.permissions.unwrap();
+    assert_eq!(
+        perms.packs.unwrap().executors,
+        Some(PackExecutorPolicy::Deny),
+        "repo cannot loosen org's executors: deny"
+    );
+    assert!(
+        !perms.network.unwrap().default,
+        "repo cannot re-enable network org turned off by default"
+    );
+}
+
+#[test]
+fn a_lower_layer_re_allowing_an_org_denied_pattern_is_a_named_conflict() {
+    let org = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec!["sudo *".to_string()],
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec![],
+                allow: vec!["sudo *".to_string()],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let conflicts = permission_layer_conflicts(&[("org", &org), ("repo", &repo)]);
+    assert_eq!(conflicts.len(), 1);
+    assert!(conflicts[0].contains("repo"), "must cite the lower layer");
+    assert!(conflicts[0].contains("org"), "must cite the ceiling layer");
+    assert!(conflicts[0].contains("sudo *"), "must cite the pattern");
+}
+
+#[test]
+fn layers_that_only_narrow_produce_no_conflicts() {
+    let org = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec!["sudo *".to_string()],
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        permissions: Some(PermissionsConfig {
+            commands: Some(CommandPermissions {
+                deny: vec!["curl *".to_string()],
+                allow: vec![],
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let conflicts = permission_layer_conflicts(&[("org", &org), ("repo", &repo)]);
+    assert!(
+        conflicts.is_empty(),
+        "adding denies is narrowing: {conflicts:?}"
+    );
 }
 
 #[test]

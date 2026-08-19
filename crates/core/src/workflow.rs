@@ -74,6 +74,33 @@ pub struct Node {
     /// schema key, so this is the schema addition it implies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The node's rung on the permissions ladder (§6.1, I18, T5.7): the
+    /// session profile requested from the adapter for `prompt`/`loop`
+    /// nodes. Absent means the engine's existing default (`edit`). Not
+    /// to be confused with the config-level `permissions:` group — this
+    /// scalar narrows what one node's agent session may do; that group
+    /// governs which *commands* run at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<NodePermissions>,
+    /// Declarative ONLY (§6.1, D105, T5.7): `network: false` activates no
+    /// sandboxing — the engine never blocks a network call over it. It
+    /// exists for policy and audit (a pack declaring it and then curling
+    /// is a detectable contradiction, M11), and an executor may choose to
+    /// actually enforce it on its own. Reading it as a sandbox is reading
+    /// a guarantee the system never offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<bool>,
+}
+
+/// `permissions: read-only | edit | full` at node level (§6.1's ladder,
+/// T5.7) — maps 1:1 onto the adapter's session profile. The names come
+/// straight from the Contrato's own spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NodePermissions {
+    ReadOnly,
+    Edit,
+    Full,
 }
 
 /// A node's crash-recovery policy (§8.1, D99). `resume_session` (continue

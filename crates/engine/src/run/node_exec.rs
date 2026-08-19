@@ -50,15 +50,17 @@ pub(super) async fn execute_node(
     // the node.
     let hooks = effective_hooks(ctx, node);
     for step in &hooks.before {
-        if !run_hook(ctx, node, HookPhase::Before, step).await?
-            && step.on_failure == HookFailurePolicy::Fail
-        {
-            return fail(
-                ctx,
-                node,
-                format!("before hook `{}` failed", step.run),
-                false,
-            );
+        match run_hook(ctx, node, HookPhase::Before, step).await? {
+            HookRun::Violation(rule) => return fail(ctx, node, rule, false),
+            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
+                return fail(
+                    ctx,
+                    node,
+                    format!("before hook `{}` failed", step.run),
+                    false,
+                );
+            }
+            HookRun::Ran(_) => {}
         }
     }
 
@@ -260,14 +262,24 @@ pub(super) fn render_or_fail(
     }
 }
 
-/// A hook only ever fails or warns (§11.1) — the returned bool is the
-/// step's own success, before the caller applies `on_failure`.
+/// How one hook step went: it ran (with its own success bool, before the
+/// caller applies `on_failure`), or the permissions model refused it
+/// outright. The distinction matters because `on_failure: warn` downgrades
+/// a hook's own failure, never a governance violation (§6.1) — otherwise
+/// any hook could opt out of the model by declaring itself warn-only.
+pub(super) enum HookRun {
+    Ran(bool),
+    Violation(String),
+}
+
+/// A hook only ever fails or warns (§11.1) — unless the permissions model
+/// (§6.1, T5.7) refuses its rendered command before it ever spawns.
 async fn run_hook(
     ctx: &RunCtx<'_>,
     node: &Node,
     phase: HookPhase,
     step: &HookStep,
-) -> Result<bool, RunError> {
+) -> Result<HookRun, RunError> {
     let rendered = match render_template(&step.run, &template_vars(ctx)) {
         Ok(rendered) => rendered,
         Err(e) => {
@@ -281,9 +293,17 @@ async fn run_hook(
                 }),
             )?;
             tracing::warn!(node_id = %node.id, error = %e, "hook template failed to render");
-            return Ok(false);
+            return Ok(HookRun::Ran(false));
         }
     };
+
+    // §6.1's runtime moment: the *rendered* command, right before it runs
+    // — a template can assemble what the YAML never showed.
+    if let Some(rule) =
+        crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
+    {
+        return Ok(HookRun::Violation(rule));
+    }
 
     let mut std_cmd = std::process::Command::new("sh");
     std_cmd.arg("-c").arg(&rendered).current_dir(ctx.worktree);
@@ -341,7 +361,18 @@ async fn run_hook(
             exit_code,
         }),
     )?;
-    Ok(exit_code == 0)
+    Ok(HookRun::Ran(exit_code == 0))
+}
+
+/// The node's rung on the permissions ladder (§6.1, T5.7) mapped onto the
+/// adapter's session profile — absent means the engine's long-standing
+/// default, `edit`.
+pub(super) fn session_profile(node: &Node) -> PermissionProfile {
+    match node.permissions {
+        Some(yunta_core::NodePermissions::ReadOnly) => PermissionProfile::ReadOnly,
+        Some(yunta_core::NodePermissions::Full) => PermissionProfile::Full,
+        Some(yunta_core::NodePermissions::Edit) | None => PermissionProfile::Edit,
+    }
 }
 
 /// Sends `SIGKILL` to `pid`'s whole process group (A4) — the `--` before
@@ -394,16 +425,18 @@ pub(super) async fn close_node(
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
     for step in &effective_hooks(ctx, node).after {
-        if !run_hook(ctx, node, HookPhase::After, step).await?
-            && step.on_failure == HookFailurePolicy::Fail
-        {
-            return fail_with_tokens(
-                ctx,
-                node,
-                format!("after hook `{}` failed", step.run),
-                false,
-                tokens,
-            );
+        match run_hook(ctx, node, HookPhase::After, step).await? {
+            HookRun::Violation(rule) => return fail_with_tokens(ctx, node, rule, false, tokens),
+            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
+                return fail_with_tokens(
+                    ctx,
+                    node,
+                    format!("after hook `{}` failed", step.run),
+                    false,
+                    tokens,
+                );
+            }
+            HookRun::Ran(_) => {}
         }
     }
 
@@ -546,6 +579,15 @@ async fn execute_bash(
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
+
+    // §6.1's runtime moment: the rendered command against the merged
+    // model, right before spawn — a template can assemble what the static
+    // scan in `check` never saw.
+    if let Some(rule) =
+        crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
+    {
+        return fail(ctx, node, rule, false);
+    }
 
     let mut std_cmd = std::process::Command::new("sh");
     std_cmd
@@ -721,7 +763,7 @@ async fn execute_prompt(
         cwd: ctx.worktree.to_path_buf(),
         model: Some(chosen.model),
         agent: chosen.agent,
-        permissions: PermissionProfile::Edit,
+        permissions: session_profile(node),
         env: Default::default(),
         edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
         budget: Budget::default(),

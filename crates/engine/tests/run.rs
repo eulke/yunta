@@ -1497,3 +1497,184 @@ nodes:
         other => panic!("expected the run to pause, got {other:?}"),
     }
 }
+
+const CONFIG_WITH_DENY: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+permissions:
+  commands:
+    deny: ["*forbidden-marker*"]
+"#;
+
+#[tokio::test]
+async fn a_template_built_command_that_violates_at_runtime_fails_the_node_citing_the_rule() {
+    // T5.7 ✓2: the YAML text alone never matches the denied pattern — the
+    // violation only exists after {{run.worktree}} renders. The static
+    // scan can't see it; the runtime moment must.
+    let bench = Bench::new();
+    let marked = bench.worktree.join("forbidden-marker");
+    std::fs::create_dir_all(&marked).unwrap();
+
+    let workflow = r#"
+name: runtime-violation
+nodes:
+  - id: sneaky
+    kind: bash
+    run: "ls {{run.worktree}}/forbidden-marker"
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(
+                reason.contains("forbidden-marker") && reason.contains("denied"),
+                "must cite the rule: {reason}"
+            );
+        }
+        other => panic!("expected the run to pause on the violation, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_denied_hook_command_fails_the_node_even_with_on_failure_warn() {
+    // Governance is not a hook outcome: `on_failure: warn` downgrades a
+    // hook's own failure, never a permission violation — otherwise any
+    // hook could opt out of the model (§6.1).
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: hook-violation
+nodes:
+  - id: build
+    kind: bash
+    run: "true"
+    hooks:
+      before:
+        - run: "echo forbidden-marker"
+          on_failure: warn
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("denied"), "must cite the rule: {reason}");
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_denied_task_criterion_blocks_the_task_citing_the_rule() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = r#"
+name: criterion-violation
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Do the task."
+"#;
+
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Task\"\n    scope: [\"out.txt\"]\n    criteria:\n      - cmd: \"test -f forbidden-marker\"\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, &fixture, CONFIG_WITH_DENY)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(
+                reason.contains("denied"),
+                "the blocked task must cite the rule: {reason}"
+            );
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_node_with_network_false_is_never_blocked_by_the_engine() {
+    // T5.7 ✓3 — a test that documents the limit, not a bug (D105):
+    // `network: false` is declarative; the engine runs the command anyway.
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: network-declarative
+nodes:
+  - id: declared-offline
+    kind: bash
+    run: "echo simulating-a-network-call"
+    network: false
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "network: false activates no sandbox — policy, not capability"
+    );
+}
+
+#[tokio::test]
+async fn a_denied_executor_path_fails_the_node_citing_the_rule() {
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        "#!/usr/bin/env python3\nprint('{}')\n",
+    );
+
+    let workflow = r#"
+name: executor-denied
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+"#;
+
+    let config = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+skills:
+  executors:
+    - { name: probe, kind: binary, path: probe.py }
+permissions:
+  commands:
+    deny: ["*probe.py"]
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", config)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("denied"), "must cite the rule: {reason}");
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}

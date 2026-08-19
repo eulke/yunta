@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use yunta_adapters::{Budget, MockAdapter};
+use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
 use yunta_core::events::Criterion;
 use yunta_core::Task;
 use yunta_engine::{run_task, DispatchOutcome, Memo, PreCheckOutcome, TaskOutcome};
@@ -78,6 +78,8 @@ outcome: { type: completed, summary: "wrote it" }
         2,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -119,6 +121,8 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         0,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -146,6 +150,8 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         2,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -182,6 +188,8 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         2,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -225,6 +233,8 @@ outcome: { type: completed, summary: "done" }
         0,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -268,6 +278,8 @@ sessions:
         2,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -293,6 +305,8 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         0,
         Budget::default(),
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();
@@ -412,6 +426,8 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             0,
             budget,
             &memo,
+            None,
+            PermissionProfile::Edit,
         ),
     )
     .await
@@ -459,6 +475,8 @@ outcome: { type: completed, summary: "should never be reached" }
         0,
         budget,
         &memo,
+        None,
+        PermissionProfile::Edit,
     )
     .await
     .unwrap();

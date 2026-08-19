@@ -55,6 +55,11 @@ pub(super) async fn execute_loop(
 
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
+    // Blocked reasons gathered this invocation, so the loop's own failure
+    // can cite them (§6.1 for permission blocks; useful for every block).
+    // A resume starts empty — the log carries each task's *status*, and
+    // the generic tail below still names which tasks are blocked.
+    let mut blocked_reasons: Vec<String> = Vec::new();
 
     loop {
         iteration += 1;
@@ -90,14 +95,14 @@ pub(super) async fn execute_loop(
                 )
                 .await;
             }
-            return fail_with_tokens(
-                ctx,
-                node,
-                "no task is ready and not all are done — blocked or failed tasks need a decision"
-                    .to_string(),
-                false,
-                tokens,
-            );
+            let mut diagnostic = "no task is ready and not all are done — blocked or failed \
+                                  tasks need a decision"
+                .to_string();
+            for reason in &blocked_reasons {
+                diagnostic.push_str("; ");
+                diagnostic.push_str(reason);
+            }
+            return fail_with_tokens(ctx, node, diagnostic, false, tokens);
         };
 
         let registered_seq = events
@@ -107,7 +112,7 @@ pub(super) async fn execute_loop(
             })
             .map(|event| event.seq)
             .unwrap_or(0);
-        run_one_task(
+        if let Some(reason) = run_one_task(
             ctx,
             node,
             task,
@@ -116,11 +121,17 @@ pub(super) async fn execute_loop(
             adapter.as_ref(),
             &mut tokens,
         )
-        .await?;
+        .await?
+        {
+            blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
+        }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Runs one task through the cycle and records its lifecycle in the log.
+/// Returns the blocked reason when the task ends `Blocked`, so the loop
+/// can cite it in its own eventual failure.
 async fn run_one_task(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -129,7 +140,7 @@ async fn run_one_task(
     instruction: &str,
     adapter: &dyn yunta_adapters::Adapter,
     tokens: &mut TokenUsage,
-) -> Result<(), RunError> {
+) -> Result<Option<String>, RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::TaskStatusChanged(yunta_core::events::TaskStatusChangedPayload {
@@ -147,6 +158,8 @@ async fn run_one_task(
         ctx.max_task_retries,
         Budget::default(),
         &ctx.memo,
+        ctx.manifest.config.permissions.as_ref(),
+        super::node_exec::session_profile(node),
     )
     .await?;
 
@@ -179,9 +192,9 @@ async fn run_one_task(
         )?;
     }
 
-    let new_status = match &report.outcome {
-        TaskOutcome::Done => TaskStatus::Done,
-        TaskOutcome::Blocked { .. } => TaskStatus::Blocked,
+    let (new_status, blocked_reason) = match report.outcome {
+        TaskOutcome::Done => (TaskStatus::Done, None),
+        TaskOutcome::Blocked { reason } => (TaskStatus::Blocked, Some(reason)),
     };
     if new_status == TaskStatus::Done {
         // §5.5: a verified task is committed before the next one runs, so
@@ -197,7 +210,7 @@ async fn run_one_task(
             caused_by: last_check_seq,
         }),
     )?;
-    Ok(())
+    Ok(blocked_reason)
 }
 
 /// Commits a done task's work in the worktree. A task that changed
