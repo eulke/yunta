@@ -74,6 +74,7 @@ pub fn build_manifest(
         base_branch,
         base_commit,
         isolation: config.resolved_isolation(),
+        max_parallel_nodes: config.resolved_max_parallel_nodes(),
     })
 }
 

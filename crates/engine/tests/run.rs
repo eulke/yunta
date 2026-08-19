@@ -390,6 +390,130 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
+fn interval(worktree: &std::path::Path, id: &str) -> (i128, i128) {
+    let start = std::fs::read_to_string(worktree.join(format!("{id}-start.txt"))).unwrap();
+    let end = std::fs::read_to_string(worktree.join(format!("{id}-end.txt"))).unwrap();
+    (start.trim().parse().unwrap(), end.trim().parse().unwrap())
+}
+
+/// Sweep-line max overlap: ties break end-before-start, so ambiguous
+/// simultaneity under-counts rather than over-counts — the right side to
+/// err on for a cap-respected assertion.
+fn max_concurrent_intervals(intervals: &[(i128, i128)]) -> usize {
+    let mut events: Vec<(i128, i32)> = Vec::new();
+    for &(start, end) in intervals {
+        events.push((start, 1));
+        events.push((end, -1));
+    }
+    events.sort();
+    let mut current = 0i32;
+    let mut max = 0i32;
+    for (_, delta) in events {
+        current += delta;
+        max = max.max(current);
+    }
+    max as usize
+}
+
+#[tokio::test]
+async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
+    let bench = Bench::new();
+
+    let workflow_yaml = r#"
+name: fan-out
+nodes:
+  - id: a
+    kind: bash
+    run: "date +%s%N > a-start.txt; sleep 0.3; date +%s%N > a-end.txt"
+  - id: b
+    kind: bash
+    run: "date +%s%N > b-start.txt; sleep 0.3; date +%s%N > b-end.txt"
+  - id: c
+    kind: bash
+    run: "date +%s%N > c-start.txt; sleep 0.3; date +%s%N > c-end.txt"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &HashMap::new(),
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.terminal, RunTerminal::Finished);
+
+    let intervals = ["a", "b", "c"].map(|id| interval(&bench.worktree, id));
+    assert_eq!(
+        max_concurrent_intervals(&intervals),
+        2,
+        "expected exactly max_parallel_nodes (2) nodes to overlap at once, batch then batch"
+    );
+}
+
+#[tokio::test]
+async fn max_parallel_nodes_defaults_to_1_and_stays_fully_sequential() {
+    let bench = Bench::new();
+
+    let workflow_yaml = r#"
+name: fan-out
+nodes:
+  - id: a
+    kind: bash
+    run: "date +%s%N > a-start.txt; sleep 0.1; date +%s%N > a-end.txt"
+  - id: b
+    kind: bash
+    run: "date +%s%N > b-start.txt; sleep 0.1; date +%s%N > b-end.txt"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config = ConfigLayer::default();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &HashMap::new(),
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.terminal, RunTerminal::Finished);
+
+    let intervals = ["a", "b"].map(|id| interval(&bench.worktree, id));
+    assert_eq!(
+        max_concurrent_intervals(&intervals),
+        1,
+        "unset max_parallel_nodes must stay fully sequential (default 1)"
+    );
+}
+
 #[tokio::test]
 async fn a_run_interrupted_mid_node_resumes_by_restarting_the_orphan() {
     let bench = Bench::new();

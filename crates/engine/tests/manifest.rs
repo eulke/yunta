@@ -217,3 +217,25 @@ fn an_explicit_none_isolation_freezes_as_none() {
 
     assert_eq!(manifest.isolation, yunta_core::Isolation::None);
 }
+
+#[test]
+fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let manifest =
+        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+
+    assert_eq!(manifest.max_parallel_nodes, 1);
+}
+
+#[test]
+fn an_explicit_max_parallel_nodes_freezes_that_value() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let cfg = config("defaults:\n  max_parallel_nodes: 4\n");
+
+    let manifest = build_manifest(&workflow(WORKFLOW), &cfg, dir.path(), dir.path()).unwrap();
+
+    assert_eq!(manifest.max_parallel_nodes, 4);
+}

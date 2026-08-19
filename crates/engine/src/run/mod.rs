@@ -27,7 +27,7 @@ use yunta_storage::{Storage, StorageError};
 use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
-use schedule::NextAction;
+use schedule::ScheduleStep;
 
 #[derive(Debug, Error)]
 pub enum RunError {
@@ -226,11 +226,11 @@ pub async fn execute_run(
 
     loop {
         let events = ctx.load_events()?;
-        match schedule::next_action(&manifest.workflow, &events) {
-            NextAction::Broken { diagnostic } => {
+        match schedule::next_step(&manifest.workflow, &events, manifest.max_parallel_nodes) {
+            ScheduleStep::Broken { diagnostic } => {
                 return Err(RunError::Broken { diagnostic });
             }
-            NextAction::Finish => {
+            ScheduleStep::Finish => {
                 let state = derive(&events);
                 ctx.emit(
                     None,
@@ -247,7 +247,7 @@ pub async fn execute_run(
                     state,
                 });
             }
-            NextAction::Pause { reason } => {
+            ScheduleStep::Pause { reason } => {
                 ctx.emit(
                     None,
                     EventPayload::RunPaused(RunPausedPayload {
@@ -259,7 +259,7 @@ pub async fn execute_run(
                     state: derive(&ctx.load_events()?),
                 });
             }
-            NextAction::Reroute {
+            ScheduleStep::Reroute {
                 from,
                 to,
                 attempt,
@@ -276,18 +276,33 @@ pub async fn execute_run(
                     }),
                 )?;
             }
-            NextAction::Execute { node, attempt } => {
-                let node = manifest
-                    .workflow
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == node)
-                    .ok_or_else(|| RunError::Broken {
-                        diagnostic: format!(
-                            "scheduler chose node `{node}` which the manifest's workflow does not define"
-                        ),
-                    })?;
-                node_exec::execute_node(&ctx, node, attempt).await?;
+            ScheduleStep::Execute(batch) => {
+                // A batch runs to completion together (every member reaches
+                // a terminal per-node state) before the next iteration
+                // decides what comes next — the same simplification
+                // `kind: parallel`'s `join: all` makes explicit (§5.8),
+                // here implicit for scheduler-formed batches. Interrupting
+                // still-running siblings the moment one fails is `join:
+                // any` territory (T4.6), out of this recorte.
+                let executions = batch.into_iter().map(|(node_id, attempt)| {
+                    let ctx = &ctx;
+                    let node = &manifest.workflow;
+                    async move {
+                        let node = node
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == node_id)
+                            .ok_or_else(|| RunError::Broken {
+                                diagnostic: format!(
+                                    "scheduler chose node `{node_id}` which the manifest's workflow does not define"
+                                ),
+                            })?;
+                        node_exec::execute_node(ctx, node, attempt).await
+                    }
+                });
+                for result in futures::future::join_all(executions).await {
+                    result?;
+                }
             }
         }
     }

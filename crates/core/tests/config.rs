@@ -210,15 +210,49 @@ fn repo_isolation_overrides_org_isolation() {
     let org = ConfigLayer {
         defaults: Some(DefaultsConfig {
             isolation: Some(Isolation::None),
+            ..Default::default()
         }),
         ..Default::default()
     };
     let repo = ConfigLayer {
         defaults: Some(DefaultsConfig {
             isolation: Some(Isolation::Worktree),
+            ..Default::default()
         }),
         ..Default::default()
     };
     let merged = ConfigLayer::merge_layers([org, repo]);
     assert_eq!(merged.resolved_isolation(), Isolation::Worktree);
+}
+
+#[test]
+fn max_parallel_nodes_defaults_to_1_when_unset() {
+    let layer = ConfigLayer::default();
+    assert_eq!(layer.resolved_max_parallel_nodes(), 1);
+}
+
+#[test]
+fn max_parallel_nodes_parses_from_defaults() {
+    let layer: ConfigLayer = serde_yaml::from_str("defaults:\n  max_parallel_nodes: 4\n").unwrap();
+    assert_eq!(layer.resolved_max_parallel_nodes(), 4);
+}
+
+#[test]
+fn repo_max_parallel_nodes_overrides_org_max_parallel_nodes() {
+    let org = ConfigLayer {
+        defaults: Some(DefaultsConfig {
+            max_parallel_nodes: Some(2),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        defaults: Some(DefaultsConfig {
+            max_parallel_nodes: Some(8),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let merged = ConfigLayer::merge_layers([org, repo]);
+    assert_eq!(merged.resolved_max_parallel_nodes(), 8);
 }

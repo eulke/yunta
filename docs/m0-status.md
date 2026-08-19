@@ -248,6 +248,83 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         si se decide que vale la pena el costo de detectar procesos muertos
         de forma portable).
 
+- [x] **T4.1 — scheduler DAG con paralelismo real (`max_parallel_nodes`).**
+      Confirmado con el usuario antes de codear (Notion no está espejado en
+      `docs/` todavía — leído directo de la fuente): la tarea completa pide
+      `pending→ready→running→done|failed|skipped|waiting` y correr el
+      workflow de referencia (`build-feature.yaml`) end-to-end. Recorte
+      acordado explícitamente:
+      - Solo `pending→ready→running→done|failed` — `skipped` depende de
+        modos (M9) y `waiting` de gates (M5/T7.2), ninguno existe en el
+        schema todavía.
+      - Criterio de aceptación cumplido con un fixture propio (nodos
+        `prompt`/`bash`/`loop` de fan-out independiente), no con el workflow
+        de referencia completo — ese usa `gate`/`check`, fuera del recorte
+        de T1.1.
+      - **Default de `max_parallel_nodes` cuando `defaults:` no lo
+        declara: `1` (secuencial)**, confirmado con el usuario por simetría
+        con §5.5 (`concurrency` de loop): el paralelismo multiplica el
+        gasto simultáneo de tokens, nadie lo debe descubrir por la factura.
+        El comportamiento de M-0 no cambia si nadie toca la config.
+      `defaults.max_parallel_nodes` en la config (`yunta_core::DefaultsConfig`),
+      congelado en el manifest igual que `isolation`
+      (`ConfigLayer::resolved_max_parallel_nodes()`,
+      `Manifest.max_parallel_nodes: u32`). Mecanismo en
+      `yunta_engine::run::schedule`:
+      - `next_action` (una sola decisión) se convirtió en `next_step`, que
+        devuelve `ScheduleStep` — `Execute(Vec<(NodeId, u32)>)` en vez de un
+        único `Execute { node, attempt }`. El tipo hace irrepresentable
+        mezclar una acción de control (`Reroute`/`Pause`/`Finish`/`Broken`)
+        con un lote de ejecuciones en la misma decisión — la cáscara
+        imperativa (`execute_run`) nunca necesita adivinar cuál de las dos
+        cosas recibió.
+      - **Orden de prioridad sin cambios** respecto de antes de T4.1: (1)
+        nodos `running` huérfanos (todos juntos, sin tope — ya estaban
+        comprometidos a correr antes del crash), (2) resolución de UNA
+        falla por iteración (re-ruta o pause, igual que siempre), (3) recién
+        acá se forma el lote de nodos `ready` frescos, hasta
+        `max_parallel_nodes`, en orden de declaración del workflow.
+      - **Un lote corre a término junto** — `execute_run` lo despacha con
+        `futures::future::join_all` (concurrencia estructurada: nada se
+        spawnea suelto, el `.await` del lote entero retiene la propiedad de
+        cada ejecución) y no vuelve a preguntarle al scheduler qué sigue
+        hasta que **todos** los miembros del lote alcanzan un estado
+        terminal de nodo. Es la misma simplificación que `kind: parallel`
+        hace explícita con `join: all` (§5.8) — acá implícita para lotes que
+        el scheduler arma solo. Interrumpir a un hermano que sigue corriendo
+        apenas otro falla es semántica de `join: any`, T4.6, fuera de este
+        recorte.
+      - `max_parallel_nodes: 0` en la config se clampea a `1` en el
+        scheduler en vez de dejar que cualquier nodo listo se muera de
+        hambre para siempre — un lote vacío disfrazado de run trabado en
+        vez de un error de config visible. Validar `max_parallel_nodes >= 1`
+        en `yunta check` sigue sin existir (T1.3 no cubre semántica de
+        `defaults:` todavía).
+      - **Deuda no cubierta: sin detección de colisión de escritura entre
+        ramas del DAG que corren en paralelo por `max_parallel_nodes`.**
+        §5.8/D100 solo la exige para `kind: parallel` (nodos declarados a
+        mano en un grupo). El riesgo físico es idéntico (mismo worktree
+        compartido — T4.2 da un worktree por *run*, no por nodo), pero acá
+        no hay warning de `check` si dos nodos con permisos de escritura y
+        scope solapado (o sin scope declarado) quedan `ready` al mismo
+        tiempo. Gatillo: extender T4.6's warning (D100) a este caso también,
+        o decidir explícitamente que el fan-out implícito exige `scope`
+        declarado para habilitarse.
+      - Tests: 3 en `crates/core/tests/config.rs` (default 1, parseo,
+        override repo\>org), 2 en `crates/engine/tests/manifest.rs` (default
+        y explícito se congelan), 2 en `crates/engine/tests/run.rs` —
+        `independent_nodes_run_concurrently_up_to_max_parallel_nodes` (3
+        nodos bash sin dependencia entre sí, `max_parallel_nodes: 2`,
+        prueba por sweep-line de intervalos `date +%s%N` que el solapamiento
+        máximo real es exactamente 2, nunca 3 — corrida 5 veces seguidas sin
+        flakiness) y `max_parallel_nodes_defaults_to_1_and_stays_fully_sequential`
+        (mismo mecanismo, config sin `defaults:`, solapamiento máximo 1 —
+        documenta que el comportamiento pre-T4.1 no cambió para nadie que no
+        configure nada). Las tres tareas de reroute/pausa/orphan-restart
+        preexistentes (`crates/engine/tests/run.rs`) siguen en verde sin
+        tocarlas, confirmando que el rediseño de `next_action`→`next_step`
+        preservó el comportamiento de esos casos.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: solo nodos `prompt`/`bash`/`loop`. Sin `gate`/`check`/`parallel`/

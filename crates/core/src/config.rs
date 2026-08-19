@@ -74,14 +74,22 @@ pub enum Isolation {
     None,
 }
 
-/// `defaults:` — **M-0 cut**: only `isolation` (T4.2's consumer). The
-/// reference config's `runner`/`timeout_minutes`/`max_parallel_nodes`/
-/// `on_failure`/`on_interrupt` wait for their own consumers (T4.1/T4.4/
-/// T4.5) — same "extend when consumed" rule as every other group here.
+/// `defaults:` — **M-0 cut**: `isolation` (T4.2's consumer) and
+/// `max_parallel_nodes` (T4.1's consumer). The reference config's
+/// `runner`/`timeout_minutes`/`on_failure`/`on_interrupt` wait for their
+/// own consumers (T4.4/T4.5) — same "extend when consumed" rule as every
+/// other group here.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Isolation>,
+    /// How many DAG nodes with no dependency on each other the scheduler
+    /// may run at once (T4.1). Absent means the schema's own default of
+    /// `1`, not "unbounded" — §5.5 states the analogous rationale for
+    /// `concurrency` in loops and it applies just as much here: nobody
+    /// should discover parallel token spend by reading the bill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_parallel_nodes: Option<u32>,
 }
 
 /// One config layer as parsed from a single file (project/user/org), and
@@ -118,6 +126,16 @@ impl ConfigLayer {
             .and_then(|defaults| defaults.isolation)
             .unwrap_or_default()
     }
+
+    /// `defaults.max_parallel_nodes`, with the schema's own default (`1`,
+    /// sequential — same place the default lives, same reasoning as
+    /// `resolved_isolation`).
+    pub fn resolved_max_parallel_nodes(&self) -> u32 {
+        self.defaults
+            .as_ref()
+            .and_then(|defaults| defaults.max_parallel_nodes)
+            .unwrap_or(1)
+    }
 }
 
 fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -137,6 +155,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
 fn merge_defaults_config(base: DefaultsConfig, more_specific: DefaultsConfig) -> DefaultsConfig {
     DefaultsConfig {
         isolation: more_specific.isolation.or(base.isolation),
+        max_parallel_nodes: more_specific.max_parallel_nodes.or(base.max_parallel_nodes),
     }
 }
 

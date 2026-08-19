@@ -41,6 +41,10 @@ pub struct Manifest {
     /// Resolved `defaults.isolation` (§7.3, T4.2) — a run's own mode
     /// never changes after creation, even if config does.
     pub isolation: Isolation,
+    /// Resolved `defaults.max_parallel_nodes` (T4.1) — how many
+    /// independently-ready DAG nodes the scheduler may run at once for
+    /// this run, frozen the same way as `isolation`.
+    pub max_parallel_nodes: u32,
     pub workflow_hash: String,
     pub config_hash: String,
 }
