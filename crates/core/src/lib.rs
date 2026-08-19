@@ -20,16 +20,16 @@ mod workflow;
 pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, Isolation, PathsConfig, RunnerCandidate,
-    StorageConfig,
+    AdapterSettings, BaselineConfig, ConfigLayer, CoverageConfig, DefaultsConfig, Isolation,
+    PathsConfig, RunnerCandidate, StorageConfig,
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use ledger::{Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use workflow::{
-    ArtifactKind, ArtifactSpec, Artifacts, HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node,
-    NodeDefaults, NodeKind, OnFailure, OnInterrupt, PromptSource, Workflow,
+    ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, HookFailurePolicy, HookStep, Hooks,
+    JoinPolicy, Node, NodeDefaults, NodeKind, OnFailure, OnInterrupt, PromptSource, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

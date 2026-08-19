@@ -114,6 +114,33 @@ pub enum NodeKind {
         join: JoinPolicy,
         nodes: Vec<Node>,
     },
+    /// Automatic verification against data the engine already has (§7.1,
+    /// D85, T5.4) — never a person (that's `gate`, out of this recorte).
+    /// The builtin list is closed on purpose: a `check` builtin is by
+    /// definition something the engine can already evaluate; anything
+    /// else is a `bash` node (exit code) or an `executor` (T5.6).
+    Check {
+        #[serde(flatten)]
+        builtin: CheckBuiltin,
+    },
+}
+
+/// `kind: check`'s closed builtin list (§7.1). No budget builtin —
+/// `limits:` already pauses the run on its own (§8.3); duplicating that
+/// as a check would be redundant, per the Contrato's own text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "builtin", rename_all = "snake_case")]
+pub enum CheckBuiltin {
+    /// Re-runs `baseline.suite` and fails if something that passed the
+    /// captured baseline stopped passing.
+    BaselineCompare,
+    /// Re-runs `coverage.cmd` and fails under `coverage.threshold`.
+    CoverageGate,
+    /// Fails if any finding posted so far in this run is at or above
+    /// `max_severity`.
+    FindingsGate {
+        max_severity: crate::events::FindingSeverity,
+    },
 }
 
 /// `parallel.join` (§5.8, D97). `all` (default): the group finishes only

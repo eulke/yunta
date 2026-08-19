@@ -88,7 +88,7 @@ fn freeze_prompts(
                 prompts.insert(node.id.clone(), content);
             }
         }
-        NodeKind::Bash { .. } => {}
+        NodeKind::Bash { .. } | NodeKind::Check { .. } => {}
         NodeKind::Parallel { nodes, .. } => {
             for child in nodes {
                 freeze_prompts(child, workflow_dir, prompts)?;

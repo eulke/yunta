@@ -99,6 +99,26 @@ pub struct DefaultsConfig {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
+/// `baseline:` (§7.2, T5.4's `baseline_compare`) — the suite the engine
+/// runs and re-runs to catch regressions ("cero regresiones" as a data
+/// comparison, never an agent's claim).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BaselineConfig {
+    pub suite: String,
+}
+
+/// `coverage:` (§7.2, T5.4's `coverage_gate`) — `cmd`'s stdout must
+/// contain a bare percentage (`NN[.NN]%`); the last match found is taken
+/// as the measured coverage. Not specified by the Contrato's prose,
+/// which only says "medido y comparado por el engine" — a permissive,
+/// documented convention rather than inventing a stricter parsing
+/// contract with no source to check it against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoverageConfig {
+    pub cmd: String,
+    pub threshold: f64,
+}
+
 /// One config layer as parsed from a single file (project/user/org), and
 /// also the type of the merged result — merging never needs to invent
 /// fields, only combine what layers actually set.
@@ -114,6 +134,10 @@ pub struct ConfigLayer {
     pub paths: Option<PathsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<DefaultsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<BaselineConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<CoverageConfig>,
 }
 
 impl ConfigLayer {
@@ -166,6 +190,11 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
         defaults: merge_fields(base.defaults, more_specific.defaults, merge_defaults_config),
+        // Every field in these two is required (no internal optionality
+        // to merge field-by-field) — a more specific layer replaces the
+        // whole group wholesale, same as `runners`' candidate arrays.
+        baseline: more_specific.baseline.or(base.baseline),
+        coverage: more_specific.coverage.or(base.coverage),
     }
 }
 

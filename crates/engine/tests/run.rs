@@ -88,8 +88,21 @@ impl Bench {
         workflow_yaml: &str,
         fixture_yaml: &str,
     ) -> (RunTerminal, yunta_engine::RunState) {
+        self.run_with_config(workflow_yaml, fixture_yaml, CONFIG)
+            .await
+    }
+
+    /// Same as [`Bench::run`] but with a caller-chosen config layer — for
+    /// tests that need `baseline:`/`coverage:` alongside the usual
+    /// `runners:`.
+    async fn run_with_config(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+    ) -> (RunTerminal, yunta_engine::RunState) {
         let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
         let manifest = build_manifest(&workflow, &config, &self.worktree, &self.worktree).unwrap();
 
         let run_dir = create_run(
@@ -1076,4 +1089,198 @@ nodes:
         write_docs_starts, 1,
         "an already-finished child must not restart on resume"
     );
+}
+
+const CONFIG_WITH_BASELINE: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: "cat marker.txt"
+"#;
+
+const CONFIG_WITH_COVERAGE: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+coverage:
+  cmd: "cat coverage.txt"
+  threshold: 80.0
+"#;
+
+#[tokio::test]
+async fn baseline_compare_passes_on_its_first_run_with_nothing_to_compare_against() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
+
+    let workflow = r#"
+name: baseline-first-run
+nodes:
+  - id: no-regressions
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn baseline_compare_fails_when_a_previously_green_suite_turns_red() {
+    let bench = Bench::new();
+    // `cat marker.txt` exits 0 while the file exists — the first
+    // `baseline_compare` node below captures that as the baseline.
+    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
+
+    let workflow = r#"
+name: baseline-regression
+nodes:
+  - id: capture
+    kind: check
+    builtin: baseline_compare
+  - id: regress
+    kind: bash
+    run: "rm marker.txt"
+    depends_on: [capture]
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+    depends_on: [regress]
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(
+            reason.contains("regression"),
+            "expected a regression diagnostic, got: {reason}"
+        ),
+        other => panic!("expected the second baseline_compare to pause the run, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn coverage_gate_passes_when_measured_coverage_meets_the_threshold() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("coverage.txt"), "lines: 92.5%\n").unwrap();
+
+    let workflow = r#"
+name: coverage-ok
+nodes:
+  - id: coverage
+    kind: check
+    builtin: coverage_gate
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn coverage_gate_fails_when_measured_coverage_is_below_the_threshold() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("coverage.txt"), "lines: 40.0%\n").unwrap();
+
+    let workflow = r#"
+name: coverage-low
+nodes:
+  - id: coverage
+    kind: check
+    builtin: coverage_gate
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("below"), "unexpected reason: {reason}");
+            assert!(reason.contains("40"), "unexpected reason: {reason}");
+        }
+        other => panic!("expected the coverage gate to pause the run, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn findings_gate_fails_when_a_posted_finding_meets_max_severity() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: findings-gate
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review the changes."
+    artifacts:
+      produces:
+        - { name: findings.yaml, kind: findings }
+  - id: gate
+    kind: check
+    builtin: findings_gate
+    max_severity: major
+    depends_on: [review]
+"#;
+
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: blocking\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
+    outcome: {{ type: completed, summary: "reviewed" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("f1")),
+        other => panic!("expected the gate to pause the run, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn findings_gate_passes_when_no_finding_meets_max_severity() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: findings-gate-clean
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review the changes."
+    artifacts:
+      produces:
+        - { name: findings.yaml, kind: findings }
+  - id: gate
+    kind: check
+    builtin: findings_gate
+    max_severity: blocking
+    depends_on: [review]
+"#;
+
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: minor\n    title: \"Style nit\"\n    location: \"src/lib.rs:10\"\n    detail: \"Naming.\"\n" }}
+    outcome: {{ type: completed, summary: "reviewed" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
 }

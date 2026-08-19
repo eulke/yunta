@@ -671,15 +671,88 @@ que aparece.
         `crates/engine/tests/run.rs` (nodo `prompt` con mock que produce
         `findings.yaml`, el run termina y `derive()` ve el finding).
 
+- [x] **T5.4 — `kind: check` con sus tres builtins (§7.1, §7.2, D85).**
+      "El engine verifica con su propia data, nunca espera a una persona"
+      (eso es `gate`, sigue fuera de este recorte) — sin sesión, sin
+      tokens, sin runner.
+      - `NodeKind::Check { builtin: CheckBuiltin }` +
+        `CheckBuiltin::{BaselineCompare, CoverageGate, FindingsGate {
+        max_severity }}` (`crates/core/src/workflow.rs`) — lista cerrada a
+        propósito: un builtin de `check` es por definición algo que el
+        engine ya puede evaluar con datos que tiene; cualquier otra cosa
+        es un nodo `bash` (exit code) o un `executor` (T5.6). Sin builtin
+        de presupuesto — `limits:` ya pausa el run por su cuenta (§8.3),
+        duplicarlo como check sería redundante según el propio texto del
+        Contrato.
+      - `BaselineConfig { suite }` / `CoverageConfig { cmd, threshold }`
+        (`crates/core/src/config.rs`), campos `baseline`/`coverage` en
+        `ConfigLayer` con merge de reemplazo wholesale (ninguno de los dos
+        tipos tiene opcionalidad interna que fusionar campo a campo).
+      - **`baseline_compare`, desviación documentada del texto literal del
+        Contrato**: la prosa describe capturar la baseline "una vez al
+        abrir el run" (`docs/eventos.md` §5.3); acá la captura es **lazy**,
+        en la primera vez que un nodo `baseline_compare` se ejecuta dentro
+        del run — capturar de forma incondicional en `create_run` hubiera
+        exigido volverla async en sus cuatro call sites
+        (`crates/engine/src/run/mod.rs`, `crates/engine/tests/run.rs`,
+        `crates/cli/src/commands/{test,run}.rs`) para un builtin que la
+        mayoría de los workflows nunca usa. Efecto observable: el primer
+        `baseline_compare` de un run siempre pasa (no tiene aún nada
+        contra qué comparar) y emite `baseline_captured`; cada uno
+        posterior re-corre `baseline.suite` y falla solo si la baseline
+        capturada salió en exit 0 y la corrida nueva no. El evento
+        `baseline_captured.hash` se completa (hash del stdout) porque el
+        schema ya lo exige desde T2.2, pero la comparación real usa el
+        exit code, no el hash — comparar por igualdad exacta de hash sería
+        demasiado estricto para una suite real (timestamps, orden de
+        líneas no determinista, etc.), y el propio Contrato solo pide
+        "algo que pasaba dejó de pasar", no salida idéntica byte a byte.
+      - **`coverage_gate`, convención documentada, no leída del Contrato**:
+        la prosa solo dice "medido y comparado por el engine" sin fijar
+        contrato de parseo. `CoverageConfig`'s doc comment fija la
+        convención: el stdout de `coverage.cmd` debe contener un
+        `NN[.NN]%` en algún lado; se toma el último que aparece. El
+        extractor (`parse_last_percentage`, `node_exec.rs`) es un scanner
+        a mano sobre `&str` — no se sumó `regex` como dependencia nueva
+        para un escaneo acotado de un solo patrón (CLAUDE.md: "¿alcanza
+        std o algo ya presente?").
+      - **`findings_gate`**: compara contra `RunState.findings` **crudo**,
+        no contra la vista deduplicada de T5.12 (`dedup_findings`) —
+        un gate que pregunta "¿existe algo así de grave?" no debería
+        arriesgarse a subcontar por un heurístico de dedup pensado para
+        reportar, no para decidir. `FindingSeverity` no tenía `Ord`
+        propio; en vez de derivarlo sobre el tipo público (que leería raro
+        — `Blocking < Note` no es intuitivo), un `severity_rank` privado
+        en `node_exec.rs` ordena por declaración (`Blocking` el peor,
+        `Note` el menor) y "at or above" se resuelve comparando rangos.
+      - Ninguno de los tres builtins pasa por la memoización de T5.9
+        (`Memo`): esa cache es específica del ciclo de criterios de tarea
+        (un mismo criterio puede re-chequearse varias veces dentro de un
+        mismo intento); un nodo `check` se evalúa una sola vez por
+        ejecución de nodo, así que no hay repetición que cachear —
+        forzar el mismo mecanismo ahí sería una abstracción sin segundo
+        uso real.
+      - **No cancel-aware**: mismo recorte que un `loop` hijo de un grupo
+        `parallel` (T4.6) — un `check` hijo de un `join: any` corre hasta
+        su propio final aunque un hermano ya haya ganado. Alcance de T4.6
+        fue bash/prompt únicamente; documentado, no un silencio.
+      - Tests: 6 en `crates/core/tests/workflow.rs` (parseo de los tres
+        builtins, `max_severity` de `findings_gate`, builtin desconocido
+        rechazado). 6 end-to-end con mock en `crates/engine/tests/run.rs`
+        (`baseline_compare` pasa en su primera corrida y detecta una
+        regresión real en la segunda; `coverage_gate` pasa/falla contra
+        el threshold; `findings_gate` pasa/falla contra `max_severity`).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
-- **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6. Sin
-  `gate`/`check`/`executor`/`workflow`; sin `context:`, `skills:`, `modes:`,
-  `inputs:`, fan-out de `runners:`, `agent:` a nivel nodo, `permissions:`,
-  `scope_expansion:`, `coordination:`. Confirmado con el usuario.
-- **T1.2**: solo `runners`/`adapters`/`storage`/`paths`. Sin `mcp_servers`, `skills`,
-  `baseline`/`coverage`, `secrets`, `permissions` (con su merge invertido, D51).
-  Confirmado con el usuario.
+- **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`
+  desde T5.4. Sin `gate`/`executor`/`workflow`; sin `context:`, `skills:`,
+  `modes:`, `inputs:`, fan-out de `runners:`, `agent:` a nivel nodo,
+  `permissions:`, `scope_expansion:`, `coordination:`. Confirmado con el
+  usuario.
+- **T1.2**: `runners`/`adapters`/`storage`/`paths`, más `baseline`/`coverage`
+  desde T5.4. Sin `mcp_servers`, `skills`, `secrets`, `permissions` (con su
+  merge invertido, D51). Confirmado con el usuario.
 - **T1.3**: solo unicidad de `id`, referencias+aciclicidad de `depends_on` (excluye
   aristas de `on_failure.goto` por I14), targets de `goto` existentes, `runner:`
   resuelto contra `runners:`. Sin coherencia de modos, scopes disjuntos en

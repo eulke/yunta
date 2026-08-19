@@ -1,6 +1,6 @@
 use yunta_core::{
-    ArtifactKind, ArtifactSpec, HookFailurePolicy, JoinPolicy, NodeKind, OnInterrupt, PromptSource,
-    Workflow,
+    ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, NodeKind, OnInterrupt,
+    PromptSource, Workflow,
 };
 
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
@@ -189,6 +189,65 @@ on_interrupt: fail_if_uncertain
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(node.on_interrupt, Some(OnInterrupt::FailIfUncertain));
+}
+
+#[test]
+fn a_check_node_parses_baseline_compare_with_no_extra_fields() {
+    let yaml = r#"
+id: no-regressions
+kind: check
+builtin: baseline_compare
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Check { builtin } => assert_eq!(builtin, CheckBuiltin::BaselineCompare),
+        other => panic!("expected Check, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_check_node_parses_coverage_gate() {
+    let yaml = r#"
+id: coverage
+kind: check
+builtin: coverage_gate
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Check { builtin } => assert_eq!(builtin, CheckBuiltin::CoverageGate),
+        other => panic!("expected Check, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_check_node_parses_findings_gate_with_its_max_severity() {
+    let yaml = r#"
+id: no-blocking-findings
+kind: check
+builtin: findings_gate
+max_severity: major
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Check { builtin } => assert_eq!(
+            builtin,
+            CheckBuiltin::FindingsGate {
+                max_severity: yunta_core::events::FindingSeverity::Major,
+            }
+        ),
+        other => panic!("expected Check, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unknown_check_builtin_fails_to_parse() {
+    let yaml = r#"
+id: mystery
+kind: check
+builtin: something_undefined
+"#;
+    let result: Result<yunta_core::Node, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "unknown builtin must not parse");
 }
 
 #[test]
