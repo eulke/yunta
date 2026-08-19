@@ -3,21 +3,24 @@
 //! When a node finishes, everything it declared under `artifacts.produces`
 //! must exist and be non-empty under the run's `artifacts/` directory —
 //! no matter what the agent reported (I5). Opaque artifacts are verified
-//! by existence and content hash only, never by format. `kind:
-//! task-ledger` is the one interpreted kind in M-0: the file is parsed
-//! and validated with every violation reported together (spec-ledger §4),
-//! and the resulting [`Ledger`] is handed back so the scheduler can emit
-//! `task_registered` per task. `findings`/`questions` arrive with their
-//! own milestones.
+//! by existence and content hash only, never by format. `task-ledger`
+//! (T5.1), `findings` (T5.12) and `questions` (T5.14) are the interpreted
+//! kinds: each is parsed and validated with every violation reported
+//! together, and the parsed result handed back to the caller — `Ledger`
+//! for `task_registered`, `Finding`s for `finding_posted`, `Question`s so
+//! `node_exec.rs` can pause the run instead of finishing the node.
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::events::{Finding, FindingsFile};
-use yunta_core::{sha256_hex, ArtifactKind, ArtifactSpec, Ledger, Node, NodeId};
+use yunta_core::{
+    sha256_hex, ArtifactKind, ArtifactSpec, Ledger, Node, NodeId, Question, QuestionsFile,
+};
 
 use crate::findings::FindingsError;
 use crate::ledger::LedgerError;
+use crate::questions::QuestionsError;
 
 #[derive(Debug, Error)]
 pub enum ArtifactError {
@@ -64,6 +67,20 @@ pub enum ArtifactError {
         name: String,
         errors: Vec<FindingsError>,
     },
+
+    #[error("node `{node}`: questions `{name}` is not valid YAML: {detail}")]
+    MalformedQuestions {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    #[error("node `{node}`: questions `{name}` failed validation with {} error(s)", errors.len())]
+    InvalidQuestions {
+        node: NodeId,
+        name: String,
+        errors: Vec<QuestionsError>,
+    },
 }
 
 /// One declared artifact that passed verification — the data
@@ -78,6 +95,7 @@ pub struct VerifiedArtifact {
     pub content_hash: String,
     pub ledger: Option<Ledger>,
     pub findings: Option<Vec<Finding>>,
+    pub questions: Option<Vec<Question>>,
 }
 
 /// Verifies every artifact a node declared, collecting every violation
@@ -132,6 +150,7 @@ pub fn close_artifacts(
 
         let mut ledger = None;
         let mut findings = None;
+        let mut questions = None;
         match kind {
             Some(ArtifactKind::TaskLedger) => match parse_ledger(&node.id, name, &bytes) {
                 Ok(parsed) => ledger = Some(parsed),
@@ -147,6 +166,13 @@ pub fn close_artifacts(
                     continue;
                 }
             },
+            Some(ArtifactKind::Questions) => match parse_questions(&node.id, name, &bytes) {
+                Ok(parsed) => questions = Some(parsed),
+                Err(error) => {
+                    errors.push(error);
+                    continue;
+                }
+            },
             None => {}
         };
 
@@ -156,6 +182,7 @@ pub fn close_artifacts(
             content_hash: sha256_hex(&bytes),
             ledger,
             findings,
+            questions,
         });
     }
 
@@ -179,6 +206,30 @@ fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding
         Ok(file.findings)
     } else {
         Err(ArtifactError::InvalidFindings {
+            node: node.clone(),
+            name: name.to_string(),
+            errors: violations,
+        })
+    }
+}
+
+fn parse_questions(
+    node: &NodeId,
+    name: &str,
+    bytes: &[u8],
+) -> Result<Vec<Question>, ArtifactError> {
+    let file: QuestionsFile =
+        serde_yaml::from_slice(bytes).map_err(|e| ArtifactError::MalformedQuestions {
+            node: node.clone(),
+            name: name.to_string(),
+            detail: e.to_string(),
+        })?;
+
+    let violations = crate::questions::register(&file);
+    if violations.is_empty() {
+        Ok(file.questions)
+    } else {
+        Err(ArtifactError::InvalidQuestions {
             node: node.clone(),
             name: name.to_string(),
             errors: violations,

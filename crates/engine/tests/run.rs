@@ -582,6 +582,138 @@ sessions:
     assert_eq!(state.findings[0].id, "f1");
 }
 
+// --- T5.14: kind: questions (§4.1, D86) ------------------------------------
+
+const QUESTIONS_WORKFLOW: &str = r#"
+name: ask
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Ask what you need to know before continuing."
+    artifacts:
+      produces:
+        - { name: questions.yaml, kind: questions }
+"#;
+
+fn questions_fixture(artifacts_dir: &std::path::Path) -> String {
+    format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/questions.yaml", content: "questions:\n  - id: q1\n    text: \"Which environment?\"\n    answer_type: choice\n    values: [staging, production]\n    required: true\n  - id: q2\n    text: \"Any notes?\"\n    answer_type: text\n    required: false\n" }}
+    outcome: {{ type: completed, summary: "asked" }}
+"#,
+        artifacts = artifacts_dir.display()
+    )
+}
+
+#[tokio::test]
+async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
+    // ✓ del Plan: "el nodo que pregunta cierra su sesión antes de que se
+    // renderice nada" (la sesión mock corre y cierra normalmente, y solo
+    // *después* de eso el engine actúa sobre las preguntas) y "sin TTY el
+    // run queda `waiting`, nunca cuelga ni falla" — en este recorte no
+    // existe ninguna superficie TTY/MCP/PR (T7.1/T7.2/T8.x), así que ese
+    // es el único camino: el run pausa citando las preguntas, no panickea
+    // ni queda colgado.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = questions_fixture(&artifacts_dir);
+
+    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, &fixture).await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("q1"), "reason must name q1: {reason}");
+            assert!(reason.contains("q2"), "reason must name q2: {reason}");
+        }
+        other => panic!("expected the run to pause on unanswered questions, got {other:?}"),
+    }
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::ArtifactWritten(p)
+                if p.path.to_string_lossy().contains("questions.yaml")
+        )),
+        "the questions artifact must still be recorded as written"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::NodeFinished(_)
+        )),
+        "a node with unanswered questions must never reach node_finished"
+    );
+}
+
+#[tokio::test]
+async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_without_a_new_session(
+) {
+    // ✓ del Plan: "matar el engine durante la espera y reanudar rehace
+    // las preguntas sin estado conversacional" — el segundo `execute_run`
+    // usa un fixture sin sesiones disponibles; si el resume intentara
+    // volver a despachar el nodo, fallaría por "fixture exhausted" en vez
+    // de devolver la misma pausa.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
+    let first_report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &first_adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+    match &first_report.terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("expected the first run to pause, got {other:?}"),
+    }
+
+    // No `sessions:` at all — any attempt to dispatch a new session errors.
+    let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
+    let mut resume_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    resume_adapters.insert("mock".to_string(), Arc::new(empty_adapter));
+    let resumed_report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &resume_adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        resumed_report.terminal, first_report.terminal,
+        "resume must replay the exact same pause, no new session needed"
+    );
+}
+
 fn interval(worktree: &std::path::Path, id: &str) -> (i128, i128) {
     let start = std::fs::read_to_string(worktree.join(format!("{id}-start.txt"))).unwrap();
     let end = std::fs::read_to_string(worktree.join(format!("{id}-end.txt"))).unwrap();

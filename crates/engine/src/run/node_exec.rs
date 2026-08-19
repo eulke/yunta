@@ -467,6 +467,21 @@ pub(super) async fn close_node(
 
     match close_artifacts(node, ctx.run_dir) {
         Ok(verified) => {
+            // §4.1/T5.14: a `kind: questions` artifact's own session has
+            // already closed by this point (the same "artifact read only
+            // at node close" ordering `task-ledger`/`findings` already
+            // rely on) — nothing renders mid-session. This recorte has no
+            // TTY/MCP/PR answering surface (T7.1/T7.2/T8.x, none built
+            // yet), so every question artifact takes the Contrato's own
+            // "sin TTY" path: the run pauses citing exactly what's
+            // unanswered, never hangs, never silently proceeds as if
+            // nothing were asked (A6).
+            let pending_questions: Vec<&yunta_core::Question> = verified
+                .iter()
+                .filter_map(|artifact| artifact.questions.as_deref())
+                .flatten()
+                .collect();
+
             for artifact in &verified {
                 ctx.emit(
                     Some(&node.id),
@@ -501,6 +516,22 @@ pub(super) async fn close_node(
                     }
                 }
             }
+            if !pending_questions.is_empty() {
+                let ids: Vec<&str> = pending_questions.iter().map(|q| q.id.as_str()).collect();
+                return fail_with_tokens(
+                    ctx,
+                    node,
+                    format!(
+                        "node `{}` asked {} question(s) awaiting an answer: {}",
+                        node.id,
+                        ids.len(),
+                        ids.join(", ")
+                    ),
+                    false,
+                    tokens,
+                );
+            }
+
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFinished(NodeFinishedPayload {

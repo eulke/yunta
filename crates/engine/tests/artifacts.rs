@@ -255,6 +255,107 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     ));
 }
 
+const ASK_NODE: &str = r#"
+id: ask
+kind: prompt
+prompt: "Ask what you need to know."
+artifacts:
+  produces:
+    - { name: questions.yaml, kind: questions }
+"#;
+
+const VALID_QUESTIONS: &str = r#"
+questions:
+  - id: q1
+    text: "Which environment?"
+    answer_type: choice
+    values: [staging, production]
+    required: true
+  - id: q2
+    text: "Any notes?"
+    answer_type: text
+    required: false
+"#;
+
+#[test]
+fn a_valid_questions_artifact_is_parsed_and_returned() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "questions.yaml", VALID_QUESTIONS);
+
+    let verified = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap();
+    let questions = verified[0].questions.as_ref().expect("parsed questions");
+    let ids: Vec<&str> = questions.iter().map(|q| q.id.as_str()).collect();
+    assert_eq!(ids, ["q1", "q2"]);
+}
+
+#[test]
+fn a_choice_question_with_no_values_is_a_reported_violation() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(
+        run_dir.path(),
+        "questions.yaml",
+        r#"
+questions:
+  - id: q1
+    text: "Which environment?"
+    answer_type: choice
+    required: true
+"#,
+    );
+
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    match &errors[..] {
+        [ArtifactError::InvalidQuestions { node, name, errors }] => {
+            assert_eq!(node.as_str(), "ask");
+            assert_eq!(name, "questions.yaml");
+            assert_eq!(errors.len(), 1);
+        }
+        other => panic!("expected one InvalidQuestions error, got {other:?}"),
+    }
+}
+
+#[test]
+fn duplicate_question_ids_report_every_violation_together() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(
+        run_dir.path(),
+        "questions.yaml",
+        r#"
+questions:
+  - id: q1
+    text: "First"
+    answer_type: text
+    required: true
+  - id: q1
+    text: ""
+    answer_type: text
+    required: false
+"#,
+    );
+
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    match &errors[..] {
+        [ArtifactError::InvalidQuestions { node, name, errors }] => {
+            assert_eq!(node.as_str(), "ask");
+            assert_eq!(name, "questions.yaml");
+            assert_eq!(errors.len(), 2, "duplicate id + empty text");
+        }
+        other => panic!("expected one InvalidQuestions error, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "questions.yaml", "questions: [not, valid");
+
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    assert!(matches!(
+        &errors[..],
+        [ArtifactError::MalformedQuestions { .. }]
+    ));
+}
+
 #[test]
 fn a_node_that_declares_no_artifacts_verifies_nothing() {
     let run_dir = tempfile::tempdir().unwrap();

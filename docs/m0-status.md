@@ -1295,6 +1295,92 @@ que aparece.
         precheck— en los tres modos, aunque el veredicto que sigue
         difiera.
 
+- [x] **T5.14 — artifact `kind: questions` (§4.1, D86). Alcance recortado:
+      parseo/validación, el orden "sesión cerrada antes de renderizar" y
+      la pausa `waiting` sin TTY; la materialización real de respuestas
+      (`questions_answered` con un canal `tty|mcp|pr` real) queda sin
+      implementar.** Investigado a fondo en Notion (§4.1 completo, más
+      §5.3 para el objeto de gate que §4.1 dice que las preguntas
+      reusan sin TTY) antes de codear. Mismo criterio de separación que
+      T5.8 con `distill`: el propio `Channel` (`tty | mcp | pr`) ya viene
+      cerrado desde el bootstrap de T2.2 — no hay un cuarto valor que
+      inventar para "vía archivo" — y **ninguna de las tres superficies
+      reales tiene una sola línea de código en este repo todavía** (TTY
+      es T7.1/T7.2, MCP es M8, PR es T7.7): no es una decisión de diseño
+      abierta, es una dependencia de milestones futuros que no existe
+      para resolver acá. `replay.rs` ya documentaba exactamente este tipo
+      de brecha ("nothing emits a `gate_waiting`/`gate_resolved` pair
+      until `kind: gate` exists... extend this the day those events
+      actually appear") — mismo tratamiento para `questions_answered`.
+      - **Por qué se separó así y no de otra forma**: de los 4 ✓ del
+        Plan, 3 son puramente sobre lo que el engine hace ANTES de que
+        alguien conteste (cierre de sesión, la pausa en sí, resume sin
+        estado) — completamente testeables con mock, cero dependencia de
+        una superficie de respuesta real. El cuarto (`questions_answered`
+        con el canal usado) solo puede probarse simulando una respuesta
+        real por algún canal, y como se explica arriba ningún canal
+        existe todavía — inventar uno (ej. un archivo de respuestas al
+        estilo `SCOPE_EXPANSION_REQUEST_FILE` de T5.11) sería diseñar la
+        superficie de respuesta yo mismo sin que el Plan la pida en esta
+        tarea, exactamente el tipo de "mejora de la spec al pasar" que
+        CLAUDE.md prohíbe.
+      - **Tipos nuevos, mismo patrón que `Ledger`/`Task` (no
+        `Finding`/`FindingsFile`)**: `Question`/`QuestionsFile`/
+        `AnswerType` viven en `crates/core/src/questions.rs`, un módulo
+        propio — no en `events/payloads.rs` junto a `Finding`. La
+        diferencia real: `FindingPostedPayload` embebe `Finding` directo
+        en el evento, pero `QuestionsAnsweredPayload` (ya fijado por
+        T2.2) solo lleva `answers_hash: String` — un hash, nunca las
+        preguntas ni las respuestas estructuradas — así que `Question` no
+        es un tipo de payload de evento, es puro schema de artifact,
+        exactamente el lugar de `Ledger`/`Task`.
+      - **Validación** (`crates/engine/src/questions.rs`, mirror de
+        `findings.rs`): `id` único, `text` no vacío, y `values` no vacío
+        cuando `answer_type: choice` — la única regla que §4.1 escribe
+        explícitamente más allá del schema. Ningún error se corta en el
+        primero; se reportan todos juntos, mismo principio que
+        `findings`/`ledger`.
+      - **Dónde se engancha la pausa**: `close_node` (`node_exec.rs`), el
+        mismo punto donde `task-ledger`/`findings` ya convierten su
+        artifact en eventos — nunca antes, porque ese punto solo se
+        alcanza después de que la sesión del nodo ya cerró (el propio
+        `execute_node` despacha y espera la sesión completa antes de
+        llamar a `close_node`), lo cual le da al primer ✓ del Plan su
+        cumplimiento gratis, por construcción, sin código nuevo que lo
+        garantice. Si el artifact trae preguntas, el nodo nunca llega a
+        `node_finished`: en cambio, `fail_with_tokens` con
+        `retryable: false` — la misma función que T5.10/T5.11 ya
+        reusan para "el run necesita a un humano, no hay nada más
+        automático que hacer" — cita cada id de pregunta sin respuesta en
+        el diagnóstico. No se agregó ningún estado nuevo a `NodeState`
+        ni a `RunTerminal`: `RunTerminal::Paused` ya documentaba su
+        propio propósito como "everything done, or waiting on a human" —
+        exactamente lo que el Contrato llama `waiting` — así que
+        reusarlo es la lectura literal del comentario existente, no una
+        interpretación forzada.
+      - **Resume sin estado conversacional, también gratis**: un nodo
+        `Failed` sin `on_failure.goto` no vuelve a `ready` por sí solo
+        (`schedule.rs`, ya construido desde T4.4) — `execute_run` sobre
+        un run ya pausado por preguntas simplemente redeclara la misma
+        pausa leyendo el log, sin despachar ninguna sesión nueva. Cero
+        código nuevo de resume; el test lo prueba pasándole al segundo
+        `execute_run` un fixture mock **sin sesiones** — si el resume
+        intentara redespachar algo, fallaría con "fixture exhausted" en
+        vez de devolver la misma pausa.
+      - Tests: 4 en `crates/engine/tests/artifacts.rs` (parseo válido con
+        `choice`/`text`, `choice` sin `values` reportado, ids duplicados
+        + texto vacío reportados juntos, YAML malformado como error
+        tipado) + 2 end-to-end en `crates/engine/tests/run.rs`, cubriendo
+        3 de los 4 ✓ del Plan: la sesión mock cierra normalmente
+        (`outcome: completed`) y solo entonces el run pausa citando cada
+        id sin responder, sin `node_finished` en el log; matar el
+        "engine" (representado por invocar `execute_run` de nuevo) y
+        reanudar con un fixture sin sesiones reproduce exactamente la
+        misma pausa. El cuarto ✓ (`questions_answered` con el canal)
+        queda como deuda explícita, con su propio gatillo: cuando exista
+        T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
+        cierra este ítem — no antes.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

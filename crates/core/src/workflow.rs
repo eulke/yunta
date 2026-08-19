@@ -292,9 +292,9 @@ impl Serialize for PromptSource {
     }
 }
 
-/// `artifacts.produces` (Contrato §4). `task-ledger` and `findings` are
-/// interpreted (T5.1/T5.12); `questions` waits for T5.14. A plain string
-/// stays opaque.
+/// `artifacts.produces` (Contrato §4). `task-ledger`, `findings` and
+/// `questions` are interpreted (T5.1/T5.12/T5.14). A plain string stays
+/// opaque.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifacts {
     pub produces: Vec<ArtifactSpec>,
@@ -312,6 +312,7 @@ pub enum ArtifactSpec {
 pub enum ArtifactKind {
     TaskLedger,
     Findings,
+    Questions,
 }
 
 /// `hooks: {before, after}` (D81, §11.1).

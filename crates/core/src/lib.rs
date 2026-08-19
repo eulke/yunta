@@ -15,6 +15,7 @@ pub mod events;
 mod ids;
 mod ledger;
 mod manifest;
+mod questions;
 mod workflow;
 
 pub use capabilities::Capabilities;
@@ -29,6 +30,7 @@ pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use ledger::{Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, Manifest};
+pub use questions::{AnswerType, Question, QuestionsFile};
 pub use workflow::{
     ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, HookFailurePolicy, HookStep, Hooks,
     JoinPolicy, Node, NodeDefaults, NodeKind, NodePermissions, OnFailure, OnInterrupt,
