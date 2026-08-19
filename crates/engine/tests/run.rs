@@ -3308,3 +3308,140 @@ async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_di
         "all three classes are in play for this workflow, so all three must be recorded"
     );
 }
+
+// --- T6.5: knowledge layering, repo > user > org (§9.2) ---------------------
+
+/// `YUNTA_HOME` is process-global state (`yunta_core::user_state_root`
+/// reads it live, same as the CLI's own `project::resolve`), so any test
+/// that points it at a scratch directory must hold this for its entire
+/// critical section — never across an `.await`, so clippy's
+/// `await_holding_lock` stays clean and no tokio runtime blocks another
+/// task waiting on it.
+static KNOWLEDGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Runs `body` with `YUNTA_HOME` pointed at `user_home` for its duration,
+/// restoring whatever `YUNTA_HOME` held before (or clearing it) even if
+/// `body` panics — so a failing assertion never leaks a bad env var into
+/// whichever test runs next in this process.
+fn with_user_home<T>(user_home: &std::path::Path, body: impl FnOnce() -> T) -> T {
+    let _guard = KNOWLEDGE_ENV_LOCK.lock().unwrap();
+    let previous = std::env::var("YUNTA_HOME").ok();
+    std::env::set_var("YUNTA_HOME", user_home);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+
+    match previous {
+        Some(value) => std::env::set_var("YUNTA_HOME", value),
+        None => std::env::remove_var("YUNTA_HOME"),
+    }
+    match result {
+        Ok(value) => value,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+#[test]
+fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_is_replayable() {
+    let user_home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(user_home.path().join("knowledge")).unwrap();
+    std::fs::write(
+        user_home.path().join("knowledge/note.md"),
+        "MARKER-USER-ONLY-CONTENT\n",
+    )
+    .unwrap();
+
+    with_user_home(user_home.path(), || {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let bench = Bench::new();
+            let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
+            let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+
+            let (terminal, _state) = bench.run(&workflow, fixture).await;
+            assert_eq!(terminal, RunTerminal::Finished);
+
+            let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+            let sources = context_sources(&events, "ask");
+            assert_eq!(sources[0].kind, "knowledge");
+            assert_materialized(&bench.run_dir(), &sources[0]);
+        })
+    });
+}
+
+#[test]
+fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() {
+    let user_home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(user_home.path().join("knowledge")).unwrap();
+    // Same filename in both layers: §9.2 says repo must win.
+    std::fs::write(
+        user_home.path().join("knowledge/shared.md"),
+        "MARKER-FROM-USER-LOSES\n",
+    )
+    .unwrap();
+    std::fs::write(
+        user_home.path().join("knowledge/user-only.md"),
+        "MARKER-USER-ONLY\n",
+    )
+    .unwrap();
+
+    with_user_home(user_home.path(), || {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let bench = Bench::new();
+            std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
+            std::fs::write(
+                bench.worktree.join(".yunta/knowledge/shared.md"),
+                "MARKER-FROM-REPO-WINS\n",
+            )
+            .unwrap();
+
+            let workflow = context_workflow("      - knowledge: {}\n");
+            let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+
+            let (terminal, _state) = bench.run(&workflow, fixture).await;
+            assert_eq!(terminal, RunTerminal::Finished);
+
+            let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+            let sources = context_sources(&events, "ask");
+            assert_materialized(&bench.run_dir(), &sources[0]);
+            let path = bench
+                .run_dir()
+                .join("context")
+                .join(&sources[0].content_hash)
+                .join("content");
+            let content = std::fs::read_to_string(path).unwrap();
+            assert!(
+                content.contains("MARKER-FROM-REPO-WINS"),
+                "repo's `shared.md` must win over user's: {content}"
+            );
+            assert!(
+                !content.contains("MARKER-FROM-USER-LOSES"),
+                "user's overridden `shared.md` must not survive the merge: {content}"
+            );
+            assert!(
+                content.contains("MARKER-USER-ONLY"),
+                "user's own untouched file must still be present: {content}"
+            );
+        })
+    });
+}
+
+#[tokio::test]
+async fn requesting_the_org_knowledge_layer_fails_the_node_naming_the_layer_not_silently() {
+    // `org` is legitimate vocabulary (a versioned pack, RFC-0002) but has
+    // no resolver until M11 — a workflow asking for it must fail loudly,
+    // never resolve as if the layer were simply empty.
+    let bench = Bench::new();
+    let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
+    let fixture = "sessions: []";
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    match &state.nodes.get(&"ask".into()) {
+        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
+            assert!(outcome.contains("org"), "got: {outcome}");
+        }
+        other => panic!("expected `ask` to fail citing the `org` layer, got {other:?}"),
+    }
+    match terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}

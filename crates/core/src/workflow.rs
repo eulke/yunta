@@ -178,14 +178,35 @@ pub struct RunEventsParams {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LedgerParams {}
 
+/// One layer of `knowledge:` (§9.2), most to least local. `Org` is a
+/// legitimate schema value (the layer is a versioned pack per RFC-0002)
+/// but has no resolver yet — packs land in M11 — so requesting it is a
+/// typed error at resolution time, never a parse error: the value itself
+/// is valid vocabulary, just not implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeLayer {
+    Repo,
+    User,
+    Org,
+}
+
+impl std::fmt::Display for KnowledgeLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KnowledgeLayer::Repo => write!(f, "repo"),
+            KnowledgeLayer::User => write!(f, "user"),
+            KnowledgeLayer::Org => write!(f, "org"),
+        }
+    }
+}
+
 /// `knowledge: { layers: [...] }` (§9.2) — empty/absent `layers` means
-/// every layer the resolver can see; T6.1's own resolution is
-/// single-layer (`repo` only) until T6.5 adds real `repo > user > org`
-/// precedence.
+/// every layer the resolver can see.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct KnowledgeParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub layers: Vec<String>,
+    pub layers: Vec<KnowledgeLayer>,
 }
 
 /// `node-output: { node: ... }` (§9, §11.2) — captured stdout/stderr of a

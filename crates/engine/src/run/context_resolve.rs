@@ -15,9 +15,12 @@
 //!   rendering), never a filesystem glob walk — the Contrato's own
 //!   example uses two literal paths, and no ✓ of T6.1 exercises pattern
 //!   expansion; real glob support is debt, not silently approximated.
-//! - `knowledge:` resolves the `repo` layer only — T6.5 adds real
-//!   `repo > user > org` precedence. Requesting any other layer is a
-//!   typed error, never a silent empty result.
+//! - `knowledge:` (T6.5) resolves `repo` and `user` with real precedence
+//!   (§9.2): the two layers merge by filename, `repo` overwriting `user`
+//!   on a name collision, regardless of the order `layers:` names them
+//!   in. `org` is a legitimate schema value (a versioned pack,
+//!   RFC-0002) but has no resolver — packs land in M11 — so requesting
+//!   it is a typed error, never a silent empty result.
 //! - `node-output:` only ever has something to read for `kind: bash`
 //!   nodes (`execute_bash` is the only place this module captures output
 //!   from, right after the process exits, success or failure alike —
@@ -135,13 +138,13 @@ pub(super) enum ContextResolveError {
         filter: String,
     },
     #[error(
-        "context `{source_id}` on node `{node}`: knowledge layer `{layer}` isn't resolvable yet \
-         (T6.5) — only `repo` is"
+        "context `{source_id}` on node `{node}`: knowledge layer `{layer}` has no resolver yet \
+         — the `org` layer is a versioned pack (RFC-0002), and packs land in M11"
     )]
     UnsupportedKnowledgeLayer {
         node: NodeId,
         source_id: String,
-        layer: String,
+        layer: yunta_core::KnowledgeLayer,
     },
     #[error(
         "context `{source_id}` on node `{node}`: mcp server `{server}` is not declared in \
@@ -433,33 +436,39 @@ async fn resolve_ledger(ctx: &RunCtx<'_>) -> Result<Vec<u8>, ContextResolveError
     Ok(lines.join("\n").into_bytes())
 }
 
-async fn resolve_knowledge(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    source_id: &str,
-    params: &yunta_core::KnowledgeParams,
-) -> Result<Vec<u8>, ContextResolveError> {
-    if let Some(layer) = params.layers.iter().find(|l| l.as_str() != "repo") {
-        return Err(ContextResolveError::UnsupportedKnowledgeLayer {
-            node: node.id.clone(),
-            source_id: source_id.to_string(),
-            layer: layer.clone(),
-        });
-    }
+/// Fixed precedence order (§9.2): `repo` last, so it overwrites `user` by
+/// filename when both declare the same doc — never the order `layers:`
+/// happens to name them in.
+const KNOWLEDGE_PRECEDENCE: [yunta_core::KnowledgeLayer; 2] = [
+    yunta_core::KnowledgeLayer::User,
+    yunta_core::KnowledgeLayer::Repo,
+];
 
-    let dir = ctx.worktree.join(".yunta").join("knowledge");
+fn knowledge_dir(ctx: &RunCtx<'_>, layer: yunta_core::KnowledgeLayer) -> Option<PathBuf> {
+    match layer {
+        yunta_core::KnowledgeLayer::Repo => Some(ctx.worktree.join(".yunta").join("knowledge")),
+        yunta_core::KnowledgeLayer::User => {
+            yunta_core::user_state_root().map(|root| root.join("knowledge"))
+        }
+        yunta_core::KnowledgeLayer::Org => None,
+    }
+}
+
+fn list_knowledge_files(
+    dir: &Path,
+    node: &NodeId,
+    source_id: &str,
+) -> Result<Vec<PathBuf>, ContextResolveError> {
     if !dir.exists() {
-        // No local override is the ordinary case for a fresh repo, not a
-        // broken source — distinct from a genuinely missing artifact or
-        // node output, which always mean something the workflow expected
-        // to exist doesn't.
+        // No override at this layer is the ordinary case (a fresh repo,
+        // or no user-level knowledge yet), not a broken source — distinct
+        // from a genuinely missing artifact or node output, which always
+        // mean something the workflow expected to exist doesn't.
         return Ok(Vec::new());
     }
-
-    let mut out = Vec::new();
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|source| ContextResolveError::Io {
-            node: node.id.clone(),
+            node: node.clone(),
             source_id: source_id.to_string(),
             action: format!("list `{}`", dir.display()),
             source,
@@ -468,7 +477,54 @@ async fn resolve_knowledge(
         .filter(|path| path.is_file())
         .collect();
     entries.sort();
-    for path in entries {
+    Ok(entries)
+}
+
+async fn resolve_knowledge(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    source_id: &str,
+    params: &yunta_core::KnowledgeParams,
+) -> Result<Vec<u8>, ContextResolveError> {
+    let requested: Vec<yunta_core::KnowledgeLayer> = if params.layers.is_empty() {
+        KNOWLEDGE_PRECEDENCE.to_vec()
+    } else {
+        params.layers.clone()
+    };
+
+    if let Some(layer) = requested
+        .iter()
+        .find(|l| **l == yunta_core::KnowledgeLayer::Org)
+    {
+        return Err(ContextResolveError::UnsupportedKnowledgeLayer {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            layer: *layer,
+        });
+    }
+
+    // Precedence (§9.2): "lo del repo pisa a lo general ante conflicto" —
+    // a later layer in KNOWLEDGE_PRECEDENCE overwrites an earlier one by
+    // filename, so the same doc name in both layers resolves to exactly
+    // one copy, never two.
+    let mut by_name: std::collections::BTreeMap<std::ffi::OsString, PathBuf> =
+        std::collections::BTreeMap::new();
+    for layer in KNOWLEDGE_PRECEDENCE {
+        if !requested.contains(&layer) {
+            continue;
+        }
+        let Some(dir) = knowledge_dir(ctx, layer) else {
+            continue;
+        };
+        for path in list_knowledge_files(&dir, &node.id, source_id)? {
+            if let Some(name) = path.file_name() {
+                by_name.insert(name.to_owned(), path);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for path in by_name.into_values() {
         let bytes = std::fs::read(&path).map_err(|source| ContextResolveError::Io {
             node: node.id.clone(),
             source_id: source_id.to_string(),
@@ -707,7 +763,8 @@ fn source_id_for(spec: &ContextSpec) -> String {
             if knowledge.layers.is_empty() {
                 "knowledge:all".to_string()
             } else {
-                format!("knowledge:{}", knowledge.layers.join(","))
+                let layers: Vec<String> = knowledge.layers.iter().map(|l| l.to_string()).collect();
+                format!("knowledge:{}", layers.join(","))
             }
         }
         ContextSpec::NodeOutput { node_output } => format!("node-output:{}", node_output.node),

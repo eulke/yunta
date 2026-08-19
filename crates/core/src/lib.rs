@@ -21,10 +21,11 @@ mod workflow;
 pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    permission_layer_conflicts, AdapterSettings, BaselineConfig, CommandPermissions, ConfigLayer,
-    CoverageConfig, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation, McpServerConfig,
-    NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
-    ProjectConfig, PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
+    permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
+    CommandPermissions, ConfigLayer, CoverageConfig, DefaultsConfig, ExecutorKind,
+    ExecutorRegistration, Isolation, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
+    PackPermissions, PathsConfig, PermissionsConfig, ProjectConfig, PublisherPermissions,
+    RunnerCandidate, SkillsConfig, StorageConfig,
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
@@ -33,9 +34,9 @@ pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use questions::{AnswerType, Question, QuestionsFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, ContextSpec,
-    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeParams, LedgerParams, McpQueryParams,
-    Node, NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnInterrupt,
-    PromptSource, RunEventsParams, ScopeExpansion, Workflow,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LedgerParams,
+    McpQueryParams, Node, NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure,
+    OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

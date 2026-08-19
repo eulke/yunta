@@ -88,6 +88,18 @@ pub struct PathsConfig {
     pub worktrees: Option<PathBuf>,
 }
 
+/// The user state root: `$YUNTA_HOME`, or `~/.yunta` when unset. Shared by
+/// the CLI (which layers `config.yaml` from it, T1.2) and the engine
+/// (which reads `knowledge/` from it live at context-resolution time,
+/// T6.5) so the two never drift on what "the user layer" means. `None`
+/// only when neither `YUNTA_HOME` nor `HOME` is set.
+pub fn user_state_root() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("YUNTA_HOME") {
+        return Some(PathBuf::from(home));
+    }
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".yunta"))
+}
+
 /// How a first-level run isolates its working tree from the checkout
 /// that started it (§7.3, T4.2). `worktree` (default) gives each run its
 /// own `git worktree`; `none` operates directly on the given checkout,

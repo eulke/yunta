@@ -1456,7 +1456,7 @@ que aparece.
         T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
         cierra este ítem — no antes.
 
-## M6 — Contexto (en progreso: T6.1–T6.4)
+## M6 — Contexto (completo: T6.1–T6.5)
 
 - [x] **T6.1 — trait `ContextSource` + builtins (§9). Alcance recortado
       con varias llamadas de ingeniería documentadas, no un gap único
@@ -1752,6 +1752,55 @@ que aparece.
         el mismo hash; y las tres claves (`stable`/`run-stable`/
         `volatile`) están presentes porque el workflow de prueba
         ejercita las tres.
+
+- [x] **T6.5 — knowledge layering, `repo > user > org` (§9.2).** T6.1 solo
+      resolvía la capa `repo`; §9.2 fija la precedencia completa: "lo del
+      repo pisa a lo general ante conflicto". `org` es un pack versionado
+      (RFC-0002) sin resolver hasta M11 — pedirlo debe fallar tipado, no
+      resolver vacío.
+      - **`KnowledgeLayer` como enum cerrado, no `String`** (`Repo | User
+        | Org`) — parse-don't-validate: un valor fuera de vocabulario en
+        `layers:` (p. ej. `galaxy`) es ahora un error de *parseo* del
+        workflow (serde_yaml, `ContextSpec` sigue siendo untagged desde
+        T6.1), nunca algo que `resolve_knowledge` descubre en runtime.
+        `org` sigue siendo vocabulario válido del enum — su error vive en
+        la resolución (abajo), no en el parseo, porque es una capa real
+        del contrato que simplemente no tiene implementación todavía.
+      - **`yunta_core::user_state_root()` compartido cli/engine.** La CLI
+        ya calculaba `$YUNTA_HOME` o `~/.yunta` para cargar `config.yaml`
+        (T1.2, antes duplicado como `project::user_root` en
+        `crates/cli/src/project.rs`); T6.5 necesita el mismo root para
+        que el motor lea `knowledge/` en vivo al resolver contexto. Se
+        movió la función a `yunta-core` y la CLI ahora delega en ella —
+        una sola fuente de verdad sobre qué es "la capa user", nunca dos
+        cálculos que puedan divergir.
+      - **Merge por nombre de archivo, `repo` gana el empate.** Las dos
+        capas resueltas (`user`, luego `repo`) se acumulan en un
+        `BTreeMap` por nombre de archivo; `repo` se aplica después de
+        `user` en un orden de precedencia fijo
+        (`KNOWLEDGE_PRECEDENCE`), así que un archivo con el mismo nombre
+        en ambas capas resuelve a la versión de `repo` sin importar el
+        orden en que `layers:` las nombre. `layers:` vacío/ausente sigue
+        significando "todas las capas resolubles" (ahora `user` +
+        `repo`, `org` nunca incluida implícitamente).
+      - **`org` es un error tipado, citando la capa y RFC-0002/M11.**
+        `ContextResolveError::UnsupportedKnowledgeLayer` ahora toma un
+        `KnowledgeLayer` en vez de `String` (ya no hace falta convertir a
+        texto en el sitio del error — `Display` lo hace en el mensaje).
+      - **Sin directorio no es error.** Ni `user` (nadie corrió `yunta`
+        antes en esa máquina) ni `repo` (repo fresco sin
+        `.yunta/knowledge/`) fallan por ausencia de carpeta — mismo
+        principio que ya regía T6.1 para `repo` solo.
+      - Tests: 2 de schema en `crates/core/tests/workflow.rs` (`layers:
+        [repo, user, org]` parsea a las tres variantes en orden; un
+        nombre de capa inválido es error de parseo, no de runtime) + 3
+        end-to-end en `crates/engine/tests/run.rs` (`layers: [user]`
+        resuelve `~/.yunta/knowledge/` vía `YUNTA_HOME` y es replayable;
+        `knowledge: {}` sin `layers:` mezcla `repo`+`user`, con `repo`
+        ganando un archivo de mismo nombre y el archivo exclusivo de
+        `user` sobreviviendo intacto; pedir `layers: [org]` falla el
+        nodo citando la capa en el diagnóstico, en vez de resolver
+        vacío).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

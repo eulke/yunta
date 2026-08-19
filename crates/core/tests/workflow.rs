@@ -582,8 +582,51 @@ context:
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     match &node.context[0] {
         yunta_core::ContextSpec::Knowledge { knowledge } => {
-            assert_eq!(knowledge.layers, vec!["repo".to_string()])
+            assert_eq!(knowledge.layers, vec![yunta_core::KnowledgeLayer::Repo])
         }
         other => panic!("expected Knowledge, got {other:?}"),
     }
+}
+
+#[test]
+fn a_knowledge_source_can_declare_every_layer_by_name() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+context:
+  - knowledge: { layers: [repo, user, org] }
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match &node.context[0] {
+        yunta_core::ContextSpec::Knowledge { knowledge } => assert_eq!(
+            knowledge.layers,
+            vec![
+                yunta_core::KnowledgeLayer::Repo,
+                yunta_core::KnowledgeLayer::User,
+                yunta_core::KnowledgeLayer::Org,
+            ]
+        ),
+        other => panic!("expected Knowledge, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unknown_knowledge_layer_name_is_a_parse_error_not_a_runtime_surprise() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+context:
+  - knowledge: { layers: [galaxy] }
+"#;
+    // `ContextSpec` is untagged (T6.1) — serde_yaml doesn't surface which
+    // variant's inner field rejected an unknown enum value, only that
+    // none matched. It is still, correctly, a parse-time error rather
+    // than something `resolve_knowledge` discovers at run time.
+    let err = serde_yaml::from_str::<yunta_core::Node>(yaml).unwrap_err();
+    assert!(
+        err.to_string().contains("did not match any variant"),
+        "error was: {err}"
+    );
 }

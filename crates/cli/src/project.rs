@@ -39,12 +39,7 @@ pub enum ProjectError {
 }
 
 fn user_root() -> Result<PathBuf, ProjectError> {
-    if let Ok(home) = std::env::var("YUNTA_HOME") {
-        return Ok(PathBuf::from(home));
-    }
-    std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".yunta"))
-        .ok_or(ProjectError::NoStateRoot)
+    yunta_core::user_state_root().ok_or(ProjectError::NoStateRoot)
 }
 
 fn org_config_path() -> PathBuf {
