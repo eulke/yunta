@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Budget, PermissionProfile, SessionRequest};
 use yunta_core::events::{
     EventPayload, HookExecutedPayload, HookPhase, NodeFailedPayload, NodeFinishedPayload,
-    RunnerResolvedPayload, TokenUsage,
+    RunnerResolvedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind, PromptSource};
 
@@ -482,6 +482,29 @@ pub(super) async fn close_node(
                 .flatten()
                 .collect();
 
+            // §5.7/T5.13: a re-plan — this same node producing a task
+            // ledger a second time, whether via a reroute back to it or a
+            // resumed run — must not silently keep a task `done` whose
+            // identity actually changed. Identity is exactly the
+            // Contrato's own wording: same `id`, same `criteria`, same
+            // `scope` — `depends_on` is deliberately not part of it, the
+            // spec never mentions it. The most recent prior registration
+            // per task id is all that's needed; `TaskRegistered`'s own
+            // replay handling (`or_insert`, never overwrites an existing
+            // status) already makes an identical re-registration a no-op,
+            // so only a genuine mismatch needs an explicit event here.
+            let previous_registrations: BTreeMap<
+                yunta_core::TaskId,
+                (Vec<yunta_core::events::Criterion>, Vec<String>),
+            > = ctx
+                .load_events()?
+                .into_iter()
+                .filter_map(|event| match event.payload {
+                    EventPayload::TaskRegistered(p) => Some((p.task_id, (p.criteria, p.scope))),
+                    _ => None,
+                })
+                .collect();
+
             for artifact in &verified {
                 ctx.emit(
                     Some(&node.id),
@@ -492,7 +515,7 @@ pub(super) async fn close_node(
                 )?;
                 if let Some(ledger) = &artifact.ledger {
                     for task in &ledger.tasks {
-                        ctx.emit(
+                        let registered_seq = ctx.emit(
                             Some(&node.id),
                             EventPayload::TaskRegistered(
                                 yunta_core::events::TaskRegisteredPayload {
@@ -503,6 +526,19 @@ pub(super) async fn close_node(
                                 },
                             ),
                         )?;
+                        let changed_identity = previous_registrations.get(&task.id).is_some_and(
+                            |(criteria, scope)| *criteria != task.criteria || *scope != task.scope,
+                        );
+                        if changed_identity {
+                            ctx.emit(
+                                Some(&node.id),
+                                EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                                    task_id: task.id.clone(),
+                                    new_status: TaskStatus::Pending,
+                                    caused_by: registered_seq,
+                                }),
+                            )?;
+                        }
                     }
                 }
                 if let Some(findings) = &artifact.findings {

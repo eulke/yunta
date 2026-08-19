@@ -1295,6 +1295,81 @@ que aparece.
         precheck— en los tres modos, aunque el veredicto que sigue
         difiera.
 
+- [x] **T5.13 — re-plan: qué sobrevive a un ledger nuevo (§5.7, D84).**
+      §5.7 vino completa — regla de identidad (mismo `id`, mismos
+      `criteria`, mismo `scope`), qué pasa con lo que cambió (vuelve a
+      `pending`), y la garantía de que el trabajo commiteado nunca se
+      revierte, palabra por palabra. Ningún gap de mecanismo que
+      documentar como llamada de ingeniería esta vez — la única decisión
+      real fue *dónde* engancharlo, no *qué* hace.
+      - **Disparador: el mecanismo de re-ruta ya construido en T4.4, sin
+        una sola línea nueva.** §5.7 dice que un nodo de planificación
+        "puede volver a ejecutarse... por una re-ruta" — y `schedule.rs`
+        ya sabe re-despachar un nodo de corrección aunque ya haya
+        terminado antes (`ScheduleStep::Reroute` seguido de
+        `corrective_finished_since` → el nodo que falló "vuelve a ready y
+        re-corre", literal de §11.2). Un loop cuyo `on_failure.goto`
+        apunta de vuelta al propio nodo `plan` reproduce exactamente el
+        escenario de §5.7 sin ningún cambio a `schedule.rs`: la tarea
+        rebota (bloqueada, o cualquier otra causa de fallo del loop) →
+        el loop falla → re-ruta a `plan` → `plan` corre una sesión
+        fresca y sobreescribe su propio artifact → una vez que `plan`
+        termina, el loop "vuelve a ready" y su próxima invocación de
+        `execute_loop` relee el ledger, ahora con contenido nuevo.
+      - **Dónde vive la comparación de identidad**: `node_exec.rs`'s
+        `close_node`, el mismo punto donde `TaskRegistered` ya se emite
+        por cada tarea del ledger (T5.1) — nunca en `loop_exec.rs`, que
+        ni siquiera sabe si el ledger que acaba de leer es el primero o
+        el enésimo. Antes de emitir los `TaskRegistered` de esta pasada,
+        se arma un mapa `task_id → (criteria, scope)` de la registración
+        **más reciente** de cada id ya presente en el log completo
+        (`ctx.load_events()`); para cada tarea del ledger nuevo, si ya
+        existía con `criteria`/`scope` distintos, se emite
+        `TaskStatusChanged { new_status: Pending, caused_by: <seq del
+        TaskRegistered recién emitido> }` justo después de registrarla
+        de nuevo. `depends_on` queda deliberadamente fuera de la
+        comparación — §5.7 nombra solo `id`+`criteria`+`scope`, ninguna
+        otra cosa.
+      - **"Conserva `done` sin reejecutar" sale gratis, sin código
+        nuevo**: `TaskRegistered`'s propio manejo en `replay.rs` ya usa
+        `entry(...).or_insert(Pending)` — una segunda registración con
+        el mismo id nunca pisa el estado que ya tiene esa tarea. Una
+        tarea idéntica entre ledgers simplemente no dispara la
+        comparación de arriba (no hay diferencia que reportar), así que
+        su `Done` (o cualquier estado que tuviera) queda intacto por
+        construcción — la propiedad que el ✓ del Plan pide ya la
+        garantizaba T2.3, T5.13 solo necesitaba no romperla al agregar
+        la mitad que faltaba (la invalidación).
+      - **Por qué el ledger de tareas se puede re-registrar sin violar
+        I3 en la práctica**: el archivo `artifacts/plan.yaml` en disco sí
+        se sobreescribe cuando `plan` corre de nuevo (la sesión del
+        agente escribe al mismo path) — pero el dato que T5.13 necesita
+        para comparar identidad nunca se re-lee del archivo: vive
+        permanentemente en cada `TaskRegistered` ya escrito al event log
+        append-only (I2), que sí es inmutable. La comparación de este
+        task lee el log, nunca el archivo viejo.
+      - **El trabajo commiteado no se revierte, tampoco por diseño
+        nuevo**: nada en el pipeline de integración (T5.10) toca el
+        worktree compartido salvo para hacer fast-forward hacia
+        adelante; una tarea invalidada por re-plan simplemente vuelve a
+        entrar al ciclo normal de `select_batch`/`dispatch_task_in_isolation`
+        con un worktree fresco derivado del HEAD *actual* — que ya
+        incluye cualquier commit de una tarea hermana intacta. No hay
+        "revertir" en ningún código de este engine, así que no hacía
+        falta escribir nada para garantizar que no pase.
+      - Test: 1 end-to-end en `crates/engine/tests/run.rs` que ejercita
+        los tres ✓ del Plan a la vez sobre un solo escenario (más fiel a
+        cómo ocurre un re-plan real que separarlos): `task-a` declarada
+        idéntica en ambos ledgers nunca vuelve a `Running`; `task-c`
+        cambia de criterio (mismo id) y su secuencia de estados es
+        `Running → Blocked → Pending → Running → Done` — la re-ruta real
+        a `plan`, no una invalidación simulada; el log conserva **ambas**
+        registraciones de `task-c` (T5.1's propio criterio de auditoría,
+        nunca se pierde una versión); y el commit `"task task-a: Write
+        a"` sigue presente en el worktree después de que `task-c`
+        termina, confirmando que integrar el trabajo re-planeado nunca
+        tocó el de la tarea que sobrevivió intacta.
+
 - [x] **T5.14 — artifact `kind: questions` (§4.1, D86). Alcance recortado:
       parseo/validación, el orden "sesión cerrada antes de renderizar" y
       la pausa `waiting` sin TTY; la materialización real de respuestas

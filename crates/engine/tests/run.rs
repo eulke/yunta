@@ -2734,3 +2734,147 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         );
     }
 }
+
+// --- T5.13: re-plan (§5.7, D84) ---------------------------------------------
+
+#[tokio::test]
+async fn a_replan_preserves_an_identical_task_and_resets_one_whose_criteria_changed() {
+    // ✓ del Plan (los tres): task-a se declara idéntica en ambos ledgers
+    // y debe conservar `done` sin volver a correr; task-c cambia de
+    // criterio (mismo id) y debe volver a `pending`; el commit de task-a
+    // sigue en el worktree después del re-plan, y task-c corre sobre ese
+    // mismo estado, no sobre uno revertido.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = r#"
+name: replan
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the ledger and implement it."
+    on_failure: { goto: plan, max_reroutes: 1 }
+"#;
+
+    let ledger_v1 = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
+        // Never satisfiable by any effect a session can produce — task-c
+        // exhausts its retries and blocks, which is what fails the loop
+        // and triggers the reroute back to `plan`.
+        task_yaml(
+            "task-c",
+            "Write c (bad criterion)",
+            "c.txt",
+            "test -f nonexistent-marker-c"
+        ),
+    );
+    // Same id, same scope for both tasks; task-a's criterion is byte-
+    // identical, task-c's is fixed to something satisfiable — the one
+    // real identity change in this re-plan.
+    let ledger_v2 = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
+        task_yaml("task-c", "Write c (fixed)", "c.txt", "test -f c.txt"),
+    );
+
+    let mut fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display(),
+        ledger_v1,
+    );
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
+    );
+    for _ in 0..=DEFAULT_MAX_RETRIES {
+        fixture.push_str(
+            "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
+        );
+    }
+    fixture.push_str(&format!(
+        "  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: replanned }}\n",
+        artifacts_dir.display(),
+        ledger_v2,
+    ));
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get(&"task-a".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get(&"task-c".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let statuses_of = |task: &str| -> Vec<yunta_core::events::TaskStatus> {
+        events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                yunta_core::events::EventPayload::TaskStatusChanged(p)
+                    if p.task_id.as_str() == task =>
+                {
+                    Some(p.new_status)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        statuses_of("task-a"),
+        vec![
+            yunta_core::events::TaskStatus::Running,
+            yunta_core::events::TaskStatus::Done,
+        ],
+        "an identical re-registration must never dispatch task-a again"
+    );
+
+    assert_eq!(
+        statuses_of("task-c"),
+        vec![
+            yunta_core::events::TaskStatus::Running,
+            yunta_core::events::TaskStatus::Blocked,
+            yunta_core::events::TaskStatus::Pending,
+            yunta_core::events::TaskStatus::Running,
+            yunta_core::events::TaskStatus::Done,
+        ],
+        "a changed criterion must reset task-c to pending and let it run again"
+    );
+
+    let registered_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                yunta_core::events::EventPayload::TaskRegistered(p) if p.task_id.as_str() == "task-c"
+            )
+        })
+        .count();
+    assert_eq!(
+        registered_count, 2,
+        "both the original and the re-planned registration must stay in the log"
+    );
+
+    let commits = commit_subjects(&bench.worktree);
+    assert!(
+        commits.contains(&"task task-a: Write a".to_string()),
+        "task-a's committed work must survive the re-plan: {commits:?}"
+    );
+}
