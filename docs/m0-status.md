@@ -236,6 +236,17 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         ningún run; `none` opera directo y libera su lock al terminar;
         **`resume` continúa en el mismo worktree que `run` creó** — no uno
         nuevo, ni el checkout original).
+      - **Deuda no cubierta: el lock de `none` no detecta staleness.** Si un
+        run bajo `isolation: none` termina de forma abrupta (crash del
+        proceso `yunta`, no un `Paused` prolijo) mientras tiene el lock
+        tomado, nadie lo libera — `release_worktree` solo corre al final del
+        camino feliz de `run`/`resume`. Un humano tiene que borrar a mano
+        `<git-common-dir>/yunta-none.lock` antes de que un run nuevo pueda
+        arrancar ahí. No hay PID/timestamp en el lock file ni chequeo de
+        "¿el proceso que lo tomó sigue vivo?". Gatillo para resolverlo:
+        cuando un crash real deje un lock huérfano en la práctica (o antes,
+        si se decide que vale la pena el costo de detectar procesos muertos
+        de forma portable).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
