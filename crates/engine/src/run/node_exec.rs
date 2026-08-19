@@ -235,14 +235,39 @@ async fn execute_parallel(
     }
 }
 
-pub(super) fn template_vars(ctx: &RunCtx<'_>) -> BTreeMap<String, String> {
-    BTreeMap::from([
+/// Template variables for one node's own rendering (§9.3/T6.3): `run.*`
+/// is always present; `runner.role` is the node's own declared `runner:`
+/// (the role name itself, known statically from the workflow — never the
+/// adapter/model a later resolution step picks, so no ordering
+/// dependency on `resolve_node_runner`); `project.*` mirrors whatever
+/// the merged config's `project:` group declares. `{{inputs.*}}` is
+/// deliberately absent — T1.5 owns declaring, validating and supplying
+/// input values at all; adding the namespace here first would mean
+/// inventing that schema unreviewed. See `docs/m0-status.md`'s T6.3
+/// entry.
+pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, String> {
+    let mut vars = BTreeMap::from([
         ("run.dir".to_string(), ctx.run_dir.display().to_string()),
         (
             "run.worktree".to_string(),
             ctx.worktree.display().to_string(),
         ),
-    ])
+    ]);
+    if let Some(role) = &node.runner {
+        vars.insert("runner.role".to_string(), role.clone());
+    }
+    if let Some(project) = &ctx.manifest.config.project {
+        if let Some(name) = &project.name {
+            vars.insert("project.name".to_string(), name.clone());
+        }
+        if let Some(base_branch) = &project.base_branch {
+            vars.insert("project.base_branch".to_string(), base_branch.clone());
+        }
+        if let Some(branch_prefix) = &project.branch_prefix {
+            vars.insert("project.branch_prefix".to_string(), branch_prefix.clone());
+        }
+    }
+    vars
 }
 
 /// Renders `input` or fails the node with a diagnostic naming the
@@ -253,7 +278,7 @@ pub(super) fn render_or_fail(
     node: &Node,
     input: &str,
 ) -> Result<Result<String, NodeEnd>, RunError> {
-    match render_template(input, &template_vars(ctx)) {
+    match render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Ok(rendered)),
         Err(e) => {
             let end = fail(ctx, node, e.to_string(), false)?;
@@ -280,7 +305,7 @@ async fn run_hook(
     phase: HookPhase,
     step: &HookStep,
 ) -> Result<HookRun, RunError> {
-    let rendered = match render_template(&step.run, &template_vars(ctx)) {
+    let rendered = match render_template(&step.run, &template_vars(ctx, node)) {
         Ok(rendered) => rendered,
         Err(e) => {
             // An unrenderable hook is a failed hook — recorded as such.

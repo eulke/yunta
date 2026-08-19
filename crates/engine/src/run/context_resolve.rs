@@ -276,7 +276,7 @@ async fn resolve_files(
     source_id: &str,
     files: &[String],
 ) -> Result<Vec<u8>, ContextResolveError> {
-    let vars = template_vars(ctx);
+    let vars = template_vars(ctx, node);
     let mut out = Vec::new();
     for pattern in files {
         let rendered =
@@ -309,7 +309,7 @@ async fn resolve_command(
     source_id: &str,
     command: &str,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    let vars = template_vars(ctx);
+    let vars = template_vars(ctx, node);
     let rendered = render_template(command, &vars).map_err(|e| ContextResolveError::Template {
         node: node.id.clone(),
         source_id: source_id.to_string(),
@@ -497,7 +497,7 @@ async fn resolve_mcp(
             server: params.server.clone(),
         })?;
 
-    let vars = template_vars(ctx);
+    let vars = template_vars(ctx, node);
     let query =
         render_template(&params.query, &vars).map_err(|e| ContextResolveError::Template {
             node: node.id.clone(),

@@ -3153,3 +3153,64 @@ nodes:
     assert_eq!(sources[0].kind, "node-output");
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
+
+// --- T6.3: templates — {{runner.role}}, {{project.*}} ----------------------
+
+#[tokio::test]
+async fn a_node_can_reference_its_own_runner_role_by_template() {
+    // ✓ del Plan: render golden — {{runner.role}} es el nombre de rol
+    // declarado en `runner:`, conocido estáticamente, nunca el
+    // adapter/model que una resolución posterior elige.
+    let bench = Bench::new();
+    let workflow = r#"
+name: role-template
+nodes:
+  - id: only
+    kind: bash
+    runner: executor
+    run: "test 'executor' = '{{runner.role}}'"
+"#;
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn a_node_can_reference_project_config_by_template() {
+    let bench = Bench::new();
+    let config = format!(
+        "{CONFIG}\nproject:\n  name: mi-repo\n  base_branch: main\n  branch_prefix: yunta/\n"
+    );
+    let workflow = r#"
+name: project-template
+nodes:
+  - id: only
+    kind: bash
+    run: "test '{{project.name}}' = 'mi-repo' && test '{{project.base_branch}}' = 'main' && test '{{project.branch_prefix}}' = 'yunta/'"
+"#;
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn an_undefined_inputs_variable_still_fails_the_node_clearly() {
+    // T1.5 owns declaring/validating/supplying `{{inputs.*}}` — absent
+    // that, referencing it is exactly the same "undefined variable"
+    // failure any other unknown name would get, never silent text.
+    let bench = Bench::new();
+    let workflow = r#"
+name: undefined-input
+nodes:
+  - id: only
+    kind: bash
+    run: "echo {{inputs.idea}}"
+"#;
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("inputs.idea"), "got: {reason}");
+        }
+        other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
+    }
+}

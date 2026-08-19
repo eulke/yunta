@@ -63,6 +63,20 @@ pub struct StorageConfig {
     pub retention_days: Option<u32>,
 }
 
+/// `project:` (§9's own `{{project.*}}` template namespace, T6.3) — the
+/// reference config's own three fields. M-0 cut: read-only data for
+/// templates, nothing here drives behavior yet (`base_branch` isn't
+/// consulted by any re-route/PR logic in this recorte).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProjectConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_prefix: Option<String>,
+}
+
 /// `paths:` (§2.2, D52) — where run/worktree state lives. `YUNTA_HOME` is
 /// an environment override applied when resolving the merged config, not
 /// a field of it.
@@ -259,6 +273,8 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<StorageConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<PathsConfig>,
@@ -327,6 +343,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
             |_base, more| more,
         ),
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
+        project: merge_fields(base.project, more_specific.project, merge_project_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
         defaults: merge_fields(base.defaults, more_specific.defaults, merge_defaults_config),
         // Every field in these two is required (no internal optionality
@@ -604,6 +621,14 @@ fn merge_storage_config(base: StorageConfig, more_specific: StorageConfig) -> St
     StorageConfig {
         path: more_specific.path.or(base.path),
         retention_days: more_specific.retention_days.or(base.retention_days),
+    }
+}
+
+fn merge_project_config(base: ProjectConfig, more_specific: ProjectConfig) -> ProjectConfig {
+    ProjectConfig {
+        name: more_specific.name.or(base.name),
+        base_branch: more_specific.base_branch.or(base.base_branch),
+        branch_prefix: more_specific.branch_prefix.or(base.branch_prefix),
     }
 }
 

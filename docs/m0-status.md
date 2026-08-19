@@ -1456,7 +1456,7 @@ que aparece.
         T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
         cierra este ítem — no antes.
 
-## M6 — Contexto (en progreso: T6.1–T6.2)
+## M6 — Contexto (en progreso: T6.1–T6.3)
 
 - [x] **T6.1 — trait `ContextSource` + builtins (§9). Alcance recortado
       con varias llamadas de ingeniería documentadas, no un gap único
@@ -1646,6 +1646,57 @@ que aparece.
         la referencia, `auth_env` ausente es un servidor público válido,
         una capa repo reemplaza una entrada entera de `mcp_servers:` sin
         tocar las demás — mismo merge que `runners:`).
+
+- [x] **T6.3 — templates: `{{runner.role}}`, `{{project.*}}` (§9.3).
+      Alcance recortado: `{{inputs.*}}` queda explícitamente afuera.**
+      `{{run.*}}` ya existía desde T4.x (`render_or_fail`/`run_hook`,
+      construidos antes de que este task existiera formalmente); el
+      mecanismo genérico de error en variable indefinida
+      (`TemplateError::Undefined`, T4.x también) ya cubre **cualquier**
+      namespace por diseño — nunca hizo falta código nuevo para que
+      `{{project.foo}}` o `{{inputs.bar}}` fallen limpio si nadie los
+      define; T6.3 solo necesitaba decidir qué namespaces poblar de
+      verdad.
+      - **Por qué `{{inputs.*}}` se dejó afuera, explícito, no
+        silencioso**: `T1.5` es quien declara el schema de `inputs:`
+        (tipos, `required`/`default` excluyentes, validación por tipo,
+        existencia de `path`) y quien lo conecta a algo que provea
+        valores reales (`--input k=v` es T7.1, todavía sin CLI). Nada de
+        eso existe en este recorte. Improvisar ahora un
+        `HashMap<String,String>` de inputs sin tipos ni validación,
+        solo para que el namespace "funcione", sería diseñar el schema
+        de T1.5 sin pasar por esa tarea — exactamente lo que CLAUDE.md
+        pide no hacer ("las specs no se mejoran al pasar"). El test
+        `an_undefined_inputs_variable_still_fails_the_node_clearly`
+        prueba que hoy referenciar `{{inputs.idea}}` ya falla limpio,
+        citando el nombre — el comportamiento correcto mientras T1.5 no
+        aterrice, no un hueco.
+      - **`{{runner.role}}` sin reordenar nada**: el nombre del rol es
+        `node.runner` mismo — un `String` ya conocido estáticamente
+        desde el propio workflow, nunca el adapter/model que
+        `resolve_node_runner` elige después. No hacía falta mover la
+        resolución del runner antes del render ni pasar datos nuevos:
+        `template_vars` pasó a tomar `node: &Node` (antes solo `ctx`) y
+        lee `node.runner` directo, en los 6 call sites que ya existían
+        (`render_or_fail`, `run_hook`, y los tres resolvers de
+        `context_resolve.rs` que ya recibían `node` — T6.1/T6.2).
+      - **`project:` como grupo de config nuevo**: `ProjectConfig {
+        name, base_branch, branch_prefix }`, merge por campo
+        (repo > user > org, sin techo especial — mismo trato que
+        `paths:`/`defaults:`), exactamente los tres campos de la
+        referencia. M-0 cut deliberado: nada en este recorte *usa*
+        `base_branch` para nada más que templates — D48 (warning ante
+        push directo a la rama base) es T1.3 propiamente, sin
+        implementar acá.
+      - Tests: 2 de schema en `crates/core/tests/config.rs`
+        (`project:` parsea la forma de referencia, una capa repo
+        reemplaza solo los campos que declara, el resto sobrevive de
+        org) + 3 end-to-end en `crates/engine/tests/run.rs`
+        (`{{runner.role}}` resuelve al rol declarado del propio nodo;
+        los tres campos de `{{project.*}}` resuelven desde una capa de
+        config real; `{{inputs.idea}}` sigue fallando limpio, citando el
+        nombre, confirmando el recorte de arriba en lugar de solo
+        documentarlo).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

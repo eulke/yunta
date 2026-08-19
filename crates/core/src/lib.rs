@@ -24,7 +24,7 @@ pub use config::{
     permission_layer_conflicts, AdapterSettings, BaselineConfig, CommandPermissions, ConfigLayer,
     CoverageConfig, DefaultsConfig, ExecutorKind, ExecutorRegistration, Isolation, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
-    PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
+    ProjectConfig, PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};

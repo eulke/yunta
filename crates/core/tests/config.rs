@@ -542,3 +542,43 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     assert_eq!(merged["internal-docs"].auth_env, None);
     assert_eq!(merged["other"].url, "https://other.example.com/mcp");
 }
+
+#[test]
+fn project_parses_the_reference_config_shape() {
+    let yaml = r#"
+project:
+  name: mi-repo
+  base_branch: main
+  branch_prefix: yunta/
+"#;
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    let project = layer.project.unwrap();
+    assert_eq!(project.name.as_deref(), Some("mi-repo"));
+    assert_eq!(project.base_branch.as_deref(), Some("main"));
+    assert_eq!(project.branch_prefix.as_deref(), Some("yunta/"));
+}
+
+#[test]
+fn repo_overrides_only_the_project_fields_it_sets() {
+    let org = ConfigLayer {
+        project: Some(yunta_core::ProjectConfig {
+            name: Some("org-default".to_string()),
+            base_branch: Some("main".to_string()),
+            branch_prefix: None,
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        project: Some(yunta_core::ProjectConfig {
+            name: Some("mi-repo".to_string()),
+            base_branch: None,
+            branch_prefix: None,
+        }),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]).project.unwrap();
+    assert_eq!(merged.name.as_deref(), Some("mi-repo"));
+    assert_eq!(merged.base_branch.as_deref(), Some("main"));
+    assert_eq!(merged.branch_prefix, None);
+}
