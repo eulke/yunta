@@ -67,7 +67,7 @@ pub(super) async fn execute_node(
     let end = match &node.kind {
         NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
         NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
-        NodeKind::Loop { until, prompt } => {
+        NodeKind::Loop { until, prompt, .. } => {
             // A loop's own task dispatch isn't cancel-aware in this
             // recorte (T4.6's scope is bash/prompt children) — a loop
             // child of a `join: any` group runs to its own completion

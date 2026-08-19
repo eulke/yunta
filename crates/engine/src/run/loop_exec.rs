@@ -1,17 +1,27 @@
-//! The loop node's task cycle (T4.1 + T5.2 wiring, Contrato §5.2/§5.5):
-//! iterate the registered ledger task by task, run each through
-//! [`run_task`], record every check in the log, and commit verified work
-//! so the next task's scope check sees only its own diff.
+//! The loop node's task cycle (T4.1 + T5.2 + T5.10 wiring, Contrato
+//! §5.2/§5.5): each iteration forms a batch of up to `concurrency` `ready`
+//! tasks (ledger declaration order), dispatches every member in its own
+//! isolated worktree concurrently, then integrates them **serially, in
+//! that same declaration order** — rebase onto the current tree,
+//! re-verify criteria and scope there, and only then fast-forward the
+//! run's shared worktree. `concurrency: 1` (the default) walks the exact
+//! same path with a batch of one; §5.5/D65 are explicit that this needs
+//! no special case.
+
+use std::path::{Path, PathBuf};
 
 use yunta_adapters::Budget;
 use yunta_core::events::{
-    CriterionResult, CriterionType, EventPayload, LoopIterationPayload, Phase, TaskStatus,
+    CriteriaCheckedPayload, CriterionResult, CriterionType, Event, EventPayload,
+    LoopIterationPayload, Phase, ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
     TokenUsage,
 };
-use yunta_core::{Ledger, Node, PromptSource, Task};
+use yunta_core::{Isolation, Ledger, Node, NodeKind, PromptSource, Task};
 
-use crate::replay::derive;
-use crate::task_cycle::{run_task, TaskOutcome};
+use crate::replay::{derive, RunState};
+use crate::scope::scope_check;
+use crate::task_cycle::{post_check, run_task, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
+use crate::worktree::prepare_worktree;
 
 use super::node_exec::{
     close_node, fail, fail_with_tokens, prompt_text, render_or_fail, resolve_node_runner, NodeEnd,
@@ -53,6 +63,14 @@ pub(super) async fn execute_loop(
         );
     };
 
+    // Absent means the engine's own default, 1 — sequential, deliberately
+    // not config-overridable (§5.5/D65: token spend multiplies with it,
+    // so it's declared per-workflow, never inherited silently).
+    let concurrency = match &node.kind {
+        NodeKind::Loop { concurrency, .. } => concurrency.unwrap_or(1).max(1),
+        _ => 1,
+    };
+
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
     // Blocked reasons gathered this invocation, so the loop's own failure
@@ -66,15 +84,9 @@ pub(super) async fn execute_loop(
         let events = ctx.load_events()?;
         let state = derive(&events);
 
-        let next_task = ledger.tasks.iter().find(|task| {
-            state.tasks.get(&task.id) == Some(&TaskStatus::Pending)
-                && task
-                    .depends_on
-                    .iter()
-                    .all(|dep| state.tasks.get(dep) == Some(&TaskStatus::Done))
-        });
+        let batch = select_batch(&ledger, &state, concurrency);
 
-        let Some(task) = next_task else {
+        if batch.is_empty() {
             let all_done = ledger
                 .tasks
                 .iter()
@@ -105,45 +117,210 @@ pub(super) async fn execute_loop(
             return fail_with_tokens(ctx, node, diagnostic, false, tokens);
         };
 
-        let registered_seq = events
-            .iter()
-            .find(|event| {
-                matches!(&event.payload, EventPayload::TaskRegistered(p) if p.task_id == task.id)
-            })
-            .map(|event| event.seq)
-            .unwrap_or(0);
-        if let Some(reason) = run_one_task(
-            ctx,
-            node,
-            task,
-            registered_seq,
-            &instruction,
-            adapter.as_ref(),
-            &mut tokens,
-        )
-        .await?
-        {
-            blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
+        // Every batch member's worktree branches from the same starting
+        // point (§5.5: "worktree por tarea desde el commit base actual"),
+        // captured once so all N tasks work from an identical snapshot.
+        let base_commit = head_commit(ctx.worktree).await?;
+
+        let dispatches = futures::future::join_all(batch.iter().map(|task| {
+            dispatch_task_in_isolation(
+                ctx,
+                node,
+                task,
+                &events,
+                &base_commit,
+                &instruction,
+                adapter.as_ref(),
+            )
+        }))
+        .await;
+
+        // Integration is serial and follows the batch's own order, which
+        // is ledger declaration order (§5.5: "en orden de declaración del
+        // ledger — no en orden de finalización") — never the order
+        // dispatch happened to finish in.
+        for dispatch in dispatches {
+            let (task, task_worktree, mut report) = dispatch?;
+
+            let mut last_check_seq = ctx.emit(
+                Some(&node.id),
+                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                    task_id: task.id.clone(),
+                    phase: Phase::Pre,
+                    results: to_results(&report.pre_check),
+                }),
+            )?;
+
+            for attempt in report.attempts.drain(..) {
+                tokens = sum_tokens(tokens, attempt.tokens);
+                last_check_seq = ctx.emit(
+                    Some(&node.id),
+                    EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                        task_id: task.id.clone(),
+                        phase: Phase::Post,
+                        results: to_results(&attempt.post_check),
+                    }),
+                )?;
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ScopeChecked(ScopeCheckedPayload {
+                        task_id: Some(task.id.clone()),
+                        diff: attempt.scope.diff,
+                        violations: attempt.scope.violations,
+                    }),
+                )?;
+            }
+
+            let blocked_reason = match report.outcome {
+                TaskOutcome::Blocked { reason } => {
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                            task_id: task.id.clone(),
+                            new_status: TaskStatus::Blocked,
+                            caused_by: last_check_seq,
+                        }),
+                    )?;
+                    Some(reason)
+                }
+                TaskOutcome::Done => {
+                    let outcome = integrate_task(
+                        ctx,
+                        node,
+                        task,
+                        &task_worktree,
+                        &ctx.memo,
+                        &mut last_check_seq,
+                    )
+                    .await?;
+                    // §5.5's own words: a rejected integration "vuelve a
+                    // ready sobre el árbol nuevo" — back to `Pending`, so
+                    // a future batch retries it automatically. This is
+                    // deliberately NOT `Blocked`: green in isolation but
+                    // broken by a sibling's integration is a timing
+                    // artifact of concurrency, not evidence the task
+                    // itself can't succeed — that verdict only comes from
+                    // `run_task`'s own retry exhaustion, the branch above.
+                    let new_status = match &outcome {
+                        IntegrationOutcome::Integrated => TaskStatus::Done,
+                        IntegrationOutcome::Rejected(reason) => {
+                            tracing::warn!(
+                                task_id = %task.id,
+                                %reason,
+                                "task integration rejected, returning to ready"
+                            );
+                            TaskStatus::Pending
+                        }
+                    };
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                            task_id: task.id.clone(),
+                            new_status,
+                            caused_by: last_check_seq,
+                        }),
+                    )?;
+                    // Never counted toward the loop's own "no task ready"
+                    // diagnostic — a `Pending` task is retriable, not
+                    // stuck, so there's nothing to cite a human decision
+                    // for yet.
+                    None
+                }
+            };
+            if let Some(reason) = blocked_reason {
+                blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
+            }
         }
     }
 }
 
+/// Up to `concurrency` tasks this iteration may work on, in ledger
+/// declaration order: a task whose dependencies are all `Done` and is
+/// itself still `Pending`, or an orphaned `Running` task with no
+/// terminal event after it (a crash mid-batch, §5.5's own resume
+/// guarantee — "las que quedaron `running` huérfanas se reejecutan").
+/// Scope disjointness between independent tasks is **not** re-checked
+/// here: `ledger::register` (T5.1) already refuses two tasks without a
+/// `depends_on` edge declaring overlapping scope, so any two tasks that
+/// can both be `ready` at once are disjoint by construction.
+fn select_batch<'a>(ledger: &'a Ledger, state: &RunState, concurrency: u32) -> Vec<&'a Task> {
+    ledger
+        .tasks
+        .iter()
+        .filter(|task| match state.tasks.get(&task.id) {
+            Some(TaskStatus::Pending) => task
+                .depends_on
+                .iter()
+                .all(|dep| state.tasks.get(dep) == Some(&TaskStatus::Done)),
+            Some(TaskStatus::Running) => true,
+            _ => false,
+        })
+        .take(concurrency as usize)
+        .collect()
+}
+
+/// How many times this task has already been dispatched `Running` in the
+/// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
+/// worktree/branch names unique across a resumed orphan's fresh attempt;
+/// never fed into retry-limit logic (that's `run_task`'s own
+/// `max_retries`, scoped to one dispatch).
+fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::TaskStatusChanged(p)
+                    if p.task_id == *task_id && p.new_status == TaskStatus::Running
+            )
+        })
+        .count() as u32
+        + 1
+}
+
+/// Isolates one batch member in its own worktree (§5.5: "cada tarea del
+/// lote recibe su propio worktree derivado del commit base actual") and
+/// runs it through the ordinary task cycle there — pre-check, dispatch,
+/// post-check, scope-check, retried up to `max_task_retries` exactly as
+/// the sequential path always has. Never commits or marks the task
+/// `done`/`blocked` in the log itself; that's the caller's job once every
+/// batch member's dispatch has settled, so integration can stay strictly
+/// serial and in declaration order.
 #[allow(clippy::too_many_arguments)]
-/// Runs one task through the cycle and records its lifecycle in the log.
-/// Returns the blocked reason when the task ends `Blocked`, so the loop
-/// can cite it in its own eventual failure.
-async fn run_one_task(
+async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task: &Task,
-    registered_seq: u64,
+    task: &'a Task,
+    events: &[Event],
+    base_commit: &str,
     instruction: &str,
     adapter: &dyn yunta_adapters::Adapter,
-    tokens: &mut TokenUsage,
-) -> Result<Option<String>, RunError> {
+) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
+    let attempt = attempt_number(events, &task.id);
+    let task_worktree = ctx
+        .run_dir
+        .join("task-worktrees")
+        .join(format!("{}-{attempt}", task.id));
+    let branch = format!("yunta/task/{}/{attempt}", task.id);
+    prepare_worktree(
+        ctx.worktree,
+        &task_worktree,
+        base_commit,
+        &branch,
+        Isolation::Worktree,
+    )
+    .await?;
+
+    let registered_seq = events
+        .iter()
+        .find(|event| {
+            matches!(&event.payload, EventPayload::TaskRegistered(p) if p.task_id == task.id)
+        })
+        .map(|event| event.seq)
+        .unwrap_or(0);
     ctx.emit(
         Some(&node.id),
-        EventPayload::TaskStatusChanged(yunta_core::events::TaskStatusChangedPayload {
+        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
             task_id: task.id.clone(),
             new_status: TaskStatus::Running,
             caused_by: registered_seq,
@@ -154,7 +331,7 @@ async fn run_one_task(
         task,
         instruction,
         adapter,
-        ctx.worktree,
+        &task_worktree,
         ctx.max_task_retries,
         Budget::default(),
         &ctx.memo,
@@ -163,72 +340,111 @@ async fn run_one_task(
     )
     .await?;
 
-    let mut last_check_seq = ctx.emit(
-        Some(&node.id),
-        EventPayload::CriteriaChecked(yunta_core::events::CriteriaCheckedPayload {
-            task_id: task.id.clone(),
-            phase: Phase::Pre,
-            results: to_results(&report.pre_check),
-        }),
-    )?;
-
-    for attempt in &report.attempts {
-        *tokens = sum_tokens(*tokens, attempt.tokens);
-        last_check_seq = ctx.emit(
-            Some(&node.id),
-            EventPayload::CriteriaChecked(yunta_core::events::CriteriaCheckedPayload {
-                task_id: task.id.clone(),
-                phase: Phase::Post,
-                results: to_results(&attempt.post_check),
-            }),
-        )?;
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
-                task_id: Some(task.id.clone()),
-                diff: attempt.scope.diff.clone(),
-                violations: attempt.scope.violations.clone(),
-            }),
-        )?;
-    }
-
-    let (new_status, blocked_reason) = match report.outcome {
-        TaskOutcome::Done => (TaskStatus::Done, None),
-        TaskOutcome::Blocked { reason } => (TaskStatus::Blocked, Some(reason)),
-    };
-    if new_status == TaskStatus::Done {
-        // §5.5: a verified task is committed before the next one runs, so
-        // every task's scope check sees only its own diff — without this,
-        // T001's uncommitted edits would count against T002's scope.
-        commit_task_work(ctx, task).await?;
-    }
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::TaskStatusChanged(yunta_core::events::TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status,
-            caused_by: last_check_seq,
-        }),
-    )?;
-    Ok(blocked_reason)
+    Ok((task, task_worktree, report))
 }
 
-/// Commits a done task's work in the worktree. A task that changed
-/// nothing (its criteria were satisfied by side effects that left no
-/// diff) simply produces no commit — never an error.
-async fn commit_task_work(ctx: &RunCtx<'_>, task: &Task) -> Result<(), RunError> {
-    let git = |args: Vec<String>| {
-        let worktree = ctx.worktree.to_path_buf();
-        async move {
-            tokio::process::Command::new("git")
-                .args(&args)
-                .current_dir(&worktree)
-                .output()
-                .await
-        }
-    };
+enum IntegrationOutcome {
+    Integrated,
+    Rejected(String),
+}
 
-    let add = git(vec!["add".into(), "-A".into()])
+/// Integrates one task verified `Done` in isolation (§5.5, D65): rebase
+/// its branch onto the run's *current* integration HEAD (which may have
+/// moved since this batch started, if an earlier-declared sibling
+/// integrated first), re-run criteria and scope right there — green in
+/// isolation is necessary, never sufficient, since a sibling's
+/// integration can change the ground a task's work sits on — and only on
+/// a clean re-verification does the shared worktree fast-forward onto the
+/// rebased result. A rebase conflict or a post-integration criteria/scope
+/// failure returns the task to `ready` on the new tree; nothing else in
+/// the batch is touched.
+async fn integrate_task(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    task_worktree: &Path,
+    memo: &Memo,
+    last_check_seq: &mut u64,
+) -> Result<IntegrationOutcome, RunError> {
+    commit_task_work(task_worktree, task).await?;
+
+    let integration_head = head_commit(ctx.worktree).await?;
+    if !run_git_ok(task_worktree, &["rebase", &integration_head]).await? {
+        let _ = run_git(task_worktree, &["rebase", "--abort"]).await;
+        // No `post_check` ran — nothing to attach the reason to but the
+        // rebase itself, so it's recorded the same way any other command
+        // outcome is: a synthetic `CriterionRun` naming the git command
+        // and its (failing) exit code, through the existing
+        // `CriteriaChecked` vocabulary rather than a new event kind.
+        *last_check_seq = ctx.emit(
+            Some(&node.id),
+            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: task.id.clone(),
+                phase: Phase::Post,
+                results: vec![CriterionResult {
+                    cmd: format!("git rebase {integration_head}"),
+                    exit_code: 1,
+                    r#type: None,
+                    reused: false,
+                }],
+            }),
+        )?;
+        return Ok(IntegrationOutcome::Rejected(format!(
+            "rebase onto the integrated tree conflicted for task `{}`",
+            task.id
+        )));
+    }
+
+    let post_runs = post_check(task, task_worktree, memo).await?;
+    *last_check_seq = ctx.emit(
+        Some(&node.id),
+        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+            task_id: task.id.clone(),
+            phase: Phase::Post,
+            results: to_results(&post_runs),
+        }),
+    )?;
+    let scope = scope_check(task_worktree, &task.scope).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::ScopeChecked(ScopeCheckedPayload {
+            task_id: Some(task.id.clone()),
+            diff: scope.diff.clone(),
+            violations: scope.violations.clone(),
+        }),
+    )?;
+
+    let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
+    if !criteria_green || !scope.violations.is_empty() {
+        return Ok(IntegrationOutcome::Rejected(format!(
+            "criteria or scope failed after integration for task `{}`",
+            task.id
+        )));
+    }
+
+    let task_head = head_commit(task_worktree).await?;
+    if !run_git_ok(ctx.worktree, &["merge", "--ff-only", &task_head]).await? {
+        // §5.5's integration is strictly serial (the engine itself, not
+        // an external actor, is the only writer to `ctx.worktree` between
+        // reading `integration_head` above and this merge) — a non-fast-
+        // forward here means that invariant broke, not a legitimate task
+        // outcome, so it surfaces as an engine error rather than a
+        // `ready` retry.
+        return Err(RunError::Git {
+            context: format!("fast-forward integration of task `{}`", task.id),
+            detail: "expected a clean fast-forward after rebase but git refused it".to_string(),
+        });
+    }
+    Ok(IntegrationOutcome::Integrated)
+}
+
+/// Commits a done task's work in `cwd` — the task's own isolated worktree
+/// during integration (§5.5), or the run's shared worktree when
+/// `concurrency` never applies. A task that changed nothing (its criteria
+/// were satisfied by side effects that left no diff) simply produces no
+/// commit — never an error.
+async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
+    let add = run_git(cwd, &["add", "-A"])
         .await
         .map_err(|source| RunError::Io {
             context: format!("stage task `{}` work", task.id),
@@ -241,7 +457,7 @@ async fn commit_task_work(ctx: &RunCtx<'_>, task: &Task) -> Result<(), RunError>
         });
     }
 
-    let staged = git(vec!["diff".into(), "--cached".into(), "--quiet".into()])
+    let staged = run_git(cwd, &["diff", "--cached", "--quiet"])
         .await
         .map_err(|source| RunError::Io {
             context: format!("inspect staged work for task `{}`", task.id),
@@ -251,12 +467,15 @@ async fn commit_task_work(ctx: &RunCtx<'_>, task: &Task) -> Result<(), RunError>
         return Ok(()); // nothing staged — nothing to commit
     }
 
-    let commit = git(vec![
-        "commit".into(),
-        "-q".into(),
-        "-m".into(),
-        format!("task {}: {}", task.id, task.title),
-    ])
+    let commit = run_git(
+        cwd,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            &format!("task {}: {}", task.id, task.title),
+        ],
+    )
     .await
     .map_err(|source| RunError::Io {
         context: format!("commit task `{}` work", task.id),
@@ -271,7 +490,39 @@ async fn commit_task_work(ctx: &RunCtx<'_>, task: &Task) -> Result<(), RunError>
     Ok(())
 }
 
-fn to_results(runs: &[crate::task_cycle::CriterionRun]) -> Vec<CriterionResult> {
+async fn run_git(cwd: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+}
+
+async fn run_git_ok(cwd: &Path, args: &[&str]) -> Result<bool, RunError> {
+    let output = run_git(cwd, args).await.map_err(|source| RunError::Io {
+        context: format!("run git {}", args.join(" ")),
+        source,
+    })?;
+    Ok(output.status.success())
+}
+
+async fn head_commit(repo: &Path) -> Result<String, RunError> {
+    let output = run_git(repo, &["rev-parse", "HEAD"])
+        .await
+        .map_err(|source| RunError::Io {
+            context: "read the integration HEAD commit".to_string(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(RunError::Git {
+            context: "read the integration HEAD commit".to_string(),
+            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
     runs.iter()
         .map(|run| CriterionResult {
             cmd: run.cmd.clone(),

@@ -90,6 +90,9 @@ pub enum RunError {
 
     #[error(transparent)]
     EventsExport(#[from] crate::events_export::EventsExportError),
+
+    #[error(transparent)]
+    Worktree(#[from] crate::worktree::WorktreeError),
 }
 
 /// Everything node execution needs, borrowed once. Also owns the small

@@ -135,6 +135,15 @@ pub enum NodeKind {
     Loop {
         until: String,
         prompt: PromptSource,
+        /// Simultaneous `ready` tasks per batch (§5.5, D65) — absent
+        /// means the engine's own default, `1` (sequential; "no hay caso
+        /// especial", the batch mechanism handles both the same way).
+        /// Declared per-node, deliberately: no config-level default
+        /// exists anywhere in the reference schema, since token spend
+        /// multiplies with it and nobody should discover that from the
+        /// bill instead of the workflow file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        concurrency: Option<u32>,
     },
     /// Nodes named by the author, run at once (§5.8, T4.6) — distinct
     /// from a loop's own `concurrency:` (§5.5), whose task count doesn't

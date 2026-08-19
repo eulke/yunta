@@ -332,3 +332,115 @@ async fn a_single_session_fixture_still_scripts_exactly_one_spawn() {
         Err(err) => assert!(err.to_string().contains("exhausted"), "got: {err}"),
     }
 }
+
+fn prompt_request(cwd: PathBuf, prompt: &str) -> SessionRequest {
+    SessionRequest {
+        prompt: prompt.to_string(),
+        ..request(cwd)
+    }
+}
+
+#[tokio::test]
+async fn match_prompt_contains_picks_the_right_script_out_of_call_order() {
+    // T5.10: concurrent task dispatch means spawn() calls no longer land
+    // in fixture-declaration order — a script that names which request
+    // it belongs to must be selectable regardless of when it's called.
+    // Each request gets its OWN cwd (as real per-task worktrees would),
+    // so the assertions can tell whose effect actually landed where.
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let fixture = r#"
+sessions:
+  - match_prompt_contains: "task-b"
+    effects:
+      - { path: b.txt, content: "b" }
+    outcome: { type: completed, summary: did-b }
+  - match_prompt_contains: "task-a"
+    effects:
+      - { path: a.txt, content: "a" }
+    outcome: { type: completed, summary: did-a }
+"#;
+    let adapter = MockAdapter::from_yaml(fixture).unwrap();
+
+    // Spawned in the OPPOSITE order the fixture declares them.
+    let session_a = adapter
+        .spawn(prompt_request(dir_a.path().to_path_buf(), "do task-a now"))
+        .await
+        .unwrap();
+    drain(session_a).await;
+    let session_b = adapter
+        .spawn(prompt_request(dir_b.path().to_path_buf(), "do task-b now"))
+        .await
+        .unwrap();
+    drain(session_b).await;
+
+    assert!(
+        dir_a.path().join("a.txt").exists(),
+        "task-a's request must get task-a's own script, not whatever spawned first"
+    );
+    assert!(
+        !dir_a.path().join("b.txt").exists(),
+        "task-a's cwd must never see task-b's effect"
+    );
+    assert!(dir_b.path().join("b.txt").exists(), "task-b's own effect");
+    assert!(!dir_b.path().join("a.txt").exists());
+}
+
+#[tokio::test]
+async fn a_matched_script_is_never_consumed_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = r#"
+sessions:
+  - match_prompt_contains: "task-a"
+    outcome: { type: completed, summary: did-a }
+"#;
+    let adapter = MockAdapter::from_yaml(fixture).unwrap();
+
+    let first = adapter
+        .spawn(prompt_request(dir.path().to_path_buf(), "do task-a"))
+        .await
+        .unwrap();
+    drain(first).await;
+
+    match adapter
+        .spawn(prompt_request(dir.path().to_path_buf(), "do task-a again"))
+        .await
+    {
+        Ok(_) => panic!("the matching script was already consumed"),
+        Err(err) => assert!(err.to_string().contains("exhausted"), "got: {err}"),
+    }
+}
+
+#[tokio::test]
+async fn unmatched_scripts_still_serve_in_declaration_order() {
+    // Fixtures that never set match_prompt_contains keep today's exact
+    // behavior — this field is additive, not a breaking change.
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = r#"
+sessions:
+  - effects:
+      - { path: first.txt, content: "1" }
+    outcome: { type: completed, summary: first }
+  - effects:
+      - { path: second.txt, content: "2" }
+    outcome: { type: completed, summary: second }
+"#;
+    let adapter = MockAdapter::from_yaml(fixture).unwrap();
+
+    drain(
+        adapter
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(dir.path().join("first.txt").exists());
+    drain(
+        adapter
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(dir.path().join("second.txt").exists());
+}

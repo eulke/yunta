@@ -82,6 +82,15 @@ pub struct SessionScript {
     #[serde(default)]
     pub effects: Vec<MockEffect>,
     pub outcome: MockOutcome,
+    /// Selects this script by a substring of the spawning request's own
+    /// prompt, instead of by call order (T5.10: concurrent task dispatch
+    /// means several `spawn()` calls race, so pure declaration-order
+    /// consumption can no longer promise which request gets which
+    /// script). Absent — the vast majority of fixtures, unchanged — keeps
+    /// today's exact behavior: consumed strictly in declaration order,
+    /// among the other unmatched scripts.
+    #[serde(default)]
+    pub match_prompt_contains: Option<String>,
 }
 
 fn default_model() -> String {

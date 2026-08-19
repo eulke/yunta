@@ -11,8 +11,8 @@ mod fixture;
 pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -28,16 +28,18 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub struct MockAdapter {
     fixture: MockFixture,
-    /// Index of the next session script `spawn()` consumes.
-    next_session: AtomicUsize,
+    /// One flag per `fixture.sessions` entry — `true` once `spawn()` has
+    /// claimed it. Replaces a bare atomic counter (T5.10: concurrent task
+    /// dispatch races several `spawn()` calls at once, so "the next
+    /// index" stops meaning "the right script" — see
+    /// `SessionScript::match_prompt_contains`).
+    consumed: Mutex<Vec<bool>>,
 }
 
 impl MockAdapter {
     pub fn new(fixture: MockFixture) -> Self {
-        Self {
-            fixture,
-            next_session: AtomicUsize::new(0),
-        }
+        let consumed = Mutex::new(vec![false; fixture.sessions.len()]);
+        Self { fixture, consumed }
     }
 
     pub fn from_yaml(yaml: &str) -> std::result::Result<Self, serde_yaml::Error> {
@@ -91,20 +93,48 @@ impl Adapter for MockAdapter {
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
-        let index = self.next_session.fetch_add(1, Ordering::SeqCst);
-        let script = self
-            .fixture
-            .sessions
-            .get(index)
-            .ok_or_else(|| YuntaError::Adapter {
-                adapter: "mock".to_string(),
-                message: format!(
-                    "fixture exhausted: {} scripted session(s), spawn #{} requested — \
-                     add a session to the fixture for every session the run opens",
-                    self.fixture.sessions.len(),
-                    index + 1
-                ),
-            })?;
+        let index = {
+            let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
+            let claim = self
+                .fixture
+                .sessions
+                .iter()
+                .enumerate()
+                .find_map(|(i, script)| {
+                    let matches = script
+                        .match_prompt_contains
+                        .as_deref()
+                        .is_some_and(|needle| req.prompt.contains(needle));
+                    (!consumed[i] && matches).then_some(i)
+                });
+            // No script named this request explicitly — fall back to the
+            // next unconsumed script that never opted into matching by
+            // prompt at all, in declaration order. This is the entire
+            // pre-T5.10 behavior for every fixture that doesn't use
+            // `match_prompt_contains`.
+            let claim = claim.or_else(|| {
+                self.fixture
+                    .sessions
+                    .iter()
+                    .enumerate()
+                    .find(|(i, script)| !consumed[*i] && script.match_prompt_contains.is_none())
+                    .map(|(i, _)| i)
+            });
+            let Some(index) = claim else {
+                return Err(YuntaError::Adapter {
+                    adapter: "mock".to_string(),
+                    message: format!(
+                        "fixture exhausted: {} scripted session(s), none left unconsumed and \
+                         matching this request — add a session to the fixture for every \
+                         session the run opens",
+                        self.fixture.sessions.len(),
+                    ),
+                });
+            };
+            consumed[index] = true;
+            index
+        };
+        let script = &self.fixture.sessions[index];
 
         self.apply_effects(script, &req.cwd)?;
 

@@ -1036,6 +1036,135 @@ que aparece.
         también se escribe tras `Paused`, incluyendo el propio evento de
         cierre en ambos casos).
 
+- [x] **T5.10 — paralelismo de tareas del ledger, `concurrency: N` (§5.5,
+      D65).** A diferencia de T5.6-T5.9, esta spec vino **completa** —
+      Contrato §5.5 y D65 fijan mecanismo, orden de integración,
+      interacción con memoización, presupuesto y default, palabra por
+      palabra. Solo dos detalles de mecánica git quedaron sin fijar
+      (abajo), resueltos con una llamada de ingeniería defendible en vez
+      de una nueva pregunta, dado que no decidían si la feature era
+      testeable (a diferencia del gap de T5.8).
+      - **Un solo camino de código, sin caso especial** ("si el ledger es
+        una cadena de dependencias, el lote es de 1 y el comportamiento
+        coincide con el secuencial"): `execute_loop` ya no distingue
+        `concurrency: 1` de `concurrency: N` — TODO batch pasa por
+        worktree-por-tarea + integración serializada, incluido el camino
+        que antes era la ejecución secuencial simple. Los 42 tests
+        preexistentes (incluido el bootstrap plan→loop→gate) siguen en
+        verde sin tocarse, confirmando que la unificación es
+        observacionalmente idéntica al comportamiento anterior.
+      - **Formación del lote** (`select_batch`): hasta `concurrency` tareas
+        `ready` en **orden de declaración del ledger** — nunca de
+        finalización. La disjunción de scope entre tareas independientes
+        **no se re-chequea acá**: `ledger::register` (T5.1, ya construido
+        en el bootstrap) ya rechaza dos tareas sin `depends_on` entre sí
+        que declaren scopes solapados, así que cualquier par que pueda
+        estar `ready` a la vez ya es disjunto por construcción — reuso
+        directo, no lógica nueva.
+      - **Worktree por tarea** (`dispatch_task_in_isolation`): un
+        `git worktree add` real por miembro del lote (`prepare_worktree`,
+        ya existente desde T4.2), derivado del HEAD de integración
+        **capturado una sola vez por lote** — todas las tareas del mismo
+        lote parten del mismo snapshot. Ubicación:
+        `run.dir/task-worktrees/<task_id>-<intento>`; branch
+        `yunta/task/<task_id>/<intento>`. El número de intento se deriva
+        del log (cuántos `TaskStatusChanged: running` tiene ya esa tarea),
+        nunca de un contador en memoria — sobrevive resume sin estado
+        extra.
+      - **Integración serializada** (`integrate_task`): rebase de la
+        tarea sobre el HEAD de integración *actual* (que puede haber
+        avanzado por una integración previa del mismo lote) →
+        reejecución de criterios y scope ahí → solo entonces
+        fast-forward del worktree compartido. "Verde en el árbol
+        individual es necesario, nunca suficiente" se cumple literal: el
+        veredicto que cuenta es siempre el de esta segunda pasada.
+      - **Corrección semántica real, no un detalle menor**: §5.5 dice
+        literal "esa tarea **vuelve a ready**" cuando la integración
+        rechaza — **no** `Blocked`. Es una distinción real que casi se me
+        pasa: `Blocked` (el mismo que ya existía) es el veredicto de
+        `run_task` agotando sus propios reintentos — "esta tarea no
+        puede con esto". Un rechazo de integración es un artefacto de
+        *timing* de la concurrencia, no evidencia de que la tarea no
+        pueda: la tarea vuelve a `Pending` y un lote futuro la reintenta
+        sola, automáticamente, sin necesitar una decisión humana. El test
+        `a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns_to_ready`
+        verifica la secuencia completa de `TaskStatusChanged` para
+        confirmar el `Pending` intermedio, no solo el estado final.
+      - **Auditoría del rechazo, sin evento nuevo**: un fallo de
+        criterios/scope post-integración ya tiene su propio
+        `CriteriaChecked`/`ScopeChecked` (mismo mecanismo del ciclo
+        normal) al que apunta `caused_by`. Un conflicto de **rebase**
+        (que nunca llega a correr `post_check`) no tenía a qué apuntar —
+        resuelto reusando el vocabulario existente: un `CriterionRun`
+        sintético (`cmd: "git rebase <head>"`, `exit_code: 1`) vía el
+        mismo evento `CriteriaChecked`, en vez de inventar un kind nuevo
+        para lo que en el fondo es "un comando falló". Además,
+        `tracing::warn!` en el momento del rechazo (Observabilidad desde
+        el día uno).
+      - **Guards/suites globales "una vez por lote", gratis por
+        memoización**: no se escribió lógica de dedup — el propio §5.5 lo
+        anticipa ("la memoización lo resuelve sin lógica extra") y T5.9 ya
+        estaba construido antes de este task exactamente para esto. No se
+        tocó `Memo` en absoluto.
+      - **Dos detalles de mecánica git que el Contrato no fija (llamada de
+        ingeniería, no un ADR nuevo)**:
+        1. *Qué pasa en un conflicto de rebase*: `git rebase --abort` +
+           rechazo (arriba). Alternativa descartada: dejar el worktree en
+           conflicto sin abortar — más "inspeccionable" pero deja basura
+           git real que un intento futuro con el mismo `task_id` pero
+           nuevo número de intento no toca (cada intento usa su propio
+           directorio/branch), así que no hay razón para no limpiar.
+        2. *Reintentos ilimitados de integración*: si dos tareas
+           conflictúan de rebase **siempre** entre sí (caso patológico,
+           no mencionado por el Contrato), nada en este recorte pone un
+           techo — cada lote futuro las reintentaría indefinidamente. No
+           se inventó un cap: §5.5 no pide uno, y el caso general ya se
+           autolimita (una vez el HEAD de integración avanza, la mayoría
+           de las tareas pasan a estar genuinamente rojas en su propio
+           pre-check y `run_task` las bloquea por agotamiento real, como
+           muestra el propio test de arriba). Documentado como límite
+           conocido, no una promesa incumplida.
+      - **`concurrency` no tiene default de config**: solo existe a nivel
+        nodo (`Option<u32>`), sin `defaults.concurrency` ni
+        `node_defaults.concurrency` — inferido de la ausencia total en el
+        schema de referencia más la razón explícita del propio §5.5
+        ("nadie debe descubrirlo por la factura"), no de una frase
+        literal que lo prohíba. Confirmable después si hace falta.
+      - **`yunta-adapters` ganó una capacidad real, no un parche de
+        test**: `MockAdapter` servía sesiones estrictamente en orden de
+        llamada (`AtomicUsize`) — su propio doc decía "deterministic
+        because M-0 execution is sequential", supuesto que T5.10 rompe
+        por primera vez (dispatch concurrente real de varias sesiones a
+        la vez). Como A8 exige que **todo** camino del engine sea
+        ejercitable con mock, esto no era negociable: `SessionScript`
+        ganó `match_prompt_contains: Option<String>` (selecciona el
+        script por substring del prompt entrante — que ya incluye el
+        `task_id` vía el template de `run_task`), y `MockAdapter` pasó de
+        un contador atómico a un `Mutex<Vec<bool>>` de consumo. Aditivo y
+        retrocompatible: un fixture que nunca declara el campo nuevo se
+        comporta exactamente igual que antes — verificado con un test
+        dedicado (`unmatched_scripts_still_serve_in_declaration_order`).
+      - Tests: 3 nuevos en `crates/adapters/tests/mock.rs` (matching por
+        substring fuera de orden de llamada, un script matcheado nunca se
+        consume dos veces, fixtures sin el campo nuevo mantienen el
+        comportamiento de siempre) + 2 de schema en
+        `crates/core/tests/workflow.rs` (`concurrency` ausente/declarado)
+        + 4 end-to-end en `crates/engine/tests/run.rs`, uno por cada ✓ del
+        Plan: reproducibilidad real (8 tareas independientes,
+        `concurrency: 4` vs `concurrency: 1`, mismo estado final y
+        **misma secuencia exacta de mensajes de commit** — con dispatch
+        genuinamente concurrente vía `tokio::join_all` + el mock nuevo);
+        una tarea verde en aislamiento que se cae tras la integración de
+        otra vuelve a `Pending` sin tocar a la otra (verificado con la
+        secuencia completa de `TaskStatusChanged`, no solo el estado
+        final); scope de cada tarea evaluado contra su propio diff nunca
+        el de su par (inspecciona los `ScopeChecked.diff` de cada tarea
+        buscando el archivo de la otra); matar el engine a mitad de lote
+        (log escrito a mano: una tarea `Done` ya integrada, otra
+        `Running` huérfana) y reanudar reejecuta solo la huérfana —
+        confirmado contando cuántas veces la tarea ya-Done recibe
+        `Running` en el log tras el resume (debe ser exactamente 1).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

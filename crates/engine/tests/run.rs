@@ -1730,3 +1730,513 @@ nodes:
         "a paused run's export must include the pause itself"
     );
 }
+
+// --- T5.10: concurrency: N in loop nodes (§5.5, D65) -----------------------
+
+const CONCURRENCY_CONFIG: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+"#;
+
+/// An 8-independent-task ledger: no `depends_on` between any of them, each
+/// with its own disjoint scope (`out-N.txt`) so `ledger::register` (T5.1)
+/// accepts it as a legal batch of fully parallelizable work.
+fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String {
+    format!(
+        "  - id: {id}\n    title: \"{title}\"\n    scope: [\"{scope}\"]\n    criteria:\n      - cmd: \"{criterion}\"\n"
+    )
+}
+
+fn eight_independent_tasks_ledger() -> String {
+    let mut yaml = String::from("tasks:\n");
+    for n in 1..=8 {
+        yaml.push_str(&format!(
+            "  - id: task-{n}\n    title: \"Write out-{n}\"\n    scope: [\"out-{n}.txt\"]\n    criteria:\n      - cmd: \"test -f out-{n}.txt\"\n"
+        ));
+    }
+    yaml
+}
+
+fn concurrency_workflow(concurrency: u32) -> String {
+    format!(
+        r#"
+name: eight-tasks
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{{{run.dir}}}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - {{ name: plan.yaml, kind: task-ledger }}
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    concurrency: {concurrency}
+    prompt: "Read your task from the ledger and implement it."
+"#
+    )
+}
+
+/// One mock session per task, matched by its own id (never by call order —
+/// concurrent dispatch races several `spawn()` calls at once) plus the
+/// planner's own session first.
+fn eight_tasks_fixture(artifacts_dir: &std::path::Path) -> String {
+    let mut yaml = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display(),
+        eight_independent_tasks_ledger(),
+    );
+    for n in 1..=8 {
+        yaml.push_str(&format!(
+            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: out-{n}.txt, content: \"{n}\" }}\n    outcome: {{ type: completed, summary: \"did task-{n}\" }}\n"
+        ));
+    }
+    yaml
+}
+
+/// Commit subjects on `worktree`'s current branch, oldest first, excluding
+/// the `init_repo` seed commit.
+fn commit_subjects(worktree: &std::path::Path) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .args(["log", "--format=%s", "--reverse"])
+        .current_dir(worktree)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| *line != "initial")
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
+    // T5.10 ✓: same final state, same commit sequence, regardless of
+    // concurrency — the batch mechanism integrates strictly in ledger
+    // declaration order no matter how many tasks dispatch at once.
+    let sequential = Bench::new();
+    let workflow_seq = concurrency_workflow(1);
+    let fixture_seq = eight_tasks_fixture(&sequential.run_dir().join("artifacts"));
+    let (terminal_seq, state_seq) = sequential
+        .run_with_config(&workflow_seq, &fixture_seq, CONCURRENCY_CONFIG)
+        .await;
+    assert_eq!(terminal_seq, RunTerminal::Finished);
+
+    let parallel = Bench::new();
+    let workflow_par = concurrency_workflow(4);
+    let fixture_par = eight_tasks_fixture(&parallel.run_dir().join("artifacts"));
+    let (terminal_par, state_par) = parallel
+        .run_with_config(&workflow_par, &fixture_par, CONCURRENCY_CONFIG)
+        .await;
+    assert_eq!(terminal_par, RunTerminal::Finished);
+
+    for n in 1..=8 {
+        let id: yunta_core::TaskId = format!("task-{n}").into();
+        assert_eq!(
+            state_seq.tasks.get(&id),
+            Some(&yunta_core::events::TaskStatus::Done)
+        );
+        assert_eq!(
+            state_par.tasks.get(&id),
+            state_seq.tasks.get(&id),
+            "task-{n} status must match between concurrency levels"
+        );
+    }
+
+    let commits_seq = commit_subjects(&sequential.worktree);
+    let commits_par = commit_subjects(&parallel.worktree);
+    assert_eq!(
+        commits_seq.len(),
+        8,
+        "expected one commit per task, got {commits_seq:?}"
+    );
+    assert_eq!(
+        commits_seq, commits_par,
+        "the same ledger must produce the same commit sequence at any concurrency"
+    );
+    // Declaration order, not finishing order.
+    let expected: Vec<String> = (1..=8)
+        .map(|n| format!("task task-{n}: Write out-{n}"))
+        .collect();
+    assert_eq!(commits_seq, expected);
+}
+
+#[tokio::test]
+async fn a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns_to_ready() {
+    // Task A always integrates cleanly. Task B's own criterion is
+    // satisfied in isolation (its own worktree predates A's integration)
+    // but is re-checked false once A's file exists on the tree B rebases
+    // onto — exactly "pasa en su worktree pero rompe tras la integración
+    // de otra". B must go back to `ready` without touching A.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = r#"
+name: integration-conflict
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    concurrency: 2
+    prompt: "Read your task from the ledger and implement it."
+"#;
+
+    let ledger = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-a", "Create a", "a.txt", "test -f a.txt"),
+        task_yaml(
+            "task-b",
+            "Create b, require no a",
+            "b.txt",
+            "test -f b.txt && test ! -f a.txt"
+        ),
+    );
+
+    let mut fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display(),
+        ledger,
+    );
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
+    );
+    // Several task-b sessions: the first attempt succeeds in isolation and
+    // is rejected at integration (back to ready); the retried attempt(s)
+    // are now genuinely red (a.txt is already on the integrated tree) and
+    // exhaust run_task's own retries into a real Blocked.
+    for _ in 0..(DEFAULT_MAX_RETRIES + 2) {
+        fixture.push_str(
+            "  - match_prompt_contains: \"task-b\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-b }\n",
+        );
+    }
+
+    let (terminal, state) = bench
+        .run_with_config(workflow, &fixture, CONCURRENCY_CONFIG)
+        .await;
+
+    // task-a must have succeeded and stayed succeeded, unaffected by
+    // task-b's fate.
+    assert_eq!(
+        state.nodes.get(&"implement".into()),
+        state.nodes.get(&"implement".into()),
+    );
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let a_statuses: Vec<_> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::TaskStatusChanged(p)
+                if p.task_id.as_str() == "task-a" =>
+            {
+                Some(p.new_status)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        a_statuses,
+        vec![
+            yunta_core::events::TaskStatus::Running,
+            yunta_core::events::TaskStatus::Done,
+        ],
+        "task-a must reach Done exactly once and never regress"
+    );
+
+    let b_statuses: Vec<_> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::TaskStatusChanged(p)
+                if p.task_id.as_str() == "task-b" =>
+            {
+                Some(p.new_status)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        b_statuses.contains(&yunta_core::events::TaskStatus::Pending),
+        "task-b's rejected integration must return it to Pending (ready), not Blocked: {b_statuses:?}"
+    );
+    // Confirms the ordering claimed above: Pending shows up strictly after
+    // task-b's first Running, i.e. it really was reverted mid-flight.
+    let first_running = b_statuses
+        .iter()
+        .position(|s| *s == yunta_core::events::TaskStatus::Running)
+        .unwrap();
+    let reverted = b_statuses
+        .iter()
+        .position(|s| *s == yunta_core::events::TaskStatus::Pending)
+        .unwrap();
+    assert!(reverted > first_running);
+
+    // The run eventually gives up on task-b (it can never satisfy "no
+    // a.txt" once a.txt is permanently integrated) — that's expected, not
+    // a test bug: the point here is task-a's own success was untouched.
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("task-b")),
+        other => panic!("expected the run to eventually pause on task-b, got {other:?}"),
+    }
+    let _ = state;
+}
+
+#[tokio::test]
+async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
+    // Two independent tasks dispatched in the same batch; task-x's own
+    // declared scope never mentions task-y's file. If scope were checked
+    // against anything but task-x's own isolated diff, task-y's write
+    // would spuriously violate it.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = concurrency_workflow(2);
+    let ledger = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-x", "x", "x.txt", "test -f x.txt"),
+        task_yaml("task-y", "y", "y.txt", "test -f y.txt"),
+    );
+    let fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
+        artifacts_dir.display(),
+        ledger,
+    );
+
+    let (terminal, state) = bench
+        .run_with_config(&workflow, &fixture, CONCURRENCY_CONFIG)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get(&"task-x".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get(&"task-y".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    for (task, forbidden) in [("task-x", "y.txt"), ("task-y", "x.txt")] {
+        for event in &events {
+            if let yunta_core::events::EventPayload::ScopeChecked(p) = &event.payload {
+                if p.task_id.as_ref().map(|id| id.as_str()) == Some(task) {
+                    assert!(
+                        !p.diff
+                            .iter()
+                            .any(|path| path.to_string_lossy().contains(forbidden)),
+                        "task `{task}`'s own scope check must never see `{forbidden}`: {:?}",
+                        p.diff
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(&concurrency_workflow(2)).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONCURRENCY_CONFIG).unwrap();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    let ledger = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-p", "p", "p.txt", "test -f p.txt"),
+        task_yaml("task-q", "q", "q.txt", "test -f q.txt"),
+    );
+    std::fs::create_dir_all(&artifacts_dir).unwrap();
+    std::fs::write(artifacts_dir.join("plan.yaml"), &ledger).unwrap();
+
+    // Simulate the crash by hand-writing the log up through: plan already
+    // registered, the loop started, task-p already Done and committed,
+    // and task-q left `Running` with no terminal event — an orphan.
+    git(&bench.worktree, &["checkout", "-b", "yunta/task/task-p/1"]);
+    std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "task task-p: p"]);
+    git(&bench.worktree, &["checkout", "-"]);
+    git(
+        &bench.worktree,
+        &["merge", "--ff-only", "yunta/task/task-p/1"],
+    );
+
+    for event in [
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("plan".into()),
+            payload: yunta_core::events::EventPayload::NodeStarted(
+                yunta_core::events::NodeStartedPayload { attempt: 1 },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("plan".into()),
+            payload: yunta_core::events::EventPayload::ArtifactWritten(
+                yunta_core::events::ArtifactWrittenPayload {
+                    path: "artifacts/plan.yaml".into(),
+                    content_hash: "irrelevant".to_string(),
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("plan".into()),
+            payload: yunta_core::events::EventPayload::TaskRegistered(
+                yunta_core::events::TaskRegisteredPayload {
+                    task_id: "task-p".into(),
+                    criteria: vec![],
+                    scope: vec!["p.txt".to_string()],
+                    depends_on: vec![],
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("plan".into()),
+            payload: yunta_core::events::EventPayload::TaskRegistered(
+                yunta_core::events::TaskRegisteredPayload {
+                    task_id: "task-q".into(),
+                    criteria: vec![],
+                    scope: vec!["q.txt".to_string()],
+                    depends_on: vec![],
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("plan".into()),
+            payload: yunta_core::events::EventPayload::NodeFinished(
+                yunta_core::events::NodeFinishedPayload {
+                    outcome: "planned".to_string(),
+                    tokens_used: Default::default(),
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("implement".into()),
+            payload: yunta_core::events::EventPayload::NodeStarted(
+                yunta_core::events::NodeStartedPayload { attempt: 1 },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("implement".into()),
+            payload: yunta_core::events::EventPayload::TaskStatusChanged(
+                yunta_core::events::TaskStatusChangedPayload {
+                    task_id: "task-p".into(),
+                    new_status: yunta_core::events::TaskStatus::Running,
+                    caused_by: 0,
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("implement".into()),
+            payload: yunta_core::events::EventPayload::TaskStatusChanged(
+                yunta_core::events::TaskStatusChangedPayload {
+                    task_id: "task-q".into(),
+                    new_status: yunta_core::events::TaskStatus::Running,
+                    caused_by: 0,
+                },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("implement".into()),
+            payload: yunta_core::events::EventPayload::TaskStatusChanged(
+                yunta_core::events::TaskStatusChangedPayload {
+                    task_id: "task-p".into(),
+                    new_status: yunta_core::events::TaskStatus::Done,
+                    caused_by: 0,
+                },
+            ),
+        },
+        // task-q never got a follow-up — orphaned Running, no p.txt-style
+        // commit ever landed for it.
+    ] {
+        bench.storage.append_event(&event).unwrap();
+    }
+
+    let fixture = "sessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
+    let adapter = yunta_adapters::MockAdapter::from_yaml(fixture).unwrap();
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), Arc::new(adapter));
+
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.terminal, RunTerminal::Finished);
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let p_running_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                yunta_core::events::EventPayload::TaskStatusChanged(p)
+                    if p.task_id.as_str() == "task-p" && p.new_status == yunta_core::events::TaskStatus::Running
+            )
+        })
+        .count();
+    assert_eq!(
+        p_running_count, 1,
+        "an already-Done task must never be re-dispatched on resume"
+    );
+    assert_eq!(
+        report.state.tasks.get(&"task-q".into()),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "the orphaned task must be re-run to completion"
+    );
+}

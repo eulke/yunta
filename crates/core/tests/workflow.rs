@@ -16,7 +16,7 @@ fn parses_the_m0_schema_recorte_without_loss() {
     assert_eq!(implement.id.as_str(), "implement");
     assert_eq!(implement.runner.as_deref(), Some("executor"));
     match &implement.kind {
-        NodeKind::Loop { until, prompt } => {
+        NodeKind::Loop { until, prompt, .. } => {
             assert_eq!(until, "all_tasks_complete");
             assert!(matches!(prompt, PromptSource::Inline(_)));
         }
@@ -296,6 +296,37 @@ timeout_seconds: 30
             assert_eq!(timeout_seconds, Some(30));
         }
         other => panic!("expected Executor, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_loop_node_s_concurrency_defaults_to_absent() {
+    let yaml = r#"
+id: implement
+kind: loop
+until: all_tasks_complete
+prompt: "do it"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, None),
+        other => panic!("expected Loop, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_loop_node_can_declare_concurrency() {
+    let yaml = r#"
+id: implement
+kind: loop
+until: all_tasks_complete
+prompt: "do it"
+concurrency: 4
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, Some(4)),
+        other => panic!("expected Loop, got {other:?}"),
     }
 }
 
