@@ -42,6 +42,9 @@ pub fn build_manifest(
     workflow_dir: &Path,
     repo: &Path,
 ) -> Result<Manifest, ManifestError> {
+    let mut workflow = workflow.clone();
+    expand_implicit_dependencies(&mut workflow);
+
     let mut prompts = BTreeMap::new();
     for node in &workflow.nodes {
         freeze_prompts(node, workflow_dir, &mut prompts)?;
@@ -53,9 +56,9 @@ pub fn build_manifest(
     Ok(Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         yunta_version: env!("CARGO_PKG_VERSION").to_string(),
-        workflow_hash: content_hash(workflow),
+        workflow_hash: content_hash(&workflow),
         config_hash: content_hash(config),
-        workflow: workflow.clone(),
+        workflow,
         config: config.clone(),
         prompts,
         base_branch,
@@ -63,6 +66,37 @@ pub fn build_manifest(
         isolation: config.resolved_isolation(),
         max_parallel_nodes: config.resolved_max_parallel_nodes(),
     })
+}
+
+/// §9's `context: [{ artifact: { node, name } }]` creates an *implicit*
+/// `depends_on` edge onto `node` — folded into the ordinary field here,
+/// once, so `check`'s cycle detection and the scheduler's own readiness
+/// calculation (both already only ever read `Node.depends_on`) need zero
+/// awareness of `context:` existing at all. `check()` calls this too
+/// (its own copy of the workflow, never the manifest's), so a cycle
+/// created purely by two nodes' context-artifact references is still
+/// caught statically rather than deadlocking a real run. Idempotent: a
+/// node that already lists the referenced node explicitly gets no
+/// duplicate.
+pub(crate) fn expand_implicit_dependencies(workflow: &mut Workflow) {
+    for node in &mut workflow.nodes {
+        expand_implicit_dependencies_in(node);
+    }
+}
+
+fn expand_implicit_dependencies_in(node: &mut Node) {
+    if let NodeKind::Parallel { nodes, .. } = &mut node.kind {
+        for child in nodes {
+            expand_implicit_dependencies_in(child);
+        }
+    }
+    for spec in &node.context {
+        if let yunta_core::ContextSpec::Artifact { artifact } = spec {
+            if !node.depends_on.contains(&artifact.node) {
+                node.depends_on.push(artifact.node.clone());
+            }
+        }
+    }
 }
 
 /// Freezes `node`'s own file prompt (if any) and recurses into a

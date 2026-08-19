@@ -90,6 +90,95 @@ pub struct Node {
     /// a guarantee the system never offered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<bool>,
+    /// `context:` (§9, T6.1) — data resolved and materialized *before*
+    /// the node's session opens, in declaration order. Only acted on for
+    /// `kind: prompt` in this recorte (`check` rejects it on any other
+    /// node kind, §9's own text never states the rule beyond the
+    /// implication that a session is what consumes it) — see
+    /// `docs/m0-status.md`'s T6.1 entry for the loop/task-level context
+    /// this deliberately doesn't cover yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<ContextSpec>,
+}
+
+/// One `context:` entry (§9): a builtin `ContextSource` plus its own
+/// parameters. `mcp` isn't here — T6.2 adds it separately. Untagged: each
+/// variant's own (unique) field name is the discriminant, exactly
+/// matching the Contrato's own YAML — `- files: [...]`, `- command:
+/// "..."`, `- artifact: { node: ..., name: ... }`, and so on; there is no
+/// separate `kind:` key to introduce.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ContextSpec {
+    Files {
+        files: Vec<String>,
+    },
+    Command {
+        command: String,
+    },
+    Artifact {
+        artifact: ArtifactContextRef,
+    },
+    RunEvents {
+        #[serde(rename = "run-events")]
+        run_events: RunEventsParams,
+    },
+    Ledger {
+        ledger: LedgerParams,
+    },
+    Knowledge {
+        knowledge: KnowledgeParams,
+    },
+    NodeOutput {
+        #[serde(rename = "node-output")]
+        node_output: NodeOutputParams,
+    },
+}
+
+/// `artifact: { node: ..., name: ... }` (§9) — the referenced node's own
+/// declared artifact. Reading it creates an *implicit* `depends_on` edge
+/// (`build_manifest` expands it into the frozen workflow's own
+/// `depends_on`, so `check`/the scheduler need no separate awareness of
+/// `context:` at all — by the time either runs, the edge is already
+/// ordinary `depends_on`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactContextRef {
+    pub node: NodeId,
+    pub name: String,
+}
+
+/// `run-events: { filter: ... }` (§9) — a read-only query into the run's
+/// own event log. `filter` stays a free-form string (the Contrato's only
+/// example is `filter: failed`, no closed vocabulary given) — the
+/// resolver's own job (T6.1) to interpret, not the schema's.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RunEventsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+}
+
+/// `ledger: {}` (§9) — no parameters in this recorte's own resolution
+/// (the aggregate ledger/task-status view; see the node's own doc
+/// comment on `context` for the task-scoped variant this doesn't cover
+/// yet).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LedgerParams {}
+
+/// `knowledge: { layers: [...] }` (§9.2) — empty/absent `layers` means
+/// every layer the resolver can see; T6.1's own resolution is
+/// single-layer (`repo` only) until T6.5 adds real `repo > user > org`
+/// precedence.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct KnowledgeParams {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<String>,
+}
+
+/// `node-output: { node: ... }` (§9, §11.2) — captured stdout/stderr of a
+/// previously-run node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeOutputParams {
+    pub node: NodeId,
 }
 
 /// `permissions: read-only | edit | full` at node level (§6.1's ladder,

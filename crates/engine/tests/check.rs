@@ -21,6 +21,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         description: None,
         permissions: None,
         network: None,
+        context: Vec::new(),
     }
 }
 
@@ -40,6 +41,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         description: None,
         permissions: None,
         network: None,
+        context: Vec::new(),
     }
 }
 
@@ -63,6 +65,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         description: None,
         permissions: None,
         network: None,
+        context: Vec::new(),
     }
 }
 
@@ -415,5 +418,88 @@ fn a_read_only_parallel_child_does_not_count_toward_the_write_collision_warning(
     assert!(
         warnings.is_empty(),
         "one writer alone cannot collide: {warnings:?}"
+    );
+}
+
+// --- T6.1: context: (§9) ----------------------------------------------------
+
+#[test]
+fn context_on_a_bash_node_is_a_check_error() {
+    let mut node = bash("build", "true", &[]);
+    node.context = vec![yunta_core::ContextSpec::Command {
+        command: "git log".to_string(),
+    }];
+    let wf = workflow(vec![node]);
+    let errors = check(&wf, &ConfigLayer::default());
+    match &errors[..] {
+        [CheckError::ContextOnUnsupportedNode { node }] => assert_eq!(node.as_str(), "build"),
+        other => panic!("expected one ContextOnUnsupportedNode error, got {other:?}"),
+    }
+}
+
+#[test]
+fn context_on_a_prompt_node_is_never_an_error() {
+    let mut node = prompt("plan", "planner", &[]);
+    node.context = vec![yunta_core::ContextSpec::Ledger {
+        ledger: yunta_core::LedgerParams::default(),
+    }];
+    let wf = workflow(vec![node]);
+    let errors = check(
+        &wf,
+        &ConfigLayer {
+            runners: Some(HashMap::from([(
+                "planner".to_string(),
+                vec![RunnerCandidate {
+                    adapter: "mock".to_string(),
+                    model: "mock-model".to_string(),
+                    agent: None,
+                }],
+            )])),
+            ..Default::default()
+        },
+    );
+    assert_eq!(errors, Vec::new());
+}
+
+#[test]
+fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
+    // Two nodes that reference each other's artifact purely through
+    // `context:` — no explicit `depends_on` at all — must still be
+    // caught as a cycle: the implicit edge is exactly as real as a
+    // declared one (§9).
+    let mut a = prompt("a", "planner", &[]);
+    a.context = vec![yunta_core::ContextSpec::Artifact {
+        artifact: yunta_core::ArtifactContextRef {
+            node: "b".into(),
+            name: "b.md".to_string(),
+        },
+    }];
+    let mut b = prompt("b", "planner", &[]);
+    b.context = vec![yunta_core::ContextSpec::Artifact {
+        artifact: yunta_core::ArtifactContextRef {
+            node: "a".into(),
+            name: "a.md".to_string(),
+        },
+    }];
+    let wf = workflow(vec![a, b]);
+    let errors = check(
+        &wf,
+        &ConfigLayer {
+            runners: Some(HashMap::from([(
+                "planner".to_string(),
+                vec![RunnerCandidate {
+                    adapter: "mock".to_string(),
+                    model: "mock-model".to_string(),
+                    agent: None,
+                }],
+            )])),
+            ..Default::default()
+        },
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, CheckError::DependsOnCycle { .. })),
+        "a cycle formed purely through context-artifact references must be caught: {errors:?}"
     );
 }

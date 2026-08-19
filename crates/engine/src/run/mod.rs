@@ -24,6 +24,7 @@
 //! reasoned about mock-testability for shouldn't be built on a guess.
 
 mod check_exec;
+mod context_resolve;
 mod executor_exec;
 mod loop_exec;
 mod node_exec;

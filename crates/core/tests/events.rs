@@ -55,6 +55,7 @@ fn all_kinds() -> Vec<EventPayload> {
             sources: vec![ContextSourceRef {
                 source_id: "files:docs".to_string(),
                 kind: "files".to_string(),
+                content_hash: "sha256:333".to_string(),
             }],
             segment_hashes: HashMap::from([("stable".to_string(), "sha256:222".to_string())]),
         }),

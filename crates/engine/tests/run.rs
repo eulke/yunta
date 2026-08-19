@@ -2878,3 +2878,278 @@ nodes:
         "task-a's committed work must survive the re-plan: {commits:?}"
     );
 }
+
+// --- T6.1: context: (§9) -----------------------------------------------------
+
+/// A single `prompt` node named `ask` declaring `context_yaml` verbatim
+/// under `context:`. `runner: executor` matches `CONFIG`'s own mock
+/// candidate.
+fn context_workflow(context_yaml: &str) -> String {
+    format!(
+        "name: ctx\nnodes:\n  - id: ask\n    kind: prompt\n    runner: executor\n    prompt: \"Do the thing.\"\n    context:\n{context_yaml}"
+    )
+}
+
+/// The one `context_assembled` event's `sources`, for the given node.
+fn context_sources(
+    events: &[yunta_core::events::Event],
+    node: &str,
+) -> Vec<yunta_core::events::ContextSourceRef> {
+    events
+        .iter()
+        .find_map(|e| match (&e.node_id, &e.payload) {
+            (Some(n), yunta_core::events::EventPayload::ContextAssembled(p))
+                if n.as_str() == node =>
+            {
+                Some(p.sources.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no context_assembled event found for node `{node}`"))
+}
+
+/// Confirms a resolved source is genuinely replayable: the file
+/// materialized under `context/<content_hash>/content` exists and its
+/// own hash matches what the event recorded — reconstructing it never
+/// needs to re-run the command, re-read the original path outside the
+/// snapshot, or touch the network.
+fn assert_materialized(run_dir: &std::path::Path, source: &yunta_core::events::ContextSourceRef) {
+    let path = run_dir
+        .join("context")
+        .join(&source.content_hash)
+        .join("content");
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("materialized file missing at {path:?}: {e}"));
+    assert_eq!(
+        yunta_core::sha256_hex(&bytes),
+        source.content_hash,
+        "materialized content must hash to exactly what the event recorded"
+    );
+}
+
+#[tokio::test]
+async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("a.txt"), "MARKER-FILES-CONTENT\n").unwrap();
+
+    let workflow = context_workflow("      - files: [\"a.txt\"]\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].kind, "files");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn a_command_source_resolves_stdout_and_is_replayable() {
+    let bench = Bench::new();
+    let workflow = context_workflow("      - command: \"echo MARKER-COMMAND-OUTPUT\"\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].kind, "command");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn an_artifact_source_creates_an_implicit_dependency_and_resolves_the_content() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    // No explicit `depends_on` on `plan` — the ordering must come purely
+    // from `context: [{ artifact: { node: grill } }]`.
+    let workflow = r#"
+name: ctx-artifact
+nodes:
+  - id: grill
+    kind: prompt
+    runner: executor
+    prompt: "Write the brief."
+    artifacts:
+      produces: [brief.md]
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Plan from the brief."
+    context:
+      - artifact: { node: grill, name: brief.md }
+"#;
+    let fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display()
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "the implicit dependency must order grill before plan without any explicit depends_on"
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "plan");
+    assert_eq!(sources[0].kind, "artifact");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn a_missing_artifact_reference_fails_the_node_never_silently_empty() {
+    // ✓ del Plan: "fuente caída = nodo failed" — referencing a real,
+    // already-run node whose artifact was simply never produced.
+    let bench = Bench::new();
+    let workflow = r#"
+name: ctx-missing-artifact
+nodes:
+  - id: grill
+    kind: bash
+    run: "true"
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Plan from the brief."
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, name: brief.md }
+"#;
+    let fixture = "sessions: []";
+
+    let (terminal, state) = bench.run(workflow, fixture).await;
+    match &state.nodes.get(&"plan".into()) {
+        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
+            assert!(outcome.contains("brief.md"), "got: {outcome}");
+        }
+        other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
+    }
+    match terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_run_events_source_resolves_filtered_failures_and_is_replayable() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ctx-run-events
+nodes:
+  - id: lint
+    kind: bash
+    run: "false"
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+  - id: fix-lint
+    kind: prompt
+    runner: executor
+    prompt: "Fix the lint errors."
+    context:
+      - run-events: { filter: failed }
+"#;
+    let fixture =
+        "sessions:\n  - match_prompt_contains: \"NodeFailed\"\n    outcome: { type: completed, summary: tried }\n";
+
+    let _ = bench.run(workflow, fixture).await;
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "fix-lint");
+    assert_eq!(sources[0].kind, "run-events");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn a_ledger_source_resolves_aggregate_task_state_and_is_replayable() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: ctx-ledger
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: audit
+    kind: prompt
+    runner: executor
+    depends_on: [plan]
+    prompt: "Summarize the ledger."
+    context:
+      - ledger: {}
+"#;
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-x", "x", "x.txt", "test -f x.txt")
+    );
+    let fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
+        artifacts_dir.display(),
+        ledger,
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "audit");
+    assert_eq!(sources[0].kind, "ledger");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn a_knowledge_source_resolves_the_repo_layer_and_is_replayable() {
+    let bench = Bench::new();
+    std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
+    std::fs::write(
+        bench.worktree.join(".yunta/knowledge/note.md"),
+        "MARKER-KNOWLEDGE-CONTENT\n",
+    )
+    .unwrap();
+
+    let workflow = context_workflow("      - knowledge: {}\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].kind, "knowledge");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn a_node_output_source_resolves_a_bash_node_s_captured_stdout() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ctx-node-output
+nodes:
+  - id: build
+    kind: bash
+    run: "echo MARKER-BUILD-OUTPUT"
+  - id: report
+    kind: prompt
+    runner: executor
+    depends_on: [build]
+    prompt: "Report on the build."
+    context:
+      - node-output: { node: build }
+"#;
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
+
+    let (terminal, _state) = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "report");
+    assert_eq!(sources[0].kind, "node-output");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}

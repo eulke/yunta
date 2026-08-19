@@ -73,6 +73,14 @@ pub enum CheckError {
     /// caught by the second moment, at runtime, right before execution.
     #[error("node `{node}`: {rule}")]
     CommandDenied { node: NodeId, rule: String },
+
+    /// §9/T6.1: `context:` is resolved into a session's own prompt —
+    /// only `kind: prompt` opens one in this recorte (a `bash`/`check`/
+    /// `executor`/`loop` node has nowhere to put it yet; see
+    /// `docs/m0-status.md`'s T6.1 entry). Declaring it elsewhere is
+    /// caught here rather than silently ignored at runtime (A6).
+    #[error("node `{node}`: `context:` is only supported on `kind: prompt` nodes in this recorte")]
+    ContextOnUnsupportedNode { node: NodeId },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -96,6 +104,15 @@ pub enum CheckWarning {
 /// spirit as the ledger's T1.0 §4: whoever writes this by hand corrects
 /// once, not once per `yunta check` run).
 pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
+    // §9: `context: [{ artifact }]` creates an implicit `depends_on` edge
+    // — expanded here, on this function's own clone, so cycle detection
+    // below sees exactly the graph a real run would build (`build_manifest`
+    // expands the same way), never a narrower one that misses a cycle
+    // formed only through context references.
+    let mut workflow = workflow.clone();
+    crate::manifest::expand_implicit_dependencies(&mut workflow);
+    let workflow = &workflow;
+
     let mut errors = Vec::new();
 
     // Global, not per-group: replay derives node state from one flat
@@ -162,6 +179,12 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
                 }
                 Some(_) => {}
             }
+        }
+
+        if !node.context.is_empty() && !matches!(node.kind, NodeKind::Prompt { .. }) {
+            errors.push(CheckError::ContextOnUnsupportedNode {
+                node: node.id.clone(),
+            });
         }
     }
 

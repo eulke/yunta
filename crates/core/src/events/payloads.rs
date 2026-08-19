@@ -154,13 +154,21 @@ pub struct DiscardedCandidate {
     pub reason: String,
 }
 
-/// One resolved `ContextSource` reference in `context_assembled.sources`.
-/// `kind` stays a plain string until M6 defines the closed set of builtin
-/// source kinds.
+/// One resolved `ContextSource` reference in `context_assembled.sources`
+/// (§9, T6.1). `kind` stays a plain string — M6 fixes the *set* of
+/// builtin source kinds (`files | command | artifact | run-events |
+/// ledger | knowledge | node-output`, `mcp` from T6.2) but never closes
+/// it into an enum, since a pack can add its own sources (M11) without
+/// this type needing to change. `content_hash` is what makes "cada
+/// resolución emite evento con hash" (§9) literal — the hash of exactly
+/// the bytes materialized under `context/<content_hash>/` for this
+/// source, so replay can name precisely what a session saw without
+/// re-running anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextSourceRef {
     pub source_id: String,
     pub kind: String,
+    pub content_hash: String,
 }
 
 // --- Per-kind payloads (docs/eventos.md §5.1-§5.25) -----------------------

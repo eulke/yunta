@@ -25,6 +25,7 @@ fn node(id: &str, description: Option<&str>) -> Node {
         description: description.map(str::to_string),
         permissions: None,
         network: None,
+        context: Vec::new(),
     }
 }
 

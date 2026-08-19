@@ -489,3 +489,93 @@ prompt: { file: prompts/plan.md }
         other => panic!("expected Prompt, got {other:?}"),
     }
 }
+
+// --- T6.1: context: (§9) ----------------------------------------------------
+
+#[test]
+fn a_node_s_context_defaults_to_empty() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert!(node.context.is_empty());
+}
+
+#[test]
+fn every_context_builtin_parses_from_its_own_contrato_example() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+context:
+  - files: ["docs/architecture.md", "{{run.dir}}/artifacts/brief.md"]
+  - command: "git log --oneline -20"
+  - artifact: { node: grill, name: brief.md }
+  - ledger: {}
+  - knowledge: {}
+  - node-output: { node: lint }
+  - run-events: { filter: failed }
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(node.context.len(), 7);
+
+    use yunta_core::ContextSpec;
+    match &node.context[0] {
+        ContextSpec::Files { files } => assert_eq!(
+            files,
+            &vec![
+                "docs/architecture.md".to_string(),
+                "{{run.dir}}/artifacts/brief.md".to_string()
+            ]
+        ),
+        other => panic!("expected Files, got {other:?}"),
+    }
+    match &node.context[1] {
+        ContextSpec::Command { command } => assert_eq!(command, "git log --oneline -20"),
+        other => panic!("expected Command, got {other:?}"),
+    }
+    match &node.context[2] {
+        ContextSpec::Artifact { artifact } => {
+            assert_eq!(artifact.node.as_str(), "grill");
+            assert_eq!(artifact.name, "brief.md");
+        }
+        other => panic!("expected Artifact, got {other:?}"),
+    }
+    assert!(matches!(&node.context[3], ContextSpec::Ledger { .. }));
+    match &node.context[4] {
+        ContextSpec::Knowledge { knowledge } => assert!(knowledge.layers.is_empty()),
+        other => panic!("expected Knowledge, got {other:?}"),
+    }
+    match &node.context[5] {
+        ContextSpec::NodeOutput { node_output } => {
+            assert_eq!(node_output.node.as_str(), "lint")
+        }
+        other => panic!("expected NodeOutput, got {other:?}"),
+    }
+    match &node.context[6] {
+        ContextSpec::RunEvents { run_events } => {
+            assert_eq!(run_events.filter.as_deref(), Some("failed"))
+        }
+        other => panic!("expected RunEvents, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_knowledge_source_can_declare_specific_layers() {
+    let yaml = r#"
+id: plan
+kind: prompt
+prompt: "plan it"
+context:
+  - knowledge: { layers: [repo] }
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match &node.context[0] {
+        yunta_core::ContextSpec::Knowledge { knowledge } => {
+            assert_eq!(knowledge.layers, vec!["repo".to_string()])
+        }
+        other => panic!("expected Knowledge, got {other:?}"),
+    }
+}

@@ -1456,6 +1456,121 @@ que aparece.
         T7.1/T7.2 (TTY) o T7.7 (PR) o M8 (MCP), ese milestone es quien
         cierra este ítem — no antes.
 
+## M6 — Contexto (en progreso: T6.1)
+
+- [x] **T6.1 — trait `ContextSource` + builtins (§9). Alcance recortado
+      con varias llamadas de ingeniería documentadas, no un gap único
+      como T5.8/T5.14 — la tarea en sí es grande.** §9 fija el modelo
+      (siete builtins más `mcp`, materialización efectiva bajo
+      `context/<hash>/`, "una fuente que falla es fallo del nodo", evento
+      con hash por resolución) pero deja bastante mecánica sin cerrar;
+      cada decisión abajo es defendible por separado y ninguna decide si
+      la feature es testeable con mock — todas se resolvieron sin
+      pregunta nueva, mismo criterio que T5.10/T5.11/T5.13.
+      - **Sin `trait ContextSource` real.** El Contrato nombra un trait
+        (`id()`/`resolve()`), pero con un solo conjunto de builtins y
+        ningún segundo implementador (los packs de M11 son quienes
+        necesitarían inyectar una fuente propia) un objeto trait no es
+        una frontera real todavía (CLAUDE.md: "una abstracción sin
+        segunda implementación real... es costo sin beneficio"). Cada
+        builtin es una función resolver detrás de un único `match`
+        (`crates/engine/src/run/context_resolve.rs`) — nada impide una
+        versión con dispatch dinámico el día que un pack la necesite de
+        verdad.
+      - **Resuelto solo para `kind: prompt`.** `context:` vive en
+        `Node` para cualquier tipo, pero solo `execute_prompt` lo
+        resuelve — un `bash`/`check`/`executor` no abre sesión, no tiene
+        dónde inyectarlo, y una tarea de un `loop` despacha su propia
+        sesión por `run_task` (T5.2), un camino de código
+        *completamente distinto* de `execute_prompt` que este recorte no
+        toca. Declarar `context:` en cualquier otro tipo de nodo es
+        **error de `check`** (`CheckError::ContextOnUnsupportedNode`),
+        nunca un silencio — A6.
+      - **`artifact:` crea de verdad una dependencia implícita, sin
+        tocar `check`/`schedule.rs`.** `build_manifest` expande
+        `context: [{ artifact: { node, ... } }]` en el propio
+        `depends_on` del nodo, una sola vez, antes de calcular
+        `workflow_hash` — así que el scheduler y el chequeo de ciclos
+        (ambos ya solo leen `Node.depends_on`) no necesitan saber que
+        `context:` existe. `check()` corre la misma expansión sobre su
+        propio clon antes de buscar ciclos, para que un ciclo formado
+        *solo* por referencias `artifact:` cruzadas se detecte estático,
+        no como deadlock en un run real — verificado con un test
+        dedicado.
+      - **`files:` es ruta literal, no glob real.** El único ejemplo del
+        Contrato usa dos paths sin comodines; ningún ✓ de T6.1 ejercita
+        expansión de patrones; y no hay ninguna librería de *filesystem
+        walk* en el workspace todavía (`globset` solo *matchea* contra
+        paths ya conocidos, no los enumera). Agregar una dependencia
+        nueva (`glob`/`walkdir`) para una capacidad que nada testea
+        hubiera sido sobre-ingeniería — cada entrada de `files:` se
+        renderiza por template y se lee como un path directo, relativo
+        al worktree o absoluto si el template ya lo resolvió así (el
+        propio caso `{{run.dir}}/...` del ejemplo). Soporte real de glob
+        queda como deuda nombrada, no una aproximación silenciosa.
+      - **`knowledge:` resuelve solo la capa `repo`.** T6.5 es
+        literalmente la tarea siguiente para `repo > user > org` — pedir
+        cualquier capa que no sea `repo` en T6.1 es un error tipado
+        (`UnsupportedKnowledgeLayer`), nunca contenido vacío silencioso;
+        un directorio `.yunta/knowledge/` ausente sí resuelve vacío sin
+        error, porque no tener conocimiento local todavía es el caso
+        normal de un repo nuevo, no una fuente rota.
+      - **`node-output:` necesitó una captura nueva, no solo un
+        lector.** T4.4 ya había dejado esto documentado como deuda
+        explícita ("`node-output` como artifact montable por `context:`
+        (M6)") — sin captura, el builtin sería un stub imposible de
+        testear. Se agregó en `execute_bash` únicamente (el único tipo
+        de nodo con stdout/stderr de proceso real ya leído ahí mismo):
+        se persiste a `run_dir/node-output/<node_id>.txt`
+        **incondicionalmente**, tanto en éxito como en fallo — el caso
+        que le importa a §11.2 es exactamente el de un nodo *fallido*
+        cuya salida el nodo correctivo necesita leer. Captura para
+        `executor`/`prompt` queda fuera, nombrada.
+      - **`ledger:` solo resuelve la vista agregada, no "la tarea
+        propia".** §9 describe dos variantes para este builtin: la
+        propia tarea (para un `executor` dentro de un loop) y el estado
+        agregado (para nodos de auditoría). Con `context:` resuelto solo
+        para `kind: prompt` (arriba), la variante task-scoped no tiene
+        ningún camino de código real que la use todavía — se implementó
+        únicamente la agregada (lista `task_id: status` derivada de
+        `replay::derive`, ordenada).
+      - **Umbral inline/referencia sin config**: mismo tratamiento que
+        `MAX_EXPANSION_FILES` en T5.11 — `INLINE_THRESHOLD_BYTES = 4096`
+        como constante del engine, documentado como el número que el
+        propio §9 deja sin fijar ("umbral configurable"), no una
+        promesa de que hoy sea configurable.
+      - **`content_hash` agregado a `ContextSourceRef`, `mcp` fuera de
+        alcance.** T2.2 (bootstrap) ya había dejado `ContextSourceRef`
+        con `source_id`/`kind` pero sin hash — su propio doc comment
+        invitaba a esto exactamente ("`kind` stays a plain string until
+        M6..."). Se agregó `content_hash: String`, el campo que hace
+        literal "cada resolución emite evento con hash" (§9);
+        `segment_hashes` (ya existía, por clase de estabilidad §9.1)
+        se deja vacío — poblarlo sin que exista clasificación de
+        estabilidad todavía sería inventar datos. `mcp` no está en el
+        `match` de builtins en absoluto — T6.2 lo agrega aparte, tal
+        como el propio Plan separa las dos tareas.
+      - Tests: 3 de schema en `crates/core/tests/workflow.rs` (default
+        vacío, los siete builtins parseando desde el propio ejemplo YAML
+        del Contrato, `knowledge.layers` explícito) + 3 en
+        `crates/engine/tests/check.rs` (`context:` en un nodo `bash` es
+        error, en un nodo `prompt` no lo es, un ciclo formado solo por
+        `artifact:` cruzados se detecta) + 9 end-to-end en
+        `crates/engine/tests/run.rs`, uno por builtin más el caso de
+        falla: cada uno resuelve su contenido, lo inyecta en el prompt
+        (verificado indirectamente pero de forma real — el fixture mock
+        solo matchea la sesión si el contenido resuelto aparece
+        literalmente en el prompt recibido, así que una resolución rota
+        habría hecho fallar el fixture, no solo el assert) y es
+        replayable (el archivo materializado bajo
+        `context/<content_hash>/content` existe y su propio hash
+        recalculado coincide con el que quedó en el evento, sin volver a
+        ejecutar nada); el de `artifact:` prueba además que el
+        `grill → plan` ordena solo por la dependencia implícita, sin
+        `depends_on` explícito; y un `artifact:` que referencia un nodo
+        real que nunca produjo el artifact falla el nodo con un mensaje
+        que nombra el artifact, nunca contenido vacío.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

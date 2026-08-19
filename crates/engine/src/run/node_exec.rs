@@ -235,7 +235,7 @@ async fn execute_parallel(
     }
 }
 
-fn template_vars(ctx: &RunCtx<'_>) -> BTreeMap<String, String> {
+pub(super) fn template_vars(ctx: &RunCtx<'_>) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("run.dir".to_string(), ctx.run_dir.display().to_string()),
         (
@@ -688,6 +688,7 @@ async fn execute_bash(
             use tokio::io::AsyncReadExt;
             let mut buf = Vec::new();
             let _ = pipe.read_to_end(&mut buf).await;
+            buf
         })
     });
 
@@ -719,9 +720,19 @@ async fn execute_bash(
                 Some(task) => task.await.unwrap_or_default(),
                 None => Vec::new(),
             };
-            if let Some(task) = stdout_task {
-                let _ = task.await;
-            }
+            let stdout_bytes = match stdout_task {
+                Some(task) => task.await.unwrap_or_default(),
+                None => Vec::new(),
+            };
+            // §9/§11.2, T6.1: captured regardless of exit status — a
+            // failing `lint` is exactly the case a corrective node's own
+            // `node-output` context wants to read.
+            crate::run::context_resolve::write_node_output(
+                ctx.run_dir,
+                &node.id,
+                &stdout_bytes,
+                &stderr_bytes,
+            )?;
 
             if status.success() {
                 close_node(ctx, node, "exit 0".to_string(), TokenUsage::default()).await
@@ -818,6 +829,14 @@ async fn execute_prompt(
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt))? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
+    };
+    let context_block = match super::context_resolve::resolve_and_assemble(ctx, node).await? {
+        Ok(block) => block,
+        Err(end) => return Ok(end),
+    };
+    let rendered = match context_block {
+        Some(block) => format!("{block}\n{rendered}"),
+        None => rendered,
     };
     let chosen = match resolve_node_runner(ctx, node)? {
         Ok(chosen) => chosen,

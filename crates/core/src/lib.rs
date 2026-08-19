@@ -32,9 +32,10 @@ pub use ledger::{Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use questions::{AnswerType, Question, QuestionsFile};
 pub use workflow::{
-    ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, HookFailurePolicy, HookStep, Hooks,
-    JoinPolicy, Node, NodeDefaults, NodeKind, NodePermissions, OnFailure, OnInterrupt,
-    PromptSource, ScopeExpansion, Workflow,
+    ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, ContextSpec,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeParams, LedgerParams, Node,
+    NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnInterrupt,
+    PromptSource, RunEventsParams, ScopeExpansion, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
