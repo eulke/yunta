@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_core::{content_hash, ConfigLayer, Manifest, NodeId, NodeKind, PromptSource, Workflow};
+use yunta_core::{
+    content_hash, ConfigLayer, Manifest, Node, NodeId, NodeKind, PromptSource, Workflow,
+};
 
 /// Version of the manifest's own schema (D07).
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -42,22 +44,7 @@ pub fn build_manifest(
 ) -> Result<Manifest, ManifestError> {
     let mut prompts = BTreeMap::new();
     for node in &workflow.nodes {
-        let prompt = match &node.kind {
-            NodeKind::Prompt { prompt } => prompt,
-            NodeKind::Loop { prompt, .. } => prompt,
-            NodeKind::Bash { .. } => continue,
-        };
-        if let PromptSource::File(path) = prompt {
-            let full_path = workflow_dir.join(path);
-            let content = std::fs::read_to_string(&full_path).map_err(|source| {
-                ManifestError::PromptFile {
-                    node: node.id.clone(),
-                    path: full_path.clone(),
-                    source,
-                }
-            })?;
-            prompts.insert(node.id.clone(), content);
-        }
+        freeze_prompts(node, workflow_dir, &mut prompts)?;
     }
 
     let base_commit = git_line(repo, &["rev-parse", "HEAD"])?;
@@ -76,6 +63,39 @@ pub fn build_manifest(
         isolation: config.resolved_isolation(),
         max_parallel_nodes: config.resolved_max_parallel_nodes(),
     })
+}
+
+/// Freezes `node`'s own file prompt (if any) and recurses into a
+/// `parallel` node's children (T4.6) — a child's `prompt: {file: ...}`
+/// needs the same freeze-at-creation guarantee (§2.1) as a top-level
+/// node's, since it's dispatched through the identical `execute_node`.
+fn freeze_prompts(
+    node: &Node,
+    workflow_dir: &Path,
+    prompts: &mut BTreeMap<NodeId, String>,
+) -> Result<(), ManifestError> {
+    match &node.kind {
+        NodeKind::Prompt { prompt } | NodeKind::Loop { prompt, .. } => {
+            if let PromptSource::File(path) = prompt {
+                let full_path = workflow_dir.join(path);
+                let content = std::fs::read_to_string(&full_path).map_err(|source| {
+                    ManifestError::PromptFile {
+                        node: node.id.clone(),
+                        path: full_path.clone(),
+                        source,
+                    }
+                })?;
+                prompts.insert(node.id.clone(), content);
+            }
+        }
+        NodeKind::Bash { .. } => {}
+        NodeKind::Parallel { nodes, .. } => {
+            for child in nodes {
+                freeze_prompts(child, workflow_dir, prompts)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn git_line(repo: &Path, args: &[&str]) -> Result<String, ManifestError> {

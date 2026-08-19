@@ -1,5 +1,6 @@
 use yunta_core::{
-    ArtifactKind, ArtifactSpec, HookFailurePolicy, NodeKind, OnInterrupt, PromptSource, Workflow,
+    ArtifactKind, ArtifactSpec, HookFailurePolicy, JoinPolicy, NodeKind, OnInterrupt, PromptSource,
+    Workflow,
 };
 
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
@@ -122,6 +123,49 @@ nodes:
     let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
     let defaults = workflow.node_defaults.unwrap();
     assert_eq!(defaults.hooks.unwrap().after[0].run, "cargo fmt");
+}
+
+#[test]
+fn a_parallel_node_parses_its_children_and_defaults_join_to_all() {
+    let yaml = r#"
+id: pre-launch
+kind: parallel
+nodes:
+  - id: write-docs
+    kind: bash
+    run: "echo docs"
+  - id: load-test
+    kind: bash
+    run: "echo load"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Parallel { join, nodes } => {
+            assert_eq!(join, JoinPolicy::All);
+            assert_eq!(nodes.len(), 2);
+            assert_eq!(nodes[0].id.as_str(), "write-docs");
+            assert_eq!(nodes[1].id.as_str(), "load-test");
+        }
+        other => panic!("expected Parallel, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_parallel_node_can_declare_join_any() {
+    let yaml = r#"
+id: pre-launch
+kind: parallel
+join: any
+nodes:
+  - id: a
+    kind: bash
+    run: "true"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Parallel { join, .. } => assert_eq!(join, JoinPolicy::Any),
+        other => panic!("expected Parallel, got {other:?}"),
+    }
 }
 
 #[test]

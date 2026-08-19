@@ -454,12 +454,116 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         preexistente de `restart_node` (`a_run_interrupted_mid_node_resumes_by_restarting_the_orphan`)
         sigue en verde sin tocarlo, confirmando que el default no cambió.
 
+- [x] **T4.6 — `kind: parallel` con `join: all|any` y colisión de scope
+      (D97/D100, §5.8).** El incremento más grande de M4: primer node kind
+      nuevo desde el schema recortado original de T1.1, y la primera
+      infraestructura de cancelación real del engine (nada usaba
+      `CancellationToken` antes de esto). Confirmado con el usuario de
+      antemano construir la tarea completa, `join: any` incluido, en vez
+      de recortar la interrupción en vivo para después.
+      - `NodeKind::Parallel { join, nodes: Vec<Node> }`
+      (`crates/core/src/workflow.rs`) — los hijos son `Node`s comunes:
+      mismos hooks/scope/artifacts/runner que cualquier nodo de primer
+      nivel, porque T4.6 los despacha a través del mismo `execute_node`
+      recursivo, no de un camino separado. Consecuencia deliberada: los
+      prompt de un hijo declarado como `{file: ...}` también se congela al
+      crear el manifest (`freeze_prompts` en `crates/engine/src/manifest.rs`
+      pasó a ser recursivo).
+      - **Los hijos no participan del DAG de nivel superior**: no son
+        visibles para el `depends_on`/`on_failure.goto` de otros nodos, y
+        el propio `on_failure` de un hijo (si lo declara) queda inerte —
+        la re-ruta es una decisión del scheduler de nivel superior
+        (`schedule.rs`), que nunca ve nada dentro de un grupo. No
+        confundirlo con un vacío silencioso: es la misma arquitectura por
+        la que el `max_parallel_nodes` de T4.1 tampoco aplica dentro de un
+        grupo — `parallel` siempre corre **todos** sus hijos a la vez,
+        sin tope, porque es un grupo nombrado a mano, no fan-out
+        implícito.
+      - **`join: all`** (default): el grupo espera a que todos los hijos
+        terminen (`futures::future::join_all`); si alguno falla, el grupo
+        falla nombrando ese hijo.
+      - **`join: any`**: carrera real con `futures::stream::FuturesUnordered`.
+        Al primer hijo que **termina con éxito**, el grupo cancela a los
+        demás — nunca a un hijo que ya falló por su cuenta, que
+        simplemente queda descartado de la carrera. Interrupción real:
+        cada hijo corre bajo un `CancellationToken` propio del grupo
+        (`cancel.child_token()`, así un grupo anidado dentro de otro
+        cancela en cascada); un `bash` cancelado recibe `SIGKILL` a todo
+        su grupo de procesos (mismo patrón que el timeout de hooks de
+        T4.3 — `process_group(0)` al spawnear); una sesión de `prompt`
+        cancelada usa el `interrupt()` → espera → `kill()` ya existente
+        del adapter (mismo mecanismo que el corte por presupuesto de
+        T3.3), ahora corriendo por una señal externa además de por
+        timeout — `dispatch_session` (`task_cycle.rs`) hace `select!`
+        entre el deadline de budget y la cancelación, cualquiera de los
+        dos que llegue primero.
+      - **`nodes: Vec<Node>` fija la lectura de stdout/stderr de un `bash`
+        cancelable con tareas propias** (`crates/engine/src/run/node_exec.rs`,
+        `execute_bash`): drenar los pipes recién después de `wait()`
+        arriesgaba el deadlock clásico si el comando llenaba el buffer del
+        pipe antes de salir — antes esto lo evitaba `.output()` sin que
+        nadie lo pidiera explícitamente; al pasar a un `wait()` cancelable
+        había que replicar esa garantía a mano con tareas lectoras
+        propias, esperadas antes de devolver el resultado (JoinHandle
+        retenido, nunca huérfano).
+      - **Re-entrancia en resume**: un hijo ya `Finished` (o `Failed` bajo
+        `join: all`) nunca se re-despacha; un grupo `join: any` cuyo
+        ganador ya haya terminado (crash entre el `node_finished` del hijo
+        y el del propio grupo) cierra de inmediato sin volver a correr a
+        nadie. Sin esto, cualquier crash a mitad de un `parallel` habría
+        duplicado trabajo ya hecho al reanudar.
+      - **D100 — colisión de escritura** (`crates/engine/src/check.rs`):
+        recorte explícito porque `permissions:` no existe en este schema
+        (T5.7) — hoy **todo** nodo es de facto escribible (`bash` sin
+        restricción, `prompt`/`loop` siempre con
+        `PermissionProfile::Edit`), así que la condición real de D100
+        ("dos o más hijos con permisos de escritura") se simplifica a
+        "dos o más hijos", honesto dado el schema en vez de una regla más
+        angosta de lo que D100 pretende. Dos hijos con scope declarado y
+        solapado (heurística de prefijo literal, reusada de la regla 4 del
+        ledger vía `ledger::globs_might_overlap`, ahora `pub(crate)`) es
+        **error** en `check()`; sin scope declarado en dos o más, es
+        **warning** — nuevo `check_warnings()`, función separada de
+        `check()` en vez de agregarle severidad a `CheckError`, para que
+        nada de lo que ya trata `check()` como "debe estar vacío para
+        seguir" tenga que aprender a filtrar. `yunta check` y
+        `check_or_refuse` (el gate previo a `run`/`graph`) imprimen los
+        warnings por stderr sin bloquear.
+      - **Corrección de alcance encontrada al pasar**: la unicidad global
+        de ids (`check()`'s `DuplicateNodeId`) solo escaneaba
+        `workflow.nodes` de primer nivel — un hijo de `parallel`
+        reutilizando un id ya en uso en otro lado habría corrompido la
+        derivación de replay (I2: un solo mapa plano `NodeId -> NodeState`)
+        sin que `check` lo viera. Ahora `collect_ids` recorre el árbol
+        completo, arbitrariamente anidado.
+      - Tests: 6 en `crates/core/tests/workflow.rs` (parseo, default de
+        `join`), 5 en `crates/engine/tests/check.rs` (id duplicado global,
+        overlap = error, disjoint = sin nada, sin scope = warning, grupo
+        de un solo hijo nunca advierte), 4 en `crates/engine/tests/run.rs`
+        — `join: all` termina cuando terminan todos, `join: all` falla si
+        falla un hijo, `join: any` termina con el rápido **y** el lento
+        queda con su `touch` final sin ejecutar (prueba de interrupción
+        real, no solo de que ganó el rápido), y la re-entrancia de resume
+        (corrida 5 veces seguidas sin flakiness; verificado a mano con
+        `ps` que no queda ningún `sleep` huérfano tras la cancelación) — y
+        1 en `crates/cli/tests/run_flow.rs` end-to-end (el warning D100
+        aparece por stderr y el run igual termina).
+      - **Deuda documentada, no silenciosa**: un hijo `kind: loop` no es
+        cancelable — su propio ciclo de tareas (`run_task`/`dispatch_session`
+        dentro de `loop_exec.rs`) recibe un `CancellationToken` que nadie
+        dispara nunca, así que sigue corriendo hasta su propio final
+        aunque un hermano gane la carrera de `join: any`. Ampliar
+        `run_task` (función pública, con su propia suite de tests) para
+        aceptar cancelación externa es más superficie de la que este
+        recorte tocó — sin tarea asignada, gatillo: alguien necesita de
+        verdad un `loop` corriendo dentro de un grupo `parallel`.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
-- **T1.1**: solo nodos `prompt`/`bash`/`loop`. Sin `gate`/`check`/`parallel`/
-  `executor`/`workflow`; sin `context:`, `skills:`, `modes:`, `inputs:`, fan-out de
-  `runners:`, `agent:` a nivel nodo, `permissions:`, `scope_expansion:`,
-  `coordination:`. Confirmado con el usuario.
+- **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6. Sin
+  `gate`/`check`/`executor`/`workflow`; sin `context:`, `skills:`, `modes:`,
+  `inputs:`, fan-out de `runners:`, `agent:` a nivel nodo, `permissions:`,
+  `scope_expansion:`, `coordination:`. Confirmado con el usuario.
 - **T1.2**: solo `runners`/`adapters`/`storage`/`paths`. Sin `mcp_servers`, `skills`,
   `baseline`/`coverage`, `secrets`, `permissions` (con su merge invertido, D51).
   Confirmado con el usuario.

@@ -6,14 +6,16 @@
 
 use std::collections::BTreeMap;
 
+use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Budget, PermissionProfile, SessionRequest};
 use yunta_core::events::{
     EventPayload, HookExecutedPayload, HookPhase, NodeFailedPayload, NodeFinishedPayload,
     RunnerResolvedPayload, TokenUsage,
 };
-use yunta_core::{HookFailurePolicy, HookStep, Hooks, Node, NodeKind, PromptSource};
+use yunta_core::{HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind, PromptSource};
 
 use crate::artifacts::close_artifacts;
+use crate::replay::{derive, NodeState};
 use crate::runner::resolve_runner;
 use crate::scope::scope_check;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
@@ -27,10 +29,14 @@ pub(super) enum NodeEnd {
     Failed,
 }
 
+/// `cancel` only ever fires for a child of a `join: any` parallel group
+/// once a sibling has won (T4.6) — every other call site passes a token
+/// nothing ever cancels, so this is a no-op parameter for them.
 pub(super) async fn execute_node(
     ctx: &RunCtx<'_>,
     node: &Node,
     attempt: u32,
+    cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
@@ -57,13 +63,152 @@ pub(super) async fn execute_node(
     }
 
     let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt).await?,
+        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
+        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
         NodeKind::Loop { until, prompt } => {
+            // A loop's own task dispatch isn't cancel-aware in this
+            // recorte (T4.6's scope is bash/prompt children) — a loop
+            // child of a `join: any` group runs to its own completion
+            // even after a sibling wins. Documented debt, not a silent
+            // gap: see `docs/m0-status.md`'s T4.6 entry.
             super::loop_exec::execute_loop(ctx, node, until, prompt).await?
+        }
+        NodeKind::Parallel { join, nodes } => {
+            execute_parallel(ctx, node, *join, nodes, cancel).await?
         }
     };
     Ok(end)
+}
+
+/// Runs `node`'s children (§5.8, T4.6): all of them concurrently, joined
+/// per `join`. Re-entrant on resume: a child already terminal in the log
+/// — `Finished`, or `Failed` — is never re-dispatched, and a group whose
+/// winning child already finished (crash between the child's own
+/// `node_finished` and the group's) closes immediately without racing
+/// anyone else. See the module's resume-safety test.
+async fn execute_parallel(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    join: JoinPolicy,
+    children: &[Node],
+    cancel: &CancellationToken,
+) -> Result<NodeEnd, RunError> {
+    let group_cancel = cancel.child_token();
+    let state = derive(&ctx.load_events()?);
+
+    let already_failed: Vec<&Node> = children
+        .iter()
+        .filter(|child| matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. })))
+        .collect();
+    let to_run: Vec<&Node> = children
+        .iter()
+        .filter(|child| !state.nodes.contains_key(&child.id))
+        .collect();
+
+    match join {
+        JoinPolicy::All => {
+            if let Some(first) = already_failed.first() {
+                return fail(
+                    ctx,
+                    node,
+                    format!("child `{}` failed under join: all", first.id),
+                    false,
+                );
+            }
+            let results = futures::future::join_all(
+                to_run
+                    .iter()
+                    .map(|child| execute_node(ctx, child, 1, &group_cancel)),
+            )
+            .await;
+
+            let mut failed_child = None;
+            for (child, result) in to_run.iter().zip(results) {
+                if matches!(result?, NodeEnd::Failed) {
+                    failed_child.get_or_insert(&child.id);
+                }
+            }
+            if let Some(id) = failed_child {
+                return fail(
+                    ctx,
+                    node,
+                    format!("child `{id}` failed under join: all"),
+                    false,
+                );
+            }
+            close_node(
+                ctx,
+                node,
+                format!("{} child(ren) finished", children.len()),
+                TokenUsage::default(),
+            )
+            .await
+        }
+        JoinPolicy::Any => {
+            use futures::stream::{FuturesUnordered, StreamExt};
+
+            if let Some(already_won) = children.iter().find(|child| {
+                matches!(state.nodes.get(&child.id), Some(NodeState::Finished { .. }))
+            }) {
+                return close_node(
+                    ctx,
+                    node,
+                    format!("`{}` succeeded first", already_won.id),
+                    TokenUsage::default(),
+                )
+                .await;
+            }
+
+            let mut failures: Vec<&yunta_core::NodeId> =
+                already_failed.iter().map(|child| &child.id).collect();
+            let mut running: FuturesUnordered<_> = to_run
+                .iter()
+                .map(|child| {
+                    let cancel = group_cancel.clone();
+                    async move { (&child.id, execute_node(ctx, child, 1, &cancel).await) }
+                })
+                .collect();
+
+            let mut winner = None;
+            while winner.is_none() {
+                let Some((child_id, result)) = running.next().await else {
+                    break;
+                };
+                match result? {
+                    NodeEnd::Finished => {
+                        winner = Some(child_id);
+                        group_cancel.cancel();
+                    }
+                    NodeEnd::Failed => failures.push(child_id),
+                }
+            }
+            // Drain the rest: the cancelled losers finishing their own
+            // interrupt→kill sequence.
+            while let Some((_, result)) = running.next().await {
+                if let NodeEnd::Failed = result? {
+                    // Expected — a cancelled child fails its own node.
+                }
+            }
+
+            match winner {
+                Some(id) => {
+                    close_node(
+                        ctx,
+                        node,
+                        format!("`{id}` succeeded first"),
+                        TokenUsage::default(),
+                    )
+                    .await
+                }
+                None => fail(
+                    ctx,
+                    node,
+                    format!("join: any — no child succeeded ({} failed)", failures.len()),
+                    false,
+                ),
+            }
+        }
+    }
 }
 
 fn template_vars(ctx: &RunCtx<'_>) -> BTreeMap<String, String> {
@@ -338,41 +483,111 @@ pub(super) fn fail_with_tokens(
     Ok(NodeEnd::Failed)
 }
 
-async fn execute_bash(ctx: &RunCtx<'_>, node: &Node, run: &str) -> Result<NodeEnd, RunError> {
+/// Runs the bash command, cancellable (T4.6): a `join: any` sibling
+/// winning sends `SIGKILL` to this whole process group and fails the
+/// node rather than waiting for `sh` to exit on its own. Stdout/stderr
+/// are drained concurrently with `wait()` by owned reader tasks — reading
+/// them only after `wait()` (like a naive `child.wait()` + read) risks
+/// the child blocking forever on a full pipe for any command chatty
+/// enough to fill one before exiting.
+async fn execute_bash(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    run: &str,
+    cancel: &CancellationToken,
+) -> Result<NodeEnd, RunError> {
     let rendered = match render_or_fail(ctx, node, run)? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
 
-    let output = tokio::process::Command::new("sh")
+    let mut std_cmd = std::process::Command::new("sh");
+    std_cmd
         .arg("-c")
         .arg(&rendered)
         .current_dir(ctx.worktree)
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        std_cmd.process_group(0);
+    }
+    let mut child = tokio::process::Command::from(std_cmd)
+        .spawn()
         .map_err(|source| RunError::Io {
-            context: format!("run bash node `{}`", node.id),
+            context: format!("spawn bash node `{}`", node.id),
             source,
         })?;
 
-    if output.status.success() {
-        close_node(ctx, node, "exit 0".to_string(), TokenUsage::default()).await
-    } else {
-        let stderr_tail: String = String::from_utf8_lossy(&output.stderr)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-        fail(
-            ctx,
-            node,
-            format!("exit {}: {stderr_tail}", output.status.code().unwrap_or(-1)),
-            false,
-        )
+    let stderr_task = child.stderr.take().map(|mut pipe| {
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf).await;
+            buf
+        })
+    });
+    let stdout_task = child.stdout.take().map(|mut pipe| {
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf).await;
+        })
+    });
+
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            if let Some(pid) = child.id() {
+                kill_process_group(pid).await;
+            }
+            let _ = child.wait().await;
+            if let Some(task) = stderr_task {
+                let _ = task.await;
+            }
+            if let Some(task) = stdout_task {
+                let _ = task.await;
+            }
+            fail(
+                ctx,
+                node,
+                "interrupted: a sibling in this join: any group finished first".to_string(),
+                false,
+            )
+        }
+        status = child.wait() => {
+            let status = status.map_err(|source| RunError::Io {
+                context: format!("run bash node `{}`", node.id),
+                source,
+            })?;
+            let stderr_bytes = match stderr_task {
+                Some(task) => task.await.unwrap_or_default(),
+                None => Vec::new(),
+            };
+            if let Some(task) = stdout_task {
+                let _ = task.await;
+            }
+
+            if status.success() {
+                close_node(ctx, node, "exit 0".to_string(), TokenUsage::default()).await
+            } else {
+                let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
+                    .lines()
+                    .rev()
+                    .take(20)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                fail(
+                    ctx,
+                    node,
+                    format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
+                    false,
+                )
+            }
+        }
     }
 }
 
@@ -443,6 +658,7 @@ async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
+    cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt))? {
         Ok(rendered) => rendered,
@@ -466,13 +682,12 @@ async fn execute_prompt(
         adapter_settings: Default::default(),
     };
 
-    let (outcome, tokens) =
-        dispatch_session(adapter.as_ref(), request)
-            .await
-            .map_err(|source| RunError::Spawn {
-                node: node.id.clone(),
-                source,
-            })?;
+    let (outcome, tokens) = dispatch_session(adapter.as_ref(), request, cancel)
+        .await
+        .map_err(|source| RunError::Spawn {
+            node: node.id.clone(),
+            source,
+        })?;
 
     match outcome {
         DispatchOutcome::Completed { summary } => close_node(ctx, node, summary, tokens).await,

@@ -21,7 +21,7 @@ mod template;
 mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
-pub use check::{check, CheckError};
+pub use check::{check, check_warnings, CheckError, CheckWarning};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
 pub use replay::{derive, NodeState, RunState};

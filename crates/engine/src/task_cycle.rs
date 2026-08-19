@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
@@ -187,6 +188,7 @@ const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
     request: SessionRequest,
+    cancel: &CancellationToken,
 ) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
     let budget = request.budget;
     let mut session = adapter.spawn(request).await?;
@@ -199,24 +201,44 @@ pub(crate) async fn dispatch_session(
         .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
     let mut tokens = TokenUsage::default();
     let mut terminal = None;
+    let mut cancelled = false;
 
     {
         let mut stream = session.events();
         loop {
-            let next = match deadline {
-                Some((deadline, timeout)) => {
-                    match tokio::time::timeout_at(deadline, stream.next()).await {
-                        Ok(next) => next,
-                        Err(_) => {
-                            terminal = Some(DispatchOutcome::BudgetExceeded {
-                                reason: format!("exceeded timeout of {timeout:?}"),
-                            });
-                            break;
+            // A node outside a `join: any` race passes a token nothing
+            // ever cancels, so that branch simply never wins for it —
+            // same `select!` shape either way.
+            let next = if let Some((deadline_at, timeout)) = deadline {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        cancelled = true;
+                        None
+                    }
+                    result = tokio::time::timeout_at(deadline_at, stream.next()) => {
+                        match result {
+                            Ok(next) => next,
+                            Err(_) => {
+                                terminal = Some(DispatchOutcome::BudgetExceeded {
+                                    reason: format!("exceeded timeout of {timeout:?}"),
+                                });
+                                break;
+                            }
                         }
                     }
                 }
-                None => stream.next().await,
+            } else {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        cancelled = true;
+                        None
+                    }
+                    next = stream.next() => next,
+                }
             };
+            if cancelled {
+                break;
+            }
 
             let Some(event) = next else { break };
 
@@ -261,13 +283,24 @@ pub(crate) async fn dispatch_session(
         }
     } // the stream's borrow of `session` ends here — interrupt/kill need &mut self too.
 
-    if matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
+    if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
         // A4: never leave anything running. Ordered termination first,
         // then forceful — mock has nothing to distinguish them, but a
         // real adapter's session may still close cleanly on interrupt.
         let _ = session.interrupt().await;
         tokio::time::sleep(INTERRUPT_GRACE_PERIOD).await;
         let _ = session.kill().await;
+    }
+
+    if cancelled {
+        return Ok((
+            DispatchOutcome::Failed {
+                message: "interrupted: a sibling in this join: any group finished first"
+                    .to_string(),
+                retryable: false,
+            },
+            tokens,
+        ));
     }
 
     Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
@@ -327,8 +360,11 @@ pub async fn run_task(
             budget,
             adapter_settings: Default::default(),
         };
+        // A loop task's own cancellation (mid-execution, from outside)
+        // isn't wired in this recorte — see T4.6's debt note in
+        // docs/m0-status.md — so this token is never triggered.
         let (dispatch_outcome, tokens) =
-            dispatch_session(adapter, request)
+            dispatch_session(adapter, request, &CancellationToken::new())
                 .await
                 .map_err(|source| TaskCycleError::Spawn {
                     task: task.id.clone(),

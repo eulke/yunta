@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use yunta_core::{ConfigLayer, Node, NodeKind, OnFailure, PromptSource, RunnerCandidate, Workflow};
-use yunta_engine::{check, CheckError};
+use yunta_core::{
+    ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource, RunnerCandidate, Workflow,
+};
+use yunta_engine::{check, check_warnings, CheckError, CheckWarning};
 
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
     Node {
@@ -28,6 +30,26 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         scope: Vec::new(),
         runner: Some(runner.to_string()),
+        artifacts: None,
+        hooks: None,
+        on_failure: None,
+        on_interrupt: None,
+    }
+}
+
+fn bash_with_scope(id: &str, run: &str, scope: &[&str]) -> Node {
+    let mut node = bash(id, run, &[]);
+    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node
+}
+
+fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
+    Node {
+        id: id.into(),
+        kind: NodeKind::Parallel { join, nodes },
+        depends_on: Vec::new(),
+        scope: Vec::new(),
+        runner: None,
         artifacts: None,
         hooks: None,
         on_failure: None,
@@ -165,6 +187,84 @@ fn runner_declared_with_zero_candidates_is_reported() {
         node: "plan".into(),
         runner: "planner".to_string(),
     }));
+}
+
+#[test]
+fn a_parallel_group_s_child_id_colliding_with_another_node_is_a_duplicate() {
+    // Global uniqueness, not per-group: replay derives node state from a
+    // single flat NodeId -> NodeState map, so a child reusing an id in
+    // use elsewhere would corrupt derivation, not just read oddly.
+    let wf = workflow(vec![
+        bash("shared", "true", &[]),
+        parallel("group", JoinPolicy::All, vec![bash("shared", "true", &[])]),
+    ]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::DuplicateNodeId {
+        id: "shared".into()
+    }));
+}
+
+#[test]
+fn two_children_with_overlapping_declared_scope_is_an_error() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![
+            bash_with_scope("a", "true", &["src/**"]),
+            bash_with_scope("b", "true", &["src/lib.rs"]),
+        ],
+    )]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::OverlappingParallelScope { group, .. } if group.as_str() == "group"
+        )),
+        "expected an OverlappingParallelScope error, got {errors:?}"
+    );
+}
+
+#[test]
+fn two_children_with_disjoint_declared_scope_has_no_error_or_warning() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![
+            bash_with_scope("a", "true", &["src/a.rs"]),
+            bash_with_scope("b", "true", &["src/b.rs"]),
+        ],
+    )]);
+    assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+    assert_eq!(check_warnings(&wf), Vec::new());
+}
+
+#[test]
+fn two_children_without_declared_scope_produce_a_warning_not_an_error() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![bash("a", "true", &[]), bash("b", "true", &[])],
+    )]);
+    assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+    let warnings = check_warnings(&wf);
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            CheckWarning::UndeclaredParallelScope { group } if group.as_str() == "group"
+        )),
+        "expected an UndeclaredParallelScope warning, got {warnings:?}"
+    );
+}
+
+#[test]
+fn a_single_child_group_never_warns_about_collision() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::Any,
+        vec![bash("a", "true", &[])],
+    )]);
+    assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+    assert_eq!(check_warnings(&wf), Vec::new());
 }
 
 #[test]

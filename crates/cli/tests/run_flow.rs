@@ -535,3 +535,44 @@ nodes:
     assert!(worktree_dirs[0].path().join("marker.txt").exists());
     assert!(worktree_dirs[0].path().join("attempt-marker.txt").exists());
 }
+
+#[test]
+fn a_parallel_group_with_undeclared_scope_warns_but_the_run_still_completes() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: load-test
+        kind: bash
+        run: "touch load.txt"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(stdout(&run).contains("finished"));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("pre-launch") && stderr.contains("warning"),
+        "expected a D100 warning naming the group, got: {stderr}"
+    );
+}

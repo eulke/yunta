@@ -86,6 +86,12 @@ pub(crate) fn refuse_unrunnable(
 /// `yunta check` before running anything — a workflow that fails static
 /// validation never creates a run.
 pub(crate) fn check_or_refuse(workflow: &Workflow, config: &ConfigLayer) -> Result<(), ExitCode> {
+    // Warnings (D100: a `parallel` group that can't verify its children
+    // won't collide) are visible but never block — only `check()`'s
+    // errors do.
+    for warning in yunta_engine::check_warnings(workflow) {
+        eprintln!("warning: {warning}");
+    }
     let errors = yunta_engine::check(workflow, config);
     if errors.is_empty() {
         return Ok(());

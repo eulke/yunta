@@ -843,3 +843,204 @@ sessions:
         Some(&yunta_core::events::TaskStatus::Blocked)
     );
 }
+
+#[tokio::test]
+async fn a_parallel_group_with_join_all_finishes_when_every_child_finishes() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: load-test
+        kind: bash
+        run: "touch load.txt"
+"#;
+
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    for id in ["pre-launch", "write-docs", "load-test"] {
+        assert!(
+            matches!(
+                state.nodes.get(&id.into()),
+                Some(NodeState::Finished { .. })
+            ),
+            "expected `{id}` finished, got {:?}",
+            state.nodes.get(&id.into())
+        );
+    }
+    assert!(bench.worktree.join("docs.txt").exists());
+    assert!(bench.worktree.join("load.txt").exists());
+}
+
+#[tokio::test]
+async fn a_parallel_group_with_join_all_fails_if_any_child_fails() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: load-test
+        kind: bash
+        run: "exit 1"
+"#;
+
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("load-test"), "got: {reason}"),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+    assert!(matches!(
+        state.nodes.get(&"load-test".into()),
+        Some(NodeState::Failed { .. })
+    ));
+}
+
+#[tokio::test]
+async fn a_parallel_group_with_join_any_completes_with_the_first_success_and_interrupts_the_rest() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: race
+nodes:
+  - id: race
+    kind: parallel
+    join: any
+    nodes:
+      - id: fast
+        kind: bash
+        run: "true"
+      - id: slow
+        kind: bash
+        run: "sleep 5 && touch slow-finished-fully.txt"
+"#;
+
+    let started = std::time::Instant::now();
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "expected join: any to return as soon as `fast` won, took {elapsed:?}"
+    );
+    assert!(matches!(
+        state.nodes.get(&"fast".into()),
+        Some(NodeState::Finished { .. })
+    ));
+    // The slow sibling was interrupted before its own `touch` ran — proof
+    // the process was actually cut short, not just outraced by chance.
+    assert!(!bench.worktree.join("slow-finished-fully.txt").exists());
+}
+
+#[tokio::test]
+async fn resuming_a_crashed_parallel_group_never_re_runs_a_child_that_already_finished() {
+    let bench = Bench::new();
+
+    let workflow_yaml = r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: load-test
+        kind: bash
+        run: "test -f present.txt"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+
+    // Simulate a crash mid-group: the parallel node and one child
+    // (write-docs) finished; the other child (load-test) never started.
+    for event in [
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("pre-launch".into()),
+            payload: yunta_core::events::EventPayload::NodeStarted(
+                yunta_core::events::NodeStartedPayload { attempt: 1 },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("write-docs".into()),
+            payload: yunta_core::events::EventPayload::NodeStarted(
+                yunta_core::events::NodeStartedPayload { attempt: 1 },
+            ),
+        },
+        yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("write-docs".into()),
+            payload: yunta_core::events::EventPayload::NodeFinished(
+                yunta_core::events::NodeFinishedPayload {
+                    outcome: "exit 0".to_string(),
+                    tokens_used: Default::default(),
+                },
+            ),
+        },
+    ] {
+        bench.storage.append_event(&event).unwrap();
+    }
+    // If write-docs re-ran, it would overwrite this — instead assert it
+    // survives untouched, since a second `touch` would only prove nothing.
+    std::fs::write(bench.worktree.join("docs.txt"), "original").unwrap();
+    std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
+
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &HashMap::new(),
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.terminal, RunTerminal::Finished);
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let write_docs_starts = events
+        .iter()
+        .filter(|e| {
+            e.node_id.as_ref().map(|id| id.as_str()) == Some("write-docs")
+                && matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_))
+        })
+        .count();
+    assert_eq!(
+        write_docs_starts, 1,
+        "an already-finished child must not restart on resume"
+    );
+}

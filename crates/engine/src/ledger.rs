@@ -280,7 +280,10 @@ fn glob_literal_prefix(glob: &str) -> &str {
     &glob[..end]
 }
 
-fn globs_might_overlap(a: &str, b: &str) -> bool {
+/// Same conservative approximation as this module's own rule 4 above,
+/// reused by `check`'s `parallel` scope-collision rule (D100, T4.6) —
+/// one heuristic, not two independently-drifting copies.
+pub(crate) fn globs_might_overlap(a: &str, b: &str) -> bool {
     let (pa, pb) = (glob_literal_prefix(a), glob_literal_prefix(b));
     pa.starts_with(pb) || pb.starts_with(pa)
 }

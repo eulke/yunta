@@ -86,15 +86,48 @@ pub enum OnInterrupt {
     FailIfUncertain,
 }
 
-/// The three node kinds M-0 needs (Plan, sección M-0). `gate`, `check`,
-/// `parallel`, `executor` and `workflow` are the rest of the full T1.1
-/// catalogue and stay out until their own milestone.
+/// The four node kinds M4 needs (Plan, sección M-0/M4). `gate`, `check`,
+/// `executor` and `workflow` are the rest of the full T1.1 catalogue and
+/// stay out until their own milestone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
-    Prompt { prompt: PromptSource },
-    Bash { run: String },
-    Loop { until: String, prompt: PromptSource },
+    Prompt {
+        prompt: PromptSource,
+    },
+    Bash {
+        run: String,
+    },
+    Loop {
+        until: String,
+        prompt: PromptSource,
+    },
+    /// Nodes named by the author, run at once (§5.8, T4.6) — distinct
+    /// from a loop's own `concurrency:` (§5.5), whose task count doesn't
+    /// exist until the plan runs. Children are ordinary `Node`s (their
+    /// own hooks/scope/artifacts/runner apply exactly as at the top
+    /// level, T4.6 dispatches them through the same `execute_node`); they
+    /// share the run's one worktree (T4.2 gives one per *run*, not per
+    /// node) and aren't visible to the top-level DAG's own `depends_on`.
+    Parallel {
+        #[serde(default)]
+        join: JoinPolicy,
+        nodes: Vec<Node>,
+    },
+}
+
+/// `parallel.join` (§5.8, D97). `all` (default): the group finishes only
+/// once every child does, and one failed child fails the group. `any`:
+/// the group finishes with the first child to *succeed*; the engine
+/// sends the rest `interrupt`, escalating to `kill` if they don't close
+/// in time (same ordered-then-forceful mechanism as an agent session's
+/// own cancellation, Spec del Adapter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinPolicy {
+    #[default]
+    All,
+    Any,
 }
 
 /// A node's prompt: an inline string, or `{file: ...}` (Contrato §9.3,

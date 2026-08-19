@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use yunta_adapters::Adapter;
 use yunta_core::events::{
     Event, EventPayload, NodeReroutedPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics,
@@ -286,9 +287,12 @@ pub async fn execute_run(
                 // a terminal per-node state) before the next iteration
                 // decides what comes next — the same simplification
                 // `kind: parallel`'s `join: all` makes explicit (§5.8),
-                // here implicit for scheduler-formed batches. Interrupting
-                // still-running siblings the moment one fails is `join:
-                // any` territory (T4.6), out of this recorte.
+                // here implicit for scheduler-formed batches. Top-level DAG
+                // fan-out never interrupts a still-running sibling the
+                // moment one fails — that's `join: any`'s own semantics
+                // (T4.6), scoped to a named `parallel` group, not implicit
+                // `max_parallel_nodes` batches — so each node gets a token
+                // nothing ever cancels.
                 let executions = batch.into_iter().map(|(node_id, attempt)| {
                     let ctx = &ctx;
                     let node = &manifest.workflow;
@@ -302,7 +306,8 @@ pub async fn execute_run(
                                     "scheduler chose node `{node_id}` which the manifest's workflow does not define"
                                 ),
                             })?;
-                        node_exec::execute_node(ctx, node, attempt).await
+                        node_exec::execute_node(ctx, node, attempt, &CancellationToken::new())
+                            .await
                     }
                 });
                 for result in futures::future::join_all(executions).await {
