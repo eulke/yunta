@@ -52,17 +52,78 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - [x] **T7.1 (parcial)** — `yunta check`, `yunta run <workflow>`,
       `yunta status <run_id>`, `yunta resume <run_id>` reales en el CLI, con
       config en capas (repo > usuario > org, `YUNTA_HOME` como raíz de estado).
-      Un workflow con nodos `prompt`/`loop` se rechaza **antes** de crear el run
-      mientras no exista adapter real (T7.3) — el mensaje apunta a `yunta test`.
+      `real_adapters()` construye `claude-code` cuando `runners:` lo nombra en
+      la config mergeada; un workflow con `prompt`/`loop` que no resuelve a
+      ningún adapter construido se rechaza **antes** de crear el run.
 - [x] **T7.9 (recorte)** — `yunta test`: casos en `.yunta/tests/` con
       `workflow`/`fixture`/`expect` (final_state, nodes, tasks), sandbox por caso
       (worktree git, runs root y DB temporales), fixture renderizado con
       `{{run.dir}}`/`{{worktree}}`, el mock suplanta a todo adapter que la config
       nombre. Sin `mode`/`inputs`/`events`/`never` (esperan su schema o T7.9
       completo).
-- [ ] **T7.3** — adapter `claude-code` real (no ejercitable en este sandbox: necesita
-      el binario `claude` instalado y autenticado). **Es lo único que falta para que
-      `yunta run` corra el bootstrap real.**
+- [x] **T7.3 — adapter `claude-code` real.** Resultó sí ejercitable: el binario
+      `claude` está instalado y autenticado en este sandbox (comparte
+      infraestructura de sesión con el propio entorno de trabajo — ver nota de
+      costo/seguridad abajo). Implementado en `yunta-adapters::claude_code`:
+      - `probe()`: `claude --version`.
+      - `spawn()`/`resume()`: `claude -p --output-format stream-json --verbose
+        [--resume <id>] [--model] [--agent] <permission-args> <prompt>`.
+      - Parser (`parse.rs`) puro: `system/init` → `SessionOpened`; bloques
+        `text`/`tool_use` de mensajes `assistant` → `Note`/`ToolUse` (digest =
+        `file_path`/`path`/`command`/`pattern`/`url` del input, o su hash);
+        `thinking` deliberadamente no se expone. El `usage` de la línea
+        `result` final (nunca el de líneas `assistant` intermedias, que
+        subcuentan tokens de thinking aún no conciliados) es la única fuente
+        de `Usage` — un total correcto importa más que poder cortar la sesión
+        a mitad de camino, algo que este modo de ejecución por turnos atómicos
+        no soporta bien de todas formas.
+      - `capabilities()`: `resume_session`/`permission_profiles`/
+        `custom_agents`/`usage_reporting` en `true`; `edit_hooks`/`run_tools`
+        en `false` — honesto (A6): no hay bloqueo de ediciones en vivo para el
+        CLI real todavía, el scope check post-hoc (T5.3) es el límite real.
+      - `interrupt()`/`kill()`: `process_group(0)` al spawnear + `kill -SIGNAL
+        -- -<pgid>` (A4, exterminio del árbol completo).
+      - Mapeo de permisos (`permissions.rs`): las tres opciones obvias se
+        probaron en vivo antes de elegir. `bypassPermissions`/
+        `--dangerously-skip-permissions` — rechazadas por el CLI corriendo
+        como root (contenedor). `dontAsk` — corre sin colgarse pero **deniega
+        toda tool call** en vez de permitirla. `acceptEdits` — confirmada en
+        vivo: permite Write y Bash sin prompt, corre como root, produce el
+        archivo pedido. Es lo que usan los tres `PermissionProfile`;
+        `ReadOnly` además restringe `--tools` a un set no-mutante.
+      - Tests: 11 en `crates/adapters/tests/claude_code.rs` contra un binario
+        `claude` simulado por script (`fixtures/claude_code_stub.sh`) — sin
+        red, sin costo, nunca un LLM real en CI (A8). Cubren sesión exitosa,
+        fallo con `retryable`, mapeo de `tool_use`, crash sin evento terminal,
+        los tres perfiles de permiso, `--resume`, y **exterminio real del
+        árbol de procesos** (el stub genera un nieto que `kill()` debe matar
+        también). 1 test end-to-end en `crates/cli/tests/run_flow.rs` prueba
+        que `yunta run` real dispara el adapter (mismo stub, vía
+        `adapters.claude-code.binary` en config).
+      - **Smoke test manual con el binario real** (el criterio de aceptación
+        de T7.3): workflow de 3 nodos (`bash` → `prompt` con `claude-haiku-4-5`
+        pidiendo crear `marker.txt` → `bash` verificando el archivo con
+        `grep`) corrido con `yunta run` de verdad. Resultado: **run
+        finished**, `marker.txt` creado con el contenido correcto, 18
+        tokens de entrada / 262 de salida atribuidos en `status`. El primer
+        intento con `--dangerously-skip-permissions` fue el que reveló el
+        bloqueo por root; el segundo con `dontAsk` reveló la denegación
+        silenciosa; el tercero con `acceptEdits` fue el que funcionó — los
+        tres quedan documentados en el módulo como el rationale del mapeo.
+      - **Nota de costo/seguridad**: el binario `claude` en este sandbox
+        comparte `session_id` e infraestructura con la sesión de trabajo
+        actual (no es una instalación aislada con su propia cuota) y cada
+        invocación real cuesta dinero de la cuenta de Anthropic — confirmado
+        con el usuario antes de gastar (~5 llamadas de prueba, entre
+        US$0.004 y US$0.06 cada una, para diagnosticar el mapeo de permisos y
+        el bug de `kill`).
+      - **Bug real encontrado y corregido en el camino**: `kill -SIGNAL
+        -<pgid>` (sin `--`) hace que `procps-ng`'s `kill` no envíe ninguna
+        señal — sale con status 0 igual, sin tocar ningún proceso. Sin el
+        test que verifica que un nieto del proceso muere de verdad, esto
+        habría sido una violación silenciosa de A4 en producción. El fix
+        (`kill <signal> -- -<pgid>`) y el test que lo atrapa quedaron en el
+        mismo commit.
 
 ## Hecho de más, no nombrado explícitamente en el alcance mínimo
 
@@ -161,10 +222,9 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
 
 ## Pendiente explícito (para retomar sin adivinar)
 
-1. **T7.3** — adapter `claude-code` real: probe (binario, versión, auth), spawn
-   headless streaming, `resume`, `permission_profiles`, `edit_hooks`,
-   `custom_agents`, skills. Requiere el binario `claude` instalado y autenticado en
-   el entorno donde se corra — no ejercitable en este sandbox.
+1. **T7.3 — hecho.** Ver el detalle en "Alcance mínimo de M-0" arriba. `skills`
+   queda deliberadamente fuera (M6, `context:`/`skills:` no existen en el
+   recorte de T1.1) — no es una falla, es scope.
 2. **Grupos de config diferidos de T1.2**: `mcp_servers`, `skills`,
    `baseline`/`coverage`, `secrets`, `permissions` (merge invertido, org manda).
    Implementar recién cuando algo los consuma: `baseline`/`coverage` con T5.4
