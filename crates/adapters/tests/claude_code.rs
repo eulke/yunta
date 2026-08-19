@@ -204,7 +204,7 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
 }
 
 #[tokio::test]
-async fn read_only_restricts_tools_and_bypasses_prompts_safely() {
+async fn read_only_restricts_the_tool_set_and_never_asks() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -224,15 +224,11 @@ async fn read_only_restricts_tools_and_bypasses_prompts_safely() {
 
     let args = std::fs::read_to_string(&args_file).unwrap();
     assert!(args.contains("--tools"), "got: {args}");
-    assert!(args.contains("bypassPermissions"), "got: {args}");
-    assert!(
-        !args.contains("--dangerously-skip-permissions"),
-        "got: {args}"
-    );
+    assert!(args.contains("acceptEdits"), "got: {args}");
 }
 
 #[tokio::test]
-async fn edit_and_full_run_unattended_with_skip_permissions() {
+async fn edit_and_full_run_unattended_without_the_root_blocked_flags() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -251,10 +247,14 @@ async fn edit_and_full_run_unattended_with_skip_permissions() {
     let _ = drain(session).await;
 
     let args = std::fs::read_to_string(&args_file).unwrap();
+    assert!(args.contains("acceptEdits"), "got: {args}");
+    // Both are refused when the CLI runs as root — confirmed empirically
+    // (see permissions.rs) — so neither may appear in the built args.
     assert!(
-        args.contains("--dangerously-skip-permissions"),
+        !args.contains("--dangerously-skip-permissions"),
         "got: {args}"
     );
+    assert!(!args.contains("bypassPermissions"), "got: {args}");
 }
 
 #[tokio::test]
