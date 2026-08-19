@@ -1678,3 +1678,55 @@ permissions:
         other => panic!("expected the run to pause, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn events_jsonl_is_written_at_run_dir_when_the_run_finishes() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: single-node
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#;
+
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
+    let round_tripped: Vec<yunta_core::events::Event> = jsonl
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(yunta_engine::derive(&round_tripped), state);
+    assert!(
+        jsonl.contains("\"kind\":\"run_finished\""),
+        "the closing event itself must be included in the export"
+    );
+}
+
+#[tokio::test]
+async fn events_jsonl_is_also_written_when_the_run_pauses() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: no-runner
+nodes:
+  - id: plan
+    kind: prompt
+    prompt: "plan it"
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    match terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+
+    let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
+    assert!(
+        jsonl.contains("\"kind\":\"run_paused\""),
+        "a paused run's export must include the pause itself"
+    );
+}

@@ -6,6 +6,22 @@
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (§8.1, `restart_node`).
+//!
+//! **`events.jsonl` export (§8.3, T5.8)**: the Contrato says only "al
+//! cierre" without enumerating which terminal states count — a real gap,
+//! documented in `docs/m0-status.md`'s T5.8 entry rather than guessed
+//! silently. This recorte exports on every terminal `RunReport` the
+//! schedule loop already recognizes — `Finish` and `Pause` alike, via
+//! [`RunCtx::export_events_jsonl`] — unconditionally, independent of
+//! whether the workflow declares `on_finish:` at all (D20/§8.3's own
+//! phrasing reads as two actions conjoined at close, not one gated on the
+//! other). `ScheduleStep::Broken`'s early `Err` return is deliberately
+//! excluded: that path never reaches a `RunReport` at all today, and a
+//! corrupt-log export is its own design question, not silently folded
+//! into this one. `on_finish.distill` itself stays unimplemented — its
+//! mechanism (agent session? deterministic transform?) isn't documented
+//! anywhere in Notion, and per CLAUDE.md a mechanism that can't be
+//! reasoned about mock-testability for shouldn't be built on a guess.
 
 mod check_exec;
 mod executor_exec;
@@ -71,6 +87,9 @@ pub enum RunError {
 
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
+
+    #[error(transparent)]
+    EventsExport(#[from] crate::events_export::EventsExportError),
 }
 
 /// Everything node execution needs, borrowed once. Also owns the small
@@ -110,6 +129,22 @@ impl RunCtx<'_> {
 
     pub(crate) fn load_events(&self) -> Result<Vec<Event>, RunError> {
         Ok(self.storage.events_for_run(self.run_id)?)
+    }
+
+    /// Exports the run's whole log to `run.dir/events.jsonl` (§8.3, T5.8)
+    /// — called at every close this recorte recognizes (`Finish` and
+    /// `Pause`; see this module's own doc comment on the trigger
+    /// decision). Re-exports in full each time, same "regenerate from the
+    /// log" principle `progress.md` (T5.5) already follows — a run that
+    /// pauses, resumes, and later finishes just gets the file rewritten
+    /// with the fuller log, never appended to.
+    pub(crate) fn export_events_jsonl(&self) -> Result<(), RunError> {
+        let events = self.load_events()?;
+        let jsonl = crate::events_export::render_events_jsonl(&events)?;
+        std::fs::write(self.run_dir.join("events.jsonl"), jsonl).map_err(|source| RunError::Io {
+            context: "write events.jsonl".to_string(),
+            source,
+        })
     }
 }
 
@@ -255,6 +290,7 @@ pub async fn execute_run(
                         },
                     }),
                 )?;
+                ctx.export_events_jsonl()?;
                 return Ok(RunReport {
                     terminal: RunTerminal::Finished,
                     state,
@@ -267,6 +303,7 @@ pub async fn execute_run(
                         reason: reason.clone(),
                     }),
                 )?;
+                ctx.export_events_jsonl()?;
                 return Ok(RunReport {
                     terminal: RunTerminal::Paused { reason },
                     state: derive(&ctx.load_events()?),

@@ -974,6 +974,68 @@ que aparece.
         sin cambio de comportamiento — es exactamente lo que el Plan pide
         de ese test: documentar el límite.
 
+- [x] **T5.8 — export de `events.jsonl` al cierre (§8.3, §3.1). Alcance
+      recortado: solo el export, `on_finish.distill` queda sin
+      implementar.** Investigado a fondo en Notion antes de codear;
+      confirmado con el usuario que la brecha de `distill` es real y de
+      otra naturaleza que las de T5.6/T5.7 — decide si el mecanismo es
+      testeable con mock (A8), no solo un nombre de campo.
+      - **Por qué se separó**: el propio criterio ✓ del Plan
+        ("property test: derivar estado desde el JSONL produce el mismo
+        `RunState` que el replay desde la DB") solo testea el export —
+        nada en el Plan, el Contrato, las ADRs, ni RFC-0003 testea o
+        siquiera define el comportamiento de `distill`. §8.3 da el
+        propósito (D20: destilar `plan.yaml`/artifacts en ADRs y
+        `CONTEXT.md` bajo `.yunta/knowledge/`) pero nunca el mecanismo —
+        ¿sesión de agente (como un nodo `prompt`)? ¿transformación
+        determinista del engine? Ninguno de los documentos lo dice, y sin
+        eso no hay forma de saber si `distill` es testeable con mock sin
+        inventar diseño nuevo — exactamente el tipo de decisión que
+        CLAUDE.md pide no tomar en silencio. Queda como deuda explícita,
+        no implementado; `on_finish:` no se agregó al schema de
+        `Workflow` todavía porque su única razón de ser hoy sería
+        `distill`, sin mecanismo.
+      - **Lo que sí está completamente especificado y se implementó**:
+        `events.jsonl` es el log completo del run, un objeto JSON por
+        línea en orden de `seq`, escrito en la raíz de `run.dir` (junto a
+        `manifest.yaml`/`progress.md`) — "el run archivado queda
+        autocontenido... con vida independiente de `retention_days`"
+        (§8.3). `render_events_jsonl` (`crates/engine/src/events_export.rs`,
+        núcleo puro sin IO) serializa cada `Event` tal cual con
+        `serde_json` — `EventPayload` ya viene con tag interno `kind`
+        (T2.2), así que no hace falta un envelope aparte; T2.0 documenta
+        `event_hash`/`prev_event_hash` (I26) como T2.5, todavía sin campo
+        en `Event`, así que no hay cadena de hashes que preservar en este
+        recorte.
+      - **Gap real resuelto con propuesta documentada — condición de
+        disparo**: §8.3 solo dice "al cierre" sin enumerar qué terminal
+        states cuentan, ni si el export depende de que `on_finish:` esté
+        declarado. Propuesta: se exporta en **todo** `RunReport` terminal
+        que el scheduler ya reconoce hoy — `Finish` y `Pause` por igual
+        — de forma **incondicional**, sin importar si el workflow declara
+        `on_finish:` (la propia redacción de §8.3 conjuga "destila...
+        **y** exporta" como dos acciones a la par, no una condicionada a
+        la otra). El camino `ScheduleStep::Broken` queda deliberadamente
+        afuera: hoy ni siquiera llega a un `RunReport` (retorna `Err`
+        antes), y exportar un log roto es una pregunta de diseño propia
+        que no se resolvió por analogía. Documentado en el doc del propio
+        módulo `run/mod.rs`, no solo acá.
+      - **Regeneración completa, nunca apéndice**: mismo principio que
+        `progress.md` (T5.5) — un run que pausa, resume y después termina
+        simplemente reescribe el archivo con el log más completo, nunca
+        le agrega líneas al que ya existía.
+      - Tests: 3 puros en `crates/engine/tests/events_export.rs` (una
+        línea JSON por evento en orden, log vacío → string vacío, y el
+        property test literal del ✓ — round-trip byte-a-byte de los
+        eventos más `derive()` idéntico entre original y JSONL, con
+        varios fixtures a mano en el mismo estilo que
+        `replay_is_deterministic_across_several_fixtures` de T2.3, ya que
+        el workspace no tiene `proptest`/`quickcheck` como dependencia) +
+        2 end-to-end en `crates/engine/tests/run.rs` (el archivo existe
+        y su replay coincide con el estado del run tras `Finished`;
+        también se escribe tras `Paused`, incluyendo el propio evento de
+        cierre en ambos casos).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod check;
+mod events_export;
 mod findings;
 mod ledger;
 mod manifest;
@@ -25,6 +26,7 @@ mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use check::{check, check_warnings, CheckError, CheckWarning};
+pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{register as register_findings, FindingsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
