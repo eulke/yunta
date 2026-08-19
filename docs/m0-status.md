@@ -1165,6 +1165,136 @@ que aparece.
         confirmado contando cuántas veces la tarea ya-Done recibe
         `Running` en el log tras el resume (debe ser exactamente 1).
 
+- [x] **T5.11 — ampliación de scope, `scope_expansion:` (§6.2, D73).** El
+      Contrato fija el modelo entero — tres modos (`rules`/`ask`/`deny`,
+      default `deny`), un único request object idéntico en los tres
+      (`paths`, `reason`, `proposed_criterion`), el propio pre-check del
+      criterio propuesto corriendo primero en todo modo, un cap
+      `max_per_run` cuyo agotamiento escala en vez de denegar en
+      silencio, y D80 (toda denegación se convierte en finding) — pero dos
+      mecánicas de transporte quedan sin fijar, resueltas acá como
+      llamadas de ingeniería documentadas (no decidían si la feature era
+      testeable, así que no ameritaban una pregunta nueva, siguiendo el
+      mismo criterio de T5.10):
+      - **Transporte del request**: no existe superficie MCP en este
+        codebase (`skills`/`mcp_servers` está fuera de M0), así que no hay
+        "tool call" que un agente pueda invocar. Se reusó el patrón que
+        T5.12 ya fija para `kind: findings`: un archivo estructurado que
+        el agente escribe y el engine lee — acá, un único path conocido
+        dentro del worktree aislado propio de la tarea
+        (`SCOPE_EXPANSION_REQUEST_FILE =
+        .yunta-scope-expansion-request.yaml`), porque un request es un
+        objeto por intento, no una lista.
+      - **"Tamaño acotado"** (§6.2, sin número): acotado por *cantidad de
+        archivos* del diff bajo los `paths` pedidos, no por líneas
+        cambiadas — más simple y robusto mezclando archivos trackeados y
+        untracked, igual de fiel a "un arreglo chico, adyacente".
+        `MAX_EXPANSION_FILES = 5`.
+      - **Bug real encontrado y corregido antes de escribir ningún test de
+        integración**: el archivo de request, al vivir sin trackear
+        dentro del propio worktree de la tarea, aparecía en
+        `git ls-files --others` — exactamente lo que `scope_check` (T5.3)
+        usa para armar el diff. Sin tratamiento especial, **cualquier**
+        uso del mecanismo habría hecho que la propia tarea violara su
+        scope por el archivo de control, sin importar el modo ni el
+        veredicto — el feature se habría autoderrotado en su primer uso
+        real. Corregido en `load_request`: el archivo se borra apenas se
+        lee, tratado como señal de control-plane consumida una vez, nunca
+        como parte del diff entregable de la tarea — lo cual de paso le
+        da a "un request por intento" su único cumplimiento real (una
+        segunda lectura contra el mismo worktree no encuentra nada).
+      - **`ask` degrada siempre a pausa, nunca a consulta real**: no
+        existe `kind: gate`/T7.2 en este codebase todavía, así que no hay
+        superficie interactiva por la que una persona decida. No es una
+        ambigüedad de diseño sino una consecuencia técnica dura: `ask`
+        evalúa exactamente como `rules`/`deny` en el pre-check y el cap,
+        pero cuando le toca renderizar el propio veredicto de modo
+        produce `Decision::Escalate` — que no tiene evento propio
+        (`scope_expansion_requested` se emite igual, pero no
+        `granted`/`denied`) y hace que `run_task` marque
+        `needs_human_decision`, la señal que `loop_exec.rs` usa para
+        pausar el run.
+      - **`max_per_run` bajo concurrencia real: soft race documentada, no
+        corregida**: `granted_count` (cuenta de eventos
+        `scope_expansion_granted` ya en el log) se lee una vez por lote,
+        al mismo tiempo que `base_commit` — dos tareas del **mismo** lote
+        concurrente que ambas terminan concedidas pueden ver el mismo
+        conteo pre-lote, así que el cap puede excederse hasta en
+        `concurrency - 1` dentro de un lote antes de que el próximo lote
+        lo note. Serializar la evaluación cerraría el hueco pero anularía
+        el punto entero de T5.10 (dispatch concurrente real) por un cap
+        blando cuyo propósito es atajar "diez concesiones seguidas", no
+        imponer un límite de seguridad duro — aceptado, no arreglado,
+        documentado en el propio doc comment de `granted_count`.
+      - **Un `Done` que igual queda con una decisión pendiente**: si el
+        pre-check/mode de una tarea escala (`ask`, o cap agotado) pero
+        la propia tarea termina satisfaciendo sus criterios y scope
+        *declarados* sin necesitar la ampliación, `run_task` devuelve
+        igual `TaskOutcome::Done` — pero con `needs_human_decision: true`.
+        `loop_exec.rs` lo respeta: integra la tarea normalmente (el
+        trabajo es real) pero pausa el run una vez que el lote completo
+        terminó de integrar, citando la tarea, en vez de dejar pasar en
+        silencio una escalada que nadie resolvió. Límite honesto
+        documentado en el propio módulo: esa pausa es una notificación
+        de una sola vez, no estado durable — como la tarea ya quedó
+        `Done` e integrada, un resume posterior no la vuelve a
+        re-despachar y por lo tanto no vuelve a pausar por el mismo
+        request sin resolver. El request sigue siendo auditable para
+        siempre en el log (`scope_expansion_requested` sin
+        `granted`/`denied` correspondiente es exactamente la huella de
+        "todavía debe una decisión"), pero nada en este recorte lo
+        vuelve a superficiar automáticamente pasada esa primera pausa —
+        explícito en el doc comment de `scope_expansion.rs`, no un hueco
+        silencioso (A6).
+      - **Mapeo de campos D80 (finding automático por denegación)**: sin
+        precedente en el codebase de un finding generado por el engine
+        mismo (el único emisor existente, `node_exec.rs`, reenvía
+        findings que el propio agente ya escribió con su `id` en un
+        artifact `kind: findings`) — decisiones tomadas: `id` =
+        `scope-expansion-<task_id>-<intento>` (única por construcción,
+        un request por intento); `severity: Minor` (una denegación es
+        flujo de control rutinario, no evidencia de que el run esté
+        roto — distinta de cualquier severidad que la propia
+        falla de criterios/scope de la tarea cargue por su lado);
+        `title`/`location`/`detail` arman el mensaje a partir del propio
+        `reason` del agente y el motivo de la denegación, nunca una
+        explicación inventada por el engine; `proposed_criterion` se
+        reenvía tal cual. No cubierto por ningún ADR — llamada de
+        ingeniería documentada acá, revisable si el equipo define un
+        esquema de ids de finding más adelante.
+      - **Excluido deliberadamente de este alcance (gap #1, no
+        testeado)**: §6.2 dice que `scope_expansion.mode` sigue el mismo
+        modelo de techo que el resto de `permissions` (§6.1, T5.7 —
+        capas más bajas solo pueden angostar, nunca aflojar), pero no da
+        forma YAML concreta a nivel config para ese ceiling. Ninguno de
+        los 5 ✓ del Plan lo ejercita, así que quedó fuera de este task:
+        `scope_expansion:` hoy es puramente de nodo (`NodeKind::Loop`),
+        sin interacción con `PermissionsConfig`/`merge_permissions`
+        (T5.7). Pendiente para cuando el Plan o un ADR lo pida.
+      - Tests: 9 en `crates/engine/tests/scope_expansion.rs` (unitarios
+        sobre `evaluate` con un repo git real — precheck que ya pasa
+        deniega sin consultar en cualquier modo, `deny` deniega sin
+        correr regla alguna, `ask` escala, `rules` concede/deniega por
+        `within`/criterio-requerido/tamaño, cap agotado escala incluso
+        bajo `rules`, cap no agotado no escala) + 3 de schema en
+        `crates/core/tests/workflow.rs` (`scope_expansion` ausente,
+        declarado con `ask`+`within`+cap, default `deny` sin `mode:`) + 5
+        end-to-end en `crates/engine/tests/run.rs`, uno por cada ✓ del
+        Plan: escribir fuera de scope sin request nunca es una ampliación
+        implícita, ni con un `within` que técnicamente cubriría el path
+        (bloquea la tarea, cero eventos `scope_expansion_*`); un criterio
+        propuesto que ya pasa se deniega sin consultar incluso en `ask`
+        (el run nunca pausa); toda denegación —acá, el default `deny` sin
+        ningún bloque `scope_expansion:` en absoluto— produce un finding
+        con el `reason` y el `proposed_criterion` del agente; una
+        ampliación concedida (`rules`) deja pasar el mismo diff que,
+        bajo `deny`, sigue siendo una violación real (dos corridas, mismo
+        diff, solo cambia el modo); el request object grabado en el
+        evento `scope_expansion_requested` es idéntico —`paths`,
+        `reason`, `proposed_criterion`, hasta el resultado del
+        precheck— en los tres modos, aunque el veredicto que sigue
+        difiera.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

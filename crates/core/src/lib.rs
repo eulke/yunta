@@ -32,7 +32,7 @@ pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use workflow::{
     ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, HookFailurePolicy, HookStep, Hooks,
     JoinPolicy, Node, NodeDefaults, NodeKind, NodePermissions, OnFailure, OnInterrupt,
-    PromptSource, Workflow,
+    PromptSource, ScopeExpansion, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

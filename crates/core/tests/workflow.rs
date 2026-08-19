@@ -300,6 +300,73 @@ timeout_seconds: 30
 }
 
 #[test]
+fn a_loop_node_s_scope_expansion_defaults_to_absent() {
+    let yaml = r#"
+id: implement
+kind: loop
+until: all_tasks_complete
+prompt: "do it"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Loop {
+            scope_expansion, ..
+        } => assert!(scope_expansion.is_none()),
+        other => panic!("expected Loop, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_loop_node_can_declare_scope_expansion_ask_with_within_and_cap() {
+    let yaml = r#"
+id: implement
+kind: loop
+until: all_tasks_complete
+prompt: "do it"
+scope_expansion:
+  mode: ask
+  within: ["src/**"]
+  max_per_run: 3
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Loop {
+            scope_expansion, ..
+        } => {
+            let se = scope_expansion.unwrap();
+            assert_eq!(se.mode, yunta_core::events::ScopeExpansionMode::Ask);
+            assert_eq!(se.within, vec!["src/**".to_string()]);
+            assert_eq!(se.max_per_run, Some(3));
+        }
+        other => panic!("expected Loop, got {other:?}"),
+    }
+}
+
+#[test]
+fn scope_expansion_with_no_mode_defaults_to_deny() {
+    let yaml = r#"
+id: implement
+kind: loop
+until: all_tasks_complete
+prompt: "do it"
+scope_expansion:
+  within: ["src/**"]
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    match node.kind {
+        NodeKind::Loop {
+            scope_expansion, ..
+        } => {
+            assert_eq!(
+                scope_expansion.unwrap().mode,
+                yunta_core::events::ScopeExpansionMode::Deny
+            );
+        }
+        other => panic!("expected Loop, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_loop_node_s_concurrency_defaults_to_absent() {
     let yaml = r#"
 id: implement

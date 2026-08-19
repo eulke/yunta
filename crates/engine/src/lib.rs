@@ -20,6 +20,7 @@ mod replay;
 mod run;
 mod runner;
 mod scope;
+pub mod scope_expansion;
 mod task_cycle;
 mod template;
 mod worktree;

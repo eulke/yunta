@@ -2240,3 +2240,365 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         "the orphaned task must be re-run to completion"
     );
 }
+
+// --- T5.11: scope_expansion (§6.2, D73) ------------------------------------
+
+/// A loop node declaring `scope_expansion:` — `within` is only rendered
+/// when the caller passes something, so `rules`-mode tests can still omit
+/// it when a test wants an empty ceiling.
+fn scope_expansion_workflow(mode: &str, within: &[&str], max_per_run: Option<u32>) -> String {
+    let within_line = if within.is_empty() {
+        String::new()
+    } else {
+        let items = within
+            .iter()
+            .map(|w| format!("\"{w}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("      within: [{items}]\n")
+    };
+    let cap_line = max_per_run
+        .map(|n| format!("      max_per_run: {n}\n"))
+        .unwrap_or_default();
+    format!(
+        r#"
+name: scope-expansion
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{{{run.dir}}}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - {{ name: plan.yaml, kind: task-ledger }}
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the ledger and implement it."
+    scope_expansion:
+      mode: {mode}
+{within_line}{cap_line}"#
+    )
+}
+
+/// The same loop shape with no `scope_expansion:` key at all — §6.2's own
+/// default (an absent block behaves exactly like `mode: deny` with no
+/// `within`/`max_per_run`) — proving that default is really live, not
+/// just documented.
+fn no_scope_expansion_workflow() -> String {
+    r#"
+name: scope-expansion-default
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the ledger and implement it."
+"#
+    .to_string()
+}
+
+fn plan_session(artifacts_dir: &std::path::Path, ledger: &str) -> String {
+    format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        artifacts_dir.display(),
+        ledger,
+    )
+}
+
+fn findings_posted(events: &[yunta_core::events::Event]) -> Vec<&yunta_core::events::Finding> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::FindingPosted(p) => Some(&p.finding),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_implicit_expansion()
+{
+    // ✓ del Plan: nada le da a un agente una vía para ampliar su propio
+    // scope salvo el protocolo de request — ni un `within` que
+    // técnicamente cubriría el path lo salva si nunca se escribió un
+    // request. `scope_expansion: { mode: rules, within: [b.txt] }` está
+    // declarado, pero el agente jamás escribe el archivo de request.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = scope_expansion_workflow("rules", &["b.txt"], None);
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-s", "s", "a.txt", "test -f a.txt")
+    );
+
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    for _ in 0..=DEFAULT_MAX_RETRIES {
+        fixture.push_str(
+            "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
+        );
+    }
+
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
+
+    assert_eq!(
+        state.tasks.get(&"task-s".into()),
+        Some(&yunta_core::events::TaskStatus::Blocked),
+        "an out-of-scope write with no request must block the task, never silently pass"
+    );
+    match terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("expected the run to pause on task-s, got {other:?}"),
+    }
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::ScopeExpansionRequested(p)
+                if p.task_id.as_str() == "task-s"
+        )),
+        "no scope_expansion_* event may fire when the agent never wrote a request"
+    );
+}
+
+#[tokio::test]
+async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even_in_ask_mode() {
+    // ✓ del Plan: un criterio propuesto que ya pasa se rechaza sin
+    // consultar en NINGÚN modo — ni siquiera `ask`, que de otro modo
+    // escalaría y pausaría el run.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = scope_expansion_workflow("ask", &[], None);
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-p", "p", "a.txt", "test -f a.txt")
+    );
+
+    let request_yaml = "paths:\n  - c.txt\nreason: \"already fine, no work needed\"\nproposed_criterion:\n  cmd: \"true\"\n";
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-p\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-p }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    ));
+
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "an auto-rejected request must never pause the run, even under ask mode"
+    );
+    assert_eq!(
+        state.tasks.get(&"task-p".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let denied = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+                if p.task_id.as_str() == "task-p" =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("a Denied event must be recorded");
+    assert!(denied
+        .denial_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("already passes"));
+
+    let findings = findings_posted(&events);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.detail.contains("already fine, no work needed")),
+        "the finding must carry the agent's own reason: {findings:?}"
+    );
+}
+
+#[tokio::test]
+async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterion() {
+    // ✓ del Plan: toda denegación —acá, el default `deny` sin ningún
+    // bloque `scope_expansion:` en el workflow— se convierte en un
+    // finding (D80) que lleva el reason y el proposed_criterion del
+    // propio agente, no una explicación inventada por el engine.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = no_scope_expansion_workflow();
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-d", "d", "a.txt", "test -f a.txt")
+    );
+
+    let request_yaml = "paths:\n  - b.txt\nreason: \"need an adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f b.txt\"\n";
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-d\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-d }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    ));
+
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get(&"task-d".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let denied = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+                if p.task_id.as_str() == "task-d" =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("a Denied event must be recorded under the default deny mode");
+    assert_eq!(
+        denied.denial_reason.as_deref(),
+        Some("scope_expansion mode is deny (the default)")
+    );
+
+    let findings = findings_posted(&events);
+    let finding = findings
+        .iter()
+        .find(|f| f.detail.contains("need an adjacent fix in b.txt"))
+        .expect("a finding carrying the agent's own reason must exist");
+    assert_eq!(
+        finding.proposed_criterion,
+        Some(yunta_core::events::ProposedCriterion {
+            cmd: "test -f b.txt".to_string()
+        })
+    );
+    assert!(finding.location.contains("b.txt"));
+}
+
+#[tokio::test]
+async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
+    // ✓ del Plan: "el diff final se evalúa contra scope declarado más
+    // ampliaciones autorizadas" — mismo diff, mismo agente; sólo el modo
+    // cambia entre las dos corridas.
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-w", "w", "a.txt", "test -f a.txt")
+    );
+    let request_yaml = "paths:\n  - b.txt\nreason: \"small adjacent fix\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    let session = format!(
+        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-w }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    );
+
+    // Granted: `rules` mode, `within` covers b.txt.
+    let granted_bench = Bench::new();
+    let granted_artifacts = granted_bench.run_dir().join("artifacts");
+    let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
+    let mut granted_fixture = plan_session(&granted_artifacts, &ledger);
+    granted_fixture.push_str(&session);
+    let (granted_terminal, granted_state) =
+        granted_bench.run(&granted_workflow, &granted_fixture).await;
+    assert_eq!(granted_terminal, RunTerminal::Finished);
+    assert_eq!(
+        granted_state.tasks.get(&"task-w".into()),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "a granted expansion must let b.txt through the final scope check"
+    );
+
+    // Denied: same diff, `deny` mode — b.txt is never granted, so the
+    // same write is now a real violation and the task never satisfies
+    // its own scope check.
+    let denied_bench = Bench::new();
+    let denied_artifacts = denied_bench.run_dir().join("artifacts");
+    let denied_workflow = scope_expansion_workflow("deny", &[], None);
+    let mut denied_fixture = plan_session(&denied_artifacts, &ledger);
+    for _ in 0..=DEFAULT_MAX_RETRIES {
+        denied_fixture.push_str(&session);
+    }
+    let (_denied_terminal, denied_state) =
+        denied_bench.run(&denied_workflow, &denied_fixture).await;
+    assert_eq!(
+        denied_state.tasks.get(&"task-w".into()),
+        Some(&yunta_core::events::TaskStatus::Blocked),
+        "without a grant, b.txt stays a scope violation on the same diff"
+    );
+}
+
+#[tokio::test]
+async fn the_request_object_is_recorded_identically_across_all_three_modes() {
+    // ✓ del Plan: el request object es "idéntico en los tres modos" —
+    // mismo agente, mismos paths/reason/proposed_criterion; sólo el modo
+    // de la config cambia entre corridas. El evento `ScopeExpansionRequested`
+    // debe grabar exactamente lo mismo en los tres casos, incluso cuando
+    // el veredicto que sigue difiere.
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-g", "g", "a.txt", "test -f a.txt")
+    );
+    let request_yaml = "paths:\n  - c.txt\nreason: \"golden request\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    let session = format!(
+        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-g }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    );
+
+    let mut requested_payloads = Vec::new();
+    for mode in ["rules", "ask", "deny"] {
+        let bench = Bench::new();
+        let artifacts_dir = bench.run_dir().join("artifacts");
+        let workflow = scope_expansion_workflow(mode, &[], None);
+        let mut fixture = plan_session(&artifacts_dir, &ledger);
+        fixture.push_str(&session);
+        let _ = bench.run(&workflow, &fixture).await;
+
+        let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+        let requested = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                yunta_core::events::EventPayload::ScopeExpansionRequested(p)
+                    if p.task_id.as_str() == "task-g" =>
+                {
+                    Some(p.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("mode `{mode}` must record a ScopeExpansionRequested event"));
+        requested_payloads.push((mode, requested));
+    }
+
+    let (first_mode, first) = &requested_payloads[0];
+    for (mode, payload) in &requested_payloads[1..] {
+        assert_eq!(
+            payload.paths, first.paths,
+            "paths must be identical between `{first_mode}` and `{mode}`"
+        );
+        assert_eq!(payload.reason, first.reason);
+        assert_eq!(payload.proposed_criterion, first.proposed_criterion);
+        assert_eq!(
+            payload.proposed_criterion_precheck,
+            first.proposed_criterion_precheck
+        );
+    }
+}

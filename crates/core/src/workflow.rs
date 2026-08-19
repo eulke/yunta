@@ -95,6 +95,22 @@ pub struct Node {
 /// `permissions: read-only | edit | full` at node level (§6.1's ladder,
 /// T5.7) — maps 1:1 onto the adapter's session profile. The names come
 /// straight from the Contrato's own spelling.
+/// `scope_expansion:` (§6.2, D73, T5.11) — governs how a loop's tasks may
+/// grow past their own declared scope. `within` is a hard ceiling
+/// ("jamás fuera de esto") checked in `rules` mode; `max_per_run` caps
+/// how many expansions this run may grant before exhaustion escalates
+/// ("diez concesiones seguidas no son readecuación, son un plan mal
+/// cortado") — absent means uncapped.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScopeExpansion {
+    #[serde(default)]
+    pub mode: crate::events::ScopeExpansionMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub within: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_per_run: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NodePermissions {
@@ -144,6 +160,16 @@ pub enum NodeKind {
         /// bill instead of the workflow file.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         concurrency: Option<u32>,
+        /// §6.2/D73: the agent never widens its own scope — it requests,
+        /// the engine (or a person, in `ask`) decides. Absent has the
+        /// same effect as declaring it with no `mode:` — `deny` (§6.2's
+        /// own default): every request becomes a finding, none are
+        /// granted. Loop-scoped, not workflow- or config-scoped, because
+        /// `scope_expansion_requested`'s own payload is keyed by
+        /// `task_id` — this is ledger-task machinery, the same rung
+        /// `concurrency:` already occupies on this node kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope_expansion: Option<ScopeExpansion>,
     },
     /// Nodes named by the author, run at once (§5.8, T4.6) — distinct
     /// from a loop's own `concurrency:` (§5.5), whose task count doesn't

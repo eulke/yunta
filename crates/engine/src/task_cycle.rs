@@ -41,6 +41,12 @@ pub enum TaskCycleError {
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
+    #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
+    ScopeExpansion {
+        task: TaskId,
+        #[source]
+        source: crate::scope_expansion::ScopeExpansionError,
+    },
     #[error("failed to compute the working tree's hash for memoization: git {args} in `{cwd}`: {detail}")]
     TreeHash {
         args: String,
@@ -179,7 +185,7 @@ pub enum DispatchOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AttemptRecord {
     pub attempt: u32,
     pub dispatch: DispatchOutcome,
@@ -188,20 +194,33 @@ pub struct AttemptRecord {
     pub post_check: Vec<CriterionRun>,
     pub scope: ScopeCheckResult,
     pub succeeded: bool,
+    /// §6.2/D73/T5.11: the agent's own expansion request this attempt, if
+    /// it wrote one, and what the engine decided — `None` when no request
+    /// file was found, the ordinary case. The caller (`loop_exec.rs`) owns
+    /// emitting `scope_expansion_requested`/`granted`/`denied` and the
+    /// D80 finding conversion from this; `run_task` only decides and
+    /// widens `scope` for this attempt's own check when granted.
+    pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TaskOutcome {
     Done,
     Blocked { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TaskCycleReport {
     pub task_id: TaskId,
     pub pre_check: Vec<CriterionRun>,
     pub attempts: Vec<AttemptRecord>,
     pub outcome: TaskOutcome,
+    /// `true` when any attempt's scope-expansion request escalated (§6.2:
+    /// `ask` mode, or `max_per_run` already exhausted) — neither is a
+    /// verdict `run_task` can render alone, so the cycle stops retrying
+    /// and the caller (`loop_exec.rs`) pauses the run for a human rather
+    /// than burning further sessions while one is waiting on a decision.
+    pub needs_human_decision: bool,
 }
 
 /// Default retry cap (§5.2: "cap configurable, default 2").
@@ -442,6 +461,11 @@ pub(crate) async fn dispatch_session(
 /// [`pre_check`]/[`post_check`] helpers stay pure building blocks.
 /// `profile` is the node's own rung of the same ladder, forwarded to
 /// every session this cycle opens.
+/// `scope_expansion` carries the loop node's own §6.2 settings (absent
+/// means the schema's own default, `deny`) plus how many expansions this
+/// run has already granted before this task cycle started — the caller
+/// derives that count from the log (§6.2's `max_per_run` is run-scoped,
+/// not task-scoped), `run_task` only reads and threads it through.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_task(
     task: &Task,
@@ -453,6 +477,8 @@ pub async fn run_task(
     memo: &Memo,
     permissions: Option<&yunta_core::PermissionsConfig>,
     profile: PermissionProfile,
+    scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    granted_so_far: u32,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -461,6 +487,7 @@ pub async fn run_task(
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
                 outcome: TaskOutcome::Blocked { reason: rule },
+                needs_human_decision: false,
             });
         }
     }
@@ -482,10 +509,12 @@ pub async fn run_task(
             pre_check: pre_runs,
             attempts: Vec::new(),
             outcome: TaskOutcome::Blocked { reason },
+            needs_human_decision: false,
         });
     }
 
     let mut attempts = Vec::new();
+    let mut granted_this_call = granted_so_far;
     for attempt in 1..=(max_retries + 1) {
         // §5.2 step 3: minimal brief — the node's instruction plus which
         // task is this session's, never the plan as prose. Every attempt
@@ -514,11 +543,71 @@ pub async fn run_task(
                     task: task.id.clone(),
                     source,
                 })?;
+
+        // §6.2: the agent never widens its own scope — it may have left a
+        // request behind, which this attempt's own worktree is the only
+        // place to find (a fresh session per attempt, same cwd).
+        let expansion_outcome =
+            match crate::scope_expansion::load_request(cwd).map_err(|source| {
+                TaskCycleError::ScopeExpansion {
+                    task: task.id.clone(),
+                    source,
+                }
+            })? {
+                Some(expansion_request) => {
+                    let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
+                    let within = scope_expansion
+                        .map(|se| se.within.as_slice())
+                        .unwrap_or(&[]);
+                    let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
+                    let (precheck_exit, decision) = crate::scope_expansion::evaluate(
+                        mode,
+                        within,
+                        max_per_run,
+                        granted_this_call,
+                        &expansion_request,
+                        cwd,
+                    )
+                    .await
+                    .map_err(|source| TaskCycleError::ScopeExpansion {
+                        task: task.id.clone(),
+                        source,
+                    })?;
+                    if decision == crate::scope_expansion::Decision::Granted {
+                        granted_this_call += 1;
+                    }
+                    Some(crate::scope_expansion::ScopeExpansionOutcome {
+                        request: expansion_request,
+                        precheck_exit,
+                        decision,
+                    })
+                }
+                None => None,
+            };
+        let granted_paths: &[String] = expansion_outcome
+            .as_ref()
+            .filter(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted)
+            .map(|outcome| outcome.request.paths.as_slice())
+            .unwrap_or(&[]);
+        let effective_scope: Vec<String> = task
+            .scope
+            .iter()
+            .cloned()
+            .chain(granted_paths.iter().cloned())
+            .collect();
+
         let post_runs = post_check(task, cwd, memo).await?;
-        let scope = scope_check(cwd, &task.scope).await?;
+        // §6.2: "el diff final se evalúa contra scope declarado más
+        // ampliaciones autorizadas" — never against a denied or escalated
+        // request's paths.
+        let scope = scope_check(cwd, &effective_scope).await?;
 
         let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
         let succeeded = criteria_green && scope.violations.is_empty();
+        let escalated = matches!(
+            expansion_outcome.as_ref().map(|o| &o.decision),
+            Some(crate::scope_expansion::Decision::Escalate)
+        );
 
         attempts.push(AttemptRecord {
             attempt,
@@ -527,6 +616,7 @@ pub async fn run_task(
             post_check: post_runs,
             scope,
             succeeded,
+            scope_expansion: expansion_outcome,
         });
 
         if succeeded {
@@ -535,6 +625,20 @@ pub async fn run_task(
                 pre_check: pre_runs,
                 attempts,
                 outcome: TaskOutcome::Done,
+                needs_human_decision: escalated,
+            });
+        }
+        // A pending human decision means no further session should spend
+        // budget while the run is about to pause for it.
+        if escalated {
+            return Ok(TaskCycleReport {
+                task_id: task.id.clone(),
+                pre_check: pre_runs,
+                attempts,
+                outcome: TaskOutcome::Blocked {
+                    reason: "a scope expansion request needs a human decision".to_string(),
+                },
+                needs_human_decision: true,
             });
         }
     }
@@ -543,6 +647,7 @@ pub async fn run_task(
         task_id: task.id.clone(),
         pre_check: pre_runs,
         attempts,
+        needs_human_decision: false,
         outcome: TaskOutcome::Blocked {
             reason: format!(
                 "criteria still red or scope violated after {} attempt(s)",

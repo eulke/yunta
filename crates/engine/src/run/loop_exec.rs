@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 
 use yunta_adapters::Budget;
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, CriterionType, Event, EventPayload,
-    LoopIterationPayload, Phase, ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage,
+    CriteriaCheckedPayload, CriterionResult, CriterionType, Decider, Event, EventPayload, Finding,
+    FindingPostedPayload, FindingSeverity, LoopIterationPayload, Phase, ProposedCriterionPrecheck,
+    ScopeCheckedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
+    ScopeExpansionRequestedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{Isolation, Ledger, Node, NodeKind, PromptSource, Task};
 
@@ -70,6 +71,14 @@ pub(super) async fn execute_loop(
         NodeKind::Loop { concurrency, .. } => concurrency.unwrap_or(1).max(1),
         _ => 1,
     };
+    // Loop-scoped, never workflow/config-scoped (§6.2: a request is
+    // task-specific, and only a loop node's own tasks can ever write one).
+    let scope_expansion = match &node.kind {
+        NodeKind::Loop {
+            scope_expansion, ..
+        } => scope_expansion.as_ref(),
+        _ => None,
+    };
 
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
@@ -78,6 +87,14 @@ pub(super) async fn execute_loop(
     // A resume starts empty — the log carries each task's *status*, and
     // the generic tail below still names which tasks are blocked.
     let mut blocked_reasons: Vec<String> = Vec::new();
+    // §6.2: a scope-expansion request left `Escalate`d (`ask` mode, or
+    // `max_per_run` exhausted) is a decision owed to a human — regardless
+    // of whether *this* attempt's own criteria happened to succeed
+    // without needing the grant. `TaskCycleReport.needs_human_decision`
+    // carries that even on a `Done` outcome, which the ordinary
+    // `Blocked`/`Done` branch below never surfaces on its own, so it's
+    // tracked here and checked once the whole batch has integrated.
+    let mut human_decisions_needed: Vec<String> = Vec::new();
 
     loop {
         iteration += 1;
@@ -131,9 +148,18 @@ pub(super) async fn execute_loop(
                 &base_commit,
                 &instruction,
                 adapter.as_ref(),
+                scope_expansion,
             )
         }))
         .await;
+
+        // Cumulative grants this run, kept live across the integration
+        // loop below so each emitted `ScopeExpansionGranted` carries an
+        // accurate `count_this_run` — `dispatch_task_in_isolation` above
+        // already read its own (necessarily slightly stale, see
+        // `granted_count`'s own doc comment) snapshot for the cap check;
+        // this one only feeds the event payload, not any decision.
+        let mut expansions_granted_this_run = granted_count(&events);
 
         // Integration is serial and follows the batch's own order, which
         // is ledger declaration order (§5.5: "en orden de declaración del
@@ -141,6 +167,7 @@ pub(super) async fn execute_loop(
         // dispatch happened to finish in.
         for dispatch in dispatches {
             let (task, task_worktree, mut report) = dispatch?;
+            let needs_human_decision = report.needs_human_decision;
 
             let mut last_check_seq = ctx.emit(
                 Some(&node.id),
@@ -169,6 +196,18 @@ pub(super) async fn execute_loop(
                         violations: attempt.scope.violations,
                     }),
                 )?;
+
+                if let Some(outcome) = &attempt.scope_expansion {
+                    emit_scope_expansion_events(
+                        ctx,
+                        node,
+                        &task.id,
+                        attempt.attempt,
+                        outcome,
+                        scope_expansion,
+                        &mut expansions_granted_this_run,
+                    )?;
+                }
             }
 
             let blocked_reason = match report.outcome {
@@ -230,6 +269,30 @@ pub(super) async fn execute_loop(
             if let Some(reason) = blocked_reason {
                 blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
             }
+            if needs_human_decision {
+                human_decisions_needed.push(format!(
+                    "task `{}` has a scope expansion request awaiting a human decision",
+                    task.id
+                ));
+            }
+        }
+
+        if !human_decisions_needed.is_empty() {
+            // The whole batch integrates before pausing (serial
+            // integration order still holds — this only stops the *next*
+            // batch from being dispatched while a decision is owed): a
+            // pending `ask`/exhausted-cap request must reach a human
+            // before the run spends any further budget, never be
+            // bypassed just because the task that raised it happened to
+            // succeed on its own declared scope (A6).
+            let mut diagnostic =
+                "a scope expansion request needs a human decision before this run can continue"
+                    .to_string();
+            for reason in &human_decisions_needed {
+                diagnostic.push_str("; ");
+                diagnostic.push_str(reason);
+            }
+            return fail_with_tokens(ctx, node, diagnostic, false, tokens);
         }
     }
 }
@@ -278,6 +341,23 @@ fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
         + 1
 }
 
+/// How many `scope_expansion_granted` events the run's whole log already
+/// has (§6.2: `max_per_run` is run-scoped, never per-task). Read once per
+/// batch, same moment as `base_commit` — a known, documented tradeoff:
+/// two tasks in the *same* concurrent batch that both get granted can
+/// each see the pre-batch count, so `max_per_run` may be overshot by up
+/// to `concurrency - 1` within one batch before the next batch's fresh
+/// read catches it. Serializing expansion evaluation to close this
+/// would undo T5.10's whole point (real concurrent dispatch) for a soft
+/// cap whose purpose is catching "ten grants in a row", not enforcing a
+/// hard security boundary — accepted, not fixed.
+fn granted_count(events: &[Event]) -> u32 {
+    events
+        .iter()
+        .filter(|event| matches!(&event.payload, EventPayload::ScopeExpansionGranted(_)))
+        .count() as u32
+}
+
 /// Isolates one batch member in its own worktree (§5.5: "cada tarea del
 /// lote recibe su propio worktree derivado del commit base actual") and
 /// runs it through the ordinary task cycle there — pre-check, dispatch,
@@ -295,6 +375,7 @@ async fn dispatch_task_in_isolation<'a>(
     base_commit: &str,
     instruction: &str,
     adapter: &dyn yunta_adapters::Adapter,
+    scope_expansion: Option<&yunta_core::ScopeExpansion>,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
@@ -337,6 +418,8 @@ async fn dispatch_task_in_isolation<'a>(
         &ctx.memo,
         ctx.manifest.config.permissions.as_ref(),
         super::node_exec::session_profile(node),
+        scope_expansion,
+        granted_count(events),
     )
     .await?;
 
@@ -520,6 +603,95 @@ async fn head_commit(repo: &Path) -> Result<String, RunError> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Emits the events one attempt's scope-expansion outcome requires (§6.2):
+/// always a `ScopeExpansionRequested`, then a `Granted` or `Denied` — never
+/// both, and neither for `Escalate`, which has no event kind of its own
+/// (D73: nothing has been decided yet, so there's nothing to announce
+/// beyond the request itself; the pause and its diagnostic already come
+/// from `run_task`'s own `needs_human_decision`/`Blocked` outcome). Every
+/// `Denied` also becomes a `FindingPosted` (D80), using the agent's own
+/// `reason`/`proposed_criterion` as the finding's evidence rather than the
+/// engine inventing new wording. `decided_by` is always `Decider::Rule`
+/// here — this recorte has no `kind: gate` (T7.2) for a person to decide
+/// through, so `ask` mode only ever reaches `Escalate`, never a rendered
+/// verdict.
+#[allow(clippy::too_many_arguments)]
+fn emit_scope_expansion_events(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: &yunta_core::TaskId,
+    attempt_number: u32,
+    outcome: &crate::scope_expansion::ScopeExpansionOutcome,
+    scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    granted_this_run: &mut u32,
+) -> Result<(), RunError> {
+    let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
+
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::ScopeExpansionRequested(ScopeExpansionRequestedPayload {
+            task_id: task_id.clone(),
+            paths: outcome.request.paths.clone(),
+            reason: outcome.request.reason.clone(),
+            proposed_criterion: outcome.request.proposed_criterion.clone(),
+            proposed_criterion_precheck: outcome
+                .precheck_exit
+                .map(|exit_code| ProposedCriterionPrecheck { exit_code }),
+        }),
+    )?;
+
+    match &outcome.decision {
+        crate::scope_expansion::Decision::Granted => {
+            *granted_this_run += 1;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::ScopeExpansionGranted(ScopeExpansionGrantedPayload {
+                    task_id: task_id.clone(),
+                    decided_by: Decider::Rule,
+                    mode,
+                    count_this_run: *granted_this_run,
+                }),
+            )?;
+        }
+        crate::scope_expansion::Decision::Denied(reason) => {
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
+                    task_id: task_id.clone(),
+                    decided_by: Decider::Rule,
+                    mode,
+                    count_this_run: *granted_this_run,
+                    denial_reason: Some(reason.clone()),
+                }),
+            )?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::FindingPosted(FindingPostedPayload {
+                    finding: Finding {
+                        id: format!("scope-expansion-{task_id}-{attempt_number}"),
+                        // Denied is a routine control-flow outcome, not
+                        // evidence the run itself is broken — `Minor` by
+                        // default, distinct from whatever severity the
+                        // task's own criteria/scope failure separately
+                        // carries.
+                        severity: FindingSeverity::Minor,
+                        title: format!("scope expansion denied for task `{task_id}`"),
+                        location: outcome.request.paths.join(", "),
+                        detail: format!(
+                            "{reason} — agent's stated reason: {}",
+                            outcome.request.reason
+                        ),
+                        proposed_criterion: outcome.request.proposed_criterion.clone(),
+                    },
+                }),
+            )?;
+        }
+        crate::scope_expansion::Decision::Escalate => {}
+    }
+
+    Ok(())
 }
 
 fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
