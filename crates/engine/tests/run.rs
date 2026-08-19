@@ -372,6 +372,152 @@ nodes:
 }
 
 #[tokio::test]
+async fn a_failing_before_hook_aborts_the_node_without_opening_a_session() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: before-hook-guard
+nodes:
+  - id: implement
+    kind: prompt
+    runner: executor
+    hooks:
+      before:
+        - run: "exit 1"
+    prompt: "should never run"
+"#;
+
+    // No sessions declared: if the engine opened one despite the failing
+    // before-hook, the mock would fail for a different, distinguishable
+    // reason than "before hook".
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("before hook"), "got: {reason}"),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_after_hook_defaults_to_failing_the_node() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: after-hook-fails-by-default
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+    hooks:
+      after:
+        - run: "exit 1"
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("after hook"), "got: {reason}"),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_after_hook_with_on_failure_warn_lets_the_node_finish() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: after-hook-warns
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+    hooks:
+      after:
+        - run: "exit 1"
+          on_failure: warn
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn a_hook_that_exceeds_its_timeout_fails_the_node_without_waiting_it_out() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: hook-timeout
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+    hooks:
+      before:
+        - run: "sleep 5"
+          timeout_seconds: 1
+"#;
+
+    let started = std::time::Instant::now();
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let elapsed = started.elapsed();
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("before hook"), "got: {reason}"),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "expected the 1s timeout to cut the 5s sleep short, took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn node_defaults_hooks_apply_when_a_node_declares_none_of_its_own() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: uses-node-defaults
+node_defaults:
+  hooks:
+    after:
+      - run: "touch defaults-ran.txt"
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(bench.worktree.join("defaults-ran.txt").exists());
+}
+
+#[tokio::test]
+async fn a_node_s_own_hooks_replace_node_defaults_for_that_phase_instead_of_merging() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: overrides-node-defaults
+node_defaults:
+  hooks:
+    after:
+      - run: "touch should-not-run.txt"
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+    hooks:
+      after:
+        - run: "touch overridden.txt"
+"#;
+
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(bench.worktree.join("overridden.txt").exists());
+    assert!(!bench.worktree.join("should-not-run.txt").exists());
+}
+
+#[tokio::test]
 async fn a_bash_node_can_reference_the_run_s_worktree_by_template() {
     let bench = Bench::new();
 

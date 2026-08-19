@@ -11,7 +11,7 @@ use yunta_core::events::{
     EventPayload, HookExecutedPayload, HookPhase, NodeFailedPayload, NodeFinishedPayload,
     RunnerResolvedPayload, TokenUsage,
 };
-use yunta_core::{Node, NodeKind, PromptSource};
+use yunta_core::{HookFailurePolicy, HookStep, Hooks, Node, NodeKind, PromptSource};
 
 use crate::artifacts::close_artifacts;
 use crate::runner::resolve_runner;
@@ -38,17 +38,21 @@ pub(super) async fn execute_node(
     )?;
 
     // hooks.before (§11.1): a failing before aborts without spending a
-    // token; a failing after fails the node before verification.
-    if let Some(hooks) = &node.hooks {
-        for step in &hooks.before {
-            if !run_hook(ctx, node, HookPhase::Before, &step.run).await? {
-                return fail(
-                    ctx,
-                    node,
-                    format!("before hook `{}` failed", step.run),
-                    false,
-                );
-            }
+    // token; a failing after fails the node before verification. Either
+    // phase's step can opt into `on_failure: warn` instead of the default
+    // `fail`, in which case a non-zero exit is recorded but doesn't stop
+    // the node.
+    let hooks = effective_hooks(ctx, node);
+    for step in &hooks.before {
+        if !run_hook(ctx, node, HookPhase::Before, step).await?
+            && step.on_failure == HookFailurePolicy::Fail
+        {
+            return fail(
+                ctx,
+                node,
+                format!("before hook `{}` failed", step.run),
+                false,
+            );
         }
     }
 
@@ -89,13 +93,15 @@ pub(super) fn render_or_fail(
     }
 }
 
+/// A hook only ever fails or warns (§11.1) — the returned bool is the
+/// step's own success, before the caller applies `on_failure`.
 async fn run_hook(
     ctx: &RunCtx<'_>,
     node: &Node,
     phase: HookPhase,
-    command: &str,
+    step: &HookStep,
 ) -> Result<bool, RunError> {
-    let rendered = match render_template(command, &template_vars(ctx)) {
+    let rendered = match render_template(&step.run, &template_vars(ctx)) {
         Ok(rendered) => rendered,
         Err(e) => {
             // An unrenderable hook is a failed hook — recorded as such.
@@ -103,7 +109,7 @@ async fn run_hook(
                 Some(&node.id),
                 EventPayload::HookExecuted(HookExecutedPayload {
                     phase,
-                    command: command.to_string(),
+                    command: step.run.clone(),
                     exit_code: -1,
                 }),
             )?;
@@ -111,17 +117,55 @@ async fn run_hook(
             return Ok(false);
         }
     };
-    let status = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&rendered)
-        .current_dir(ctx.worktree)
-        .status()
-        .await
+
+    let mut std_cmd = std::process::Command::new("sh");
+    std_cmd.arg("-c").arg(&rendered).current_dir(ctx.worktree);
+    // A4: a timed-out hook's whole process tree must die together, not
+    // just the `sh` that ran it — same reasoning as the adapter session's
+    // own process group (yunta-adapters::claude_code).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        std_cmd.process_group(0);
+    }
+    let mut child = tokio::process::Command::from(std_cmd)
+        .spawn()
         .map_err(|source| RunError::Io {
-            context: format!("run hook `{rendered}`"),
+            context: format!("spawn hook `{rendered}`"),
             source,
         })?;
-    let exit_code = status.code().unwrap_or(-1);
+
+    let exit_code = match step.timeout_seconds.map(std::time::Duration::from_secs) {
+        None => child
+            .wait()
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("run hook `{rendered}`"),
+                source,
+            })?
+            .code()
+            .unwrap_or(-1),
+        Some(timeout) => match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(status) => status
+                .map_err(|source| RunError::Io {
+                    context: format!("run hook `{rendered}`"),
+                    source,
+                })?
+                .code()
+                .unwrap_or(-1),
+            Err(_elapsed) => {
+                if let Some(pid) = child.id() {
+                    kill_process_group(pid).await;
+                }
+                let _ = child.wait().await;
+                // Never a real process exit code (those are 0..=255) —
+                // distinct from -1's "couldn't even render/run" so a
+                // timeout is diagnosable from the event alone.
+                -2
+            }
+        },
+    };
+
     ctx.emit(
         Some(&node.id),
         EventPayload::HookExecuted(HookExecutedPayload {
@@ -133,6 +177,46 @@ async fn run_hook(
     Ok(exit_code == 0)
 }
 
+/// Sends `SIGKILL` to `pid`'s whole process group (A4) — the `--` before
+/// the negative pid is load-bearing, see `claude_code::signal_group`'s
+/// doc comment for the procps-ng behavior this avoids.
+async fn kill_process_group(pid: u32) {
+    let _ = tokio::process::Command::new("kill")
+        .arg("-KILL")
+        .arg("--")
+        .arg(format!("-{pid}"))
+        .status()
+        .await;
+}
+
+/// A node's hooks with `node_defaults.hooks` filled in per phase (§11.1):
+/// a phase the node itself leaves empty inherits the workflow-level
+/// default's list for that phase; a phase the node declares replaces the
+/// default wholesale, the same "arrays reemplazan" rule config layers use
+/// (§2.2/D52) rather than concatenating the two.
+fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
+    let defaults = ctx
+        .manifest
+        .workflow
+        .node_defaults
+        .as_ref()
+        .and_then(|defaults| defaults.hooks.as_ref());
+    let own = node.hooks.as_ref();
+
+    let before = own
+        .filter(|hooks| !hooks.before.is_empty())
+        .map(|hooks| hooks.before.clone())
+        .or_else(|| defaults.map(|hooks| hooks.before.clone()))
+        .unwrap_or_default();
+    let after = own
+        .filter(|hooks| !hooks.after.is_empty())
+        .map(|hooks| hooks.after.clone())
+        .or_else(|| defaults.map(|hooks| hooks.after.clone()))
+        .unwrap_or_default();
+
+    Hooks { before, after }
+}
+
 /// Runs after-hooks, then verifies scope and artifacts — the close
 /// sequence every successful node body goes through (§11.1's order:
 /// session → after → verificación).
@@ -142,17 +226,17 @@ pub(super) async fn close_node(
     outcome: String,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    if let Some(hooks) = &node.hooks {
-        for step in &hooks.after {
-            if !run_hook(ctx, node, HookPhase::After, &step.run).await? {
-                return fail_with_tokens(
-                    ctx,
-                    node,
-                    format!("after hook `{}` failed", step.run),
-                    false,
-                    tokens,
-                );
-            }
+    for step in &effective_hooks(ctx, node).after {
+        if !run_hook(ctx, node, HookPhase::After, step).await?
+            && step.on_failure == HookFailurePolicy::Fail
+        {
+            return fail_with_tokens(
+                ctx,
+                node,
+                format!("after hook `{}` failed", step.run),
+                false,
+                tokens,
+            );
         }
     }
 

@@ -325,6 +325,66 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         tocarlas, confirmando que el rediseño de `next_action`→`next_step`
         preservó el comportamiento de esos casos.
 
+- [x] **T4.3 — hooks con timeout, `on_failure: fail|warn` y `node_defaults.hooks`.**
+      A diferencia de T4.1, el criterio de aceptación completo de la tarea
+      **sí** era alcanzable con el schema recortado de M-0 (`hooks:
+      {before, after}` ya existía desde T1.1) — no hizo falta pedir un
+      recorte nuevo. Dos detalles de forma que el Contrato no fija
+      (nombre/unidad exacta del campo de timeout; granularidad del merge
+      de `node_defaults.hooks`) se decidieron por analogía con precedente
+      ya existente en el propio código, documentados acá en vez de
+      preguntados — ver el porqué de cada uno abajo.
+      - **Secuencia sin cambios** (ya estaba bien desde antes de T4.3):
+        `hooks.before` → sesión/bash/loop → `hooks.after` → verificación
+        (scope + artifacts). Un `before` que falla con la política default
+        (`fail`) ya abortaba el nodo sin abrir sesión; un `after` fallido
+        con `fail` ya fallaba el nodo antes de la verificación. Confirmado
+        con dos tests nuevos que resultaron estar **ya en verde** antes de
+        tocar código — la deuda real de T4.3 era timeout, `warn` y
+        `node_defaults`, no la secuencia en sí.
+      - **`HookStep.timeout_seconds: Option<u64>`** (`crates/core/src/workflow.rs`).
+        Nombre/unidad no están en el Contrato ("timeout corto configurable"
+        sin más detalle) — elegido por analogía: segundos, no minutos como
+        `defaults.timeout_minutes` (sesiones enteras), porque un hook es
+        "pegamento" de duración corta por diseño (§11.1). Ausente = sin
+        timeout, igual que el comportamiento pre-T4.3 (aditivo, cero
+        cambio para workflows existentes).
+      - **`HookStep.on_failure: HookFailurePolicy` (`fail` default \|
+        `warn`)** — distinto del `on_failure.goto` a nivel nodo (re-ruta);
+        un hook nunca re-rutea, solo falla o avisa. `warn`: el
+        `hook_executed` con el exit code real igual se emite, pero el nodo
+        sigue su camino normal.
+      - **`Workflow.node_defaults: Option<NodeDefaults>`** con solo `hooks`
+        (extiende cuando otro campo lo necesite). Merge **por fase, no
+        concatenado**: si el nodo declara su propio `before`/`after` no
+        vacío, reemplaza al default entero para esa fase; si lo deja vacío,
+        hereda la lista completa del default. Elegido por la misma regla
+        "arrays reemplazan" que ya usa el merge de capas de config
+        (§2.2/D52) — no está escrito para `node_defaults` específicamente,
+        pero mantiene un solo principio de merge en toda la base de código
+        en vez de inventar uno nuevo solo para este caso.
+      - **Timeout con exterminio de árbol completo (A4)**, no solo del
+        proceso `sh`: mismo patrón que la sesión del adapter `claude-code`
+        (`process_group(0)` al spawnear + `kill -KILL -- -<pgid>` al
+        vencer el timeout) — un hook que backgroundea algo (`comando &`) no
+        puede sobrevivir a su propio timeout como huérfano. Verificado a
+        mano (`ps` después de correr el test del timeout: cero procesos
+        `sleep` remanentes).
+      - `exit_code: -2` en `hook_executed` marca un timeout específicamente
+        (distinto de `-1`, ya usado para "la plantilla del comando ni
+        siquiera renderizó") — ninguno de los dos es un exit code real de
+        proceso (0–255), así que no hay ambigüedad con una salida genuina.
+      - Tests (todos en `crates/engine/tests/run.rs`, mock adapter/sin red):
+        before-hook fallido aborta sin sesión (fixture `sessions: []` —
+        si el engine igual abriera sesión, el mock fallaría por una razón
+        distinta y el test lo distinguiría), after-hook falla por default,
+        after-hook con `warn` deja terminar el nodo, hook que excede su
+        timeout falla el nodo **y** el test completo en <3s en vez de
+        esperar los 5s del `sleep` (probado 3 veces seguidas sin
+        flakiness), `node_defaults.hooks` aplica cuando el nodo no declara
+        hooks propios, y un nodo con hooks propios los usa en vez de
+        concatenar con el default.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: solo nodos `prompt`/`bash`/`loop`. Sin `gate`/`check`/`parallel`/

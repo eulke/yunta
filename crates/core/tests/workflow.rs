@@ -1,4 +1,4 @@
-use yunta_core::{ArtifactKind, ArtifactSpec, NodeKind, PromptSource, Workflow};
+use yunta_core::{ArtifactKind, ArtifactSpec, HookFailurePolicy, NodeKind, PromptSource, Workflow};
 
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
 
@@ -68,6 +68,58 @@ prompt: "prompts/plan.md"
         }
         other => panic!("expected Prompt, got {other:?}"),
     }
+}
+
+#[test]
+fn a_hook_step_defaults_to_fail_with_no_timeout() {
+    let yaml = r#"
+id: fix-lint
+kind: bash
+run: "true"
+hooks:
+  after:
+    - run: "cargo fmt"
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    let step = &node.hooks.unwrap().after[0];
+    assert_eq!(step.on_failure, HookFailurePolicy::Fail);
+    assert_eq!(step.timeout_seconds, None);
+}
+
+#[test]
+fn a_hook_step_parses_warn_and_a_timeout() {
+    let yaml = r#"
+id: fix-lint
+kind: bash
+run: "true"
+hooks:
+  after:
+    - run: "rm -rf .tmp-fixtures"
+      on_failure: warn
+      timeout_seconds: 5
+"#;
+    let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
+    let step = &node.hooks.unwrap().after[0];
+    assert_eq!(step.on_failure, HookFailurePolicy::Warn);
+    assert_eq!(step.timeout_seconds, Some(5));
+}
+
+#[test]
+fn node_defaults_hooks_parses_at_the_workflow_level() {
+    let yaml = r#"
+name: with-node-defaults
+node_defaults:
+  hooks:
+    after:
+      - run: "cargo fmt"
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let defaults = workflow.node_defaults.unwrap();
+    assert_eq!(defaults.hooks.unwrap().after[0].run, "cargo fmt");
 }
 
 #[test]

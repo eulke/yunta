@@ -37,6 +37,7 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
         description: None,
+        node_defaults: None,
         nodes,
     }
 }

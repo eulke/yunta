@@ -28,8 +28,8 @@ pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use ledger::{Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use workflow::{
-    ArtifactKind, ArtifactSpec, Artifacts, HookStep, Hooks, Node, NodeKind, OnFailure,
-    PromptSource, Workflow,
+    ArtifactKind, ArtifactSpec, Artifacts, HookFailurePolicy, HookStep, Hooks, Node, NodeDefaults,
+    NodeKind, OnFailure, PromptSource, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

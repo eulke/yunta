@@ -21,7 +21,21 @@ pub struct Workflow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Workflow-level fallbacks a node inherits when it declares none of
+    /// its own (T4.3, §11.1) — visible in the same file the team reads,
+    /// never injected from a config layer (D81's own prohibition).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_defaults: Option<NodeDefaults>,
     pub nodes: Vec<Node>,
+}
+
+/// `node_defaults:` (§11.1) — M-0/M4 cut: only `hooks`, the one consumer
+/// T4.3 needs. Extends when another field needs the same "declare once,
+/// nodes inherit" treatment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<Hooks>,
 }
 
 /// A single node. Fields here are the ones the M-0 recorte names
@@ -127,8 +141,7 @@ pub enum ArtifactKind {
     TaskLedger,
 }
 
-/// `hooks: {before, after}` (D81). Per-hook `timeout`/`on_failure` are
-/// T4.3 (M4) engine behavior, not schema needed for M-0.
+/// `hooks: {before, after}` (D81, §11.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hooks {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -137,9 +150,33 @@ pub struct Hooks {
     pub after: Vec<HookStep>,
 }
 
+/// One hook command. `timeout_seconds` is unenforced (no timeout) when
+/// absent — additive over the pre-T4.3 engine, which never had one.
+/// Field name/units aren't pinned by the Contrato's prose ("timeout corto
+/// configurable"); seconds fit hook-scale commands better than the
+/// minutes granularity `defaults.timeout_minutes` uses for whole agent
+/// sessions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookStep {
     pub run: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+    /// Distinct from a node's own `on_failure.goto` re-routing — a hook
+    /// only ever fails or warns, never re-routes.
+    #[serde(default, skip_serializing_if = "is_default_hook_failure_policy")]
+    pub on_failure: HookFailurePolicy,
+}
+
+fn is_default_hook_failure_policy(policy: &HookFailurePolicy) -> bool {
+    *policy == HookFailurePolicy::default()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookFailurePolicy {
+    #[default]
+    Fail,
+    Warn,
 }
 
 /// `on_failure: {goto, max_reroutes}` — node-level re-routing (§11.2).
