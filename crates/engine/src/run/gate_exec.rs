@@ -363,13 +363,31 @@ pub(super) async fn resolve_internal_gate(
     // could drift.
     let escalation =
         super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
-    let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
-        return Ok(GateStep::StillWaiting {
-            reason: format!(
-                "gate `{}` (assignee: {assignee}) awaits a decision",
-                node.id
-            ),
-        });
+    // DI-27: a decision `resolve_gate` pre-seeded onto the log while
+    // this run was parked is consumed here, by this same consequence
+    // code — never re-asked, and its §5.3 pair is already recorded so
+    // it is never re-emitted. Re-validated against the re-derived menu:
+    // a mismatch means ask normally.
+    let events = ctx.load_events()?;
+    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id).filter(|r| {
+        r.chosen_option
+            .as_deref()
+            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == chosen))
+    });
+    let already_recorded = pre_seeded.is_some();
+    let resolution = match pre_seeded {
+        Some(resolution) => resolution,
+        None => match ctx.human_interaction.resolve(&escalation).await {
+            Some(resolution) => resolution,
+            None => {
+                return Ok(GateStep::StillWaiting {
+                    reason: format!(
+                        "gate `{}` (assignee: {assignee}) awaits a decision",
+                        node.id
+                    ),
+                });
+            }
+        },
     };
 
     let chosen = resolution.chosen_option.clone().unwrap_or_default();
@@ -381,11 +399,13 @@ pub(super) async fn resolve_internal_gate(
         // T7.2's convention exactly: record the interaction, pause the
         // run, leave the node stateless so a resume re-asks if the
         // human changes their mind.
-        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::GateResolved(resolution.clone()),
-        )?;
+        if !already_recorded {
+            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::GateResolved(resolution.clone()),
+            )?;
+        }
         return Ok(GateStep::StillWaiting {
             reason: format!(
                 "gate `{}` was resolved to abort{}",
@@ -400,11 +420,13 @@ pub(super) async fn resolve_internal_gate(
     }
 
     emit_started(ctx, node)?;
-    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::GateResolved(resolution.clone()),
-    )?;
+    if !already_recorded {
+        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::GateResolved(resolution.clone()),
+        )?;
+    }
     match on.get(&chosen) {
         Some(target) => {
             // §11.2 shape: the gate fails (retryable — a human chose a

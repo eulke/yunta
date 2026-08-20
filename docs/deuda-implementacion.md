@@ -1194,7 +1194,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   punta en `engine/tests/workflow_compose.rs` (copia padre+hermano con
   `as:`, fuente faltante, consumo vía `artifact: {name}` sin `node`).
 
-### DI-27 — Decisiones pre-sembradas: `resolve_gate` completo `[ ]`
+### DI-27 — Decisiones pre-sembradas: `resolve_gate` completo `[x]`
 
 - **Origen:** T8.1.3. `resolve_gate` (motor + CLI + tool MCP) solo
   soporta el menú de un re-route agotado, y con duplicación: apéndica
@@ -1239,6 +1239,21 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   consume una sola vez (el siguiente resume manual re-pregunta/pausa);
   propiedad: la misma decisión aplicada en vivo y pre-sembrada produce
   el mismo estado final derivado.
+- **Nota de cierre:** implementado exactamente como quedó registrado.
+  El `node_rerouted` duplicado que la primera versión de `resolve_gate`
+  apéndicaba se **borró** — hoy la función escribe solo el par §5.3 y
+  el engine que despierta aplica la consecuencia por su único camino
+  (los dos arms chequean `pre_seeded_resolution` antes de preguntar a
+  `HumanInteraction`, sin re-emitir el par). `promote` a nivel motor
+  cierra en `RunTerminal::Promoted`; el sucesor lo crea el
+  `drive_promotions` del resume del CLI, como siempre. Los errores
+  `UnsupportedGateKind`/`PromoteNeedsLiveProcess` desaparecieron;
+  `NotPaused` (el run no está estacionado en `run_paused`) es la
+  precondición nueva. Tests: 12 en `engine/tests/escalation.rs` — los
+  6 pre-sembrados nuevos (retry consumido por resume plano, promote,
+  gate interno mapeado/no-mapeado, abort-una-sola-vez, y la propiedad
+  vivo-vs-presembrado con estados derivados idénticos) sobre un
+  `GateBench` compartido, más los de reconstrucción/rechazo previos.
 
 ### DI-28 — Lock cross-process para mutaciones `git worktree` `[x]`
 

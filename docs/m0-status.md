@@ -3011,11 +3011,17 @@ que aparece.
         cadena de consecuencia más larga (`node_started`, y en opción
         no mapeada `node_finished`+reescritura de `progress.md`) —
         replicarla apurado arriesgaba una segunda copia de
-        `gate_exec::resolve_internal_gate` que se desalinea. Ambos
-        casos degradan con error accionable ("corré `yunta resume`
-        interactivo") en vez de una respuesta parcial silenciosa —
-        candidato natural para el registro de deuda una vez cierre M8
-        entero. Subcomando CLI nuevo: `yunta resolve-gate <run_id>
+        `gate_exec::resolve_internal_gate` que se desalinea. Ese recorte
+        se registró como DI-27 y quedó **cerrado** con la arquitectura
+        de **decisiones pre-sembradas**: `resolve_gate` escribe SOLO el
+        par §5.3 (el `node_rerouted` duplicado se borró), y el engine
+        que despierta consume la decisión por su único camino de
+        consecuencia (`pre_seeded_resolution`, pura sobre el log:
+        califica sii seq > último `node_failed`/`node_rerouted`/
+        `node_finished` del nodo y > último `run_paused`) — retry,
+        abort, `promote` y gates internos, uniformes, con la propiedad
+        vivo-vs-presembrado verificada por test. Precondición nueva:
+        `NotPaused`. Subcomando CLI: `yunta resolve-gate <run_id>
         <option> [--by] [--text]`.
       - **`list_workflows`/`workflow_status`** (el tool): shellean a
         `yunta list`/`yunta status` sobre este mismo binario en vez de

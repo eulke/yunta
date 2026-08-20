@@ -709,7 +709,22 @@ pub(crate) async fn execute_run_at_depth(
                     max_reroutes,
                     &cause,
                 );
-                let resolution = ctx.human_interaction.resolve(&escalation).await;
+                // DI-27: a decision `resolve_gate` pre-seeded onto the
+                // log while this run was parked is consumed here, by
+                // this same consequence code — never re-asked, and its
+                // §5.3 pair is already recorded so it is never
+                // re-emitted. The option is re-validated against the
+                // re-derived menu: a mismatch means ask normally.
+                let pre_seeded = escalation::pre_seeded_resolution(&events, &node).filter(|r| {
+                    r.chosen_option
+                        .as_deref()
+                        .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == chosen))
+                });
+                let already_recorded = pre_seeded.is_some();
+                let resolution = match pre_seeded {
+                    Some(resolution) => Some(resolution),
+                    None => ctx.human_interaction.resolve(&escalation).await,
+                };
                 let Some(resolution) = resolution else {
                     // No live surface to ask (headless, no TTY, `yunta
                     // test`) — the pre-T7.2 behavior: pause and let a
@@ -729,8 +744,10 @@ pub(crate) async fn execute_run_at_depth(
                         state: derive(&ctx.load_events()?),
                     });
                 };
-                ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))?;
-                ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))?;
+                if !already_recorded {
+                    ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))?;
+                    ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))?;
+                }
                 if resolution.chosen_option.as_deref() == Some("retry") {
                     ctx.emit(
                         Some(&node),

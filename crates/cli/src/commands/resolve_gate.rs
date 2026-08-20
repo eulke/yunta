@@ -1,11 +1,13 @@
-//! `yunta resolve-gate <run_id> <option>` (M8/T8.1.3): answers a paused
-//! run's gate decision from a separate process — no live surface
+//! `yunta resolve-gate <run_id> <option>` (M8/T8.1.3, DI-27): answers a
+//! paused run's gate decision from a separate process — no live surface
 //! attached to the run itself, exactly the shape `yunta mcp`'s own
-//! `resolve_gate` tool needs (T8.1.4). Appends the decision to the log
-//! (`yunta_engine::resolve_gate`, pure over manifest+storage) and hands
-//! the run off to a detached `yunta resume` so it actually drives
-//! forward — same mechanism `run --detach` uses (D101: a control-plane
-//! operation never blocks for the run's own duration).
+//! `resolve_gate` tool needs (T8.1.4). Appends **only the decision** to
+//! the log (`yunta_engine::resolve_gate` — the §5.3 pair, never the
+//! consequence) and hands the run off to a detached `yunta resume`,
+//! which consumes the pre-seeded decision through the engine's one
+//! existing consequence path — retry, abort, promote and internal
+//! gates alike. Same detach mechanism as `run --detach` (D101: a
+//! control-plane operation never blocks for the run's own duration).
 
 use std::process::ExitCode;
 

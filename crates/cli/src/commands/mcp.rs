@@ -166,9 +166,10 @@ fn tool_definitions() -> Vec<Tool> {
         Tool::new(
             "resolve_gate",
             "Answers a paused run's decision (§5.3) — call workflow_status first to read \
-             the run's own pause reason and menu of options. Only an exhausted \
-             re-route's own menu (retry/abort) is supported today; a `kind: gate` node or \
-             a `promote` choice need `yunta resume` run interactively instead.",
+             the run's own pause reason and menu of options. Covers exhausted re-routes \
+             (retry/abort/promote) and unresolved gate nodes; the decision is recorded on \
+             the run's log and a detached process applies it, so this returns \
+             immediately — poll workflow_status to see the outcome.",
             json!({
                 "type": "object",
                 "properties": {

@@ -74,10 +74,11 @@ enum Command {
         run_id: String,
     },
     /// Answers a paused run's gate decision from a separate process — no
-    /// live surface attached to the run itself (M8/T8.1.3). Only an
-    /// exhausted re-route's own menu (`retry`/`abort`) is supported
-    /// today; an unresolved `kind: gate` node or `promote` need `yunta
-    /// resume` run interactively instead.
+    /// live surface attached to the run itself (M8/T8.1.3, DI-27).
+    /// Records the decision on the log and hands the run to a detached
+    /// resume that applies it: exhausted re-routes (retry/abort/promote)
+    /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
+    /// pause reason; the option must be on that decision's own menu.
     ResolveGate {
         /// The run id waiting on a decision.
         run_id: String,
