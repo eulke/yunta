@@ -5149,3 +5149,291 @@ sessions:
     assert_eq!(degraded.capability, "skills");
     assert_eq!(degraded.adapter, "mock");
 }
+
+// --- DI-24: on_finish.distill — deterministic knowledge distillation ---------
+
+const DISTILL_WORKFLOW: &str = r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    artifacts:
+      produces: [plan.md]
+on_finish:
+  - distill: [plan.md]
+"#;
+
+fn distill_fixture(artifacts_dir: &std::path::Path) -> String {
+    format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/plan.md", content: "DISTILLED-MARKER: the durable decision\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+"#,
+        artifacts = artifacts_dir.display()
+    )
+}
+
+#[tokio::test]
+async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
+    let bench = Bench::new();
+    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let dest = bench
+        .worktree
+        .join(".yunta/knowledge/distilled/distiller")
+        .join(bench.run_id.as_str());
+    let copied = std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land");
+    assert!(copied.contains("DISTILLED-MARKER"));
+
+    let provenance: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+            .unwrap();
+    assert_eq!(
+        provenance["source_run"].as_str(),
+        Some(bench.run_id.as_str())
+    );
+    assert_eq!(provenance["workflow"].as_str(), Some("distiller"));
+    assert!(provenance["artifacts"][0]["content_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(
+        provenance["verification"]["findings"]["blocking"].as_u64(),
+        Some(0)
+    );
+
+    // The knowledge travels on the run's own branch: a conventional
+    // commit exists in the worktree.
+    let log = std::process::Command::new("git")
+        .args(["log", "--oneline", "-3"])
+        .current_dir(&bench.worktree)
+        .output()
+        .unwrap();
+    let log = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        log.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
+        "got: {log}"
+    );
+}
+
+#[tokio::test]
+async fn a_distill_path_never_produced_becomes_a_finding_and_the_rest_lands() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    artifacts:
+      produces: [plan.md]
+  - id: notes
+    kind: prompt
+    runner: executor
+    depends_on: [plan]
+    prompt: "Maybe write notes."
+    artifacts:
+      produces: [notes.md]
+on_finish:
+  - distill: [plan.md, notes.md]
+"#;
+    // `notes` fails before producing its artifact — but with a re-route
+    // budget of zero the run pauses... instead: notes produces, then we
+    // delete it? Simpler: notes' fixture writes the artifact and the run
+    // finishes, then this test only covers the produced path. The
+    // missing-path case uses a workflow whose declared artifact the
+    // session legitimately produced but distill names one more — which
+    // check would refuse. So: simulate runtime-missing by removing the
+    // file after the run? No — distill runs inside execute_run. The
+    // honest runtime-missing case: `notes` is mode-excluded.
+    let workflow = workflow.replace(
+        "on_finish:",
+        "modes:\n  quick: { include: [plan] }\n  full: { include: all }\non_finish:",
+    );
+    let artifacts = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+"#,
+        artifacts = artifacts.display()
+    );
+    // Run in `quick` mode: `notes` never runs, its artifact never
+    // exists, but distill declares it.
+    let workflow_parsed: Workflow = serde_yaml::from_str(&workflow).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow_parsed,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "quick",
+        None,
+    )
+    .unwrap();
+    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.terminal, RunTerminal::Finished);
+
+    let dest = bench
+        .worktree
+        .join(".yunta/knowledge/distilled/distiller")
+        .join(bench.run_id.as_str());
+    assert!(dest.join("plan.md").exists(), "the produced path lands");
+    assert!(!dest.join("notes.md").exists());
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let finding = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::FindingPosted(p) => Some(&p.finding),
+            _ => None,
+        })
+        .expect("the missing path must become a finding, never be lost");
+    assert!(finding.title.contains("notes.md"), "got: {finding:?}");
+    assert_eq!(finding.severity, yunta_core::events::FindingSeverity::Minor);
+
+    let provenance: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+            .unwrap();
+    let listed: Vec<&str> = provenance["artifacts"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, vec!["plan.md", "notes.md"]);
+    assert_eq!(provenance["artifacts"][1]["missing"].as_bool(), Some(true));
+}
+
+#[tokio::test]
+async fn a_paused_run_distills_nothing() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    artifacts:
+      produces: [plan.md]
+  - id: boom
+    kind: bash
+    depends_on: [plan]
+    run: "false"
+on_finish:
+  - distill: [plan.md]
+"#;
+    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    assert!(
+        !bench.worktree.join(".yunta/knowledge").exists(),
+        "a paused run did not close — nothing distills"
+    );
+}
+
+#[tokio::test]
+async fn a_later_run_mounts_the_distilled_knowledge() {
+    let bench = Bench::new();
+    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    // Second run, same checkout: a knowledge context source must see
+    // the distilled file (§8.3 → §9.2, the loop closed).
+    let second_workflow = r#"
+name: consumer
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    context:
+      - knowledge: {}
+    prompt: "Use what the team learned."
+"#;
+    let second_fixture = r#"
+sessions:
+  - match_prompt_contains: "DISTILLED-MARKER"
+    outcome: { type: completed, summary: "informed" }
+"#;
+    let workflow: Workflow = serde_yaml::from_str(second_workflow).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let second_id = RunId::from("run-test-2");
+    let run_dir = create_run(
+        &second_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "default",
+        None,
+    )
+    .unwrap();
+    let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let report = execute_run(
+        &second_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        report.terminal,
+        RunTerminal::Finished,
+        "the consumer session only matches if the distilled content reached its prompt"
+    );
+}

@@ -992,9 +992,14 @@ que aparece.
         sin cambio de comportamiento — es exactamente lo que el Plan pide
         de ese test: documentar el límite.
 
-- [x] **T5.8 — export de `events.jsonl` al cierre (§8.3, §3.1). Alcance
-      recortado: solo el export, `on_finish.distill` queda sin
-      implementar.** Investigado a fondo en Notion antes de codear;
+- [x] **T5.8 — export de `events.jsonl` al cierre (§8.3, §3.1). El
+      recorte de `on_finish.distill` lo cerró DI-24 (ADR D107):
+      transformación determinista — copia de artifacts declarados a
+      `.yunta/knowledge/distilled/<wf>/<run>/` + `provenance.yaml` puro
+      del log, commit en la rama del run bajo `worktree`, sin commitear
+      jamás bajo `none`, orden distill → run_finished → export →
+      cleanup, y el ciclo §8.3→§9.2 cerrado (la fuente `knowledge` lee
+      recursivo e incluye lo destilado).** Investigado a fondo en Notion antes de codear;
       confirmado con el usuario que la brecha de `distill` es real y de
       otra naturaleza que las de T5.6/T5.7 — decide si el mecanismo es
       testeable con mock (A8), no solo un nombre de campo.

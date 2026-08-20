@@ -1625,3 +1625,67 @@ on_finish:
         "a merged run branch is deleted"
     );
 }
+
+#[test]
+fn distill_under_isolation_none_leaves_uncommitted_files_and_the_next_run_refuses() {
+    // The engine never commits the user's own branch: distilled files
+    // stay visible and uncommitted, and the next `none` run refuses the
+    // dirty tree until a human commits or discards — deliberate
+    // friction, not a bug.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: distill-none
+nodes:
+  - id: plan
+    kind: bash
+    run: "echo durable > {{run.dir}}/artifacts/plan.md"
+    artifacts:
+      produces: [plan.md]
+on_finish:
+  - distill: [plan.md]
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let distilled = repo.join(".yunta/knowledge/distilled/distill-none");
+    assert!(distilled.exists(), "the files land in the user's checkout");
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&status.stdout).contains(".yunta/knowledge"),
+        "uncommitted — the engine never commits the user's branch"
+    );
+
+    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        !second.status.success(),
+        "the dirty tree must refuse the next `none` run"
+    );
+    assert!(
+        String::from_utf8_lossy(&second.stderr).contains("clean tree"),
+        "got: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+}

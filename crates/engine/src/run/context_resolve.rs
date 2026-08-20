@@ -463,16 +463,28 @@ fn list_knowledge_files(
         // mean something the workflow expected to exist doesn't.
         return Ok(Vec::new());
     }
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map_err(|source| ContextResolveError::Io {
+    // Recursive since DI-24: the distilled subtree
+    // (`distilled/<workflow>/<run>/…`) is part of the layer — §9.2's own
+    // "lo destilado acá" — so a flat listing would silently hide exactly
+    // the knowledge the close deposited.
+    let mut entries: Vec<PathBuf> = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let listing = std::fs::read_dir(&current).map_err(|source| ContextResolveError::Io {
             node: node.clone(),
             source_id: source_id.to_string(),
-            action: format!("list `{}`", dir.display()),
+            action: format!("list `{}`", current.display()),
             source,
-        })?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| path.is_file())
-        .collect();
+        })?;
+        for entry in listing.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.is_file() {
+                entries.push(path);
+            }
+        }
+    }
     entries.sort();
     Ok(entries)
 }

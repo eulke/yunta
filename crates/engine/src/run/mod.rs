@@ -18,14 +18,14 @@
 //! other). `ScheduleStep::Broken`'s early `Err` return is deliberately
 //! excluded: that path never reaches a `RunReport` at all today, and a
 //! corrupt-log export is its own design question, not silently folded
-//! into this one. `on_finish.distill` itself stays unimplemented — its
-//! mechanism (agent session? deterministic transform?) isn't documented
-//! anywhere in Notion, and per CLAUDE.md a mechanism that can't be
-//! reasoned about mock-testability for shouldn't be built on a guess.
+//! into this one. `on_finish.distill` is DI-24's deterministic
+//! transform (ADR D107) — see `distill.rs`; the close sequence is
+//! distill → `run_finished` → export → cleanup.
 
 mod budget;
 mod check_exec;
 mod context_resolve;
+mod distill;
 mod executor_exec;
 mod gate_exec;
 mod loop_exec;
@@ -542,7 +542,11 @@ pub async fn execute_run(
                 return Err(RunError::Broken { diagnostic });
             }
             ScheduleStep::Finish => {
-                let state = derive(&events);
+                // §8.3/DI-24: distill before `run_finished` — nothing is
+                // emitted after the close event (I3), and its findings
+                // are events.
+                distill::run_distill(&ctx, &mode_name).await?;
+                let state = derive(&ctx.load_events()?);
                 ctx.emit(
                     None,
                     EventPayload::RunFinished(RunFinishedPayload {
@@ -719,6 +723,10 @@ pub async fn execute_run(
                             suggested_mode: next_mode.clone(),
                         }),
                     )?;
+                    // §8.3/DI-24: a promotion is a real close — the
+                    // short attempt's knowledge is knowledge, and the
+                    // successor inherits it through the repo layer.
+                    distill::run_distill(&ctx, &mode_name).await?;
                     // DI-10/§10.2: findings without an artifact (D80
                     // denials) live only on this log — derive them into
                     // an inheritable artifact so the successor's copied

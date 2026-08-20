@@ -737,7 +737,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   purga filas; run no terminal jamás se purga; `verify`/`status` sobre
   un run purgado da "unknown run", no un estado corrupto.
 
-### DI-24 — `on_finish.distill`: mecanismo completo `[ ]`
+### DI-24 — `on_finish.distill`: mecanismo completo `[x]` (ADR D107)
 
 - **Origen:** T5.8 dejó `distill` sin implementar con la pregunta
   abierta "¿sesión de agente o transformación determinista?" y la nota

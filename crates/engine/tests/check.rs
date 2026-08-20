@@ -1101,3 +1101,32 @@ fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
         "an unparseable range must fail loudly, never be ignored: {errors:?}"
     );
 }
+
+// --- DI-24: distill paths must be declared artifacts -------------------------
+
+#[test]
+fn a_distill_path_no_node_declares_producing_fails_check() {
+    let yaml = r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+    artifacts:
+      produces: [plan.md]
+on_finish:
+  - distill: [plan.md, ghost.md]
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("ghost.md") && e.to_string().contains("distill")),
+        "got: {errors:?}"
+    );
+
+    let yaml_ok = yaml.replace(", ghost.md", "");
+    let wf: Workflow = serde_yaml::from_str(&yaml_ok).unwrap();
+    assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+}

@@ -79,6 +79,15 @@ pub enum CheckError {
         on_failure: yunta_core::DefaultOnFailure,
     },
 
+    /// DI-24: `on_finish.distill` names a path no node declares
+    /// producing — statically wrong (the runtime "declared but not
+    /// produced this run" case degrades to a finding instead).
+    #[error(
+        "`on_finish.distill` names `{path}` but no node's `artifacts.produces` declares it — \
+         declare the artifact on the node that writes it, or drop it from `distill`"
+    )]
+    DistillUnknownArtifact { path: String },
+
     /// DI-13: `fresh_context: false` requires session resume (DI-23),
     /// which isn't built — refused up front instead of accepted and
     /// silently ignored (A6).
@@ -288,6 +297,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     check_fresh_context(&workflow.nodes, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
+    check_distill_paths(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -1131,4 +1141,41 @@ fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
         return Err("the range is empty".to_string());
     }
     Ok(true)
+}
+
+/// DI-24: every `on_finish.distill` path must be some node's declared
+/// artifact. Template-bearing names (`findings-{{runner.role}}.yaml`)
+/// compare as written — the distill declaration must match the
+/// production declaration, both pre-render.
+fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let mut produced: HashSet<&str> = HashSet::new();
+    fn collect<'a>(nodes: &'a [Node], produced: &mut HashSet<&'a str>) {
+        for node in nodes {
+            if let Some(artifacts) = &node.artifacts {
+                for spec in &artifacts.produces {
+                    produced.insert(match spec {
+                        yunta_core::ArtifactSpec::Plain(name) => name,
+                        yunta_core::ArtifactSpec::Typed { name, .. } => name,
+                    });
+                }
+            }
+            if let NodeKind::Parallel {
+                nodes: children, ..
+            } = &node.kind
+            {
+                collect(children, produced);
+            }
+        }
+    }
+    collect(&workflow.nodes, &mut produced);
+    for step in &workflow.on_finish {
+        let yunta_core::OnFinishStep::Distill { distill } = step else {
+            continue;
+        };
+        for path in distill {
+            if !produced.contains(path.as_str()) {
+                errors.push(CheckError::DistillUnknownArtifact { path: path.clone() });
+            }
+        }
+    }
 }
