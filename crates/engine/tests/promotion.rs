@@ -127,6 +127,25 @@ async fn run_with_mode(
     mode: &str,
     interaction: &dyn HumanInteraction,
 ) -> (RunTerminal, Vec<yunta_core::events::Event>) {
+    let (terminal, events, _run_dir, _root) =
+        run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
+    (terminal, events)
+}
+
+/// Same, but with engine findings planted on the log after creation (the
+/// DI-10 scenario: a D80 denial lives only in the parent's events), and
+/// the run dir returned so tests can inspect derived artifacts.
+async fn run_with_mode_and_findings(
+    workflow_yaml: &str,
+    mode: &str,
+    interaction: &dyn HumanInteraction,
+    findings: &[yunta_core::events::Finding],
+) -> (
+    RunTerminal,
+    Vec<yunta_core::events::Event>,
+    std::path::PathBuf,
+    tempfile::TempDir,
+) {
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
@@ -150,6 +169,20 @@ async fn run_with_mode(
     )
     .unwrap();
 
+    for finding in findings {
+        storage
+            .append_event(&yunta_core::events::Event {
+                run_id: run_id.clone(),
+                seq: 0,
+                timestamp: FixedClock.now(),
+                node_id: None,
+                payload: EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
+                    finding: finding.clone(),
+                }),
+            })
+            .unwrap();
+    }
+
     let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
@@ -171,7 +204,7 @@ async fn run_with_mode(
     .unwrap();
 
     let events = storage.events_for_run(&run_id).unwrap();
-    (report.terminal, events)
+    (report.terminal, events, run_dir, root)
 }
 
 #[tokio::test]
@@ -238,5 +271,68 @@ async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
             .iter()
             .any(|e| matches!(e.payload, EventPayload::PromotionSignaled(_))),
         "no live surface to choose promote from — must never happen on its own"
+    );
+}
+
+// --- DI-10: findings survive promotion ---------------------------------------
+
+fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding {
+    yunta_core::events::Finding {
+        id: id.to_string(),
+        severity: yunta_core::events::FindingSeverity::Major,
+        title: title.to_string(),
+        location: location.to_string(),
+        detail: "scope expansion denied by a human (D80)".to_string(),
+        proposed_criterion: None,
+    }
+}
+
+#[tokio::test]
+async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
+    let interaction = ScriptedInteraction::choosing("promote");
+    let planted = [
+        finding(
+            "scope-expansion-T001-1",
+            "Scope expansion denied",
+            "tasks/T001",
+        ),
+        // Same location + same title modulo case/whitespace: a duplicate
+        // under the normative dedup rule.
+        finding(
+            "scope-expansion-T001-2",
+            "scope  expansion DENIED",
+            "tasks/T001",
+        ),
+        finding(
+            "scope-expansion-T002-1",
+            "Scope expansion denied",
+            "tasks/T002",
+        ),
+    ];
+    let (terminal, _events, run_dir, _root) =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+
+    let path = run_dir.join("artifacts/findings-inherited.yaml");
+    let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
+    let file: yunta_core::events::FindingsFile = serde_yaml::from_slice(&bytes).unwrap();
+    assert!(
+        yunta_engine::register_findings(&file).is_empty(),
+        "the derived file must satisfy the T5.12 parser"
+    );
+    assert_eq!(file.findings.len(), 2, "duplicates collapse: {file:?}");
+    assert_eq!(file.findings[0].id, "scope-expansion-T001-1");
+    assert_eq!(file.findings[1].id, "scope-expansion-T002-1");
+}
+
+#[tokio::test]
+async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
+    let interaction = ScriptedInteraction::choosing("promote");
+    let (terminal, _events, run_dir, _root) =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    assert!(
+        !run_dir.join("artifacts/findings-inherited.yaml").exists(),
+        "no findings, no file — zero noise"
     );
 }

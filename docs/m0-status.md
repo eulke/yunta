@@ -2774,8 +2774,12 @@ que aparece.
         genérica recién cuando T9.3 llegue evita una versión tirada que
         habría que rehacer. Un finding emitido por el engine (motivo:
         `finding_posted` sin artifact — p. ej. una ampliación de scope
-        denegada) no sobrevive a esta copia: vive solo en el event log
-        del padre, no en un archivo. Documentado, no resuelto.
+        denegada) **ahora sí sobrevive (cerrado por DI-10)**: el cierre
+        por promoción deriva del log un
+        `artifacts/findings-inherited.yaml` (schema `kind: findings`,
+        deduplicado por location + título normalizado, primera aparición
+        gana) que la copia de directorio ya arrastra; sin findings no se
+        escribe archivo.
       - **`isolation: none` bajo promoción**: nunca vuelve a pedir el
         lock de `cwd` (que el padre todavía tiene, sin liberar — solo se
         libera al terminar de verdad, `RunTerminal::Finished`) — el

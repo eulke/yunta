@@ -559,7 +559,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   aparece en el payload persistido; replay determinista sin cambios de
   estado.
 
-### DI-10 — Findings del engine sobreviven la promoción `[ ]`
+### DI-10 — Findings del engine sobreviven la promoción `[x]`
 
 - **Origen:** T9.2 — "un finding emitido por el engine (p. ej. una
   ampliación denegada) no sobrevive a esta copia: vive solo en el event

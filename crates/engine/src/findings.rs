@@ -57,3 +57,40 @@ pub fn register(file: &FindingsFile) -> Vec<FindingsError> {
 
     errors
 }
+
+/// §10.2/DI-10: the findings a successor inherits, derived purely from
+/// the parent's own log — every `finding_posted`, deduplicated by the
+/// normative rule (location + title normalized for case and whitespace).
+/// The first occurrence's full record wins, so no authorship or detail
+/// is lost to the collapse. Deterministic: same log, same output — the
+/// promotion close serializes exactly this into
+/// `artifacts/findings-inherited.yaml`.
+pub fn inherited_findings(
+    events: &[yunta_core::events::Event],
+) -> Vec<yunta_core::events::Finding> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut inherited = Vec::new();
+    for event in events {
+        let yunta_core::events::EventPayload::FindingPosted(p) = &event.payload else {
+            continue;
+        };
+        let key = (
+            p.finding.location.clone(),
+            normalized_title(&p.finding.title),
+        );
+        if seen.insert(key) {
+            inherited.push(p.finding.clone());
+        }
+    }
+    inherited
+}
+
+/// Case- and whitespace-insensitive: "Scope  expansion DENIED" and
+/// "scope expansion denied" are the same complaint about the same place.
+fn normalized_title(title: &str) -> String {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}

@@ -643,7 +643,26 @@ pub async fn execute_run(
                             suggested_mode: next_mode.clone(),
                         }),
                     )?;
-                    let state = derive(&ctx.load_events()?);
+                    // DI-10/§10.2: findings without an artifact (D80
+                    // denials) live only on this log — derive them into
+                    // an inheritable artifact so the successor's copied
+                    // context carries them. No findings, no file.
+                    let events_for_close = ctx.load_events()?;
+                    let inherited = crate::findings::inherited_findings(&events_for_close);
+                    if !inherited.is_empty() {
+                        let file = yunta_core::events::FindingsFile {
+                            findings: inherited,
+                        };
+                        let yaml = serde_yaml::to_string(&file).map_err(|e| RunError::Broken {
+                            diagnostic: format!("failed to serialize inherited findings: {e}"),
+                        })?;
+                        let path = ctx.run_dir.join("artifacts/findings-inherited.yaml");
+                        std::fs::write(&path, yaml).map_err(|source| RunError::Io {
+                            context: format!("write `{}`", path.display()),
+                            source,
+                        })?;
+                    }
+                    let state = derive(&events_for_close);
                     ctx.emit(
                         None,
                         EventPayload::RunFinished(RunFinishedPayload {
