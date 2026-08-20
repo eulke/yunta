@@ -262,3 +262,37 @@ async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
         "an unverifiable owner is its own case, not a live-owner refusal"
     );
 }
+
+// --- DI-28: concurrent `git worktree` mutations never corrupt metadata -------
+
+/// Git mutates `.git/worktrees/` without a complete lock between `add`s
+/// — N concurrent additions on one repo can read each other's
+/// half-written metadata (`failed to read .git/worktrees/<x>/commondir`).
+/// Exactly what a `concurrency: N` task batch, two `kind: workflow`
+/// nodes in one batch, or two MCP `run_workflow` calls do. The engine's
+/// own lock around every worktree mutation is what makes this pass
+/// deterministically.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_worktree_adds_on_one_repo_never_corrupt_git_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+
+    for round in 0..3 {
+        let adds = (0..8).map(|i| {
+            let repo = repo.clone();
+            let base_commit = base_commit.clone();
+            let path = root.path().join(format!("worktrees/r{round}-w{i}"));
+            let branch = format!("yunta/stress/r{round}-w{i}");
+            async move {
+                prepare_worktree(&repo, &path, &base_commit, &branch, Isolation::Worktree).await
+            }
+        });
+        let results = futures::future::join_all(adds).await;
+        for (i, result) in results.into_iter().enumerate() {
+            result.unwrap_or_else(|e| panic!("round {round}, add {i} failed: {e}"));
+        }
+    }
+}

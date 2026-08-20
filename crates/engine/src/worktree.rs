@@ -56,6 +56,19 @@ pub enum WorktreeError {
         #[source]
         source: std::io::Error,
     },
+    /// DI-28: another process has held the worktree-mutation lock past
+    /// the bounded wait — never silently proceed into the race the lock
+    /// exists to prevent.
+    #[error(
+        "gave up waiting for the worktree-mutation lock `{lock_path}`{owner} — another \
+         process is mutating this repo's worktrees; if it's hung, stop it (or delete the \
+         lock by hand once you're sure nothing is running) and retry",
+        owner = .owner_pid.map(|pid| format!(" (held by pid {pid})")).unwrap_or_default()
+    )]
+    MutationLockTimeout {
+        lock_path: PathBuf,
+        owner_pid: Option<u32>,
+    },
 }
 
 /// Puts `repo` in the state a run needs before it starts: for
@@ -93,6 +106,8 @@ pub async fn prepare_worktree(
                     source,
                 })?;
             }
+            let common_dir = common_git_dir(repo).await?;
+            let _mutation_lock = lock_worktree_mutations(&common_dir).await?;
             run_git(
                 repo,
                 &[
@@ -178,6 +193,9 @@ pub async fn cleanup_worktree(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("/"));
 
+    // DI-28: removal rewrites the same `.git/worktrees/` metadata an
+    // `add` scans — same lock, same reasoning.
+    let _mutation_lock = lock_worktree_mutations(Path::new(common_dir.trim())).await?;
     run_git(
         &main_repo,
         &[
@@ -198,19 +216,117 @@ async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {
     Ok(output.trim().is_empty())
 }
 
-/// The lock lives next to git's own metadata (`--git-common-dir`, correct
-/// even when `repo` is itself already a worktree) rather than inside the
-/// working tree — it must never show up as an uncommitted file for the
-/// very dirty-tree check it exists to support.
-async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
+/// The repo's common git dir (`--git-common-dir`, correct even when
+/// `repo` is itself already a worktree) — where both of Yunta's lock
+/// files live, next to git's own metadata rather than inside the
+/// working tree: they must never show up as uncommitted files for the
+/// very checks they exist to support (dirty-tree, scope-by-diff).
+async fn common_git_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
     let common_dir = run_git(repo, &["rev-parse", "--git-common-dir"]).await?;
     let common_dir = PathBuf::from(common_dir.trim());
-    let common_dir = if common_dir.is_absolute() {
+    Ok(if common_dir.is_absolute() {
         common_dir
     } else {
         repo.join(common_dir)
+    })
+}
+
+async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
+    Ok(common_git_dir(repo).await?.join("yunta-none.lock"))
+}
+
+/// DI-28: how long an acquirer waits on a live holder before giving up
+/// loudly. Worktree mutations take tens of milliseconds — 30s of
+/// patience means the holder is hung, not busy.
+const MUTATION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const MUTATION_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(15);
+
+/// DI-28: holds `yunta-worktree.lock` for the duration of one `git
+/// worktree` mutation; dropping it releases. Removal in `Drop` (not an
+/// explicit method) so an early `?` return can't leak the lock.
+struct WorktreeMutationGuard {
+    lock_path: PathBuf,
+}
+
+impl Drop for WorktreeMutationGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+/// DI-28: serializes every `git worktree` mutation on one repo —
+/// in-process *and* cross-process. Git mutates `.git/worktrees/`
+/// without a complete lock between `add`s, so N concurrent additions
+/// (a `concurrency: N` task batch, two `kind: workflow` nodes in one
+/// scheduler batch, two MCP `run_workflow` calls) can read each
+/// other's half-written metadata and fail with `failed to read
+/// .git/worktrees/<x>/commondir`. One file lock in the common git dir
+/// — the same home as `yunta-none.lock`, shared by every linked
+/// worktree of the repo, invisible to scope-by-diff — covers all of it,
+/// and living inside this module's only mutation functions means no
+/// call site can forget it.
+///
+/// Same owner model as DI-08's `none` lock: content is the holder's
+/// pid, liveness by `kill -0` at contention time. A dead holder's lock
+/// is stolen by *removing* it and retrying the atomic `create_new` —
+/// never by overwriting in place, which would let two stealers both
+/// think they won.
+async fn lock_worktree_mutations(
+    common_dir: &Path,
+) -> Result<WorktreeMutationGuard, WorktreeError> {
+    use std::io::Write;
+
+    let lock_path = common_dir.join("yunta-worktree.lock");
+    let write_err = |source, lock_path| WorktreeError::Io {
+        action: "create the worktree-mutation lock".to_string(),
+        path: lock_path,
+        source,
     };
-    Ok(common_dir.join("yunta-none.lock"))
+    let owner_json = serde_json::to_string(&LockOwner {
+        pid: std::process::id(),
+    })
+    .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
+
+    let deadline = std::time::Instant::now() + MUTATION_LOCK_TIMEOUT;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                file.write_all(owner_json.as_bytes())
+                    .map_err(|source| write_err(source, lock_path.clone()))?;
+                return Ok(WorktreeMutationGuard { lock_path });
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                let owner: Option<LockOwner> = std::fs::read(&lock_path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+                match owner {
+                    Some(owner) if !crate::process_registry::process_alive(owner.pid) => {
+                        // Dead holder: steal by remove-then-retry — the
+                        // atomic `create_new` above decides which of two
+                        // concurrent stealers actually wins.
+                        let _ = std::fs::remove_file(&lock_path);
+                        continue;
+                    }
+                    // Alive, or unreadable (a holder between its
+                    // `create_new` and its `write_all` — microseconds):
+                    // wait our turn.
+                    _ => {}
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(WorktreeError::MutationLockTimeout {
+                        lock_path,
+                        owner_pid: owner.map(|o| o.pid),
+                    });
+                }
+                tokio::time::sleep(MUTATION_LOCK_POLL).await;
+            }
+            Err(source) => return Err(write_err(source, lock_path)),
+        }
+    }
 }
 
 /// The lock's content (DI-08): the owning `yunta` process. Liveness is

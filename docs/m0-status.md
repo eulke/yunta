@@ -3042,13 +3042,13 @@ que aparece.
         (`--detach` × 2, `resolve-gate` × 2 vía CLI, más el flujo
         base), 3 en `crates/cli/tests/mcp_flow.rs` (E2E stdio, el de
         supervivencia al SIGKILL incluido).
-      - **Flake preexistente detectado, no tocado**: `run.rs`'s
+      - **Flake preexistente detectado**: `run.rs`'s
         `eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits`
-        (T5.10) falla intermitentemente bajo `cargo test --workspace`
-        (contención real de `git worktree add` con toda la suite
-        corriendo en paralelo) — siempre pasa en aislado
-        (`cargo test -p yunta-engine --test run`). Ajeno a T8.1;
-        candidato para el registro de deuda.
+        (T5.10) fallaba intermitentemente bajo `cargo test --workspace` —
+        era un bug de producto (race de `git worktree add` concurrente),
+        registrado como DI-28 y **cerrado**: toda mutación `git worktree`
+        pasa ahora por `yunta-worktree.lock` en el common git dir
+        (patrón DI-08, robo por borrado+`create_new` atómico).
 - [ ] **T8.2 — MCP por-run (§6.4/§6.5, D49/D98/D103/D104).** No
       arrancada. Requiere: `coordination: independent | blackboard` en
       `NodeKind::Parallel` (no existe hoy); `SessionRequest.

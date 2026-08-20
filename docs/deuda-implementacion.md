@@ -60,6 +60,8 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 | DI-24 | `on_finish.distill` — mecanismo completo | T5.8 | 2 | M |
 | DI-25 | Cadena de promoción de un run hijo | T9.3 | 3 | M |
 | DI-26 | Montaje cross-run de artifacts por vínculo (ADR) | T9.3/§12 | 3 | M |
+| DI-27 | Decisiones pre-sembradas: `resolve_gate` completo | T8.1 | 1 | M |
+| DI-28 | Lock cross-process para mutaciones `git worktree` | T5.10/T4.2 | 1 | S |
 
 ---
 
@@ -1191,6 +1193,94 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   (desconocido/self/fan-out/parallel/ciclo-vía-mount) y 3 de punta a
   punta en `engine/tests/workflow_compose.rs` (copia padre+hermano con
   `as:`, fuente faltante, consumo vía `artifact: {name}` sin `node`).
+
+### DI-27 — Decisiones pre-sembradas: `resolve_gate` completo `[ ]`
+
+- **Origen:** T8.1.3. `resolve_gate` (motor + CLI + tool MCP) solo
+  soporta el menú de un re-route agotado, y con duplicación: apéndica
+  un `node_rerouted` que es copia de la consecuencia del camino vivo.
+  Gates internos (`kind: gate`) y `promote` degradan con error
+  accionable porque su cadena de consecuencia vive imperativa en dos
+  sitios (`run/mod.rs` arm `GateExhaustedReroutes` y
+  `gate_exec::resolve_internal_gate`) y replicarla en la vía pura
+  habría sido una segunda copia que se desalinea.
+- **Solución de referencia — invertir quién ejecuta la consecuencia:**
+  1. **`resolve_gate` escribe SOLO la decisión**: el par
+     `gate_waiting` + `gate_resolved` (el objeto §5.3 que el humano vio
+     queda auditado en el log). Se borra el `node_rerouted` duplicado.
+     Precondición nueva: el último evento del run debe ser `run_paused`
+     (error `NotPaused`) — elimina la carrera con un proceso vivo que
+     está por preguntar lo mismo.
+  2. **El engine consume la decisión al despertar** por su único camino
+     existente: antes de preguntar a `HumanInteraction`, cada arm
+     chequea `pre_seeded_resolution(events, node)` — pura sobre el log
+     (I2). Si hay decisión calificada, la aplica con el mismo código de
+     consecuencia de siempre, sin re-emitir el par. El
+     `yunta resume --detach` que `resolve-gate` ya dispara es el
+     proceso vivo que la consecuencia necesita: `promote` (distill +
+     sucesor vía `drive_promotions`) y los gates internos (su cadena
+     entera en `resolve_internal_gate`) salen gratis.
+  3. **Regla de calificación**: el último `gate_resolved` del nodo
+     califica sii su seq es mayor que el último
+     `node_failed`/`node_rerouted`/`node_finished` de ese nodo **y**
+     que el último `run_paused` del run. Un par apéndicado en pausa
+     califica; el camino vivo (consecuencia inmediata tras el par)
+     nunca deja pares calificados; un abort consumido (el engine emite
+     `run_paused` después) se consume **una sola vez** — un resume
+     manual posterior re-pregunta, la semántica de hoy; un fallo nuevo
+     del nodo invalida decisiones viejas. Defensa: al consumir se
+     re-valida la opción contra el menú re-derivado; si no coincide, se
+     ignora y se pregunta normal.
+  4. Borrar `UnsupportedGateKind`/`PromoteNeedsLiveProcess`; actualizar
+     descripciones del tool MCP y el help del subcomando.
+- **✓ Criterios:** `promote` pre-sembrado cierra el run y el resume
+  crea+corre el sucesor; gate interno pre-sembrado con opción mapeada
+  re-rutea y con no mapeada finaliza el gate; abort pre-sembrado se
+  consume una sola vez (el siguiente resume manual re-pregunta/pausa);
+  propiedad: la misma decisión aplicada en vivo y pre-sembrada produce
+  el mismo estado final derivado.
+
+### DI-28 — Lock cross-process para mutaciones `git worktree` `[x]`
+
+- **Origen:** flake real detectado en T8.1 al correr el workspace
+  completo: `eight_independent_tasks_at_concurrency_4...` (T5.10) —
+  `git worktree add` falla con `failed to read
+  .git/worktrees/task-1-1/commondir` cuando N miembros de un batch
+  preparan sus worktrees concurrentes sobre el mismo repo (git muta
+  `.git/worktrees/` sin lock completo entre `add`s). **Bug de
+  producto, no del test**: afecta a cualquier usuario con
+  `concurrency: N`, a dos nodos `kind: workflow` en un mismo batch, y
+  — desde T8.1 — a dos `run_workflow` MCP en rápida sucesión
+  (cross-process). T4.2 promete "dos runs paralelos sobre el mismo
+  repo no colisionan".
+- **Solución de referencia:** un lock de archivo `yunta-worktree.lock`
+  en el **common git dir** (donde ya vive `yunta-none.lock` —
+  invisible al scope-by-diff, compartido por todos los worktrees
+  vinculados), adquirido dentro de `worktree.rs` alrededor de **toda**
+  mutación `git worktree` (`add`, `remove`, y el `branch -d` del
+  cleanup). Patrón DI-08 reutilizado: contenido = pid del dueño,
+  liveness por `kill -0`, robo explícito de lock muerto, espera con
+  backoff acotada (~30s → error nombrando lock y dueño). Un solo
+  mecanismo cubre in-process y cross-process, y por construcción
+  ningún call site puede olvidarlo: el lock vive dentro de las únicas
+  funciones que corren esos comandos. Costo nulo (mutaciones raras, de
+  decenas de ms; lo caro — la sesión — sigue concurrente).
+- **✓ Criterios:** test estrés en `tests/worktree.rs` (8
+  `prepare_worktree` concurrentes sobre un repo, varias rondas) verde
+  de forma estable; el test T5.10 que flakeaba pasa N corridas
+  consecutivas bajo `cargo test --workspace` (protocolo de
+  verificación documentado en la nota de cierre).
+- **Nota de cierre:** implementado como quedó registrado, con un
+  refinamiento sobre el robo de lock: un dueño muerto se roba
+  **borrando el archivo y re-entrando al `create_new` atómico** — nunca
+  sobrescribiendo en el lugar, que dejaría a dos ladrones concurrentes
+  creyéndose ambos ganadores (el patrón DI-08 original sobrescribe; ahí
+  la contención es a escala humana, acá es a escala de máquina).
+  Verificación: el test estrés reprodujo la race **3/15 corridas antes
+  del fix** (mismo error exacto del flake:
+  `failed to read .git/worktrees/<x>/commondir`) y **0/15 después**;
+  `cargo test --workspace` completo, 3/3 corridas limpias (antes
+  fallaba ~2 de 3).
 
 ---
 
