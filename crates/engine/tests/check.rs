@@ -1510,3 +1510,41 @@ nodes:
         .iter()
         .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
 }
+
+// --- DI-20: scope_expansion ceiling in check ---------------------------------
+
+#[test]
+fn a_loop_mode_over_the_scope_expansion_ceiling_is_refused() {
+    let workflow = r#"
+name: expansive
+nodes:
+  - id: implement
+    kind: loop
+    until: all_tasks_complete
+    prompt: "work"
+    scope_expansion:
+      mode: rules
+      within: ["src/**"]
+"#;
+    let wf: Workflow = serde_yaml::from_str(workflow).unwrap();
+    let ceiling: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+    assert!(
+        check(&wf, &ceiling).iter().any(
+            |e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { node, .. }
+                if node.as_str() == "implement")
+        ),
+        "got: {:?}",
+        check(&wf, &ceiling)
+    );
+
+    // Harder than the ceiling is fine; so is everything with no ceiling.
+    let deny_node = workflow.replace("mode: rules", "mode: deny");
+    let wf_deny: Workflow = serde_yaml::from_str(&deny_node).unwrap();
+    assert!(!check(&wf_deny, &ceiling)
+        .iter()
+        .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
+    assert!(!check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
+}

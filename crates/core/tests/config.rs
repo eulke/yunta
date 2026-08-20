@@ -654,3 +654,59 @@ fn repo_overrides_only_the_project_fields_it_sets() {
     assert_eq!(merged.base_branch.as_deref(), Some("main"));
     assert_eq!(merged.branch_prefix, None);
 }
+
+// --- DI-20: layered ceiling for scope_expansion ------------------------------
+
+#[test]
+fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
+    let org: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+    let repo: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
+    // org → repo (most specific last): the harder ceiling wins.
+    let merged = ConfigLayer::merge_layers(vec![org.clone(), repo]);
+    assert_eq!(
+        merged
+            .permissions
+            .unwrap()
+            .scope_expansion
+            .unwrap()
+            .max_mode,
+        yunta_core::events::ScopeExpansionMode::Deny
+    );
+
+    // The other way around the ceiling still holds: a softer lower
+    // layer never wins the merge.
+    let soft_repo: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
+    let merged = ConfigLayer::merge_layers(vec![org, soft_repo]);
+    assert_eq!(
+        merged
+            .permissions
+            .unwrap()
+            .scope_expansion
+            .unwrap()
+            .max_mode,
+        yunta_core::events::ScopeExpansionMode::Ask
+    );
+}
+
+#[test]
+fn a_layer_softening_the_scope_expansion_ceiling_is_a_conflict() {
+    let org: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+    let repo: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
+    let conflicts = yunta_core::permission_layer_conflicts(&[("org", &org), ("repo", &repo)]);
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c.contains("scope_expansion") && c.contains("repo") && c.contains("org")),
+        "got: {conflicts:?}"
+    );
+
+    // Hardening is narrowing — never a conflict.
+    let hard: ConfigLayer =
+        serde_yaml::from_str("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
+    assert!(yunta_core::permission_layer_conflicts(&[("org", &org), ("repo", &hard)]).is_empty());
+}

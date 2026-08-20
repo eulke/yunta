@@ -993,7 +993,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   runs_root, mode, promoted_from }` + `storage`/`clock` como argumentos
   de infraestructura; ~22 call sites migrados mecánicamente.
 
-### DI-20 — Techo en capas para `scope_expansion` `[ ]`
+### DI-20 — Techo en capas para `scope_expansion` `[x]`
 
 - **Origen:** T5.11 gap #1 — §6.2 dice que el modo sigue el modelo de
   techo de §6.1 pero no da forma YAML. **Requiere decisión de schema
@@ -1011,6 +1011,18 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **✓ Criterios:** org con `max_mode: ask` + nodo `rules` → error de
   check citando la capa org; nodo `deny` → limpio; sin techo declarado →
   comportamiento actual intacto.
+- **Mini-ADR (decidido al cerrar):** la propuesta de arriba tal cual —
+  `permissions.scope_expansion.max_mode: rules | ask | deny`, severidad
+  `rules < ask < deny`, merge al más estricto (mismo patrón que
+  `packs.executors`), capa inferior que ablanda →
+  `permission_layer_conflicts` (que SÍ nombra las capas). Un matiz sobre
+  el ✓: el error de `check` cita el techo mergeado por VALOR
+  (`max_mode: ask`), no por nombre de capa — la config mergeada no
+  arrastra procedencia, y agregarla solo para este mensaje sería
+  desproporcionado; la atribución por capa vive en
+  `permission_layer_conflicts`, exactamente como en T5.7
+  (`CommandDenied` tampoco nombra capas). `strictness()`/`as_str()`
+  ahora son métodos públicos de `ScopeExpansionMode`.
 
 ### DI-21 — `events.jsonl` en el camino `Broken` `[ ]`
 

@@ -72,6 +72,28 @@ pub enum ScopeExpansionMode {
     Deny,
 }
 
+impl ScopeExpansionMode {
+    /// DI-20/§6.1: the severity order the layered ceiling compares by —
+    /// `rules` is the most permissive (auto-grants), `deny` the least.
+    /// A higher number never grants what a lower one would refuse.
+    pub fn strictness(self) -> u8 {
+        match self {
+            ScopeExpansionMode::Rules => 0,
+            ScopeExpansionMode::Ask => 1,
+            ScopeExpansionMode::Deny => 2,
+        }
+    }
+
+    /// The YAML spelling, for diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScopeExpansionMode::Rules => "rules",
+            ScopeExpansionMode::Ask => "ask",
+            ScopeExpansionMode::Deny => "deny",
+        }
+    }
+}
+
 /// `decided_by`: `rule | person` plus an identifier for the latter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

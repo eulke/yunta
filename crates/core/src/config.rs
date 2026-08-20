@@ -333,6 +333,21 @@ pub struct PermissionsConfig {
     pub packs: Option<PackPermissions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<NetworkPermissions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_expansion: Option<ScopeExpansionPermissions>,
+}
+
+/// `permissions.scope_expansion` (§6.2/D73, DI-20): the layered ceiling
+/// over how a loop node may let its tasks grow past declared scope.
+/// `max_mode` is the most *permissive* node-level `scope_expansion.mode`
+/// the layer allows (`rules < ask < deny` in severity) — the same
+/// only-narrowing model every other `permissions` group follows (§6.1):
+/// merge keeps the strictest declared ceiling, a lower layer softening
+/// it is a reported conflict, and a node declaring a mode over the
+/// merged ceiling fails `check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeExpansionPermissions {
+    pub max_mode: crate::events::ScopeExpansionMode,
 }
 
 /// `permissions.commands` — patterns matched against every hook, criterion,
@@ -671,6 +686,16 @@ fn merge_permissions(
         }
     };
 
+    // Ceiling semantics, same as packs: the strictest declared wins.
+    let scope_expansion = match (ceiling.scope_expansion, lower.scope_expansion) {
+        (Some(c), Some(l)) => Some(if c.max_mode.strictness() >= l.max_mode.strictness() {
+            c
+        } else {
+            l
+        }),
+        (c, l) => c.or(l),
+    };
+
     let network = match (ceiling.network, lower.network) {
         (Some(c), Some(l)) => Some(NetworkPermissions {
             // `false` is the narrower value — a ceiling that turned the
@@ -684,6 +709,7 @@ fn merge_permissions(
         commands,
         packs,
         network,
+        scope_expansion,
     })
 }
 
@@ -750,6 +776,18 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 if lower_net.default && !higher_net.default {
                     conflicts.push(format!(
                         "layer `{lower_name}` re-enables `network.default` turned off by layer `{higher_name}` — permissions only narrow (§6.1)"
+                    ));
+                }
+            }
+
+            if let (Some(lower_se), Some(higher_se)) =
+                (lower.scope_expansion, higher.scope_expansion)
+            {
+                if lower_se.max_mode.strictness() < higher_se.max_mode.strictness() {
+                    conflicts.push(format!(
+                        "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow (§6.1/§6.2)",
+                        lower_se.max_mode.as_str(),
+                        higher_se.max_mode.as_str()
                     ));
                 }
             }

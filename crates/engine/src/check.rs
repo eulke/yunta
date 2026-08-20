@@ -277,6 +277,22 @@ pub enum CheckError {
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
+    /// DI-20/§6.2: the node asks for a scope-expansion mode more
+    /// permissive than the merged `permissions.scope_expansion.max_mode`
+    /// ceiling allows — same only-narrowing model as every other
+    /// `permissions` group (§6.1); which *layer* set the binding ceiling
+    /// is `permission_layer_conflicts`' territory at config load.
+    #[error(
+        "node `{node}`: `scope_expansion.mode: {mode}` exceeds the merged permissions ceiling \
+         `scope_expansion.max_mode: {ceiling}` (§6.2/D73) — harden the node's mode, or raise \
+         the ceiling in the layer that set it"
+    )]
+    ScopeExpansionModeOverCeiling {
+        node: NodeId,
+        mode: &'static str,
+        ceiling: &'static str,
+    },
+
     /// DI-18: a 0 would starve every ready node forever — a config
     /// mistake surfaced here as a refusal (the scheduler's clamp to 1
     /// stays as defense in depth for runs created before this rule).
@@ -467,6 +483,29 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
         }
 
         check_gate(node, &known_ids, config, &mut errors);
+
+        // DI-20/§6.2: the loop's declared expansion mode against the
+        // merged ceiling. An absent block is `deny` — the strictest —
+        // so only an explicit, too-permissive declaration can trip.
+        if let NodeKind::Loop {
+            scope_expansion: Some(se),
+            ..
+        } = &node.kind
+        {
+            if let Some(ceiling) = config
+                .permissions
+                .as_ref()
+                .and_then(|permissions| permissions.scope_expansion)
+            {
+                if se.mode.strictness() < ceiling.max_mode.strictness() {
+                    errors.push(CheckError::ScopeExpansionModeOverCeiling {
+                        node: node.id.clone(),
+                        mode: se.mode.as_str(),
+                        ceiling: ceiling.max_mode.as_str(),
+                    });
+                }
+            }
+        }
     }
 
     check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
