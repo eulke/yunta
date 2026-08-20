@@ -7,8 +7,10 @@
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
-use yunta_core::events::{Event, EventPayload, GateOption, GateWaitingPayload};
-use yunta_core::{Manifest, NodeId, NodeKind, Workflow};
+use yunta_core::events::{
+    Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload,
+};
+use yunta_core::{Manifest, NodeId, NodeKind, RunId, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 
@@ -128,33 +130,33 @@ pub(crate) fn build_internal_gate_escalation(
 /// calling machine's own environment, not on the log, so it isn't a
 /// pure question `manifest`+`events` alone can answer). Those pauses
 /// have no menu to reconstruct; the caller keeps its existing reason.
-pub fn current_escalation(manifest: &Manifest, events: &[Event]) -> Option<GateWaitingPayload> {
-    let mode_name = match events.first().map(|e| &e.payload) {
-        Some(EventPayload::RunCreated(p)) => p.mode.clone(),
-        _ => return None,
-    };
-    let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
-    let step = schedule::next_step(
-        &manifest.workflow,
-        events,
-        manifest.max_parallel_nodes,
-        manifest.config.resolved_on_interrupt(),
-        mode_nodes.as_ref(),
-    );
-    match step {
+///
+/// The `NodeId` alongside the object is the node the decision belongs
+/// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
+/// against the right node, the same one the live pause path would have
+/// used.
+pub fn current_escalation(
+    manifest: &Manifest,
+    events: &[Event],
+) -> Option<(NodeId, GateWaitingPayload)> {
+    let mode_name = current_mode_name(events)?;
+    match current_step(manifest, events)? {
         ScheduleStep::GateExhaustedReroutes {
             node,
             goto,
             max_reroutes,
             cause,
-        } => Some(build_reroute_escalation(
-            &manifest.workflow,
-            &mode_name,
-            &node,
-            &goto,
-            max_reroutes,
-            &cause,
-        )),
+        } => {
+            let escalation = build_reroute_escalation(
+                &manifest.workflow,
+                &mode_name,
+                &node,
+                &goto,
+                max_reroutes,
+                &cause,
+            );
+            Some((node, escalation))
+        }
         ScheduleStep::ResolveInternalGate { node } => {
             let node = super::find_node(&manifest.workflow, &node).ok()?;
             let NodeKind::Gate {
@@ -167,14 +169,168 @@ pub fn current_escalation(manifest: &Manifest, events: &[Event]) -> Option<GateW
             else {
                 return None;
             };
-            Some(build_internal_gate_escalation(
-                &node.id,
-                assignee,
-                message.as_deref(),
-                options,
-                on,
-            ))
+            let escalation =
+                build_internal_gate_escalation(&node.id, assignee, message.as_deref(), options, on);
+            Some((node.id.clone(), escalation))
         }
         _ => None,
     }
+}
+
+fn current_mode_name(events: &[Event]) -> Option<String> {
+    match events.first().map(|e| &e.payload) {
+        Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
+        _ => None,
+    }
+}
+
+/// The raw scheduler decision behind [`current_escalation`], for callers
+/// that need more than the built object — [`resolve_gate`] needs
+/// `goto`/`cause`/`max_reroutes` too, to write the same follow-up event
+/// the live path would after a `retry`.
+fn current_step(manifest: &Manifest, events: &[Event]) -> Option<ScheduleStep> {
+    let mode_name = current_mode_name(events)?;
+    let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
+    let step = schedule::next_step(
+        &manifest.workflow,
+        events,
+        manifest.max_parallel_nodes,
+        manifest.config.resolved_on_interrupt(),
+        mode_nodes.as_ref(),
+    );
+    match step {
+        ScheduleStep::GateExhaustedReroutes { .. } | ScheduleStep::ResolveInternalGate { .. } => {
+            Some(step)
+        }
+        _ => None,
+    }
+}
+
+/// M8/T8.1.3: answers the escalation a paused run is currently waiting
+/// on, purely by appending to its log — no live process, same "the log
+/// is the state" (I2) a `resume`'s own `run_resumed` already leans on.
+/// Reconstructs the current step, validates `option_id` against its
+/// declared options, and appends the identical events the live pause
+/// path would have recorded had a surface answered it there and then.
+/// Driving the run forward from this new state (an ordinary `resume`,
+/// detached or not) is the caller's job — this function only ever
+/// writes the decision.
+///
+/// **Scope cut, deliberate**: only an exhausted re-route's own menu
+/// (`retry`/`abort`) is supported. `promote` needs a live process
+/// (distill, successor creation — real IO this pure function was never
+/// going to do) and an unresolved internal gate's consequence chain is
+/// longer than a re-route's (`node_started`, and on an unmapped option
+/// `node_finished` + a `progress.md` rewrite) — reimplementing that here
+/// risks a second copy of `gate_exec::resolve_internal_gate`'s own logic
+/// that drifts from it. Both degrade with an actionable error (A6)
+/// rather than a silent partial answer; supporting them is its own
+/// follow-up task, not a rush into this one's scope.
+pub fn resolve_gate(
+    manifest: &Manifest,
+    storage: &yunta_storage::Storage,
+    run_id: &RunId,
+    clock: &dyn yunta_core::Clock,
+    option_id: &str,
+    resolved_by: Option<String>,
+    free_text: Option<String>,
+) -> Result<(), ResolveGateError> {
+    let events = storage.events_for_run(run_id)?;
+    let mode_name = current_mode_name(&events).ok_or(ResolveGateError::NothingToResolve)?;
+    let step = current_step(manifest, &events).ok_or(ResolveGateError::NothingToResolve)?;
+    let ScheduleStep::GateExhaustedReroutes {
+        node,
+        goto,
+        max_reroutes,
+        cause,
+    } = step
+    else {
+        return Err(ResolveGateError::UnsupportedGateKind);
+    };
+    let escalation = build_reroute_escalation(
+        &manifest.workflow,
+        &mode_name,
+        &node,
+        &goto,
+        max_reroutes,
+        &cause,
+    );
+    if !escalation.options.iter().any(|o| o.id == option_id) {
+        return Err(ResolveGateError::UnknownOption {
+            chosen: option_id.to_string(),
+            declared: escalation
+                .options
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+    if option_id == "promote" {
+        return Err(ResolveGateError::PromoteNeedsLiveProcess);
+    }
+    let resolution = yunta_core::events::GateResolvedPayload {
+        chosen_option: Some(option_id.to_string()),
+        resolved_by,
+        free_text,
+        approved_sha: None,
+    };
+    storage.append_event(&Event {
+        run_id: run_id.clone(),
+        seq: 0,
+        timestamp: clock.now(),
+        node_id: Some(node.clone()),
+        payload: EventPayload::GateWaiting(escalation),
+    })?;
+    storage.append_event(&Event {
+        run_id: run_id.clone(),
+        seq: 0,
+        timestamp: clock.now(),
+        node_id: Some(node.clone()),
+        payload: EventPayload::GateResolved(resolution),
+    })?;
+    if option_id == "retry" {
+        storage.append_event(&Event {
+            run_id: run_id.clone(),
+            seq: 0,
+            timestamp: clock.now(),
+            node_id: Some(node),
+            payload: EventPayload::NodeRerouted(NodeReroutedPayload {
+                to_node: goto,
+                cause,
+                attempt: max_reroutes + 1,
+                max_reroutes,
+            }),
+        })?;
+    }
+    // Any other declared option (`abort`) needs nothing further — the
+    // run is already sitting paused, and `gate_resolved` alone records
+    // the decision; a future resume simply re-derives the same
+    // exhausted-reroute step and re-pauses if nobody answers it again.
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveGateError {
+    #[error(
+        "this run isn't currently waiting on a decision `resolve_gate` can answer — it may be \
+         running, finished, or paused for a reason with no menu of options (a plain failure, a \
+         budget cap, an external gate with no forge)"
+    )]
+    NothingToResolve,
+    #[error(
+        "this run is waiting on an unresolved `kind: gate` node, not an exhausted re-route — \
+         `resolve_gate` doesn't support that yet; run `yunta resume <run_id>` interactively \
+         instead"
+    )]
+    UnsupportedGateKind,
+    #[error(
+        "`promote` needs a live process to distill and create the successor run — run `yunta \
+         resume <run_id>` interactively instead"
+    )]
+    PromoteNeedsLiveProcess,
+    #[error("option `{chosen}` isn't valid here — declared options: {declared}")]
+    UnknownOption { chosen: String, declared: String },
+    #[error(transparent)]
+    Storage(#[from] yunta_storage::StorageError),
 }

@@ -2000,3 +2000,116 @@ extern "C" {
 unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
     kill(pid, sig)
 }
+
+// --- M8/T8.1.3: `yunta resolve-gate` -----------------------------------------
+
+#[test]
+fn yunta_resolve_gate_answers_an_exhausted_reroute_from_a_separate_process() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: hopeless
+nodes:
+  - id: lint
+    kind: bash
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 0 }
+  - id: fix-lint
+    kind: bash
+    run: "touch fixed.txt"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        stdout(&run).contains("paused"),
+        "expected the exhausted re-route to pause the run, got: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let run_id = run_id_from(&run);
+    assert!(!repo.join("fixed.txt").exists());
+
+    // A separate process, with no live surface attached to the run,
+    // answers it.
+    let resolve = yunta_in(&repo, &home, &["resolve-gate", &run_id, "retry"]);
+    assert!(
+        resolve.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&resolve),
+        String::from_utf8_lossy(&resolve.stderr)
+    );
+    assert!(stdout(&resolve).contains("resolved"));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        if stdout(&status).contains("finished") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never reached finished after resolve-gate: {}",
+            stdout(&status)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(repo.join("fixed.txt").exists());
+}
+
+#[test]
+fn yunta_resolve_gate_rejects_an_unknown_option_without_touching_the_log() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: hopeless
+nodes:
+  - id: lint
+    kind: bash
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 0 }
+  - id: fix-lint
+    kind: bash
+    run: "touch fixed.txt"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+
+    let resolve = yunta_in(&repo, &home, &["resolve-gate", &run_id, "nonexistent"]);
+    assert!(!resolve.status.success());
+    let err = String::from_utf8_lossy(&resolve.stderr);
+    assert!(err.contains("retry") && err.contains("abort"), "got: {err}");
+
+    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    assert!(
+        stdout(&status).contains("waiting"),
+        "an invalid option must not touch the run's state: {}",
+        stdout(&status)
+    );
+}

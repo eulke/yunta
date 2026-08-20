@@ -73,6 +73,23 @@ enum Command {
         /// The run id to resume.
         run_id: String,
     },
+    /// Answers a paused run's gate decision from a separate process — no
+    /// live surface attached to the run itself (M8/T8.1.3). Only an
+    /// exhausted re-route's own menu (`retry`/`abort`) is supported
+    /// today; an unresolved `kind: gate` node or `promote` need `yunta
+    /// resume` run interactively instead.
+    ResolveGate {
+        /// The run id waiting on a decision.
+        run_id: String,
+        /// The chosen option id, as printed by `yunta status`.
+        option: String,
+        /// Who's answering, for the audit trail (`gate_resolved.resolved_by`).
+        #[arg(long)]
+        by: Option<String>,
+        /// Free-form context alongside the choice (§5.3's own `free_text`).
+        #[arg(long = "text")]
+        free_text: Option<String>,
+    },
     /// Sends every running node's session an ordered interrupt,
     /// escalating to `kill` if it doesn't close in time (Spec Adapter
     /// §2, A4).
@@ -193,6 +210,20 @@ async fn main() -> ExitCode {
         }
         Some(Command::Status { run_id }) => commands::status::status(&run_id),
         Some(Command::Resume { run_id }) => commands::resume::resume(&run_id).await,
+        Some(Command::ResolveGate {
+            run_id,
+            option,
+            by,
+            free_text,
+        }) => {
+            commands::resolve_gate::resolve_gate(
+                &run_id,
+                &option,
+                by.as_deref(),
+                free_text.as_deref(),
+            )
+            .await
+        }
         Some(Command::Cancel { run_id }) => commands::cancel::cancel(&run_id).await,
         Some(Command::List { runs }) => {
             if runs {

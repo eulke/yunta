@@ -7,6 +7,7 @@ pub mod init;
 pub mod list;
 pub mod new;
 pub(crate) mod promote;
+pub mod resolve_gate;
 pub mod resume;
 pub mod run;
 pub mod stats;
@@ -15,6 +16,7 @@ pub mod test;
 pub mod verify;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -38,6 +40,45 @@ pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
         }
     });
     root
+}
+
+/// M8/D101: hands a run off to a fully independent `yunta resume` and
+/// returns without waiting on it — what `run --detach` and
+/// `resolve-gate` both need (a control-plane operation that must never
+/// block for the run's own duration). No new execution path: the
+/// detached child is an ordinary resume, exactly what a human would run
+/// by hand. Its own log goes to `run.dir/scratch/detached.log` (never
+/// silently discarded); its process group is its own so a signal to
+/// *this* invocation's group (a shell's Ctrl-C) can never reach it.
+pub(crate) fn spawn_detached_resume(
+    run_dir: &Path,
+    run_id: &str,
+    cwd: &Path,
+) -> std::io::Result<()> {
+    let log_path = run_dir.join("scratch/detached.log");
+    let log = std::fs::File::create(&log_path)?;
+    let log_err = log.try_clone()?;
+    let mut child_cmd = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
+    );
+    child_cmd
+        .arg("resume")
+        .arg(run_id)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(log)
+        .stderr(log_err);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        child_cmd.process_group(0);
+    }
+    child_cmd.spawn()?;
+    // Deliberately not awaited, not tracked: the whole point is that
+    // this run's life stops depending on this process the moment it's
+    // launched (I25's own rule, applied here to the CLI launcher rather
+    // than an MCP session).
+    Ok(())
 }
 
 /// Prints a run's outcome and maps it to an exit code: success only when
