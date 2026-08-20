@@ -1057,6 +1057,12 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   corrida → actualizar la entrada correspondiente de `m0-status.md`.
 - **✓ Criterios:** ambas checklists corridas y sus entradas de deuda
   cerradas; cualquier corrección hecha con test de regresión.
+- **Estado:** la checklist existe — `docs/smoke-checklist.md`, con
+  protocolo de corrección (cada divergencia = tarea propia + test de
+  regresión) y registro de resultados en `m0-status.md`. El ítem queda
+  abierto hasta que ambas corridas ocurran: requieren binario `codex`
+  autenticado y token+repo descartable de GitHub, que este entorno no
+  tiene — es trabajo de la primera sesión con credenciales, no de esta.
 
 ### DI-23 — `on_interrupt: resume_session` `[ ]`
 
