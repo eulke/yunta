@@ -546,15 +546,17 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         `ps` que no queda ningún `sleep` huérfano tras la cancelación) — y
         1 en `crates/cli/tests/run_flow.rs` end-to-end (el warning D100
         aparece por stderr y el run igual termina).
-      - **Deuda documentada, no silenciosa**: un hijo `kind: loop` no es
-        cancelable — su propio ciclo de tareas (`run_task`/`dispatch_session`
-        dentro de `loop_exec.rs`) recibe un `CancellationToken` que nadie
-        dispara nunca, así que sigue corriendo hasta su propio final
-        aunque un hermano gane la carrera de `join: any`. Ampliar
-        `run_task` (función pública, con su propia suite de tests) para
-        aceptar cancelación externa es más superficie de la que este
-        recorte tocó — sin tarea asignada, gatillo: alguien necesita de
-        verdad un `loop` corriendo dentro de un grupo `parallel`.
+      - **Hijo `loop`/`check` cancelable ✓ (cerrado por DI-11)**:
+        `run_task`/`dispatch_session` propagan el token del nodo
+        (`DispatchOutcome::Cancelled` → `TaskOutcome::Interrupted`), y
+        `run_command` de los check builtins corre en process group
+        propio con `select!` sobre el token. El destino del nodo
+        distingue quién canceló: carrera `join: any` → `node_failed`
+        "interrupted…" (el grupo cierra); cancelación del usuario (token
+        raíz de DI-08) → sin evento terminal — el nodo queda huérfano y
+        el resume lo re-trata por `on_interrupt` (§8.1), que es lo que
+        hace la cancelación resumible (test e2e: Ctrl-C → resume →
+        finished).
 
 ## M5 — Verificación (completo: T5.1–T5.14)
 
@@ -2975,9 +2977,11 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    terminal en el log (escalación SIGKILL a los pgids con timeout), y con
    engine muerto mata los pgids huérfanos, emite `run_paused { reason:
    "cancelled after crash" }` y limpia. `--detach` (M8/D101) consumirá el
-   mismo engine.json. Deuda que sigue: las sesiones de un loop no son
-   cancel-aware (DI-11), así que un Ctrl-C durante una tarea de loop
-   espera a que la sesión cierre sola antes de pausar.
+   mismo engine.json. La deuda que seguía (sesiones de loop no
+   cancel-aware) la cerró DI-11: el token raíz llega hasta cada
+   dispatch, y la cancelación del usuario deja nodos huérfanos que el
+   resume re-trata por `on_interrupt` en vez de `node_failed`
+   fabricados que lo dejarían sin salida.
 10. **Retención a nivel de base de datos (§8.3/T7.1's `gc`)**: `gc` borra
     `run.dir`/worktree de runs terminales pasado `storage.retention_days`,
     pero §8.3 también dice que el event log *base* se conserva según esa

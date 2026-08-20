@@ -197,14 +197,7 @@ pub(super) async fn execute_executor(
                 kill_process_group(pid).await;
             }
             let _ = child.wait().await;
-            return fail(
-                ctx,
-                node,
-                "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
-                  cancelled"
-                    .to_string(),
-                false,
-            );
+            return super::node_exec::cancelled_end(ctx, node);
         }
         WaitOutcome::TimedOut => {
             if let Some(pid) = child.id() {

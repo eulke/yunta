@@ -25,10 +25,13 @@ pub(super) async fn execute_check(
     ctx: &RunCtx<'_>,
     node: &Node,
     builtin: &CheckBuiltin,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     match builtin {
-        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node).await,
-        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node).await,
+        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, cancel).await,
+        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, cancel).await,
+        // `findings_gate` reads artifacts, spawns nothing — there is no
+        // wait point for a token to interrupt.
         CheckBuiltin::FindingsGate { max_severity } => {
             execute_findings_gate(ctx, node, *max_severity).await
         }
@@ -40,25 +43,81 @@ struct CommandOutput {
     stdout: String,
 }
 
+/// A check command's run: done with its output, or cut by cancellation
+/// (DI-11) — the caller turns the latter into the node's own fate.
+enum CommandRun {
+    Done(CommandOutput),
+    Cancelled,
+}
+
 /// Runs `cmd` to completion and captures its stdout — unlike a bash
 /// *node*, a check builtin's command is the engine's own verification
 /// step, not agent-visible work, so its stdout is data to parse, not a
-/// stream to relay.
-async fn run_command(cwd: &Path, cmd: &str) -> Result<CommandOutput, RunError> {
-    let output = tokio::process::Command::new("sh")
+/// stream to relay. Cancel-aware (DI-11/A4): the command runs in its own
+/// process group, registered in `engine.json`, and a fired token kills
+/// the whole tree.
+async fn run_command(
+    ctx: &RunCtx<'_>,
+    cwd: &Path,
+    cmd: &str,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<CommandRun, RunError> {
+    let mut std_cmd = std::process::Command::new("sh");
+    std_cmd
         .arg("-c")
         .arg(cmd)
         .current_dir(cwd)
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        std_cmd.process_group(0);
+    }
+    let mut child = tokio::process::Command::from(std_cmd)
+        .spawn()
         .map_err(|source| RunError::Io {
             context: format!("run check command `{cmd}`"),
             source,
         })?;
-    Ok(CommandOutput {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-    })
+    let _pgid_registration =
+        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
+
+    let stdout_task = child.stdout.take().map(|mut pipe| {
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf).await;
+            buf
+        })
+    });
+
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            if let Some(pid) = child.id() {
+                super::node_exec::kill_process_group(pid).await;
+            }
+            let _ = child.wait().await;
+            if let Some(task) = stdout_task {
+                let _ = task.await;
+            }
+            Ok(CommandRun::Cancelled)
+        }
+        status = child.wait() => {
+            let status = status.map_err(|source| RunError::Io {
+                context: format!("run check command `{cmd}`"),
+                source,
+            })?;
+            let stdout_bytes = match stdout_task {
+                Some(task) => task.await.unwrap_or_default(),
+                None => Vec::new(),
+            };
+            Ok(CommandRun::Done(CommandOutput {
+                exit_code: status.code().unwrap_or(-1),
+                stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+            }))
+        }
+    }
 }
 
 /// `baseline_compare` (§7.2): capture is lazy, on this builtin's own first
@@ -69,7 +128,11 @@ async fn run_command(cwd: &Path, cmd: &str) -> Result<CommandOutput, RunError> {
 /// entry), not a silent gap: the first `baseline_compare` node always
 /// passes (it has nothing yet to compare against) and every later one
 /// compares against that first run's result.
-async fn execute_baseline_compare(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
+async fn execute_baseline_compare(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<NodeEnd, RunError> {
     let Some(baseline) = &ctx.manifest.config.baseline else {
         return fail(
             ctx,
@@ -87,7 +150,10 @@ async fn execute_baseline_compare(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
             _ => None,
         });
 
-    let output = run_command(ctx.worktree, &baseline.suite).await?;
+    let output = match run_command(ctx, ctx.worktree, &baseline.suite, cancel).await? {
+        CommandRun::Done(output) => output,
+        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node),
+    };
 
     match already_captured {
         None => {
@@ -144,7 +210,11 @@ async fn execute_baseline_compare(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
 /// `NN[.NN]%` — the last one found is taken as the measured coverage, per
 /// `CoverageConfig`'s own documented convention (the Contrato's prose
 /// doesn't specify a parsing contract).
-async fn execute_coverage_gate(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
+async fn execute_coverage_gate(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<NodeEnd, RunError> {
     let Some(coverage) = &ctx.manifest.config.coverage else {
         return fail(
             ctx,
@@ -155,7 +225,10 @@ async fn execute_coverage_gate(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd,
         );
     };
 
-    let output = run_command(ctx.worktree, &coverage.cmd).await?;
+    let output = match run_command(ctx, ctx.worktree, &coverage.cmd, cancel).await? {
+        CommandRun::Done(output) => output,
+        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node),
+    };
     let Some(measured) = parse_last_percentage(&output.stdout) else {
         return fail(
             ctx,

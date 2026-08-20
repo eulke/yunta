@@ -27,6 +27,26 @@ use super::{RunCtx, RunError};
 pub(super) enum NodeEnd {
     Finished,
     Failed,
+    /// DI-11: the run's root cancellation cut this node mid-flight — no
+    /// terminal event was recorded, on purpose: the node stays orphaned
+    /// (`running` in the log) so a later resume re-treats it per its
+    /// `on_interrupt` policy, exactly like a crash (§8.1).
+    Interrupted,
+}
+
+/// DI-11: the shared "my token fired" epilogue — which cancellation was
+/// it? A user/root cancel leaves the node orphaned; a `join: any`
+/// sibling race records the loss so the group can close over it.
+pub(super) fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
+    if ctx.root_cancel.is_cancelled() {
+        return Ok(NodeEnd::Interrupted);
+    }
+    fail(
+        ctx,
+        node,
+        "interrupted: a sibling in this join: any group finished first".to_string(),
+        false,
+    )
 }
 
 /// `cancel` only ever fires for a child of a `join: any` parallel group
@@ -68,23 +88,14 @@ pub(super) async fn execute_node(
         NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
         NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
         NodeKind::Loop { until, prompt, .. } => {
-            // A loop's own task dispatch isn't cancel-aware in this
-            // recorte (T4.6's scope is bash/prompt children) — a loop
-            // child of a `join: any` group runs to its own completion
-            // even after a sibling wins. Documented debt, not a silent
-            // gap: see `docs/m0-status.md`'s T4.6 entry.
-            super::loop_exec::execute_loop(ctx, node, until, prompt).await?
+            super::loop_exec::execute_loop(ctx, node, until, prompt, cancel).await?
         }
         NodeKind::Parallel { join, nodes } => {
             execute_parallel(ctx, node, *join, nodes, cancel).await?
         }
-        // Not cancel-aware in this recorte, same debt as a loop child
-        // above: a verification command is expected to be short-lived, and
-        // T4.6's scope was bash/prompt only. A `check` child of a `join:
-        // any` group runs to completion even after a sibling wins.
-        NodeKind::Check { builtin } => super::check_exec::execute_check(ctx, node, builtin).await?,
-        // Not cancel-aware beyond the top-level `join: any` race passed in
-        // here — same recorte as `check`/`loop` children above.
+        NodeKind::Check { builtin } => {
+            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
+        }
         NodeKind::Executor {
             executor,
             with,
@@ -160,8 +171,15 @@ async fn execute_parallel(
 
             let mut failed_child = None;
             for (child, result) in to_run.iter().zip(results) {
-                if matches!(result?, NodeEnd::Failed) {
-                    failed_child.get_or_insert(&child.id);
+                match result? {
+                    NodeEnd::Failed => {
+                        failed_child.get_or_insert(&child.id);
+                    }
+                    // DI-11: a root cancellation unwound this child —
+                    // the group closes nothing; the whole run is
+                    // pausing, and resume re-enters it.
+                    NodeEnd::Interrupted => return Ok(NodeEnd::Interrupted),
+                    NodeEnd::Finished => {}
                 }
             }
             if let Some(id) = failed_child {
@@ -216,14 +234,18 @@ async fn execute_parallel(
                         group_cancel.cancel();
                     }
                     NodeEnd::Failed => failures.push(child_id),
+                    // DI-11: root cancellation, not a sibling race —
+                    // drain the rest and unwind without a terminal.
+                    NodeEnd::Interrupted => {
+                        while running.next().await.is_some() {}
+                        return Ok(NodeEnd::Interrupted);
+                    }
                 }
             }
             // Drain the rest: the cancelled losers finishing their own
-            // interrupt→kill sequence.
+            // interrupt→kill sequence (each records its own failure).
             while let Some((_, result)) = running.next().await {
-                if let NodeEnd::Failed = result? {
-                    // Expected — a cancelled child fails its own node.
-                }
+                let _ = result?;
             }
 
             match winner {
@@ -768,14 +790,7 @@ async fn execute_bash(
             if let Some(task) = stdout_task {
                 let _ = task.await;
             }
-            fail(
-                ctx,
-                node,
-                "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
-                  cancelled"
-                    .to_string(),
-                false,
-            )
+            cancelled_end(ctx, node)
         }
         status = child.wait() => {
             let status = status.map_err(|source| RunError::Io {
@@ -951,5 +966,6 @@ async fn execute_prompt(
         DispatchOutcome::BudgetExceeded { reason } => {
             fail_with_tokens(ctx, node, reason, false, tokens)
         }
+        DispatchOutcome::Cancelled => cancelled_end(ctx, node),
     }
 }

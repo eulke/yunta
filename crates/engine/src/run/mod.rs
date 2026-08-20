@@ -146,6 +146,12 @@ pub(crate) struct RunCtx<'a> {
     /// be written — the run proceeds, degraded loudly (A4's external
     /// paths lose their map, the internal ones never needed it).
     pub process_registry: Option<crate::process_registry::ProcessRegistry>,
+    /// DI-08/DI-11: the invocation's root cancellation (Ctrl-C, `yunta
+    /// cancel`). Execution paths consult it to tell a user cancellation
+    /// (leave the node orphaned — resume re-treats it per
+    /// `on_interrupt`, §8.1) apart from a `join: any` sibling race
+    /// (record the loss as failed so the group can close).
+    pub root_cancel: CancellationToken,
 }
 
 impl RunCtx<'_> {
@@ -393,6 +399,7 @@ pub async fn execute_run(
     // `None` (tests, callers with no signal source) gets a token nothing
     // ever fires — the pre-DI-08 behavior exactly.
     let root_cancel = cancel.cloned().unwrap_or_default();
+    let root_cancel_for_ctx = root_cancel.clone();
     let ctx = RunCtx {
         run_id,
         manifest,
@@ -416,6 +423,7 @@ pub async fn execute_run(
                 None
             }
         },
+        root_cancel: root_cancel_for_ctx,
     };
 
     let events = ctx.load_events()?;

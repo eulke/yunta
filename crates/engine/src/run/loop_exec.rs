@@ -33,6 +33,7 @@ pub(super) async fn execute_loop(
     node: &Node,
     until: &str,
     prompt: &PromptSource,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     if until != "all_tasks_complete" {
         return fail(
@@ -164,6 +165,7 @@ pub(super) async fn execute_loop(
                 &instruction,
                 adapter.as_ref(),
                 scope_expansion,
+                cancel,
             )
         }))
         .await;
@@ -232,6 +234,15 @@ pub(super) async fn execute_loop(
                 }
             }
 
+            // DI-11: a cancelled dispatch ends the whole loop node
+            // without a verdict — the task stays `running` in the log
+            // (orphaned), which is exactly what makes a later resume
+            // re-execute it (§5.5's own "huérfanas se reejecutan"), and
+            // the node's own fate follows the same root-vs-sibling rule
+            // every other kind applies.
+            if matches!(report.outcome, TaskOutcome::Interrupted) {
+                return super::node_exec::cancelled_end(ctx, node);
+            }
             let blocked_reason = match report.outcome {
                 TaskOutcome::Blocked { reason } => {
                     ctx.emit(
@@ -287,6 +298,8 @@ pub(super) async fn execute_loop(
                     // for yet.
                     None
                 }
+                // Unreachable: handled by the early return above.
+                TaskOutcome::Interrupted => None,
             };
             let was_blocked = blocked_reason.is_some();
             if let Some(reason) = blocked_reason {
@@ -600,6 +613,7 @@ async fn dispatch_task_in_isolation<'a>(
     instruction: &str,
     adapter: &dyn yunta_adapters::Adapter,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
@@ -646,6 +660,7 @@ async fn dispatch_task_in_isolation<'a>(
         granted_count(events),
         &granted_paths_for(events, &task.id),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        cancel,
     )
     .await?;
 

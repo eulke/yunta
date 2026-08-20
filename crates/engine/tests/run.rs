@@ -4871,3 +4871,117 @@ sessions:
     assert_eq!(tool.tool_name.as_deref(), Some("edit"));
     assert_eq!(tool.target_digest.as_deref(), Some("abc123"));
 }
+
+// --- DI-11: loop/check cancellation under join: any --------------------------
+
+#[tokio::test]
+async fn a_join_any_race_cancels_a_slow_loop_child_when_a_sibling_wins() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = r#"
+name: race-loop
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: race
+    kind: parallel
+    depends_on: [plan]
+    join: any
+    nodes:
+      - id: quick
+        kind: bash
+        run: "true"
+      - id: slow-loop
+        kind: loop
+        runner: executor
+        until: all_tasks_complete
+        prompt: "Implement your task."
+"#;
+
+    // The task session stalls 4s before doing anything — far longer than
+    // `quick` needs to win. Without cancellation the loop would sit out
+    // the whole delay and finish anyway.
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"slow\"\n    scope: [\"slow.txt\"]\n    criteria:\n      - cmd: \"test -f slow.txt\"\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+  - steps:
+      - {{ type: note, text: "stalling", after_ms: 4000 }}
+    effects:
+      - {{ path: slow.txt, content: "slow" }}
+    outcome: {{ type: completed, summary: "did T001" }}
+"#,
+        artifacts = artifacts_dir.display()
+    );
+
+    let started = std::time::Instant::now();
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "the loser must die with the race, not sit out its stall: {:?}",
+        started.elapsed()
+    );
+
+    assert!(matches!(
+        state.nodes.get(&"race".into()),
+        Some(NodeState::Finished { .. })
+    ));
+    match state.nodes.get(&"slow-loop".into()) {
+        Some(NodeState::Failed { outcome, .. }) => {
+            assert!(outcome.contains("interrupted"), "got: {outcome}");
+        }
+        other => panic!("the losing loop must be recorded interrupted, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_join_any_race_cancels_a_slow_check_child_when_a_sibling_wins() {
+    let bench = Bench::new();
+    let config = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: "sleep 4"
+"#;
+    let workflow = r#"
+name: race-check
+nodes:
+  - id: race
+    kind: parallel
+    join: any
+    nodes:
+      - id: quick
+        kind: bash
+        run: "true"
+      - id: slow-check
+        kind: check
+        builtin: baseline_compare
+"#;
+
+    let started = std::time::Instant::now();
+    let (terminal, state) = bench
+        .run_with_config(workflow, "sessions: []\n", config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "the check must die with the race: {:?}",
+        started.elapsed()
+    );
+    match state.nodes.get(&"slow-check".into()) {
+        Some(NodeState::Failed { outcome, .. }) => {
+            assert!(outcome.contains("interrupted"), "got: {outcome}");
+        }
+        other => panic!("the losing check must be recorded interrupted, got {other:?}"),
+    }
+}

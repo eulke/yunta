@@ -1513,3 +1513,62 @@ fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
     );
     assert!(stdout(&resume).contains("finished"));
 }
+
+#[test]
+fn a_cancelled_run_resumes_by_restarting_the_orphaned_node() {
+    // DI-11/§8.1: a user cancellation leaves the interrupted node
+    // orphaned — no fabricated terminal — so `resume` re-treats it per
+    // `on_interrupt` (restart_node) instead of dead-ending on a failed
+    // node.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: resumable
+nodes:
+  - id: gated
+    kind: bash
+    run: "echo x > started.txt; test -f go.txt || sleep 30"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let mut yunta = spawn_run_until(&repo, &home, &repo.join("started.txt"));
+    let run_id = only_run_id(&home);
+
+    std::process::Command::new("kill")
+        .args(["-INT", &yunta.id().to_string()])
+        .status()
+        .unwrap();
+    let output = yunta.wait_with_output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("cancelled by user"),
+        "got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // Give the restarted node its exit condition, then resume.
+    write(&repo.join("go.txt"), "go");
+    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    assert!(
+        resume.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&resume),
+        String::from_utf8_lossy(&resume.stderr)
+    );
+    assert!(
+        stdout(&resume).contains("finished"),
+        "got: {}",
+        stdout(&resume)
+    );
+}

@@ -176,6 +176,11 @@ pub enum DispatchOutcome {
     /// No terminal event at all (O2) — the engine synthesizes this, the
     /// adapter never emits it.
     Crashed,
+    /// DI-11: the dispatch's own `CancellationToken` fired — a
+    /// `join: any` sibling won, or the user cancelled the run. The
+    /// session was cut (interrupt→kill); the *caller* decides what the
+    /// cancellation means, because only it knows which token fired.
+    Cancelled,
     /// The engine cut the session via `interrupt` → `kill` (T3.3, O4):
     /// the token count from `Usage` events or the wall-clock timeout
     /// demanded it, independent of whether the adapter itself honored
@@ -206,7 +211,14 @@ pub struct AttemptRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskOutcome {
     Done,
-    Blocked { reason: String },
+    Blocked {
+        reason: String,
+    },
+    /// DI-11: the cycle's cancellation token fired mid-attempt — the
+    /// session was cut (interrupt→kill) and the cycle stopped without a
+    /// verdict. What that means for the task's status is the caller's
+    /// call, not this cycle's.
+    Interrupted,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -520,16 +532,7 @@ pub(crate) async fn dispatch_session(
     }
 
     if cancelled {
-        return Ok((
-            DispatchOutcome::Failed {
-                message:
-                    "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
-                          cancelled"
-                        .to_string(),
-                retryable: false,
-            },
-            tokens,
-        ));
+        return Ok((DispatchOutcome::Cancelled, tokens));
     }
 
     Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
@@ -575,6 +578,7 @@ pub async fn run_task(
     granted_so_far: u32,
     already_granted_paths: &[String],
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    cancel: &CancellationToken,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -629,16 +633,35 @@ pub async fn run_task(
             budget,
             adapter_settings: Default::default(),
         };
-        // A loop task's own cancellation (mid-execution, from outside)
-        // isn't wired in this recorte — see T4.6's debt note in
-        // docs/m0-status.md — so this token is never triggered.
-        let (dispatch_outcome, tokens) =
-            dispatch_session(adapter, request, &CancellationToken::new(), audit)
-                .await
-                .map_err(|source| TaskCycleError::Spawn {
-                    task: task.id.clone(),
-                    source,
-                })?;
+        let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit)
+            .await
+            .map_err(|source| TaskCycleError::Spawn {
+                task: task.id.clone(),
+                source,
+            })?;
+
+        // DI-11: a cancelled dispatch ends the cycle right here — no
+        // post-check, no verdict, no retry. The attempt is on record;
+        // what the cancellation means for the task is the caller's
+        // decision, because only it knows which token fired.
+        if matches!(dispatch_outcome, DispatchOutcome::Cancelled) {
+            attempts.push(AttemptRecord {
+                attempt,
+                dispatch: dispatch_outcome,
+                tokens,
+                post_check: Vec::new(),
+                scope: crate::scope::ScopeCheckResult::default(),
+                succeeded: false,
+                scope_expansion: None,
+            });
+            return Ok(TaskCycleReport {
+                task_id: task.id.clone(),
+                pre_check: pre_runs,
+                attempts,
+                outcome: TaskOutcome::Interrupted,
+                needs_human_decision: false,
+            });
+        }
 
         // §6.2: the agent never widens its own scope — it may have left a
         // request behind, which this attempt's own worktree is the only

@@ -582,7 +582,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **No hacer:** no escribirlo en todo cierre "por las dudas" — solo
   promoción lo consume; generalizarlo es territorio de T9.3.
 
-### DI-11 — Cancelación de `loop`/`check`/`executor` bajo `join: any` `[ ]`
+### DI-11 — Cancelación de `loop`/`check`/`executor` bajo `join: any` `[x]`
 
 - **Origen:** T4.6 — "un hijo `kind: loop` no es cancelable (…) gatillo:
   alguien necesita de verdad un loop dentro de un grupo parallel". El
@@ -594,10 +594,18 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   que `execute_node` ya recibe y lo consultan en sus puntos de espera
   (`tokio::select!` sobre la sesión/comando vs. `token.cancelled()`).
   Cancelado → interrupt→kill del proceso en curso (mecanismo T3.3
-  existente), el intento se registra como interrumpido, sin evento
-  terminal fabricado (el nodo queda huérfano y el resume lo trata por
-  `on_interrupt`, exactamente como un crash — semántica ya definida, no
-  nueva).
+  existente). **Precisión al implementar — el destino del nodo depende
+  de QUIÉN canceló, y son dos semánticas distintas:** (a) carrera
+  `join: any` (un hermano ganó) → el perdedor SÍ registra
+  `node_failed` "interrupted: a sibling…" — el grupo no puede cerrar
+  sobre un huérfano (un run `finished` con un nodo `running` eterno
+  rompería status y el propio invariante de cierre); (b) cancelación
+  del usuario (token raíz de DI-08) → sin evento terminal fabricado:
+  el nodo queda huérfano, el run pausa "cancelled by user", y el
+  resume lo trata por `on_interrupt` exactamente como un crash — que
+  es lo que hace la cancelación resumible (un `node_failed` fabricado
+  acá dejaría el run pausado sin salida). La versión anterior de este
+  ítem prescribía (b) para todo; la distinción sale de implementarlo.
 - **✓ Criterios:** grupo `join: any` con un hijo `loop` lento (mock con
   latencia) y un hermano rápido → el loop muere antes de su propio final,
   cero zombies, y el resume posterior lo re-trata por `on_interrupt`;
