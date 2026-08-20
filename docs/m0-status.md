@@ -2963,6 +2963,106 @@ que aparece.
       reviewer-alt]` literal de la doc — su último delta marcado quedó
       cerrado.
 
+## M8 — MCP (en curso: T8.1 completo, T8.2 pendiente)
+
+- [x] **T8.1 — `yunta mcp`: superficie de control por stdio (§6.4).**
+      `rmcp` ya era dependencia (T6.2, cliente saliente para `context:
+      mcp`) — sus features de servidor pasaron de dev-only a reales en
+      `yunta-cli` (`server` + `transport-io`). Cinco tools, servidor
+      manual (sin macros/`schemars` derive — mismo estilo que el server
+      de juguete de `mcp_context.rs`), cada uno con schema JSON y
+      descripción **escrita para decidir** (D74): `list_workflows`,
+      `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`.
+      Config JSON de referencia para invocarlo:
+      ```json
+      { "mcpServers": { "yunta": { "command": "yunta", "args": ["mcp"] } } }
+      ```
+      **Nunca bloquea (I25/§6.4)**: `run_workflow`/`resume_run` disparan
+      el mismo mecanismo de `--detach` y retornan de inmediato;
+      `workflow_status` es la única vía de seguimiento (pull, jamás
+      push — mismo modelo que los gates externos, D66/D101).
+      - **`yunta run --detach`** (prerrequisito, nuevo): crea el run
+        sincrónico (rápido, sin IO de agente) y lanza `yunta resume
+        <run_id>` como hijo en su propio process group
+        (`process_group(0)`, unix) — una señal al grupo del lanzador (el
+        Ctrl-C de una shell) nunca lo alcanza; stdout/stderr van a
+        `run.dir/scratch/detached.log`. Factoreado a
+        `commands::spawn_detached_resume`, compartido con
+        `resolve-gate`/`resolve_gate` (el tool) y `resume_run` (el
+        tool) — cero mecanismo de ejecución nuevo, el hijo es un resume
+        ordinario.
+      - **`current_escalation(manifest, events)`** (prerrequisito,
+        motor): reconstruye el objeto §5.3 de un gate sin superficie
+        viva **puramente desde el log** — hoy, cuando `resolve()`
+        devuelve `None`, el engine solo logueaba el `summary` como
+        texto de pausa y descartaba `options`/`tradeoffs`/`evidence`, y
+        no había forma de reconstruirlos después. `schedule::next_step`
+        es puro, así que llamarlo de nuevo sobre el mismo log alcanza
+        determinísticamente el mismo paso — las dos construcciones de
+        escalación (antes duplicadas entre `run/mod.rs` y
+        `gate_exec.rs`) se compartieron a un solo sitio cada una.
+      - **`resolve_gate(manifest, storage, run_id, clock, option, by,
+        text)`** (motor, puro sobre log): valida la opción elegida y
+        apéndica `gate_waiting`+`gate_resolved`(+`NodeRerouted` en
+        retry) — un `resume` ordinario, en cualquier proceso, drena la
+        consecuencia. **Recorte deliberado**: solo el menú de un
+        re-route agotado (`retry`/`abort`); `promote` necesita proceso
+        vivo (distill+sucesor) y un gate interno sin resolver tiene una
+        cadena de consecuencia más larga (`node_started`, y en opción
+        no mapeada `node_finished`+reescritura de `progress.md`) —
+        replicarla apurado arriesgaba una segunda copia de
+        `gate_exec::resolve_internal_gate` que se desalinea. Ambos
+        casos degradan con error accionable ("corré `yunta resume`
+        interactivo") en vez de una respuesta parcial silenciosa —
+        candidato natural para el registro de deuda una vez cierre M8
+        entero. Subcomando CLI nuevo: `yunta resolve-gate <run_id>
+        <option> [--by] [--text]`.
+      - **`list_workflows`/`workflow_status`** (el tool): shellean a
+        `yunta list`/`yunta status` sobre este mismo binario en vez de
+        duplicar su renderizado (ya es el texto estructurado D45) —
+        una segunda copia acá se desalinearía con la real.
+        `run_workflow` resuelve el nombre de catálogo contra
+        `.yunta/workflows/<name>.yaml` (misma convención que `use:` de
+        T9.3) y shellea a `yunta run <path> --detach`. `resume_run`/
+        `resolve_gate` (el tool) llaman los primitivos ya factoreados
+        directo en proceso, sin subprocess de más.
+      - ✓ **Criterios cubiertos** (test E2E real: cliente `rmcp`
+        hablando JSON-RPC por stdio contra el binario real, spawneado
+        como proceso hijo — mismo patrón que `rmcp` documenta para
+        testear un server stdio desde afuera): `list_workflows` refleja
+        el catálogo sin regenerar nada; `run_workflow` retorna en
+        milisegundos con un workflow que tarda segundos; **matar
+        `yunta mcp` (SIGKILL, no cierre prolijo) y una sesión MCP nueva
+        confirma vía `workflow_status` que el run siguió y terminó**
+        (el criterio explícito del plan); `resolve_gate` responde un
+        re-route agotado creado por otro proceso.
+      - Tests: 7 en `crates/engine/tests/escalation.rs`
+        (`current_escalation`/`resolve_gate`, reconstrucción +
+        resolución + rechazos), 5 en `crates/cli/tests/run_flow.rs`
+        (`--detach` × 2, `resolve-gate` × 2 vía CLI, más el flujo
+        base), 3 en `crates/cli/tests/mcp_flow.rs` (E2E stdio, el de
+        supervivencia al SIGKILL incluido).
+      - **Flake preexistente detectado, no tocado**: `run.rs`'s
+        `eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits`
+        (T5.10) falla intermitentemente bajo `cargo test --workspace`
+        (contención real de `git worktree add` con toda la suite
+        corriendo en paralelo) — siempre pasa en aislado
+        (`cargo test -p yunta-engine --test run`). Ajeno a T8.1;
+        candidato para el registro de deuda.
+- [ ] **T8.2 — MCP por-run (§6.4/§6.5, D49/D98/D103/D104).** No
+      arrancada. Requiere: `coordination: independent | blackboard` en
+      `NodeKind::Parallel` (no existe hoy); `SessionRequest.
+      run_tools_endpoint: Option<Endpoint>` de vuelta en `yunta-adapters`
+      (diferido explícitamente "MCP es M8"); listener HTTP loopback
+      efímero por sesión de nodo con token bearer de un solo uso
+      (D103) — nace antes de `Adapter::spawn()`, muere con la sesión,
+      un `resume` nunca reutiliza credencial; los 4 tools
+      (`yunta_post_finding`/`yunta_get_blackboard`/`yunta_task_status`/
+      `yunta_request_scope_expansion`) sin schema de wire documentado
+      más allá de la prosa del Contrato para los dos últimos; wiring de
+      al menos `claude-code` para traducir el endpoint a su mecanismo
+      nativo de MCP externo.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

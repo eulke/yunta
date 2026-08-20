@@ -108,6 +108,12 @@ enum Command {
     /// Health-checks every adapter this project's `runners:` names —
     /// binary present, version compatible, auth valid (Spec Adapter §2).
     Doctor,
+    /// Runs the control-plane MCP server over stdio (M8/T8.1, §6.4):
+    /// `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`,
+    /// `resolve_gate` — none of which ever blocks for a run's own
+    /// duration. Not a daemon (D05/D77): exits when the client closes
+    /// stdin, and no run's own life depends on this process staying up.
+    Mcp,
     /// Removes orphaned run and worktree directories, respecting
     /// `storage.retention_days`.
     Gc {
@@ -233,6 +239,7 @@ async fn main() -> ExitCode {
             }
         }
         Some(Command::Doctor) => commands::doctor::doctor().await,
+        Some(Command::Mcp) => commands::mcp::mcp().await,
         Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,

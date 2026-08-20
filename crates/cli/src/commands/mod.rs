@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod gc;
 pub mod init;
 pub mod list;
+pub mod mcp;
 pub mod new;
 pub(crate) mod promote;
 pub mod resolve_gate;
