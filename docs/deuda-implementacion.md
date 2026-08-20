@@ -62,6 +62,7 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 | DI-26 | Montaje cross-run de artifacts por vínculo (ADR) | T9.3/§12 | 3 | M |
 | DI-27 | Decisiones pre-sembradas: `resolve_gate` completo | T8.1 | 1 | M |
 | DI-28 | Lock cross-process para mutaciones `git worktree` | T5.10/T4.2 | 1 | S |
+| DI-29 | Nodo destino de `on_failure.goto`/`on` corre sin haber fallado | T4.4/§11.2 | 1 | M |
 
 ---
 
@@ -1296,6 +1297,86 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   `failed to read .git/worktrees/<x>/commondir`) y **0/15 después**;
   `cargo test --workspace` completo, 3/3 corridas limpias (antes
   fallaba ~2 de 3).
+
+### DI-29 — Nodo destino de `on_failure.goto`/`on` corre sin haber fallado `[x]`
+
+- **Origen:** M10/T10.1, escribiendo el quickstart. Verificando el
+  ejemplo lint→fix-lint del §11.2 contra el engine real (nunca contra
+  la propia palabra, CLAUDE.md) apareció un `yunta test` en rojo: un
+  `lint` que siempre pasa (`run: "true"`) igual dispara `fix-lint`
+  hasta `finished`. Confirmado también con un adapter real (Claude
+  Code) durante la propia verificación del quickstart: `fix-lint`
+  abrió sesión y editó 14 archivos fuera de `scope` — con `lint` ya en
+  verde.
+- **Causa raíz:** `deps_satisfied` (`schedule.rs`, sección 3, el batch
+  de "fresh nodes") solo mira el propio `depends_on` del nodo. Un nodo
+  destino de re-ruta, siguiendo al pie de la letra el ejemplo del
+  Contrato ("puede ser un nodo fuera del camino principal, existente
+  solo para esto"), no declara `depends_on` — así que `deps_satisfied`
+  lo da por trivialmente listo desde el instante cero, exactamente
+  igual que cualquier nodo top-level genuinamente independiente. Nada
+  en el scheduler distingue "nodo sin dependencias porque es raíz del
+  DAG" de "nodo sin dependencias porque solo debe correr vía re-ruta".
+  El único motivo por el que los tests existentes (incluido el propio
+  `a_failing_bash_node_reroutes_to_its_corrective_node_and_returns`)
+  pasan en verde es que `max_parallel_nodes` default es 1 y el nodo
+  que falla está declarado antes que su corrección en `nodes:` — el
+  batch de capacidad 1 elige `lint` primero por orden de declaración,
+  nunca por diseño; y cuando `lint` termina (falle o no), `fix-lint`
+  queda listo igual y corre. La sección 2 (manejo de fallos, que sí
+  re-rutea correctamente) nunca llega a intervenir en el camino verde
+  porque nunca hay un `NodeState::Failed` que la dispare — el nodo ya
+  corrió por la sección 3 antes.
+- **Impacto:** todo workflow con `on_failure.goto` o un gate con `on:`
+  gasta una sesión de agente en el nodo de corrección **en cada corrida
+  exitosa**, no solo cuando hace falta — el mecanismo "innegociable"
+  del bootstrap (M-0) y el criterio de aceptación de T4.4 nunca
+  estuvieron realmente probados en el caso que importa (verificación
+  en verde a la primera).
+- **Solución de referencia:** en `deps_satisfied` (o antes del batch de
+  la sección 3), excluir de la lista de nodos "fresh" candidatos a
+  cualquier nodo que sea destino de al menos un `on_failure.goto` o
+  gate `on:` en el workflow **y que además declare `depends_on` vacío**
+  — ese nodo solo se vuelve `ready` a través del `ScheduleStep::Reroute`
+  (sección 2) o de la re-ruta de gate ya existente, nunca del batch
+  genérico. Un nodo que es destino de re-ruta pero **también** tiene su
+  propio `depends_on` real (p. ej. `plan` en `build-feature.yaml`,
+  destino de `on: { ajustar: plan }` pero con `depends_on: [grill]`)
+  sigue el camino normal sin cambios — la exclusión aplica solo a
+  destinos sin ninguna arista orgánica de entrada. `yunta check` no
+  necesita un error nuevo: el schema ya admite `depends_on` vacío en
+  cualquier nodo, y el fix es puramente del scheduler.
+- **Frontera con lo ya cerrado (T1.3/DI-18):** el chequeo estático de
+  que "el subgrafo de corrección no dependa del nodo fallido" (evitar
+  ciclos reales) es una regla distinta, de `check`, no de scheduling —
+  no cubre este caso y este ítem no la toca.
+- **✓ Criterios:** test-first: un workflow con `lint` (bash, siempre
+  verde) → `fix-lint` (destino de `on_failure.goto`, sin
+  `depends_on`) corrido con mock deriva `fix-lint` como `never ran`; el
+  camino existente (`lint` falla → re-ruta → corrige → `lint` reintenta
+  y pasa) sigue produciendo el mismo estado final que hoy (property/
+  regresión sobre `a_failing_bash_node_reroutes_to_its_corrective_node_and_returns`
+  y `exhausted_reroutes_pause_the_run_instead_of_looping_forever`); un
+  gate con `on: { opcion: nodo-main-path-con-depends_on }` no cambia de
+  comportamiento (nodo con dependencias reales, exclusión no aplica).
+- **Nota de cierre:** implementado como quedó registrado, con la
+  precisión que apareció al escribir el segundo test (el del gate
+  `on:`): la señal correcta no es "el destino no declara `depends_on`"
+  — la propia raíz del workflow tampoco declara uno y no por eso es un
+  nodo de re-ruta — sino "el destino no declara `depends_on` **y**
+  ningún otro nodo lo nombra en el suyo". `plan` en el patrón de
+  referencia `on: { ajustar: plan }` tiene a `approve` dependiendo de
+  él (`depends_on: [plan]`), así que sigue su camino normal sin
+  cambios; `fix-lint`/`redo-node`, sin ningún `depends_on` propio ni
+  ajeno apuntándolos, son los únicos excluidos del batch genérico —
+  section 4 (`all_finished`) trata un destino así, nunca tocado, como
+  no bloqueante, igual que ya hacía con los nodos excluidos por modo.
+  Dos tests nuevos en `engine/tests/run.rs`
+  (`a_goto_target_with_no_depends_on_never_runs_when_its_source_never_fails`,
+  `a_gate_on_target_with_no_depends_on_never_runs_before_the_gate_maps_to_it`)
+  reprodujeron el bug en rojo (con mock, sin gastar un token real) antes
+  del fix; `cargo test --workspace` completo queda verde después,
+  sin tocar ningún test existente.
 
 ---
 

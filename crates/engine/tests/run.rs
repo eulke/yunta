@@ -292,6 +292,86 @@ sessions:
 }
 
 #[tokio::test]
+async fn a_goto_target_with_no_depends_on_never_runs_when_its_source_never_fails() {
+    let bench = Bench::new();
+
+    // `lint` always passes — `on_failure.goto` never fires. `fix-lint`
+    // names no `depends_on` (§11.2's own example: "existe solo para
+    // esto"), so nothing but an actual re-route may ever start it.
+    // DI-29: before the fix, the generic "fresh nodes" batch scheduled
+    // it anyway, purely because an empty `depends_on` reads as
+    // trivially satisfied — wasting a session on every green run.
+    let workflow = r#"
+name: lint-clean
+nodes:
+  - id: lint
+    kind: bash
+    run: "true"
+    on_failure: { goto: fix-lint, max_reroutes: 2 }
+  - id: fix-lint
+    kind: prompt
+    runner: executor
+    prompt: "should never be asked to fix anything"
+"#;
+
+    // No session scripted at all — if `fix-lint` is ever dispatched,
+    // the mock adapter has nothing to hand it and the run errors out
+    // instead of quietly leaking a false pass.
+    let fixture = r#"
+sessions: []
+"#;
+
+    let (terminal, state) = bench.run(workflow, fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"lint".into()),
+        Some(NodeState::Finished { .. })
+    ));
+    assert_eq!(
+        state.nodes.get(&"fix-lint".into()),
+        None,
+        "fix-lint has no depends_on and lint never failed — it must never have started"
+    );
+}
+
+#[tokio::test]
+async fn a_gate_on_target_with_no_depends_on_never_runs_before_the_gate_maps_to_it() {
+    let bench = Bench::new();
+
+    // `redo` is only reachable via `approve.on.redo` — it declares no
+    // `depends_on` of its own, same shape as a `goto` target. Choosing
+    // `ship` (unmapped) must never have started `redo`.
+    let workflow = r#"
+name: gate-on-target
+nodes:
+  - id: approve
+    kind: gate
+    assignee: lead
+    options: [redo, ship]
+    on: { redo: redo-node }
+  - id: redo-node
+    kind: bash
+    run: "true"
+"#;
+
+    let (terminal, state) = bench
+        .run_with_interaction(
+            workflow,
+            "sessions: []",
+            &SequencedInteraction::choosing(&["ship"]),
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.nodes.get(&"redo-node".into()),
+        None,
+        "redo-node has no depends_on and the gate never mapped to it — it must never have started"
+    );
+}
+
+#[tokio::test]
 async fn exhausted_reroutes_pause_the_run_instead_of_looping_forever() {
     let bench = Bench::new();
 

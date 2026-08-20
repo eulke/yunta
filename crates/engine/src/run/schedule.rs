@@ -222,6 +222,52 @@ pub fn next_step(
         })
     };
 
+    // DI-29: a node named only as an `on_failure.goto` or gate `on:`
+    // target — §11.2's own example is "un nodo fuera del camino
+    // principal, existente solo para esto" — declares no `depends_on`
+    // of its own on purpose. Left unfiltered, that empty list reads as
+    // trivially satisfied and the generic "fresh nodes" batch below
+    // schedules it exactly like a genuine independent root, regardless
+    // of whether anything ever actually failed or chose that gate
+    // option. Reachability for these nodes comes exclusively from the
+    // `Reroute`/gate-`on:` schedule steps (sections 2 and the gate-
+    // resolution paths above), so they're pulled out of the generic
+    // scan entirely.
+    //
+    // A goto/`on:` target that's genuinely part of the main path stays
+    // untouched — declaring no `depends_on` isn't itself the signal
+    // (the workflow's own entry point never has one either): what marks
+    // a node as reroute-*only* is that it's also an otherwise-isolated
+    // dead end — no other node's `depends_on` names it, so nothing in
+    // the ordinary DAG ever reaches it either. `plan` in the reference
+    // `on: { ajustar: plan }` pattern fails this: `approve` itself
+    // declares `depends_on: [plan]`, so `plan` is a real predecessor on
+    // the main path that also happens to be a valid re-route target
+    // later, not a node existing solely for the re-route.
+    let goto_or_gate_on_targets: HashSet<&NodeId> = workflow
+        .nodes
+        .iter()
+        .flat_map(|n| {
+            let goto = n.on_failure.iter().map(|of| &of.goto);
+            let gate_on = match &n.kind {
+                NodeKind::Gate { on, .. } => on.values().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            goto.chain(gate_on)
+        })
+        .collect();
+    let has_forward_dependent =
+        |id: &NodeId| workflow.nodes.iter().any(|n| n.depends_on.contains(id));
+    let is_reroute_only_target = |id: &NodeId| {
+        goto_or_gate_on_targets.contains(id)
+            && !has_forward_dependent(id)
+            && workflow
+                .nodes
+                .iter()
+                .find(|n| &n.id == id)
+                .is_some_and(|n| n.depends_on.is_empty())
+    };
+
     // A degenerate 0 would starve every ready node forever. `yunta
     // check` refuses it up front since DI-18 (`MaxParallelNodesZero`);
     // this clamp stays as defense in depth for a manifest frozen before
@@ -442,7 +488,7 @@ pub fn next_step(
         if !is_gate(node) || state.nodes.contains_key(&node.id) {
             continue;
         }
-        if !deps_satisfied(node) {
+        if is_reroute_only_target(&node.id) || !deps_satisfied(node) {
             continue;
         }
         // A published gate carries `Waiting` state (DI-03) and is
@@ -467,6 +513,9 @@ pub fn next_step(
         if state.nodes.contains_key(&node.id) || is_gate(node) {
             continue; // finished, failed-and-handled-above, or a gate (handled above)
         }
+        if is_reroute_only_target(&node.id) {
+            continue; // DI-29: only `Reroute`/gate-`on:` may start this node
+        }
         if deps_satisfied(node) {
             batch.push((node.id.clone(), 1));
         }
@@ -480,9 +529,14 @@ pub fn next_step(
     //    Only nodes this mode actually includes count — an excluded node
     //    never reaches any terminal state (§10.1: it's never scheduled at
     //    all), so requiring it here would mean the run could never finish.
-    let all_finished = nodes
-        .iter()
-        .all(|node| matches!(state.nodes.get(&node.id), Some(NodeState::Finished { .. })));
+    //    Same reasoning for DI-29: an untouched reroute-only target that
+    //    was simply never needed (its source never failed, or the gate
+    //    never chose its option) never reaches a terminal state either —
+    //    counting it here would make an ordinary green run un-finishable.
+    let all_finished = nodes.iter().all(|node| {
+        matches!(state.nodes.get(&node.id), Some(NodeState::Finished { .. }))
+            || (is_reroute_only_target(&node.id) && !state.nodes.contains_key(&node.id))
+    });
     if all_finished {
         ScheduleStep::Finish
     } else {
