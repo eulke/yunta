@@ -101,6 +101,12 @@ enum Command {
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
     Test,
+    /// Verifies a run's event hash chain (I26): integrity and order,
+    /// recomputed from the log as persisted.
+    Verify {
+        /// The run id to verify.
+        run_id: String,
+    },
     /// Shows verification cost stats: one run (`run_id`) or a workflow's
     /// own history (`--workflow`), never both.
     Stats {
@@ -188,6 +194,7 @@ async fn main() -> ExitCode {
         Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,
+        Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
         Some(Command::Stats {
             run_id,
             workflow,

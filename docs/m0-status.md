@@ -2913,8 +2913,20 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
 6. **T1.5 — hecho.** Ver la sección M7 más abajo. El gatillo previsto acá
    ("cuando algo necesite inputs reales") terminó siendo `--input` de T7.1,
    no el workflow de bootstrap.
-7. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
-   implementar — explícitamente fuera de M-0.
+7. **`event_hash` (T2.5) ✓**: implementado según la política de
+   `docs/eventos.md` §3 — hash encadenado por evento (columna
+   `event_hash`, calculado en la misma transacción que asigna `seq`,
+   campos length-prefixed en el orden fijo del schema), génesis
+   `H0 = SHA-256(manifest_hash)` (el primer evento de un run DEBE ser
+   `run_created` — `append_event` lo rechaza con `GenesisMissing` si
+   no), y verificación explícita vía `yunta verify <run_id>`
+   (`Storage::verify_chain`: payload alterado, evento
+   borrado/insertado/reordenado, hash alterado o ausente → `Broken` con
+   el seq exacto). Deuda menor: la política dice que la verificación
+   "corre automáticamente al generar el recibo" — el recibo (§8.4) no
+   existe todavía; cuando exista, llama a `verify_chain` antes de
+   emitirse. DBs pre-T2.5 migran con `ALTER TABLE` y sus filas viejas
+   quedan `NULL` (reportadas como ruptura, jamás backfilled).
 8. **El arco que cerraba M-0 está COMPLETO** (los seis pasos: artifacts al
    cierre, templates mínimos, scheduler T4.1, creación de run, CLI
    run/status/resume, `yunta test`). Ver la lista de alcance arriba. Deudas

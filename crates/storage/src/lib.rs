@@ -9,7 +9,7 @@ mod error;
 mod store;
 
 pub use error::{Result, StorageError};
-pub use store::Storage;
+pub use store::{ChainVerification, Storage};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-storage";

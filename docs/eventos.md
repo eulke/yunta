@@ -80,9 +80,10 @@ historial previo — es la primera implementación.
 
 ## 3. Política de `event_hash` (§3.3 del Contrato — spec, no implementación)
 
-> Fuera de alcance de M-0 **implementarlo** (T2.5); esta sección define la política
-> para que T2.5 no tenga que diseñar nada cuando llegue su turno, tal como pidió el
-> encargo original.
+> Implementado (T2.5): `yunta-storage` calcula el hash en `append_event` y lo
+> verifica en `Storage::verify_chain` / `yunta verify <run_id>`, siguiendo esta
+> política al pie de la letra. La codificación concreta de los campos es
+> length-prefixed (`len:bytes;`) para que ningún límite de campo sea ambiguo.
 
 - **Fórmula**: `event_hash = SHA-256(prev_event_hash || campos_estructurales_en_orden_fijo)`.
 - **Campos que participan**, en el orden fijo del schema (§1 de este documento, no

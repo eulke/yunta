@@ -1044,3 +1044,36 @@ fn a_finished_run_never_counts_against_max_concurrent_runs() {
         String::from_utf8_lossy(&second.stderr)
     );
 }
+
+#[test]
+fn yunta_verify_reports_an_untouched_run_s_chain_intact() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        "name: chain\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+
+    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    assert!(
+        verify.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    assert!(
+        stdout(&verify).contains("intact"),
+        "got: {}",
+        stdout(&verify)
+    );
+
+    let ghost = yunta_in(&repo, &home, &["verify", "run-ghost"]);
+    assert!(!ghost.status.success(), "an unknown run must not verify");
+}

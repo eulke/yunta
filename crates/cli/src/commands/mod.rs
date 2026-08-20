@@ -12,6 +12,7 @@ pub mod run;
 pub mod stats;
 pub mod status;
 pub mod test;
+pub mod verify;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
