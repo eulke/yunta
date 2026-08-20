@@ -161,6 +161,46 @@ pub struct DefaultsConfig {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
+/// `limits:` (§8.3, DI-05) — declared budgets and guards. Every field is
+/// optional: an absent limit means "no cap", never a hidden default —
+/// except where the reference schema itself names one
+/// ([`LimitsConfig::resolved_max_loop_iterations`],
+/// [`LimitsConfig::resolved_inline_context_bytes`]), and that default
+/// lives here and nowhere else. Budgets are advisory ceilings the engine
+/// enforces by escalation/diagnostic (§5.3), never OS enforcement (D105).
+///
+/// Canonical integer form is `2000000` — serde_yaml (YAML 1.2) resolves
+/// `2_000_000` as a *string*, which fails the parse loudly instead of
+/// silently becoming an unlimited run.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LimitsConfig {
+    /// Run-wide token budget (§8.3): exceeded → §5.3 escalation
+    /// (`continue`/`abort`), or `run_paused { reason: budget }` with no
+    /// surface to ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens_per_run: Option<u64>,
+    /// Ceiling on loop-node iterations — the only net under a ledger
+    /// whose state oscillates forever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_loop_iterations: Option<u32>,
+    /// Best-effort cap on simultaneously non-terminal runs, checked at
+    /// run creation — a soft budget, not a safety limit (two concurrent
+    /// `yunta run` invocations can both pass the check).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_runs: Option<u32>,
+    /// Ceiling on workflow-invoking-workflow nesting (consumer: T9.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_workflow_depth: Option<u32>,
+    /// Guard against runaway artifacts at close (§4): an artifact over
+    /// this size fails the node with a diagnostic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_artifact_bytes: Option<u64>,
+    /// Context sources at or under this size are inlined into the
+    /// prompt; larger ones are referenced by path (§9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context_bytes: Option<u64>,
+}
+
 /// `baseline:` (§7.2, T5.4's `baseline_compare`) — the suite the engine
 /// runs and re-runs to catch regressions ("cero regresiones" as a data
 /// comparison, never an agent's claim).
@@ -323,6 +363,8 @@ pub struct ConfigLayer {
     pub skills: Option<SkillsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<PermissionsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<LimitsConfig>,
     /// `pricing:` (§8.4, T7.5) — `{model: cost_per_1k_tokens}`, an
     /// optional currency conversion `yunta stats` and the receipt add
     /// *alongside* their token figures, never in place of them. Absent
@@ -371,6 +413,26 @@ impl ConfigLayer {
             .and_then(|defaults| defaults.on_interrupt)
             .unwrap_or_default()
     }
+
+    /// `limits.max_loop_iterations`, with the reference default (`12`)
+    /// applied — the only net under a ledger whose state oscillates
+    /// forever, so "absent" means the reference cap, never "unbounded".
+    pub fn resolved_max_loop_iterations(&self) -> u32 {
+        self.limits
+            .as_ref()
+            .and_then(|limits| limits.max_loop_iterations)
+            .unwrap_or(12)
+    }
+
+    /// `limits.inline_context_bytes`, with the reference default
+    /// (`32000`) applied — same "the default lives here" convention as
+    /// [`ConfigLayer::resolved_isolation`].
+    pub fn resolved_inline_context_bytes(&self) -> u64 {
+        self.limits
+            .as_ref()
+            .and_then(|limits| limits.inline_context_bytes)
+            .unwrap_or(32_000)
+    }
 }
 
 fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -396,6 +458,10 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         project: merge_fields(base.project, more_specific.project, merge_project_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
         defaults: merge_fields(base.defaults, more_specific.defaults, merge_defaults_config),
+        // Budgets, not permissions: normal precedence (repo > user >
+        // org), field by field — the inverted ceiling merge below is
+        // exclusive to `permissions` (§6.1).
+        limits: merge_fields(base.limits, more_specific.limits, merge_limits_config),
         // Every field in these two is required (no internal optionality
         // to merge field-by-field) — a more specific layer replaces the
         // whole group wholesale, same as `runners`' candidate arrays.
@@ -590,6 +656,23 @@ fn merge_defaults_config(base: DefaultsConfig, more_specific: DefaultsConfig) ->
         isolation: more_specific.isolation.or(base.isolation),
         max_parallel_nodes: more_specific.max_parallel_nodes.or(base.max_parallel_nodes),
         on_interrupt: more_specific.on_interrupt.or(base.on_interrupt),
+    }
+}
+
+fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> LimitsConfig {
+    LimitsConfig {
+        max_tokens_per_run: more_specific.max_tokens_per_run.or(base.max_tokens_per_run),
+        max_loop_iterations: more_specific
+            .max_loop_iterations
+            .or(base.max_loop_iterations),
+        max_concurrent_runs: more_specific
+            .max_concurrent_runs
+            .or(base.max_concurrent_runs),
+        max_workflow_depth: more_specific.max_workflow_depth.or(base.max_workflow_depth),
+        max_artifact_bytes: more_specific.max_artifact_bytes.or(base.max_artifact_bytes),
+        inline_context_bytes: more_specific
+            .inline_context_bytes
+            .or(base.inline_context_bytes),
     }
 }
 

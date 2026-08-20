@@ -94,55 +94,16 @@ impl Bench {
     }
 
     /// Same as [`Bench::run`] but with a caller-chosen config layer — for
-    /// tests that need `baseline:`/`coverage:` alongside the usual
-    /// `runners:`.
+    /// tests that need `baseline:`/`coverage:`/`limits:` alongside the
+    /// usual `runners:`.
     async fn run_with_config(
         &self,
         workflow_yaml: &str,
         fixture_yaml: &str,
         config_yaml: &str,
     ) -> (RunTerminal, yunta_engine::RunState) {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        let run_dir = create_run(
-            &self.run_id,
-            &manifest,
-            &self.runs_root,
-            &self.storage,
-            &FixedClock,
-            "default",
-            None,
-        )
-        .unwrap();
-
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), Arc::new(adapter));
-
-        let report = execute_run(
-            &self.run_id,
-            &manifest,
-            &run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
-            &NoInteraction,
-            None,
-        )
-        .await
-        .unwrap();
-        (report.terminal, report.state)
+        self.run_full(workflow_yaml, fixture_yaml, config_yaml, &NoInteraction)
+            .await
     }
 
     /// Same as [`Bench::run`] but with a caller-chosen
@@ -154,8 +115,21 @@ impl Bench {
         fixture_yaml: &str,
         human_interaction: &dyn yunta_engine::HumanInteraction,
     ) -> (RunTerminal, yunta_engine::RunState) {
+        self.run_full(workflow_yaml, fixture_yaml, CONFIG, human_interaction)
+            .await
+    }
+
+    /// The fully-parameterized shape every other `run*` helper delegates
+    /// to: caller-chosen config layer *and* interaction surface.
+    async fn run_full(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        human_interaction: &dyn yunta_engine::HumanInteraction,
+    ) -> (RunTerminal, yunta_engine::RunState) {
         let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
         let manifest = build_manifest(
             &workflow,
             &config,
@@ -4380,4 +4354,239 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     .await
     .unwrap();
     assert_eq!(resumed.terminal, RunTerminal::Finished);
+}
+
+// --- DI-05: run token budget (§8.3, limits.max_tokens_per_run) ---------------
+
+const BUDGET_CONFIG: &str = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+limits:
+  max_tokens_per_run: 100
+"#;
+
+/// A compliant session can never push the run past its cap — its own
+/// equal-share `Budget` (etapa 3) stops it first — so the run-level
+/// check's real scenario is an *overshoot*: one usage burst blows both
+/// the session share and the whole run cap at once, the session is
+/// killed, the node fails, and its `on_failure` re-route asks the
+/// scheduler for more work while `spent >= cap`.
+const BUDGET_WORKFLOW: &str = r#"
+name: budget
+nodes:
+  - id: first
+    kind: prompt
+    runner: executor
+    prompt: "Do the first thing."
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - id: fix
+    kind: prompt
+    runner: executor
+    prompt: "Fix it."
+"#;
+
+/// Session 1 bursts 200 tokens against a share of 50 (cap 100 across 2
+/// nodes); sessions 2 and 3 (the corrective, then `first`'s retry) only
+/// ever run if a human lets the run continue past the cap.
+const BUDGET_FIXTURE: &str = r#"
+sessions:
+  - steps:
+      - { type: usage, input_tokens: 150, output_tokens: 50 }
+    outcome: { type: completed, summary: "spent a lot" }
+  - outcome: { type: completed, summary: "fixed" }
+  - outcome: { type: completed, summary: "did it" }
+"#;
+
+#[tokio::test]
+async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
+    let bench = Bench::new();
+    let (terminal, state) = bench
+        .run_with_config(BUDGET_WORKFLOW, BUDGET_FIXTURE, BUDGET_CONFIG)
+        .await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("budget"), "got: {reason}");
+        }
+        other => panic!("an exhausted budget with no surface must pause, got {other:?}"),
+    }
+    // The corrective node never started — the cap is checked before the
+    // re-route hands it work.
+    assert!(matches!(
+        state.nodes.get(&"first".into()),
+        Some(NodeState::Failed { .. })
+    ));
+    assert_eq!(state.nodes.get(&"fix".into()), None);
+    // Unresolved: nothing recorded (resume re-asks, same convention as
+    // every other gate).
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(!events
+        .iter()
+        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+}
+
+#[tokio::test]
+async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() {
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["continue"]);
+    let (terminal, state) = bench
+        .run_full(BUDGET_WORKFLOW, BUDGET_FIXTURE, BUDGET_CONFIG, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    // The corrective ran and control returned to `first`, which finished
+    // on its retry — all of it past the cap, under the one authorization.
+    for node in ["first", "fix"] {
+        assert!(
+            matches!(
+                state.nodes.get(&node.into()),
+                Some(NodeState::Finished { .. })
+            ),
+            "node `{node}` should be finished, got {:?}",
+            state.nodes.get(&node.into())
+        );
+    }
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let waiting = events
+        .iter()
+        .find(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_)))
+        .expect("the budget escalation must be recorded");
+    assert_eq!(
+        waiting.node_id, None,
+        "the budget gate belongs to the run, not to any node"
+    );
+    let resolved = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::GateResolved(p) => Some((e.node_id.clone(), p)),
+            _ => None,
+        })
+        .expect("the authorization must be recorded");
+    assert_eq!(resolved.0, None);
+    assert_eq!(resolved.1.chosen_option.as_deref(), Some("continue"));
+}
+
+#[tokio::test]
+async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_recorded() {
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["abort"]);
+    let (terminal, state) = bench
+        .run_full(BUDGET_WORKFLOW, BUDGET_FIXTURE, BUDGET_CONFIG, &interaction)
+        .await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("budget"), "got: {reason}"),
+        other => panic!("abort must pause the run, got {other:?}"),
+    }
+    assert_eq!(state.nodes.get(&"fix".into()), None);
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::GateResolved(p)
+                if p.chosen_option.as_deref() == Some("abort")
+        )),
+        "the abort decision must be auditable in the log"
+    );
+}
+
+#[tokio::test]
+async fn a_run_under_its_token_budget_never_escalates() {
+    let bench = Bench::new();
+    let config = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+limits:
+  max_tokens_per_run: 1000000
+"#;
+    let (terminal, _) = bench
+        .run_with_config(BUDGET_WORKFLOW, BUDGET_FIXTURE, config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(!events
+        .iter()
+        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+}
+
+#[tokio::test]
+async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
+    // The first invocation pauses headless; the resume gets its own
+    // "continue" — proving the ask happens per invocation and nothing in
+    // the log pre-authorizes new spend.
+    let bench = Bench::new();
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(BUDGET_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(BUDGET_CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "default",
+        None,
+    )
+    .unwrap();
+    let adapter = MockAdapter::from_yaml(BUDGET_FIXTURE).unwrap();
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), Arc::new(adapter));
+
+    let first = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+    )
+    .await
+    .unwrap();
+    match &first.terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("budget"), "got: {reason}"),
+        other => panic!("expected the headless invocation to pause, got {other:?}"),
+    }
+
+    let interaction = SequencedInteraction::choosing(&["continue"]);
+    let resumed = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &interaction,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resumed.terminal, RunTerminal::Finished);
+}
+
+#[test]
+fn session_token_budget_is_an_equal_share_bounded_by_what_remains() {
+    // Fresh run, 4 non-terminal nodes: each session gets cap/4.
+    assert_eq!(yunta_engine::session_token_budget(1000, 0, 4), 250);
+    // Late in the run, what actually remains is the bound.
+    assert_eq!(yunta_engine::session_token_budget(1000, 900, 4), 100);
+    // Overspent never underflows.
+    assert_eq!(yunta_engine::session_token_budget(1000, 2000, 4), 0);
+    // A degenerate node count never divides by zero.
+    assert_eq!(yunta_engine::session_token_budget(1000, 0, 0), 1000);
 }

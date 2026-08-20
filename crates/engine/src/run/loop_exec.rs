@@ -10,7 +10,6 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_adapters::Budget;
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, Decider, Event, EventPayload, Finding,
     FindingPostedPayload, FindingSeverity, LoopIterationPayload, Phase, ProposedCriterionPrecheck,
@@ -622,7 +621,7 @@ async fn dispatch_task_in_isolation<'a>(
         adapter,
         &task_worktree,
         ctx.max_task_retries,
-        Budget::default(),
+        ctx.session_budget()?,
         &ctx.memo,
         ctx.manifest.config.permissions.as_ref(),
         super::node_exec::session_profile(node),

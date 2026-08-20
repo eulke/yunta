@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use yunta_core::{
     permission_layer_conflicts, AdapterSettings, CommandPermissions, ConfigLayer, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, Isolation, McpServerConfig, NetworkPermissions,
-    OnInterrupt, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
-    RunnerCandidate, SkillsConfig, StorageConfig,
+    ExecutorKind, ExecutorRegistration, Isolation, LimitsConfig, McpServerConfig,
+    NetworkPermissions, OnInterrupt, PackExecutorPolicy, PackPermissions, PathsConfig,
+    PermissionsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
@@ -541,6 +541,72 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     assert_eq!(merged["internal-docs"].url, "http://localhost:8000/mcp");
     assert_eq!(merged["internal-docs"].auth_env, None);
     assert_eq!(merged["other"].url, "https://other.example.com/mcp");
+}
+
+#[test]
+fn limits_parses_the_reference_config_shape() {
+    let yaml = r#"
+limits:
+  max_tokens_per_run: 2000000
+  max_loop_iterations: 12
+  max_concurrent_runs: 3
+  max_workflow_depth: 2
+  max_artifact_bytes: 10485760
+  inline_context_bytes: 32000
+"#;
+    let layer: ConfigLayer = serde_yaml::from_str(yaml).unwrap();
+    let limits = layer.limits.unwrap();
+    assert_eq!(limits.max_tokens_per_run, Some(2_000_000));
+    assert_eq!(limits.max_loop_iterations, Some(12));
+    assert_eq!(limits.max_concurrent_runs, Some(3));
+    assert_eq!(limits.max_workflow_depth, Some(2));
+    assert_eq!(limits.max_artifact_bytes, Some(10_485_760));
+    assert_eq!(limits.inline_context_bytes, Some(32_000));
+}
+
+#[test]
+fn an_underscored_limit_literal_is_a_loud_parse_error_not_a_silent_string() {
+    // serde_yaml (YAML 1.2) resolves `2_000_000` as a string — the
+    // canonical form is `2000000`; anything else must fail the parse
+    // rather than quietly become an unlimited run.
+    let result: Result<ConfigLayer, _> =
+        serde_yaml::from_str("limits:\n  max_tokens_per_run: 2_000_000\n");
+    assert!(result.is_err(), "underscored literal must not parse");
+}
+
+#[test]
+fn limits_fields_deep_merge_across_layers_with_repo_winning() {
+    let org = ConfigLayer {
+        limits: Some(LimitsConfig {
+            max_tokens_per_run: Some(1_000_000),
+            max_loop_iterations: Some(20),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let repo = ConfigLayer {
+        limits: Some(LimitsConfig {
+            max_tokens_per_run: Some(2_000_000),
+            inline_context_bytes: Some(16_000),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let merged = ConfigLayer::merge_layers([org, repo]).limits.unwrap();
+    // Normal precedence (repo > org) — the inverted ceiling merge is
+    // exclusive to `permissions`; limits are budgets, not permissions.
+    assert_eq!(merged.max_tokens_per_run, Some(2_000_000));
+    assert_eq!(merged.max_loop_iterations, Some(20));
+    assert_eq!(merged.inline_context_bytes, Some(16_000));
+    assert_eq!(merged.max_concurrent_runs, None);
+}
+
+#[test]
+fn loop_iterations_and_inline_context_resolve_to_reference_defaults_when_unset() {
+    let layer = ConfigLayer::default();
+    assert_eq!(layer.resolved_max_loop_iterations(), 12);
+    assert_eq!(layer.resolved_inline_context_bytes(), 32_000);
 }
 
 #[test]

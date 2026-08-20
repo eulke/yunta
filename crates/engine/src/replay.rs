@@ -165,6 +165,12 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
             }
         }
         EventPayload::GateWaiting(p) => {
+            // No node = a run-level escalation (§8.3's token budget,
+            // DI-05): it gates the whole invocation, not any node's
+            // state, so derivation records nothing for it.
+            if event.node_id.is_none() {
+                return Ok(());
+            }
             let node_id = require_node_id(event)?;
             // A published (or console-rendered-and-resolved-next, T7.2)
             // gate: the node is waiting on a human from this point until
@@ -181,6 +187,11 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
             Ok(())
         }
         EventPayload::GateResolved(_) => {
+            // Run-level resolution (see `GateWaiting` above): audited in
+            // the log, invisible to node state.
+            if event.node_id.is_none() {
+                return Ok(());
+            }
             let node_id = require_node_id(event)?;
             // Only restores while still `Waiting`: an external gate's
             // poll resolution emits `node_started` *before*

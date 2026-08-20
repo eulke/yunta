@@ -24,7 +24,7 @@ pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
     CommandPermissions, ConfigLayer, CoverageConfig, DefaultsConfig, ExecutorKind,
-    ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, McpServerConfig,
+    ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
     ProjectConfig, PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };

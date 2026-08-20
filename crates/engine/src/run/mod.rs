@@ -23,6 +23,7 @@
 //! anywhere in Notion, and per CLAUDE.md a mechanism that can't be
 //! reasoned about mock-testability for shouldn't be built on a guess.
 
+mod budget;
 mod check_exec;
 mod context_resolve;
 mod executor_exec;
@@ -52,6 +53,7 @@ use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
 use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
+pub use budget::session_token_budget;
 pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
 
@@ -134,6 +136,11 @@ pub(crate) struct RunCtx<'a> {
     /// so the deep execution paths (loop_exec) reach it without threading
     /// one more parameter through every layer.
     pub human_interaction: &'a dyn HumanInteraction,
+    /// §8.3/DI-05: a human's `continue` past the token cap, held for
+    /// this invocation only — in memory, never derived from the log, so
+    /// every resume asks again before spending new money. Atomic because
+    /// concurrent batch members read it while the scheduler loop writes.
+    pub budget_lifted: std::sync::atomic::AtomicBool,
 }
 
 impl RunCtx<'_> {
@@ -172,6 +179,65 @@ impl RunCtx<'_> {
             source,
         })
     }
+
+    /// The [`Budget`] for one agent session (§8.3/T3.3, DI-05): an equal
+    /// share of the remaining run cap
+    /// ([`budget::session_token_budget`]'s policy). Unlimited — exactly
+    /// the pre-limits behavior — when no cap is declared, or when a
+    /// human already answered `continue` this invocation (their lift
+    /// must not resurface as a zero-token session budget). `timeout`
+    /// stays `None`: `defaults.timeout_minutes` is outside T1.2's cut.
+    pub(crate) fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
+        if self
+            .budget_lifted
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(yunta_adapters::Budget::default());
+        }
+        let Some(cap) = self
+            .manifest
+            .config
+            .limits
+            .as_ref()
+            .and_then(|limits| limits.max_tokens_per_run)
+        else {
+            return Ok(yunta_adapters::Budget::default());
+        };
+        let state = derive(&self.load_events()?);
+        let non_terminal = flatten(&self.manifest.workflow.nodes)
+            .into_iter()
+            .filter(|node| {
+                !matches!(
+                    state.nodes.get(&node.id),
+                    Some(crate::replay::NodeState::Finished { .. })
+                )
+            })
+            .count();
+        Ok(yunta_adapters::Budget {
+            max_tokens: Some(budget::session_token_budget(
+                cap,
+                budget::tokens_spent(state.total_tokens),
+                non_terminal,
+            )),
+            ..Default::default()
+        })
+    }
+}
+
+/// Every node in declaration order, `parallel` children included — the
+/// same local convention `progress.rs`/`stats.rs` each already follow.
+fn flatten(nodes: &[yunta_core::Node]) -> Vec<&yunta_core::Node> {
+    let mut flat = Vec::new();
+    for node in nodes {
+        flat.push(node);
+        if let yunta_core::NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            flat.extend(flatten(children));
+        }
+    }
+    flat
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or
@@ -311,6 +377,7 @@ pub async fn execute_run(
         max_task_retries,
         memo: Memo::new(manifest.config_hash.clone()),
         human_interaction,
+        budget_lifted: std::sync::atomic::AtomicBool::new(false),
     };
 
     let events = ctx.load_events()?;
@@ -560,6 +627,39 @@ pub async fn execute_run(
                 }
             }
             ScheduleStep::Execute(batch) => {
+                // §8.3/DI-05: the budget check guards exactly the steps
+                // that spend tokens — a run whose remaining work is gates
+                // and questions finishes without ever tripping it.
+                if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some(cap) = manifest
+                        .config
+                        .limits
+                        .as_ref()
+                        .and_then(|limits| limits.max_tokens_per_run)
+                    {
+                        let spent = budget::tokens_spent(derive(&events).total_tokens);
+                        if spent >= cap {
+                            match budget::authorize_over_budget(&ctx, spent, cap).await? {
+                                budget::BudgetDecision::Continue => ctx
+                                    .budget_lifted
+                                    .store(true, std::sync::atomic::Ordering::Relaxed),
+                                budget::BudgetDecision::Pause { reason } => {
+                                    ctx.emit(
+                                        None,
+                                        EventPayload::RunPaused(RunPausedPayload {
+                                            reason: reason.clone(),
+                                        }),
+                                    )?;
+                                    ctx.export_events_jsonl()?;
+                                    return Ok(RunReport {
+                                        terminal: RunTerminal::Paused { reason },
+                                        state: derive(&ctx.load_events()?),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
                 // A batch runs to completion together (every member reaches
                 // a terminal per-node state) before the next iteration
                 // decides what comes next — the same simplification

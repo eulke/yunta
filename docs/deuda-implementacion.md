@@ -317,24 +317,41 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
      ```
      Merge por clave con precedencia repo > usuario > org (merge normal
      de T1.2 — el merge invertido es exclusivo de `permissions`, §6.1).
-     Congelado en el manifest (los YAML de referencia usan `2_000_000`
-     con guiones bajos: verificar que serde_yaml los acepte o
-     documentar la forma canónica sin separador).
+     Congelado en el manifest. **Verificado:** serde_yaml 0.9 (YAML
+     1.2) parsea `2_000_000` como *string*, no como entero — la forma
+     canónica es `2000000` sin separadores, y el guion bajo falla en
+     el parseo con error de tipo (ruidoso, no silencioso: correcto).
   2. **Presupuesto de run (§8.3):** el loop de `execute_run` compara
      `state.total_tokens` contra `max_tokens_per_run` en cada iteración
      del scheduler. Excedido → escalación §5.3 (no pausa muda): summary
      con tokens gastados vs. cap, `evidence` mecánica del log, opciones
-     `continue` (tradeoff: "lifts the cap for this run; recorded in
-     `gate_resolved`") y `abort`. Sin superficie → `run_paused
-     { reason: budget }`. Un `resume` posterior re-escala (la
-     autorización, si ocurre, queda en el log y el replay la respeta:
-     regla de derivación "cap levantado si existe `gate_resolved` con
-     `chosen_option: continue` para la escalación de presupuesto").
-  3. **Budget por sesión (T3.3):** `node_exec` construye `Budget` desde
-     `defaults.timeout_minutes` (ya existe) + una fracción del cap de
-     run restante — política simple y documentada: `min(restante,
-     max_tokens_per_run / nodos_no_terminales)`; sin cap → `Budget`
-     ilimitado como hoy.
+     `continue` (tradeoff: "lifts the cap for this invocation; you
+     will be asked again if the run pauses and resumes") y `abort`.
+     Sin superficie → `run_paused { reason: budget }`.
+     **La autorización es por invocación, en memoria — jamás derivada
+     del log.** Racional (corrige la versión anterior de este punto,
+     que proponía la regla "cap levantado si existe `gate_resolved`
+     con `chosen_option: continue`"): identificar *cuál* escalación
+     fue la de presupuesto exigiría o bien string-matching sobre
+     `summary` (vicio: acopla el replay a texto humano) o bien un
+     marcador nuevo en el schema de eventos (crecimiento de schema
+     para un solo consumidor); y semánticamente cada invocación nueva
+     gasta dinero nuevo — que un humano haya dicho "continue" hace
+     tres días no autoriza el gasto de hoy. Un `resume` posterior
+     re-escala: la decisión queda auditada en el log
+     (`gate_waiting`/`gate_resolved` a nivel de run, `node_id: None`),
+     pero solo la invocación que la obtuvo la consume.
+  3. **Budget por sesión (T3.3):** `node_exec` construye
+     `Budget.max_tokens` como una fracción del cap de run restante —
+     política simple y documentada: `min(restante, max_tokens_per_run /
+     nodos_no_terminales)`; sin cap → `Budget` ilimitado como hoy.
+     Si un humano ya autorizó `continue` en esta invocación, las
+     sesiones vuelven a ilimitado (capearlas a `restante = 0`
+     contradiría la autorización). **Corrección:** la versión anterior
+     decía "desde `defaults.timeout_minutes` (ya existe)" — no existe:
+     el recorte de T1.2 lo dejó fuera (documentado en `config.rs`), así
+     que `Budget.timeout` queda `None` hasta que ese campo entre por su
+     propia tarea.
   4. **Advertencia p90 (§8.6, cierra la deuda de T7.5):** en `yunta run`,
      si hay estimación (≥3 corridas) y `max_tokens_per_run <
      estimation.tokens.p90` → una línea de advertencia antes de crear el

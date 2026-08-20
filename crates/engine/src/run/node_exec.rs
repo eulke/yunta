@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Budget, PermissionProfile, SessionRequest};
+use yunta_adapters::{PermissionProfile, SessionRequest};
 use yunta_core::events::{
     EventPayload, HookExecutedPayload, HookPhase, NodeFailedPayload, NodeFinishedPayload,
     RunnerResolvedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
@@ -906,7 +906,7 @@ async fn execute_prompt(
         permissions: session_profile(node),
         env: Default::default(),
         edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
-        budget: Budget::default(),
+        budget: ctx.session_budget()?,
         adapter_settings: Default::default(),
     };
 
