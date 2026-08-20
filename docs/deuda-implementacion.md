@@ -57,6 +57,7 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 | DI-21 | `events.jsonl` en el camino `Broken` | T5.8 | 3 | S |
 | DI-22 | Smoke tests en vivo pendientes (codex, GitHubForge) | T7.4/T7.7 | 3 | S |
 | DI-23 | `on_interrupt: resume_session` | T4.5/D99 | 3 | M |
+| DI-24 | `on_finish.distill` — mecanismo completo | T5.8 | 2 | M |
 
 ---
 
@@ -630,14 +631,15 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   5. `on_finish:` en workflow: `Vec<OnFinishStep>` con
      `Cleanup { cleanup: CleanupTarget::Worktree }` y
      `Distill { distill: Vec<String> }`. **`cleanup: worktree` se
-     implementa** (cierra la deuda de T4.2: al `Finish` — nunca al
-     `Paused` — `git worktree remove` + `git branch -D` de la rama del
-     run; después del export de `events.jsonl`, que es anterior a
-     cualquier cleanup por T5.8). **`distill` parsea pero su mecanismo
-     sigue sin especificar en Notion** (gap documentado de T5.8): al
-     cierre emite una línea/evento de degradación explícita "distill
-     declared but its mechanism is pending an ADR" — parsear es
-     obligación del fixture; ejecutar sin spec sería inventar.
+     implementa** (cierra la deuda de T4.2): al `Finish` — nunca al
+     `Paused` — `git worktree remove`, y la rama del run se borra solo
+     si está mergeada o pusheada a upstream (`git branch -d`, jamás
+     `-D`; si git se niega, la rama queda y no es error — un distill
+     recién commiteado ahí, DI-24, jamás debe morir por el cleanup).
+     Siempre después del export de `events.jsonl` (T5.8). **`distill`
+     se diseña e implementa completo en DI-24** — el "mecanismo sin
+     especificar" de T5.8 queda resuelto ahí, no con una degradación
+     placeholder.
   6. Test de cierre: los tres YAML de referencia completos (menos los
      bloques de T8.2/T9.3, marcados) como fixtures reales en
      `crates/core/tests/fixtures/`, round-trip byte-comparable a nivel
@@ -669,6 +671,122 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   corrida de `gc` borra run.dir (comportamiento actual), segunda corrida
   purga filas; run no terminal jamás se purga; `verify`/`status` sobre
   un run purgado da "unknown run", no un estado corrupto.
+
+### DI-24 — `on_finish.distill`: mecanismo completo `[ ]`
+
+- **Origen:** T5.8 dejó `distill` sin implementar con la pregunta
+  abierta "¿sesión de agente o transformación determinista?" y la nota
+  de que su mecanismo "no está documentado en Notion". Releyendo las
+  fuentes con el resto del sistema ya construido, **la pregunta tiene
+  más respuesta normativa de la que parecía** — lo que falta es juntarla
+  y cerrar los huecos con decisiones explícitas. Esta sección es esa
+  propuesta de mecanismo; al implementarse **se registra como ADR nuevo
+  en Notion** (resuelve formalmente la cuestión abierta de T5.8, y la
+  regla es que la deuda no se cierra sin ADR).
+- **Lo que las fuentes SÍ fijan (no negociable):**
+  - **Destino:** `.yunta/knowledge/` — §8.3: "destila el conocimiento
+    durable (ADRs, CONTEXT.md **bajo `.yunta/knowledge/`**)"; §9.2: la
+    capa `repo` de knowledge es "`.yunta/knowledge/`, **lo destilado
+    acá**". El destilado alimenta directamente la fuente `knowledge`
+    (T6.5) y, después, el workflow `promote-knowledge` (T10.5) que
+    cura repo → org.
+  - **Orden:** antes de cualquier cleanup (§8.3/D20, "antes de
+    cualquier cleanup") — el engine impone la fase, el orden de
+    declaración en el YAML no manda.
+  - **Criterio de selección:** D20 — "lo fetcheado/generado va a la
+    respuesta del nodo, lo durable a knowledge; specs efímeras,
+    decisiones durables". `distill: [paths]` nombra artifacts del run
+    que el workflow declara durables.
+  - **Findings:** §4.1 — "sobreviven al run para el gate de promoción
+    o la destilación", pero "el engine **no impone** un artifact de
+    cierre: qué hacer con los hallazgos (consolidar, promover,
+    destilar, ignorar) es decisión del workflow". Insumo disponible,
+    jamás auto-destilado.
+- **Decisión central: transformación determinista, nunca sesión de
+  agente.** Racional: (a) §11.1 fija para los hooks del ciclo de nodo
+  "solo comandos, nunca IA (para eso existen los nodos)" — `on_finish`
+  es exactamente la misma clase de pegamento de cierre; (b) un
+  destilado escrito por LLM en el cierre sería contenido no verificable
+  entrando a la capa de conocimiento sin pasar por ningún criterio ni
+  scope — la puerta trasera perfecta contra "la palabra del agente no
+  es evidencia"; (c) A8: el cierre debe correr con mock. **Si un equipo
+  quiere un resumen redactado por agente, lo produce un nodo `prompt`
+  como artifact** (con su runner, su presupuesto, su verificación) y
+  `distill` exporta ese artifact — composición, no un mecanismo nuevo.
+  Lo mismo para findings: un nodo consolidador los escribe como
+  artifact `kind: findings` y se lo nombra en `distill`.
+- **Mecanismo propuesto:**
+  1. **Qué hace:** para cada path declarado en `distill:` (relativo a
+     `run.dir/artifacts/`, la misma convención de T7.7), el engine
+     copia el archivo a
+     `<worktree>/.yunta/knowledge/distilled/<workflow>/<run_id>/<name>`
+     y escribe al lado un `provenance.yaml` derivado por función pura
+     de (log, manifest):
+     ```yaml
+     source_run: run-20260820-...
+     workflow: build-feature
+     workflow_hash: "sha256:..."
+     mode: standard
+     distilled_at: "..."            # del Clock inyectado, jamás SystemTime directo
+     artifacts:
+       - { name: plan.yaml, content_hash: "sha256:..." }
+     verification:                   # derivado del log — evidencia, no palabra
+       criteria: { executed: 12, green: 12, reused: 3 }
+       findings: { blocking: 0, minor: 2 }
+     ```
+     Un subdirectorio por run — **jamás un índice compartido mutable**
+     (dos PRs concurrentes destilando al mismo índice = conflicto de
+     merge garantizado; ese vicio se evita por construcción).
+  2. **Cómo llega al repo:** bajo `isolation: worktree`, el engine
+     commitea los archivos destilados a la rama del run con mensaje
+     convencional (`docs(knowledge): distill from <run_id>`) — el
+     conocimiento viaja en el mismo PR que el trabajo y pasa por la
+     misma revisión humana; si la rama ya tiene upstream (el nodo `pr`
+     hizo `push -u`), el engine pushea ese commit; si no, el commit
+     queda en la rama local (y `cleanup` usa `-d`, que se niega a
+     borrar ramas no mergeadas — DI-13 ya lo fija — así que nunca se
+     pierde). Bajo `isolation: none`, los archivos quedan **sin
+     commitear** en el checkout del usuario: el engine jamás commitea
+     la rama del usuario; el árbol queda sucio a la vista y el próximo
+     run bajo `none` se negará hasta que el humano commitee o descarte
+     — fricción visible y correcta, no un bug (documentar en la guía).
+  3. **Secuencia de cierre resultante (reemplaza a la actual):**
+     `distill` (+ sus eventos) → `run_finished` → export
+     `events.jsonl` → `cleanup`. El export va después de
+     `run_finished` porque snapshotea el log completo; distill va antes
+     porque nada se emite después de `run_finished` (I3).
+  4. **Cuándo corre:** solo en cierres reales — `Finish` (Done) y
+     promoción (`Promoted`: el conocimiento del intento corto es
+     conocimiento; además el sucesor lo hereda vía la capa repo, que
+     complementa a DI-10). Jamás en `Paused` (el run no cerró) ni en
+     cancelación.
+  5. **Degradación explícita:** un path declarado que ningún nodo
+     produjo → `finding_posted` (severity `minor`, title "distill:
+     declared artifact `X` was never produced") — el canal general de
+     "registrado, nunca perdido" que §4.1 ya da, sin inventar un
+     event kind nuevo; el resto de los paths se destila igual. El
+     `provenance.yaml` lista también los ausentes con `missing: true`.
+  6. **`check` estático:** cada path de `distill:` debe coincidir con
+     algún `artifacts.produces` declarado en el workflow — error de
+     check si no (la versión estática del punto 5; el punto 5 cubre el
+     caso "declarado pero no producido en runtime").
+- **✓ Criterios:**
+  - Run mock con `distill: [plan.yaml]` → el worktree termina con
+    `.yunta/knowledge/distilled/<wf>/<run>/plan.yaml` + provenance
+    válido y un commit en la rama del run; `derive` del log intacto;
+    el mismo run re-derivado da provenance byte-idéntico (pura).
+  - Un nodo siguiente (otro run) con `context: [{knowledge: {}}]`
+    monta lo destilado — el ciclo §8.3→§9.2 cerrado end-to-end.
+  - Path no producido → finding en el log + el resto destilado;
+    `check` rechaza un path que ningún nodo declara producir.
+  - Bajo `none`: archivos presentes sin commit; el run siguiente bajo
+    `none` se rehúsa por árbol sucio (test que documenta la fricción).
+  - `Paused` → no destila nada.
+- **Dependencias:** DI-13 (schema de `on_finish` y `cleanup` con
+  `-d`); compone con DI-10 (findings de promoción) sin solaparse.
+- **No hacer:** ninguna sesión de agente en el cierre; ningún índice
+  global compartido; jamás commitear el checkout del usuario bajo
+  `none`; no auto-destilar findings sin declaración del workflow.
 
 ---
 
@@ -890,7 +1008,9 @@ construir algo. Si alguna vez duelen de verdad, reabrirlos requiere ADR.
 2. **T2.5** (plan): antes de que el volumen de eventos siga creciendo.
 3. **Nivel 2** en el orden listado — DI-08 y DI-09 primero (desbloquean
    DI-23 y `--detach` de M8); DI-13 puede avanzar en paralelo porque es
-   mayormente schema.
+   mayormente schema, y DI-24 (distill) inmediatamente después de DI-13,
+   que le da el schema de `on_finish` — juntos cierran el ciclo completo
+   §8.3 → §9.2 (destilar → montar como knowledge) que hoy está cortado.
 4. **T9.3/T9.4** para cerrar M9, ya con DI-10 resuelto de forma mínima
    (T9.3 lo generaliza).
 5. **Nivel 3** intercalado como tareas chicas entre las grandes, nunca
