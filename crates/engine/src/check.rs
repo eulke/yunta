@@ -277,6 +277,15 @@ pub enum CheckError {
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
+    /// DI-23/D99: only `kind: prompt` opens a node-scoped session —
+    /// declaring `resume_session` anywhere else names a conversation
+    /// that doesn't exist (a loop's per-task sessions re-run from the
+    /// ledger; bash/check/executor/gate/workflow open none).
+    #[error(
+        "node `{node}`: `on_interrupt: resume_session` is only supported on `kind: prompt`          nodes — nothing else has a node-scoped session to resume; declare `restart_node`          (the default) instead"
+    )]
+    ResumeSessionOnSessionlessNode { node: NodeId },
+
     /// DI-20/§6.2: the node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
     /// ceiling allows — same only-narrowing model as every other
@@ -1308,6 +1317,16 @@ fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         if node.fresh_context == Some(false) {
             errors.push(CheckError::FreshContextUnsupported {
+                node: node.id.clone(),
+            });
+        }
+        // DI-23: the explicit declaration is refused where no session
+        // exists; the *config default* stays legal (it applies where a
+        // session exists and means restart everywhere else).
+        if node.on_interrupt == Some(yunta_core::OnInterrupt::ResumeSession)
+            && !matches!(node.kind, NodeKind::Prompt { .. })
+        {
+            errors.push(CheckError::ResumeSessionOnSessionlessNode {
                 node: node.id.clone(),
             });
         }

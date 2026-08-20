@@ -1064,7 +1064,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   autenticado y token+repo descartable de GitHub, que este entorno no
   tiene — es trabajo de la primera sesión con credenciales, no de esta.
 
-### DI-23 — `on_interrupt: resume_session` `[ ]`
+### DI-23 — `on_interrupt: resume_session` `[x]`
 
 - **Origen:** T4.5/D99 — la tercera variante existe en el Contrato pero
   no en el schema ("no consumer: nothing resumes a session on crash
@@ -1083,6 +1083,22 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   a mitad de sesión, resume con `resume_session` → la sesión continúa
   (el fixture lo demuestra por efectos), no se abre una nueva; sin
   capacidad → check lo rechaza; sin sesión previa → restart con evento.
+- **Nota de cierre (dos desvíos deliberados de la propuesta):** (1) "sin
+  capacidad → check lo rechaza" se implementó como **degradación en
+  runtime con `capability_degraded`**, no como error de check: es lo que
+  D99/el propio doc del Contrato dice textual ("degradando a
+  `restart_node` con warning cuando el adapter no tiene la capacidad") —
+  la doc gana sobre la propuesta del registro — y `check` no tiene
+  adapters para consultar capacidades. Lo que SÍ es error de check es la
+  declaración explícita sobre un nodo sin sesión propia
+  (`ResumeSessionOnSessionlessNode`). (2) `fresh_context: false` NO se
+  desbloqueó: comparte la *mecánica* de resume pero es otro caso
+  (continuar la sesión de OTRO nodo, sin diseño de cuál) — sigue
+  refusado por `FreshContextUnsupported`. Detección de huérfano: arranque
+  previo sin veredicto entre medio; un intento fallido nunca se resume
+  (terminó con respuesta). Tests: 4 en `tests/run.rs` (resume real con
+  mismo id, sin capacidad → evento, sin sesión → evento, primera corrida
+  limpia sin eventos) + 1 check + 1 del mock.
 
 ### DI-25 — Cadena de promoción de un run hijo `[ ]`
 

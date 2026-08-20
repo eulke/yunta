@@ -1096,11 +1096,56 @@ async fn execute_prompt(
         skills,
     };
 
+    // DI-23/§8.1/D99: an orphaned node under `resume_session` picks its
+    // cut conversation back up instead of opening a new one. Anything
+    // less than a clean resume — no capability, no recorded session —
+    // degrades to a fresh session WITH an event, never silently.
+    let policy = node
+        .on_interrupt
+        .unwrap_or(ctx.manifest.config.resolved_on_interrupt());
+    let mut resume_session: Option<yunta_core::SessionId> = None;
+    if policy == yunta_core::OnInterrupt::ResumeSession {
+        match orphaned_session(&ctx.load_events()?, &node.id) {
+            OrphanedSession::Open(session_id) => {
+                if adapter.capabilities().resume_session {
+                    resume_session = Some(session_id);
+                } else {
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::CapabilityDegraded(
+                            yunta_core::events::CapabilityDegradedPayload {
+                                capability: "resume_session".to_string(),
+                                adapter: chosen.adapter.clone(),
+                                policy_applied: "restart_node — the adapter declares no                                                  session resume; a fresh session replaces                                                  the interrupted one"
+                                    .to_string(),
+                            },
+                        ),
+                    )?;
+                }
+            }
+            OrphanedSession::NoneRecorded => {
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::CapabilityDegraded(
+                        yunta_core::events::CapabilityDegradedPayload {
+                            capability: "resume_session".to_string(),
+                            adapter: chosen.adapter.clone(),
+                            policy_applied: "restart_node — no session was recorded before                                              the interruption; started fresh"
+                                .to_string(),
+                        },
+                    ),
+                )?;
+            }
+            OrphanedSession::NotAnOrphan => {}
+        }
+    }
+
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),
         request,
         cancel,
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        resume_session.as_ref(),
     )
     .await
     .map_err(|source| RunError::Spawn {
@@ -1126,5 +1171,62 @@ async fn execute_prompt(
             fail_with_tokens(ctx, node, reason, false, tokens)
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node),
+    }
+}
+
+/// What DI-23's resume finds in the log for `node`: the id of a session
+/// cut mid-flight (this dispatch is an orphan restart — a prior
+/// `node_started` with no terminal event before the current one, and an
+/// `agent_session_opened` inside that window), an orphan restart with no
+/// session on record (crash before it opened), or nothing to resume at
+/// all (a first attempt, or a retry after a *verdict* — a failed
+/// session ended with an answer, only an interrupted one is continued).
+enum OrphanedSession {
+    Open(yunta_core::SessionId),
+    NoneRecorded,
+    NotAnOrphan,
+}
+
+fn orphaned_session(
+    events: &[yunta_core::events::Event],
+    node_id: &yunta_core::NodeId,
+) -> OrphanedSession {
+    let mine = |event: &&yunta_core::events::Event| event.node_id.as_ref() == Some(node_id);
+    let starts: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            e.node_id.as_ref() == Some(node_id) && matches!(e.payload, EventPayload::NodeStarted(_))
+        })
+        .map(|(i, _)| i)
+        .collect();
+    // The caller's own `node_started` for this attempt is already on the
+    // log — the *previous* start is the one that may have been cut.
+    let (Some(&current), Some(&previous)) = (
+        starts.last(),
+        starts.len().checked_sub(2).and_then(|i| starts.get(i)),
+    ) else {
+        return OrphanedSession::NotAnOrphan;
+    };
+    let window = &events[previous..current];
+    let had_verdict = window.iter().filter(mine).any(|e| {
+        matches!(
+            e.payload,
+            EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)
+        )
+    });
+    if had_verdict {
+        return OrphanedSession::NotAnOrphan;
+    }
+    match window
+        .iter()
+        .filter(mine)
+        .rev()
+        .find_map(|e| match &e.payload {
+            EventPayload::AgentSessionOpened(p) => Some(p.session_id.clone()),
+            _ => None,
+        }) {
+        Some(session_id) => OrphanedSession::Open(session_id),
+        None => OrphanedSession::NoneRecorded,
     }
 }

@@ -1548,3 +1548,39 @@ nodes:
         .iter()
         .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
 }
+
+// --- DI-23: resume_session only where a session exists -----------------------
+
+#[test]
+fn resume_session_on_a_non_prompt_node_is_refused() {
+    let yaml = r#"
+name: x
+nodes:
+  - id: build
+    kind: bash
+    run: "true"
+    on_interrupt: resume_session
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert!(
+        check(&wf, &ConfigLayer::default()).iter().any(
+            |e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { node }
+                if node.as_str() == "build")
+        ),
+        "got: {:?}",
+        check(&wf, &ConfigLayer::default())
+    );
+
+    let prompt = r#"
+name: x
+nodes:
+  - id: work
+    kind: prompt
+    prompt: "go"
+    on_interrupt: resume_session
+"#;
+    let wf: Workflow = serde_yaml::from_str(prompt).unwrap();
+    assert!(!check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { .. })));
+}

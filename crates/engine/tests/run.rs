@@ -5785,3 +5785,195 @@ nodes:
     assert!(exported.contains("node_finished"));
     assert!(exported.contains("run_created"));
 }
+
+// --- DI-23: on_interrupt: resume_session -------------------------------------
+
+/// Crafts an interrupted run: `run_created` + a `node_started` (and
+/// optionally an open `agent_session_opened`) with no terminal event —
+/// exactly what a mid-session crash leaves — then resumes it with a
+/// recording mock.
+async fn resume_orphan_with_mock(
+    workflow_yaml: &str,
+    fixture_yaml: &str,
+    orphan_session: Option<&str>,
+) -> (
+    RunTerminal,
+    Vec<yunta_core::events::Event>,
+    Arc<MockAdapter>,
+) {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+    let emit = |node: &str, payload: yunta_core::events::EventPayload| {
+        bench
+            .storage
+            .append_event(&yunta_core::events::Event {
+                run_id: bench.run_id.clone(),
+                seq: 0,
+                timestamp: FixedClock.now(),
+                node_id: Some(node.into()),
+                payload,
+            })
+            .unwrap();
+    };
+    emit(
+        "work",
+        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
+            attempt: 1,
+        }),
+    );
+    if let Some(session_id) = orphan_session {
+        emit(
+            "work",
+            yunta_core::events::EventPayload::AgentSessionOpened(
+                yunta_core::events::AgentSessionOpenedPayload {
+                    session_id: session_id.into(),
+                    agent: None,
+                    model: "mock-model".to_string(),
+                    capabilities: yunta_core::Capabilities::default(),
+                },
+            ),
+        );
+    }
+
+    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), adapter.clone());
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root.join(bench.run_id.as_str()),
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let _ = run_dir;
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    (report.terminal, events, adapter)
+}
+
+const RESUME_WORKFLOW: &str = r#"
+name: resumable
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    on_interrupt: resume_session
+    prompt: "Do the thing."
+"#;
+
+#[tokio::test]
+async fn an_orphaned_prompt_with_resume_session_continues_the_same_session() {
+    let fixture = r#"
+capabilities: { resume_session: true }
+sessions:
+  - outcome: { type: completed, summary: "picked up where it left off" }
+"#;
+    let (terminal, events, adapter) =
+        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        adapter.resumes_seen(),
+        vec![yunta_core::SessionId::from("mock-session-orig")],
+        "the cut session must be resumed, not replaced"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::CapabilityDegraded(p)
+                if p.capability == "resume_session"
+        )),
+        "a successful resume degrades nothing"
+    );
+}
+
+#[tokio::test]
+async fn resume_session_without_the_capability_degrades_to_restart_with_an_event() {
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "fresh session" }
+"#;
+    let (terminal, events, adapter) =
+        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(adapter.resumes_seen().is_empty());
+    assert!(
+        events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::CapabilityDegraded(p)
+                if p.capability == "resume_session"
+                    && p.policy_applied.contains("restart_node")
+        )),
+        "degrading to a fresh session must be an event, never a silence (A6/D99)"
+    );
+}
+
+#[tokio::test]
+async fn resume_session_with_no_recorded_session_restarts_with_an_event() {
+    let fixture = r#"
+capabilities: { resume_session: true }
+sessions:
+  - outcome: { type: completed, summary: "fresh session" }
+"#;
+    let (terminal, events, adapter) = resume_orphan_with_mock(RESUME_WORKFLOW, fixture, None).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(adapter.resumes_seen().is_empty());
+    assert!(
+        events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::CapabilityDegraded(p)
+                if p.capability == "resume_session"
+                    && p.policy_applied.contains("no session")
+        )),
+        "a crash before the session opened restarts WITH an explicit event"
+    );
+}
+
+#[tokio::test]
+async fn a_clean_first_run_under_resume_session_spawns_normally_without_events() {
+    let fixture = r#"
+capabilities: { resume_session: true }
+sessions:
+  - outcome: { type: completed, summary: "first run" }
+"#;
+    let bench = Bench::new();
+    let (terminal, _state, adapter) =
+        run_with_recording_mock(&bench, RESUME_WORKFLOW, fixture, CONFIG).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(adapter.resumes_seen().is_empty());
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(!events.iter().any(|e| matches!(
+        &e.payload,
+        yunta_core::events::EventPayload::CapabilityDegraded(_)
+    )));
+}

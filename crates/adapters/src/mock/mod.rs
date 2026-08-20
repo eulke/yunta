@@ -41,6 +41,11 @@ pub struct MockAdapter {
     /// Every `spawn()`'s `req.agent`, in claim order (T9.4/A8) — same
     /// record-the-mount principle as `skills_seen`.
     agents_seen: Mutex<Vec<Option<String>>>,
+    /// Every `resume()`'s session id, in call order (DI-23/A8): the
+    /// mock's "resume" is serving the next script under the SAME
+    /// session id — recording which one proves the engine handed back
+    /// the conversation it meant to continue.
+    resumes_seen: Mutex<Vec<SessionId>>,
 }
 
 impl MockAdapter {
@@ -51,7 +56,16 @@ impl MockAdapter {
             consumed,
             skills_seen: Mutex::new(Vec::new()),
             agents_seen: Mutex::new(Vec::new()),
+            resumes_seen: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Every session id `resume()` was asked to continue, in call order.
+    pub fn resumes_seen(&self) -> Vec<SessionId> {
+        self.resumes_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// The `agent` of every session spawned so far, in claim order.
@@ -121,6 +135,31 @@ impl Adapter for MockAdapter {
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
+        self.spawn_scripted(req, None)
+    }
+
+    /// DI-23: serves the next matching script exactly like `spawn`, but
+    /// under the session id being resumed — a real adapter continues
+    /// the same conversation, so the stream reports the same identity.
+    async fn resume(
+        &self,
+        session: &SessionId,
+        req: SessionRequest,
+    ) -> Result<Box<dyn AgentSession>> {
+        self.resumes_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(session.clone());
+        self.spawn_scripted(req, Some(session.clone()))
+    }
+}
+
+impl MockAdapter {
+    fn spawn_scripted(
+        &self,
+        req: SessionRequest,
+        resume_as: Option<SessionId>,
+    ) -> Result<Box<dyn AgentSession>> {
         self.skills_seen
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -174,10 +213,12 @@ impl Adapter for MockAdapter {
 
         self.apply_effects(script, &req.cwd)?;
 
-        let session_id = SessionId::from(format!(
-            "mock-session-{}",
-            SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let session_id = resume_as.unwrap_or_else(|| {
+            SessionId::from(format!(
+                "mock-session-{}",
+                SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ))
+        });
 
         let blocked_markers: Vec<PathBuf> = script
             .effects

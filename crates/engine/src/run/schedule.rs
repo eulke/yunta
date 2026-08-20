@@ -10,10 +10,11 @@
 //! Node states cover §3.2 in full since DI-03: `waiting` is derived (a
 //! published gate, or unanswered questions — sections 0/0b below) and
 //! `skipped` is the render-side reading of a mode-excluded node (T9.1's
-//! filter here + `status`'s own display). `on_interrupt: restart_node | fail_if_uncertain`
-//! (T4.5, D99) — `resume_session` is real per the Contrato but has no
-//! consumer (nothing resumes a session on crash recovery yet), so it
-//! isn't in the schema at all rather than being accepted and ignored.
+//! filter here + `status`'s own display). `on_interrupt` (T4.5, D99)
+//! covers the Contrato's full triple since DI-23 — `resume_session`
+//! orphans re-Execute exactly like `restart_node` ones from this
+//! function's point of view; the *dispatch* path (`node_exec`) is what
+//! continues the recorded session instead of opening a new one.
 //! Concurrency is DAG-shaped fan-out only (independent nodes with no
 //! `depends_on` relation to each other); it does not cover `kind:
 //! parallel`'s named groups (T4.6) or a loop's own task `concurrency:`

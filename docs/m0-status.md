@@ -419,19 +419,23 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       base de código, no una carencia nueva de T4.4) y `node-output` como
       artifact montable por `context:` (M6). Ninguna deuda nueva agregada;
       T4.4 no necesitó tocar código.
-- [x] **T4.5 — `on_interrupt: restart_node | fail_if_uncertain` por nodo.**
-      `resume_session` (la tercera opción del Contrato, §8.1: retomar la
-      conversación del agente vía `session_id`, degradando a
-      `restart_node` con warning si el adapter no tiene la capacidad)
-      **no** entra al schema en este recorte — nada en el dispatch de
-      `node_exec` resume una sesión en recuperación de crash todavía (el
-      único resume de sesión que existe hoy es el reintento automático de
-      T3.3 dentro de un mismo intento, un caso distinto); aceptar el valor
-      en el schema y degradarlo siempre en silencio a `restart_node`
-      habría sido emular una capacidad ausente en vez de no ofrecerla —
-      justo lo que "degradación explícita, nunca emulación" prohíbe. Mismo
-      tratamiento que `isolation: container` en T4.2: no está diseñado
-      acá, no entra al enum.
+- [x] **T4.5 — `on_interrupt` por nodo.** Originalmente solo
+      `restart_node | fail_if_uncertain`; **`resume_session` entró
+      después, cerrado por DI-23** (dependía de DI-09 registrando el
+      `session_id` en el log): un nodo `prompt` huérfano bajo esa
+      política encuentra el último `agent_session_opened` de la ventana
+      interrumpida (arranque previo sin veredicto — un intento *fallido*
+      terminó con respuesta y jamás se resume) y despacha vía
+      `adapter.resume(session_id)`; sin capacidad `resume_session` en el
+      adapter, o sin sesión registrada (crash antes de abrir), degrada a
+      `restart_node` **con evento** `capability_degraded` — la
+      "degradación con warning" que D99 mismo pide, nunca un silencio.
+      Declararlo explícito en un nodo sin sesión propia
+      (`bash`/`loop`/…) es error de `check`
+      (`ResumeSessionOnSessionlessNode`); como default de config aplica
+      donde hay sesión y significa restart en el resto. El mock scriptea
+      `resume()` sirviendo el próximo fixture bajo el MISMO session id y
+      registrando el pedido (`resumes_seen`).
       - `Node.on_interrupt: Option<OnInterrupt>` (nuevo campo de nodo, no
         solo de config — el Contrato es explícito: "cada nodo `prompt`/
         `loop` declara `on_interrupt`"). Este recorte lo aplica a **todos**

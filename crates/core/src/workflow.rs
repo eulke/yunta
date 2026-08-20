@@ -420,21 +420,27 @@ pub enum NodePermissions {
     Full,
 }
 
-/// A node's crash-recovery policy (§8.1, D99). `resume_session` (continue
-/// the same agent conversation via its `session_id`, degrading to
-/// `restart_node` with a warning when the adapter lacks the capability)
-/// is real per the Contrato but has no consumer in this recorte — nothing
-/// in `node_exec`'s dispatch path resumes a session on crash recovery
-/// yet, only on an in-run retryable failure (T3.3), a different case. It
-/// stays out of the enum rather than being accepted and silently ignored
-/// — the same "no está diseñado, no entra al schema" treatment §7.3 gives
-/// `isolation: container`.
+/// A node's crash-recovery policy (§8.1, D99) — the full Contrato
+/// triple since DI-23.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnInterrupt {
     #[default]
     RestartNode,
     FailIfUncertain,
+    /// DI-23/D99: continue the same agent conversation — the
+    /// `session_id` the log recorded (`agent_session_opened`, DI-09) is
+    /// handed back to the adapter's `resume`. Only `kind: prompt` opens
+    /// a node-scoped session, so `check` refuses the explicit
+    /// declaration anywhere else; an adapter without the
+    /// `resume_session` capability — or a crash before any session
+    /// opened — degrades to `restart_node` with an explicit
+    /// `capability_degraded` event (the Contrato's own "degrada con
+    /// warning"), never silently. As a *config default*
+    /// (`defaults.on_interrupt`) it applies where a session exists;
+    /// kinds without one (bash/check/…, and a loop's per-task sessions)
+    /// restart, which is the only meaning the policy can have there.
+    ResumeSession,
 }
 
 /// The node kinds built so far (Plan, milestones M4/M5). `gate` and

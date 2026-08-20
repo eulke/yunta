@@ -440,10 +440,16 @@ pub(crate) async fn dispatch_session(
     request: SessionRequest,
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    resume: Option<&yunta_core::SessionId>,
 ) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
-    let mut session = adapter.spawn(request).await?;
+    // DI-23: `Some` continues an interrupted conversation instead of
+    // opening a new one — the caller already verified the capability.
+    let mut session = match resume {
+        Some(session_id) => adapter.resume(session_id, request).await?,
+        None => adapter.spawn(request).await?,
+    };
     // DI-08: on the map for a separate `yunta cancel` while it lives.
     let _pgid_registration = crate::process_registry::register(
         audit.and_then(|(observer, _)| observer.process_registry()),
@@ -715,7 +721,7 @@ pub async fn run_task(
             adapter_settings: setup.adapter_settings.clone(),
             skills: setup.skills.clone(),
         };
-        let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit)
+        let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
             .await
             .map_err(|source| TaskCycleError::Spawn {
                 task: task.id.clone(),

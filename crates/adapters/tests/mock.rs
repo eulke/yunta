@@ -198,24 +198,31 @@ async fn probe_reports_healthy() {
 }
 
 #[tokio::test]
-async fn resume_defaults_to_unsupported() {
+async fn resume_serves_the_next_script_under_the_same_session_id() {
+    // DI-23: the mock's resume is scripted like spawn, but the stream
+    // reports the identity being continued — and records the ask, so
+    // engine tests can prove the right conversation was picked up.
     let fixture = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let result = fixture
+    let mut session = fixture
         .resume(
             &SessionId::from("some-session"),
             request(dir.path().to_path_buf()),
         )
-        .await;
+        .await
+        .unwrap();
 
-    match result {
-        Err(YuntaError::Unsupported { adapter, what }) => {
-            assert_eq!(adapter, "mock");
-            assert_eq!(what, "resume_session");
+    let first = session.events().next().await.unwrap();
+    match first {
+        AgentEvent::SessionOpened { session_id, .. } => {
+            assert_eq!(session_id, SessionId::from("some-session"));
         }
-        Err(other) => panic!("expected Unsupported, got a different error: {other}"),
-        Ok(_) => panic!("expected Unsupported, got a session"),
+        other => panic!("expected SessionOpened first (O1), got {other:?}"),
     }
+    assert_eq!(
+        fixture.resumes_seen(),
+        vec![SessionId::from("some-session")]
+    );
 }
 
 #[tokio::test]
