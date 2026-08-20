@@ -251,15 +251,18 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
                 .push(p.path.clone());
             Ok(())
         }
-        // Every other kind is either run-scoped bookkeeping that does not
+        // Every other kind is run-scoped bookkeeping that does not
         // change node/task/budget state (runner_resolved, baseline_captured,
         // agent_session_opened, agent_message,
         // context_assembled, criteria_checked, scope_checked, scope
         // expansion, hook_executed, node_rerouted, promotion_signaled,
-        // capability_degraded, run_paused/resumed/finished), or belongs to
-        // schema this codebase doesn't have yet (loop_iteration beyond what
-        // tasks already cover, child_run_*). Nothing to derive from any of
-        // them until their own task adds the state they'd feed.
+        // capability_degraded, run_paused/resumed/finished, loop_iteration
+        // beyond what tasks already cover). child_run_created/finished
+        // (T9.3) deliberately included: the parent node's own
+        // started/finished/failed events carry its derived state (child
+        // tokens aggregate through node_finished.tokens_used), while the
+        // link pair stays pure audit — `workflow_exec` reads it directly
+        // off the log to find an open child, no derived field needed.
         _ => Ok(()),
     }
 }

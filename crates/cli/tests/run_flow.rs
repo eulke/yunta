@@ -1745,3 +1745,96 @@ fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
         String::from_utf8_lossy(&verify.stderr)
     );
 }
+
+// --- T9.3: `kind: workflow` composition from the CLI -------------------------
+
+#[test]
+fn a_composed_workflow_runs_from_the_cli_creating_a_linked_child_run() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // The child lives in the repo's versioned catalog — that's what
+    // `use:` resolves against at child birth.
+    write(
+        &repo.join(".yunta/workflows/child.yaml"),
+        r#"
+name: child
+nodes:
+  - id: work
+    kind: bash
+    run: "echo from-child > child.txt"
+"#,
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "catalog"]);
+
+    let output = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parent_id = run_id_from(&output);
+    assert!(stdout(&output).contains("finished"));
+
+    // The child is a complete run of its own under the same state root:
+    // frozen manifest, own worktree with the work done.
+    let child_id = format!("{parent_id}-feat");
+    let child_manifest = home.join("runs").join(&child_id).join("manifest.yaml");
+    assert!(
+        child_manifest.exists(),
+        "expected the child's frozen manifest at {}",
+        child_manifest.display()
+    );
+    let child_tree = home.join("worktrees").join(&child_id);
+    assert_eq!(
+        std::fs::read_to_string(child_tree.join("child.txt"))
+            .unwrap()
+            .trim(),
+        "from-child"
+    );
+}
+
+#[test]
+fn yunta_check_refuses_a_composition_cycle() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/a.yaml"),
+        "name: a\nnodes:\n  - { id: sub, kind: workflow, use: b }\n",
+    );
+    write(
+        &repo.join(".yunta/workflows/b.yaml"),
+        "name: b\nnodes:\n  - { id: sub, kind: workflow, use: a }\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: parent\nnodes:\n  - { id: top, kind: workflow, use: a }\n",
+    );
+
+    let output = yunta_in(&repo, &home, &["check", "wf.yaml"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("workflow composition cycle: a -> b -> a"),
+        "stderr: {stderr}"
+    );
+}

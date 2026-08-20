@@ -40,7 +40,7 @@ pub use workflow::{
     ContextSpec, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
     KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec, Node,
     NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep,
-    OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion, Workflow,
+    OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion, Workflow, WorkflowIsolation,
 };
 
 /// The schema major this binary speaks (§2.1, DI-13) — what a

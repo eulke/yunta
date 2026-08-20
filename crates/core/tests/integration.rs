@@ -72,3 +72,74 @@ fn the_reference_workflow_parses_and_round_trips() {
     let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
+
+#[test]
+fn the_composed_reference_workflow_parses_and_round_trips() {
+    let yaml = include_str!("fixtures/release-cycle.yaml");
+    let workflow: yunta_core::Workflow =
+        serde_yaml::from_str(yaml).expect("release-cycle.yaml must parse whole");
+
+    assert_eq!(workflow.nodes.len(), 5);
+    let design = &workflow.nodes[0];
+    let yunta_core::NodeKind::Workflow {
+        r#use,
+        inputs,
+        isolation,
+    } = &design.kind
+    else {
+        panic!("`design` must be a workflow node, got {:?}", design.kind);
+    };
+    assert_eq!(r#use, "design-review");
+    assert_eq!(
+        inputs.get("rfc").map(String::as_str),
+        Some("{{inputs.rfc}}")
+    );
+    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Worktree);
+
+    // `qa` declares no `inputs:` at all — the field is optional.
+    let qa = workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "qa")
+        .unwrap();
+    let yunta_core::NodeKind::Workflow { inputs, .. } = &qa.kind else {
+        panic!("`qa` must be a workflow node");
+    };
+    assert!(inputs.is_empty());
+
+    // Workflow nodes nest inside `parallel` groups (the reference's own
+    // `build` group).
+    let build = workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "build")
+        .unwrap();
+    let yunta_core::NodeKind::Parallel { nodes, .. } = &build.kind else {
+        panic!("`build` must be a parallel group");
+    };
+    assert!(nodes
+        .iter()
+        .all(|child| matches!(child.kind, yunta_core::NodeKind::Workflow { .. })));
+
+    let reserialized = serde_yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(workflow, reparsed);
+}
+
+#[test]
+fn workflow_node_isolation_inherit_parses() {
+    let yaml = r#"
+name: phased
+nodes:
+  - id: phase-1
+    kind: workflow
+    use: implement-phase
+    isolation: inherit
+    scope: ["src/a/**"]
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let yunta_core::NodeKind::Workflow { isolation, .. } = &workflow.nodes[0].kind else {
+        panic!("expected a workflow node");
+    };
+    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Inherit);
+}

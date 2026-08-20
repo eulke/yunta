@@ -1,23 +1,19 @@
-//! `yunta check` (T1.3) — **M-0/M4 cut only**.
+//! `yunta check` (T1.3).
 //!
-//! Full T1.3 also validates mode coherence, template variables,
-//! workflow-composition depth, permission ceilings and warns on pushes to
-//! the base branch — all of it for schema surface (`modes:`, `context:`,
-//! `permissions:`, composition) that this recorte doesn't have yet
-//! (T1.1/T1.2). What's checked here is exactly what the recortado schema
-//! can be wrong about:
-//!
-//! - node ids are unique, globally — including every `parallel` child,
-//!   nested arbitrarily deep (T4.6);
-//! - `depends_on` references exist and its graph is acyclic (I14: this
-//!   check never looks at `on_failure.goto` — re-route edges are a
-//!   separate set that never relaxes `depends_on` acyclicity);
-//! - `on_failure.goto` targets exist;
-//! - a node's `runner:` resolves to a role with at least one candidate in
-//!   the merged config's `runners:`;
-//! - a `parallel` group's children don't declare overlapping scope
-//!   (D100/§5.8) — error, since it's verifiable in advance from the
-//!   workflow alone (see `check_warnings` for the "can't verify" case).
+//! [`check`] validates one workflow file against the merged config and
+//! **never reads other files**: node-id uniqueness (every `parallel`
+//! child included), `depends_on` references and acyclicity (I14: never
+//! relaxed by `on_failure.goto`, a separate edge set), goto/gate/mode
+//! reference integrity, runner resolution, scope disjointness for
+//! `parallel` and DAG fan-out (D100/DI-12), permission ceilings over
+//! literal commands (§6.1), input specs and references (§2.3),
+//! `yunta_schema` (§2.1), and T9.3/T9.4's workflow-node and fan-out
+//! declaration rules. [`check_workflow_refs`] is the deliberate
+//! exception that does read files: the composition reference graph
+//! (`use:` resolves, acyclic, within `limits.max_workflow_depth`, §12)
+//! against the repo's `.yunta/workflows/` catalog — a separate entry
+//! point so `check`'s no-IO property stays intact, called alongside it
+//! by the CLI.
 //!
 //! Capability-aware checks ("existencia de agentes pedidos", required
 //! capabilities) wait for the `Adapter` trait (T3.1) to exist — there is
@@ -254,6 +250,62 @@ pub enum CheckError {
         node: NodeId,
         goto: NodeId,
     },
+
+    /// T9.3: a `kind: workflow` node never opens a session of its own —
+    /// the child's nodes bind their own runners — so a runner binding
+    /// here would be accepted and ignored, exactly what A6 forbids.
+    #[error(
+        "node `{node}`: `{field}` has no meaning on `kind: workflow` — the child workflow's \
+         own nodes bind their runners"
+    )]
+    WorkflowNodeRunnerBinding { node: NodeId, field: &'static str },
+
+    /// §12: "hijos paralelos con `inherit` exigen scopes disjuntos,
+    /// validado en check" — an `inherit` child shares the parent's one
+    /// tree with every concurrent sibling, so an undeclared scope makes
+    /// disjointness unverifiable: refused, same rank as
+    /// `OverlappingParallelScope` (which catches the declared-overlap
+    /// half of the same rule).
+    #[error(
+        "parallel group `{group}`: child `{node}` is `kind: workflow` with `isolation: \
+         inherit` and no `scope` — inherit children share the parent's tree, so each must \
+         declare a disjoint scope (§12)"
+    )]
+    InheritChildWithoutScope { group: NodeId, node: NodeId },
+
+    /// T9.3: a composition reference that can't resolve today — the
+    /// same broken-reference class as `UnknownGotoTarget`, across
+    /// files. Advisory about the *current* catalog by design: the child
+    /// freezes its own file at birth, so a run only ever meets the file
+    /// as it is then.
+    #[error(
+        "node `{node}`: `use: {name}` cannot be read from the repo catalog `{path}` — add \
+         the workflow file (versioned) or fix the name"
+    )]
+    WorkflowRefMissing {
+        node: NodeId,
+        name: String,
+        path: std::path::PathBuf,
+    },
+
+    #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
+    WorkflowRefUnparseable {
+        path: std::path::PathBuf,
+        detail: String,
+    },
+
+    /// §12: "el grafo de referencias entre workflows sea acíclico".
+    #[error("workflow composition cycle: {chain}")]
+    WorkflowRefCycle { chain: String },
+
+    /// §12's "profundidad máxima configurable", checked statically over
+    /// the reference graph (the runtime guard at child birth enforces
+    /// the same limit over what actually loads).
+    #[error(
+        "workflow composition {chain} nests {depth} level(s) deep but \
+         `limits.max_workflow_depth` is {max} — flatten the composition or raise the limit"
+    )]
+    WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -299,6 +351,9 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     // rules are about the declaration itself), then the graph expands so
     // every later rule sees what will actually run.
     check_runner_fanout(&workflow, &mut errors);
+    // T9.3: workflow-node rules also validate the original shape
+    // (`runners:` on one is refused before expansion would multiply it).
+    check_workflow_nodes(&workflow.nodes, None, &mut errors);
     crate::manifest::expand_runner_fanout(&mut workflow);
     crate::manifest::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
@@ -1195,6 +1250,139 @@ fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {
                 errors.push(CheckError::DistillUnknownArtifact { path: path.clone() });
             }
         }
+    }
+}
+
+/// T9.3's per-file workflow-node rules: no runner bindings (a workflow
+/// node opens no session — the child's nodes bind their own), and an
+/// `inherit` child of a `parallel` group must declare scope so §12's
+/// disjointness demand is verifiable at all.
+fn check_workflow_nodes(nodes: &[Node], group: Option<&Node>, errors: &mut Vec<CheckError>) {
+    for node in nodes {
+        if let NodeKind::Workflow { isolation, .. } = &node.kind {
+            for (present, field) in [
+                (node.runner.is_some(), "runner"),
+                (!node.runners.is_empty(), "runners"),
+                (node.agent.is_some(), "agent"),
+            ] {
+                if present {
+                    errors.push(CheckError::WorkflowNodeRunnerBinding {
+                        node: node.id.clone(),
+                        field,
+                    });
+                }
+            }
+            if *isolation == yunta_core::WorkflowIsolation::Inherit && node.scope.is_empty() {
+                if let Some(group) = group {
+                    errors.push(CheckError::InheritChildWithoutScope {
+                        group: group.id.clone(),
+                        node: node.id.clone(),
+                    });
+                }
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_workflow_nodes(children, Some(node), errors);
+        }
+    }
+}
+
+/// T9.3/§12: walks the composition reference graph as the repo's
+/// catalog stands **today** — every `use:` resolves, no cycles, and
+/// nesting stays within `limits.max_workflow_depth`. A separate entry
+/// point from [`check`], deliberately: `check` never reads files (its
+/// own doc-comment rule), while this walk exists precisely to read the
+/// catalog — the CLI calls both.
+pub fn check_workflow_refs(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    repo_root: &std::path::Path,
+) -> Vec<CheckError> {
+    let mut errors = Vec::new();
+    let catalog = repo_root.join(".yunta/workflows");
+    let max_depth = config.resolved_max_workflow_depth();
+    let mut path: Vec<String> = Vec::new();
+    walk_workflow_refs(workflow, &catalog, max_depth, &mut path, &mut errors);
+    errors
+}
+
+/// Every `(node, use-name)` reference in `nodes`, `parallel` children
+/// included.
+fn workflow_uses(nodes: &[Node], out: &mut Vec<(NodeId, String)>) {
+    for node in nodes {
+        match &node.kind {
+            NodeKind::Workflow { r#use, .. } => out.push((node.id.clone(), r#use.clone())),
+            NodeKind::Parallel {
+                nodes: children, ..
+            } => workflow_uses(children, out),
+            _ => {}
+        }
+    }
+}
+
+fn walk_workflow_refs(
+    workflow: &Workflow,
+    catalog: &std::path::Path,
+    max_depth: u32,
+    path: &mut Vec<String>,
+    errors: &mut Vec<CheckError>,
+) {
+    let mut uses = Vec::new();
+    workflow_uses(&workflow.nodes, &mut uses);
+    for (node, name) in uses {
+        if path.contains(&name) {
+            let chain = path
+                .iter()
+                .cloned()
+                .chain(std::iter::once(name.clone()))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            errors.push(CheckError::WorkflowRefCycle { chain });
+            continue;
+        }
+        let depth = path.len() as u32 + 1;
+        if depth > max_depth {
+            let chain = path
+                .iter()
+                .cloned()
+                .chain(std::iter::once(name.clone()))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            errors.push(CheckError::WorkflowRefTooDeep {
+                chain,
+                depth,
+                max: max_depth,
+            });
+            continue;
+        }
+        let file = catalog.join(format!("{name}.yaml"));
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(_) => {
+                errors.push(CheckError::WorkflowRefMissing {
+                    node,
+                    name,
+                    path: file,
+                });
+                continue;
+            }
+        };
+        let child: Workflow = match serde_yaml::from_str(&text) {
+            Ok(child) => child,
+            Err(e) => {
+                errors.push(CheckError::WorkflowRefUnparseable {
+                    path: file,
+                    detail: e.to_string(),
+                });
+                continue;
+            }
+        };
+        path.push(name);
+        walk_workflow_refs(&child, catalog, max_depth, path, errors);
+        path.pop();
     }
 }
 

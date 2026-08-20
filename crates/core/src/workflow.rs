@@ -520,6 +520,48 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         external: Option<ExternalGate>,
     },
+    /// `kind: workflow` (§12, T9.3): runs another workflow as a
+    /// sub-run — a **complete run** with its own run_id, manifest, event
+    /// log and run.dir, never an inline expansion. The parent freezes
+    /// only the child's *name and inputs* (these two fields); the child
+    /// resolves and freezes its own workflow file at birth, so a long
+    /// process picks up improvements to child workflows between
+    /// executions without any individual run losing immutability.
+    Workflow {
+        /// The child workflow's name, resolved at child birth against
+        /// the repo catalog: `.yunta/workflows/<name>.yaml` in the
+        /// parent run's own working tree (versioned, the same catalog
+        /// `list_workflows` reads).
+        r#use: String,
+        /// Inputs handed to the child, template-rendered in the
+        /// parent's own scope (`{{inputs.x}}`, `{{run.branch}}`, …)
+        /// before the child validates them against its declared
+        /// `inputs:`. Absent means the child must get by on defaults.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        inputs: BTreeMap<String, String>,
+        /// `worktree` (default) gives the child its own tree branched
+        /// off the parent's HEAD; `inherit` shares the parent's tree
+        /// for phases of one piece of work — parallel `inherit`
+        /// siblings must declare disjoint `scope` (checked).
+        #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
+        isolation: WorkflowIsolation,
+    },
+}
+
+fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
+    *isolation == WorkflowIsolation::default()
+}
+
+/// A `kind: workflow` node's `isolation:` (§12) — deliberately its own
+/// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
+/// nodes ("`inherit` solo en nodos workflow", the reference config's own
+/// comment), and a run-level `none` is not a per-node choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowIsolation {
+    #[default]
+    Worktree,
+    Inherit,
 }
 
 /// `kind: gate`'s `external:` block (§5.6).

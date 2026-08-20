@@ -1009,6 +1009,51 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   (el fixture lo demuestra por efectos), no se abre una nueva; sin
   capacidad → check lo rechaza; sin sesión previa → restart con evento.
 
+### DI-25 — Cadena de promoción de un run hijo `[ ]`
+
+- **Origen:** T9.3. Un run hijo (`kind: workflow`) puede cerrar
+  `run_finished: promoted` (su propio gate de presupuesto/re-rutas
+  agotadas aceptó promover). El padre hoy registra el
+  `child_run_finished { terminal_state: promoted }` (el grafo de
+  vínculos queda entero) y **falla el nodo con diagnóstico accionable**
+  — no improvisa la cadena. La maquinaria que encadena promociones
+  (`drive_promotions`: worktree nuevo, herencia de artifacts, sucesor
+  `promoted_from`) vive en el CLI porque necesita el checkout original;
+  el engine no puede llamarla sin invertir la dependencia.
+- **Solución propuesta:** mover el núcleo de `drive_promotions` (crear
+  sucesor + heredar artifacts + correrlo) a `yunta-engine` (no depende
+  de nada exclusivo del CLI: git + storage + adapters ya están ahí), y
+  que `workflow_exec` encadene: hijo promovido → sucesor creado con
+  `promoted_from`, un `child_run_created` nuevo en el padre, y el
+  resultado del *sucesor* es el resultado del nodo. El CLI pasa a ser
+  un caller fino de esa misma función.
+- **✓ Criterios:** test con mock: hijo que promueve → el padre corre el
+  sucesor automáticamente y el log del padre muestra ambos
+  `child_run_created` (el segundo con el sucesor); `run_created.promoted_from`
+  del sucesor apunta al hijo original.
+
+### DI-26 — Montaje cross-run de artifacts por vínculo `[ ]`
+
+- **Origen:** T9.3/§12: "un hijo puede montar artifacts del padre o de
+  hermanos terminados; nadie monta artifacts de runs ajenos". La regla
+  de exclusión se cumple hoy por construcción (no existe ningún
+  mecanismo de acceso cross-run), y el canal real padre→hijo son los
+  `inputs:` congelados (un path rendered con `{{run.dir}}` del padre
+  llega perfectamente). Pero la fuente de contexto `artifact`
+  **declarativa** cross-run no tiene sintaxis en ningún YAML de
+  referencia (`artifact: { node, name }` no tiene selector de run) —
+  inventarla sería violar "las specs no se mejoran al pasar".
+- **Solución propuesta:** proponer al corpus (ADR) la sintaxis —
+  candidata: `artifact: { run: parent | sibling:<node-id>, node, name }`
+  resuelta contra el grafo de vínculos del log (`child_run_created` del
+  padre para hermanos; el propio parentesco para `parent`), con error
+  accionable si el run referido no es un vínculo declarado (la regla de
+  §12 pasa de "por construcción" a "verificada"). Implementar recién con
+  el ADR aceptado.
+- **✓ Criterios:** ADR registrado; hijo monta `plan.yaml` del padre vía
+  la sintaxis nueva; referencia a un run sin vínculo → error de
+  resolución con evento, jamás lectura silenciosa.
+
 ---
 
 ## Posturas cerradas (decisión registrada — no son deuda)
@@ -1052,12 +1097,18 @@ construir algo. Si alguna vez duelen de verdad, reabrirlos requiere ADR.
   (recibo) la exige y cada evento nuevo que se emite sin hash agranda la
   migración. Recomendación: primera tarea del plan a retomar tras el
   Nivel 1 de este doc.
-- **T9.3** — `kind: workflow` (composición). Absorbe: la fuente
-  `artifact` cross-run general por vínculos (§12) que DI-10 resuelve de
-  forma mínima; `max_workflow_depth` (DI-05); el "árbol para
-  composición" de `status` (§8.5).
+- **T9.3** — `kind: workflow` (composición). **Cerrado** (ver
+  `docs/m0-status.md`, M9): runs hijos completos, `child_run_*`, resume
+  recursivo, presupuestos en cascada, `isolation: inherit` con scopes
+  disjuntos en check, grafo de referencias acíclico +
+  `max_workflow_depth` (consumidor de DI-05 cerrado). Deltas que
+  quedaron con ítem propio: DI-25 (cadena de promoción de un hijo),
+  DI-26 (montaje cross-run declarativo — la sintaxis no existe en la
+  referencia, requiere ADR). El "árbol para composición" de `status`
+  (§8.5) sigue pendiente y es territorio de M10 (UX de status), no un
+  mecanismo del engine.
 - **T9.4** — fan-out `runners: []` (§13.2) + `agent:` a nivel nodo
-  (§13.3) — cierra M9.
+  (§13.3) — **cerrado**; con T9.3 cierra M9.
 - **M8 (T8.1/T8.2)** — `yunta mcp` + MCP por-run. Consumidor natural de
   DI-01/DI-02/DI-03/DI-04 (la superficie `resolve_gate` reutiliza los
   mismos objetos) y de DI-08 (`--detach` usa `engine.json`).

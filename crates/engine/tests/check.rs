@@ -1187,3 +1187,194 @@ nodes:
         "got: {errors:?}"
     );
 }
+
+// --- T9.3: `kind: workflow` static rules -------------------------------------
+
+#[test]
+fn runner_bindings_on_a_workflow_node_are_refused() {
+    let yaml = r#"
+name: composed
+nodes:
+  - id: qa
+    kind: workflow
+    use: qa-review
+    runner: executor
+  - id: qa-fanout
+    kind: workflow
+    use: qa-review
+    runners: [reviewer, reviewer-alt]
+  - id: qa-agent
+    kind: workflow
+    use: qa-review
+    agent: benito
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    for (node, field) in [
+        ("qa", "runner"),
+        ("qa-fanout", "runners"),
+        ("qa-agent", "agent"),
+    ] {
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckError::WorkflowNodeRunnerBinding { node: n, field: f }
+                    if n.as_str() == node && *f == field
+            )),
+            "expected a `{field}` refusal on `{node}`, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn inherit_children_of_a_parallel_group_must_declare_scope() {
+    let yaml = r#"
+name: composed
+nodes:
+  - id: build
+    kind: parallel
+    nodes:
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    // `feat-a` shares the parent's tree with a concurrent sibling and
+    // declares nothing — disjointness is unverifiable, refused (§12).
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::InheritChildWithoutScope { node, .. } if node.as_str() == "feat-a"
+        )),
+        "got: {errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|e| matches!(
+            e,
+            CheckError::InheritChildWithoutScope { node, .. } if node.as_str() == "feat-b"
+        )),
+        "feat-b declared its scope, got: {errors:?}"
+    );
+}
+
+#[test]
+fn inherit_children_with_disjoint_scopes_pass_and_overlapping_fail() {
+    let disjoint = r#"
+name: composed
+nodes:
+  - id: build
+    kind: parallel
+    nodes:
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/a/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+"#;
+    let wf: Workflow = serde_yaml::from_str(disjoint).unwrap();
+    assert!(
+        check(&wf, &ConfigLayer::default()).is_empty(),
+        "disjoint inherit siblings must pass"
+    );
+
+    let overlapping = r#"
+name: composed
+nodes:
+  - id: build
+    kind: parallel
+    nodes:
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+"#;
+    let wf: Workflow = serde_yaml::from_str(overlapping).unwrap();
+    assert!(
+        check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::OverlappingParallelScope { .. })),
+        "overlapping inherit siblings must be refused"
+    );
+}
+
+// --- T9.3: the composition reference graph (`check_workflow_refs`) -----------
+
+fn catalog_root(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    let catalog = root.path().join(".yunta/workflows");
+    std::fs::create_dir_all(&catalog).unwrap();
+    for (name, yaml) in files {
+        std::fs::write(catalog.join(format!("{name}.yaml")), yaml).unwrap();
+    }
+    root
+}
+
+const LEAF: &str = "name: leaf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
+
+fn uses(name: &str, child: &str) -> String {
+    format!("name: {name}\nnodes:\n  - {{ id: sub, kind: workflow, use: {child} }}\n")
+}
+
+#[test]
+fn a_missing_composition_reference_is_a_check_error() {
+    let root = catalog_root(&[]);
+    let wf: Workflow = serde_yaml::from_str(&uses("parent", "ghost")).unwrap();
+    let errors = yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::WorkflowRefMissing { node, name, .. }
+                if node.as_str() == "sub" && name == "ghost"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_composition_cycle_is_a_check_error_naming_the_chain() {
+    let root = catalog_root(&[
+        ("a", uses("a", "b").as_str()),
+        ("b", uses("b", "a").as_str()),
+    ]);
+    let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
+    let errors = yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::WorkflowRefCycle { chain } if chain == "a -> b -> a"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn composition_deeper_than_the_limit_is_a_check_error() {
+    let root = catalog_root(&[
+        ("a", uses("a", "b").as_str()),
+        ("b", uses("b", "c").as_str()),
+        ("c", LEAF),
+    ]);
+    let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str("limits: { max_workflow_depth: 2 }").unwrap();
+    let errors = yunta_engine::check_workflow_refs(&wf, &config, root.path());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::WorkflowRefTooDeep {
+                depth: 3,
+                max: 2,
+                ..
+            }
+        )),
+        "got: {errors:?}"
+    );
+
+    // The same graph passes under the reference default (4).
+    assert!(
+        yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path()).is_empty()
+    );
+}
+
+#[test]
+fn a_healthy_composition_graph_passes_check_workflow_refs() {
+    let root = catalog_root(&[("a", uses("a", "b").as_str()), ("b", LEAF)]);
+    let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
+    assert!(
+        yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path()).is_empty()
+    );
+}

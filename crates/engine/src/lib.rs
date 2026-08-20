@@ -33,7 +33,7 @@ mod verification_effectiveness;
 mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
-pub use check::{check, check_warnings, CheckError, CheckWarning};
+pub use check::{check, check_warnings, check_workflow_refs, CheckError, CheckWarning};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{inherited_findings, register as register_findings, FindingsError};
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};

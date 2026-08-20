@@ -32,6 +32,15 @@ pub(super) enum NodeEnd {
     /// (`running` in the log) so a later resume re-treats it per its
     /// `on_interrupt` policy, exactly like a crash (§8.1).
     Interrupted,
+    /// T9.3: a `kind: workflow` node's child run paused on its own log
+    /// (a gate, a failure without re-route, its budget). No terminal
+    /// event here either — the node stays open so a later resume
+    /// re-enters it and resumes the child recursively (§12) — but
+    /// unlike `Interrupted` the *parent run* must pause with this
+    /// reason rather than fall through to its loop-top cancel check.
+    ChildPaused {
+        reason: String,
+    },
 }
 
 /// DI-11: the shared "my token fired" epilogue — which cancellation was
@@ -111,6 +120,14 @@ pub(super) async fn execute_node(
             )
             .await?
         }
+        NodeKind::Workflow {
+            r#use,
+            inputs,
+            isolation,
+        } => {
+            super::workflow_exec::execute_workflow(ctx, node, r#use, inputs, *isolation, cancel)
+                .await?
+        }
         // §5.6/T7.7: a gate's resolution is a forge round-trip, not a
         // session — `schedule::next_step` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
@@ -147,9 +164,18 @@ async fn execute_parallel(
         .iter()
         .filter(|child| matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. })))
         .collect();
-    let to_run: Vec<&Node> = children
+    // Fresh children start at attempt 1; a child left `running` with no
+    // terminal event (crash, root cancel, or a paused child run under a
+    // T9.3 workflow node) is an orphan the group's own restart re-runs,
+    // §8.1's `restart_node` applied inside the group — for a workflow
+    // child that re-run is what resumes its child run recursively.
+    let to_run: Vec<(&Node, u32)> = children
         .iter()
-        .filter(|child| !state.nodes.contains_key(&child.id))
+        .filter_map(|child| match state.nodes.get(&child.id) {
+            None => Some((child, 1)),
+            Some(NodeState::Running { attempt }) => Some((child, attempt + 1)),
+            _ => None,
+        })
         .collect();
 
     match join {
@@ -165,22 +191,38 @@ async fn execute_parallel(
             let results = futures::future::join_all(
                 to_run
                     .iter()
-                    .map(|child| execute_node(ctx, child, 1, &group_cancel)),
+                    .map(|(child, attempt)| execute_node(ctx, child, *attempt, &group_cancel)),
             )
             .await;
 
             let mut failed_child = None;
-            for (child, result) in to_run.iter().zip(results) {
+            let mut interrupted = false;
+            let mut child_paused: Option<String> = None;
+            for ((child, _), result) in to_run.iter().zip(results) {
                 match result? {
                     NodeEnd::Failed => {
                         failed_child.get_or_insert(&child.id);
                     }
                     // DI-11: a root cancellation unwound this child —
                     // the group closes nothing; the whole run is
-                    // pausing, and resume re-enters it.
-                    NodeEnd::Interrupted => return Ok(NodeEnd::Interrupted),
+                    // pausing, and resume re-enters it. Noted, not
+                    // returned yet: every sibling's result was already
+                    // awaited above, and dropping a sibling's recorded
+                    // failure here would change nothing it wrote.
+                    NodeEnd::Interrupted => interrupted = true,
+                    // T9.3: same shape — the group stays open and the
+                    // run pauses naming the paused child run.
+                    NodeEnd::ChildPaused { reason } => {
+                        child_paused.get_or_insert(reason);
+                    }
                     NodeEnd::Finished => {}
                 }
+            }
+            if interrupted {
+                return Ok(NodeEnd::Interrupted);
+            }
+            if let Some(reason) = child_paused {
+                return Ok(NodeEnd::ChildPaused { reason });
             }
             if let Some(id) = failed_child {
                 return fail(
@@ -217,13 +259,14 @@ async fn execute_parallel(
                 already_failed.iter().map(|child| &child.id).collect();
             let mut running: FuturesUnordered<_> = to_run
                 .iter()
-                .map(|child| {
+                .map(|(child, attempt)| {
                     let cancel = group_cancel.clone();
-                    async move { (&child.id, execute_node(ctx, child, 1, &cancel).await) }
+                    async move { (&child.id, execute_node(ctx, child, *attempt, &cancel).await) }
                 })
                 .collect();
 
             let mut winner = None;
+            let mut child_paused: Option<String> = None;
             while winner.is_none() {
                 let Some((child_id, result)) = running.next().await else {
                     break;
@@ -240,6 +283,12 @@ async fn execute_parallel(
                         while running.next().await.is_some() {}
                         return Ok(NodeEnd::Interrupted);
                     }
+                    // T9.3: a paused child run is neither a win nor a
+                    // loss — the race stays live: a sibling can still
+                    // win the group. Recorded for the no-winner ending.
+                    NodeEnd::ChildPaused { reason } => {
+                        child_paused.get_or_insert(reason);
+                    }
                 }
             }
             // Drain the rest: the cancelled losers finishing their own
@@ -250,6 +299,11 @@ async fn execute_parallel(
 
             match winner {
                 Some(id) => {
+                    // A sibling won while a workflow child's run sits
+                    // paused: the group closes (that's `join: any`'s
+                    // contract) and the child run stays paused on its
+                    // own log — a complete run, individually resumable
+                    // (`yunta resume <child>`), never silently killed.
                     close_node(
                         ctx,
                         node,
@@ -258,12 +312,21 @@ async fn execute_parallel(
                     )
                     .await
                 }
-                None => fail(
-                    ctx,
-                    node,
-                    format!("join: any — no child succeeded ({} failed)", failures.len()),
-                    false,
-                ),
+                None => {
+                    if let Some(reason) = child_paused {
+                        // No winner and a child run waiting on its own
+                        // pause: the group can't close over an open
+                        // child (§12) — the run pauses and resume
+                        // re-enters the race.
+                        return Ok(NodeEnd::ChildPaused { reason });
+                    }
+                    fail(
+                        ctx,
+                        node,
+                        format!("join: any — no child succeeded ({} failed)", failures.len()),
+                        false,
+                    )
+                }
             }
         }
     }

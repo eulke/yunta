@@ -184,7 +184,14 @@ pub(crate) fn check_or_refuse(workflow: &Workflow, config: &ConfigLayer) -> Resu
     for warning in yunta_engine::check_warnings(workflow, config) {
         eprintln!("warning: {warning}");
     }
-    let errors = yunta_engine::check(workflow, config);
+    let mut errors = yunta_engine::check(workflow, config);
+    // T9.3: the composition reference graph (`use:` names resolve,
+    // acyclic, within depth) reads the repo catalog under the current
+    // directory — the same `.yunta/workflows/` a run's children resolve
+    // against at birth.
+    if let Ok(cwd) = std::env::current_dir() {
+        errors.extend(yunta_engine::check_workflow_refs(workflow, config, &cwd));
+    }
     if errors.is_empty() {
         return Ok(());
     }

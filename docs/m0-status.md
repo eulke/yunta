@@ -2640,7 +2640,7 @@ que aparece.
         --workflow`/`--json` sin romper ninguno de los dos; menos de 3
         corridas no muestra nada).
 
-## M9 — Modos, promoción y composición (parcial: T9.1–T9.2, T9.4)
+## M9 — Modos, promoción y composición (completo: T9.1–T9.4)
 
 - [x] **T9.1 — Modos abiertos (§10.1, D44).** `modes:` no existía en
       absoluto en el schema hasta ahora — el propio `Workflow` de M-0/M7
@@ -2820,6 +2820,108 @@ que aparece.
         punta contra git real, sucesor creado y corrido, artifact real
         heredado, cadena auditada en el `run_created.promoted_from` del
         sucesor y el `promotion_signaled` del padre).
+
+- [x] **T9.3 — `kind: workflow`: composición como runs vinculados
+      (§12).** Cada sub-workflow es un **run completo** (run_id,
+      manifest, event log y run.dir propios — jamás expansión inline):
+      el padre emite `child_run_created` (con `child_workflow_hash`
+      para que la identidad efectiva viva en el evento), corre el hijo
+      con el mismo `execute_run` recursivo, y el estado terminal del
+      hijo es el resultado del nodo (`child_run_finished` +
+      `node_finished` cuyo `tokens_used` es el total derivado del hijo
+      — así el `Usage` agrega hacia arriba por replay ordinario, sin
+      campo derivado nuevo). Schema: `NodeKind::Workflow { use, inputs,
+      isolation }` con `WorkflowIsolation { worktree (default) |
+      inherit }` — enum propio, no `Isolation` (el comentario de la
+      referencia: "`inherit` solo en nodos workflow");
+      `release-cycle.yaml` es fixture de round-trip en `yunta-core`.
+      Decisiones mecánicas fijadas acá (ningún doc las pinaba):
+      - **Resolución de `use:`**: `.yunta/workflows/<name>.yaml` en el
+        **árbol de trabajo del propio run padre** — el catálogo
+        versionado del repo, el mismo que `list_workflows` describe.
+        Error accionable nombrando el path exacto si falta; el hijo
+        recién nacido pasa por `check()` estático antes de gastar nada.
+      - **`child_run_id` determinista**: `<padre>-<nodo>` (ordinal `-N`
+        si una re-ruta vuelve a correr el nodo), derivado contando los
+        `child_run_created` previos del nodo en el log — cero entropía
+        en el engine. El evento del padre se emite **antes** del
+        `run_created` del hijo: un crash en la ventana deja una
+        referencia colgante (hijo sin eventos) que el próximo resume
+        supersede con ordinal nuevo, en vez de una re-creación chocando
+        con su propia mitad.
+      - **Aislamiento**: `worktree` → árbol propio en
+        `worktrees_root/<child_id>`, rama `yunta/<child_id>`, base = el
+        HEAD del árbol del padre (el hijo ve el trabajo ya commiteado
+        del padre); manifest del hijo con `paths` congelados (DI-07).
+        `inherit` → el hijo opera directo en el árbol del padre y su
+        manifest dice `isolation: none`: el engine jamás limpia,
+        commitea ni lockea un árbol que no es suyo (un
+        `on_finish.cleanup` del hijo NO puede borrar el árbol del
+        padre por construcción).
+      - **Presupuestos en cascada**: al nacer, el
+        `limits.max_tokens_per_run` congelado del hijo = lo que le
+        queda al padre (`cap - gastado`) — auditable en el manifest del
+        hijo, y la maquinaria ordinaria de presupuesto del hijo aplica
+        el techo del padre a todo el subárbol. Un `continue` humano en
+        el padre (budget lifted) deja el cap propio del hijo intacto en
+        vez de congelar un hijo ilimitado para siempre.
+      - **Hijo pausado = padre en `waiting`** (§12: "un run padre que
+        pasa la mayor parte de su vida en waiting"): `NodeEnd::
+        ChildPaused` — sin evento terminal para el nodo (queda
+        `running` huérfano) y el padre pausa nombrando al hijo; el
+        resume del padre re-entra al nodo, encuentra el último
+        `child_run_created` sin `child_run_finished` y **resume el hijo
+        recursivamente** desde su propio manifest congelado. Cancelación
+        raíz → `Interrupted` (huérfano, DI-11); carrera `join: any` →
+        derrota registrada. En `join: any`, un hijo pausado no gana ni
+        pierde: si un hermano gana, el grupo cierra y el run hijo queda
+        pausado en su propio log (resumible con `yunta resume
+        <child>`); sin ganador, el run pausa y el resume re-entra.
+      - **Grupos `parallel` re-entrantes sobre huérfanos**: un hijo de
+        grupo `running` sin evento terminal (crash, cancelación, o el
+        nodo workflow abierto de arriba) ahora **se re-corre** al
+        restart del grupo (§8.1 `restart_node` aplicado dentro del
+        grupo, intento+1) — antes el filtro `to_run` lo saltaba y un
+        resume podía cerrar el grupo sin re-correr al interrumpido.
+      - **`check`**: `WorkflowNodeRunnerBinding` (`runner`/`runners`/
+        `agent` sobre `kind: workflow` = aceptado-e-ignorado, A6);
+        `InheritChildWithoutScope` (§12: hijos paralelos `inherit`
+        exigen scope declarado para que la disyunción sea verificable —
+        el solapamiento declarado ya lo cazaba
+        `OverlappingParallelScope`); y `check_workflow_refs` (entry
+        point separado porque `check()` no lee archivos): grafo de
+        referencias resuelto contra el catálogo, `WorkflowRefMissing`/
+        `WorkflowRefUnparseable`/`WorkflowRefCycle` (cadena `a -> b ->
+        a`)/`WorkflowRefTooDeep` contra
+        `resolved_max_workflow_depth()` (default de referencia: 4) —
+        cableado en `yunta check` y `yunta run`; el mismo límite se
+        re-aplica en runtime al nacer cada hijo (`RunCtx.depth`),
+        porque los archivos pueden cambiar entre check y nacimiento.
+      - **Modo del hijo**: primer modo declarado (el piso — la misma
+        convención del CLI) o `default` sin `modes:`.
+      - **Reproducibilidad histórica (✓ del plan)**: test que evoluciona
+        el workflow hijo entre dos runs padre — el segundo congela v2,
+        y el `child_run_id` del primero sigue apuntando a un manifest
+        que hashea v1: el histórico jamás re-resuelve
+        `nombre@versión-actual`.
+      - **Deltas registrados**: DI-25 (hijo que cierra `promoted` → el
+        padre registra el vínculo y falla el nodo con diagnóstico — no
+        improvisa la cadena de promoción) y DI-26 (montaje cross-run
+        declarativo de artifacts: la sintaxis no existe en la
+        referencia; el canal real hoy son los `inputs:` del hijo).
+        Los runs hijos no cuentan contra `max_concurrent_runs` (ese cap
+        gobierna invocaciones de `yunta run`, no el tamaño del árbol).
+      - Tests: 7 en `crates/engine/tests/workflow_compose.rs` (run
+        vinculado completo con inputs rendereados y árbol propio;
+        agregación de tokens; pausa+resume recursivo vía gate interno;
+        pinning histórico v1/v2; **release-cycle de referencia con mock
+        de punta a punta** — 4 hijos, gates aprobados por interacción
+        scriptada; techo de profundidad en runtime; archivo faltante
+        nombrando el path), 7 en `tests/check.rs` (bindings de runner,
+        scopes de `inherit`, grafo: faltante/ciclo/profundidad/sano) y
+        2 CLI en `tests/run_flow.rs` (`yunta run` compuesto de punta a
+        punta con hijo real bajo `YUNTA_HOME`; `yunta check` rechazando
+        un ciclo del catálogo).
 
 - [x] **T9.4 — Fan-out `runners:` (§13.2) + `agent:` a nivel nodo
       (§13.3, D37).** Expansión **estática en el manifest**

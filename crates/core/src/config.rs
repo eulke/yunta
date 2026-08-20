@@ -500,6 +500,18 @@ impl ConfigLayer {
     /// `limits.max_loop_iterations`, with the reference default (`12`)
     /// applied — the only net under a ledger whose state oscillates
     /// forever, so "absent" means the reference cap, never "unbounded".
+    /// `limits.max_workflow_depth`, with the reference default (`4`)
+    /// applied — how many `kind: workflow` nesting levels below the
+    /// root run are allowed (§12's "profundidad máxima configurable";
+    /// consumer: T9.3's static graph check and the runtime guard at
+    /// child birth).
+    pub fn resolved_max_workflow_depth(&self) -> u32 {
+        self.limits
+            .as_ref()
+            .and_then(|limits| limits.max_workflow_depth)
+            .unwrap_or(4)
+    }
+
     pub fn resolved_max_loop_iterations(&self) -> u32 {
         self.limits
             .as_ref()

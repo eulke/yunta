@@ -271,7 +271,12 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
         }
     };
 
-    let errors = yunta_engine::check(&workflow, &config);
+    let mut errors = yunta_engine::check(&workflow, &config);
+    // T9.3: composition references resolve against the repo catalog
+    // under the current directory (`.yunta/workflows/`).
+    if let Ok(cwd) = std::env::current_dir() {
+        errors.extend(yunta_engine::check_workflow_refs(&workflow, &config, &cwd));
+    }
     let warnings = yunta_engine::check_warnings(&workflow, &config);
     for warning in &warnings {
         eprintln!("warning: {warning}");

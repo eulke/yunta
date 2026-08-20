@@ -198,10 +198,14 @@ fn freeze_prompts(
                 prompts.insert(node.id.clone(), content);
             }
         }
+        // A `workflow` node has no prompt of its own — the child
+        // resolves and freezes its own workflow (and prompts) at birth
+        // (§12), never through the parent's manifest.
         NodeKind::Bash { .. }
         | NodeKind::Check { .. }
         | NodeKind::Executor { .. }
-        | NodeKind::Gate { .. } => {}
+        | NodeKind::Gate { .. }
+        | NodeKind::Workflow { .. } => {}
         NodeKind::Parallel { nodes, .. } => {
             for child in nodes {
                 freeze_prompts(child, workflow_dir, prompts)?;

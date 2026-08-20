@@ -32,6 +32,7 @@ mod loop_exec;
 mod node_exec;
 mod questions_exec;
 mod schedule;
+mod workflow_exec;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -152,6 +153,14 @@ pub(crate) struct RunCtx<'a> {
     /// `on_interrupt`, §8.1) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
+    /// T9.3: the forge this invocation was given — on the ctx so a
+    /// `kind: workflow` node can hand it down to its child run (whose
+    /// own gates are as real as the parent's).
+    pub forge: Option<&'a dyn Forge>,
+    /// T9.3: how many `kind: workflow` levels above this run (0 = the
+    /// root invocation) — compared against
+    /// `limits.max_workflow_depth` before a child is born.
+    pub depth: u32,
 }
 
 impl RunCtx<'_> {
@@ -430,6 +439,42 @@ pub async fn execute_run(
     forge: Option<&dyn Forge>,
     cancel: Option<&CancellationToken>,
 ) -> Result<RunReport, RunError> {
+    execute_run_at_depth(
+        run_id,
+        manifest,
+        run_dir,
+        worktree,
+        adapters,
+        storage,
+        clock,
+        max_task_retries,
+        human_interaction,
+        forge,
+        cancel,
+        0,
+    )
+    .await
+}
+
+/// [`execute_run`] with an explicit composition depth (T9.3):
+/// `workflow_exec` re-enters here for each child run, one level deeper —
+/// the recursion the Contrato's "resume del padre retoma hijos
+/// huérfanos recursivamente" (§12) is made of.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_run_at_depth(
+    run_id: &RunId,
+    manifest: &Manifest,
+    run_dir: &Path,
+    worktree: &Path,
+    adapters: &HashMap<String, Arc<dyn Adapter>>,
+    storage: &Storage,
+    clock: &dyn Clock,
+    max_task_retries: u32,
+    human_interaction: &dyn HumanInteraction,
+    forge: Option<&dyn Forge>,
+    cancel: Option<&CancellationToken>,
+    depth: u32,
+) -> Result<RunReport, RunError> {
     // DI-08: the root of every per-node token this invocation hands out.
     // `None` (tests, callers with no signal source) gets a token nothing
     // ever fires — the pre-DI-08 behavior exactly.
@@ -459,6 +504,8 @@ pub async fn execute_run(
             }
         },
         root_cancel: root_cancel_for_ctx,
+        forge,
+        depth,
     };
 
     let events = ctx.load_events()?;
@@ -848,8 +895,32 @@ pub async fn execute_run(
                         node_exec::execute_node(ctx, node, attempt, &cancel_for_batch).await
                     }
                 });
+                // T9.3: a workflow node whose child run paused can't
+                // close its node (§12: the parent waits on the child's
+                // *terminal* state) — after the whole batch lands, the
+                // parent pauses too, naming the child. A root
+                // cancellation takes precedence: the loop-top check
+                // handles it as "cancelled by user".
+                let mut child_paused: Option<String> = None;
                 for result in futures::future::join_all(executions).await {
-                    result?;
+                    if let node_exec::NodeEnd::ChildPaused { reason } = result? {
+                        child_paused.get_or_insert(reason);
+                    }
+                }
+                if let Some(reason) = child_paused {
+                    if !root_cancel.is_cancelled() {
+                        ctx.emit(
+                            None,
+                            EventPayload::RunPaused(RunPausedPayload {
+                                reason: reason.clone(),
+                            }),
+                        )?;
+                        ctx.export_events_jsonl()?;
+                        return Ok(RunReport {
+                            terminal: RunTerminal::Paused { reason },
+                            state: derive(&ctx.load_events()?),
+                        });
+                    }
                 }
             }
             ScheduleStep::PublishGate { node } => {
