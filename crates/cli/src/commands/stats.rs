@@ -475,6 +475,13 @@ pub(crate) fn render_verification_findings(
             t.sample_count
         ));
     }
+    for m in &findings.unused_modes {
+        out.push_str(&format!(
+            "  mode `{}` was never chosen across {} run(s) — \
+             still worth declaring?\n",
+            m.name, m.runs_observed
+        ));
+    }
     out
 }
 
@@ -691,6 +698,13 @@ struct VerificationFindingsJson {
     never_triggered_reroutes: Vec<NeverTriggeredRerouteJson>,
     always_approved_gates: Vec<AlwaysApprovedGateJson>,
     always_first_try_tasks: Option<usize>,
+    unused_modes: Vec<UnusedModeJson>,
+}
+
+#[derive(Serialize)]
+struct UnusedModeJson {
+    name: String,
+    runs_observed: usize,
 }
 
 #[derive(Serialize)]
@@ -744,6 +758,14 @@ impl VerificationFindingsJson {
                 .always_first_try_tasks
                 .as_ref()
                 .map(|t| t.sample_count),
+            unused_modes: findings
+                .unused_modes
+                .iter()
+                .map(|m| UnusedModeJson {
+                    name: m.name.clone(),
+                    runs_observed: m.runs_observed,
+                })
+                .collect(),
         }
     }
 }

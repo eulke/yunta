@@ -366,7 +366,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **No hacer:** no convertir ningún límite en enforcement de OS (D105:
   eso no existe); no inventar campos fuera de los seis de referencia.
 
-### DI-06 — Señales de modo en rendimiento de verificación `[ ]`
+### DI-06 — Señales de modo en rendimiento de verificación `[x]`
 
 - **Origen:** T7.10 dejó fuera "modo sin uso" y el test estructural
   "nunca sugiere quitar nodos `invariant: true`" porque `modes:` no

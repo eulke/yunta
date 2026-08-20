@@ -351,3 +351,115 @@ fn no_history_flags_nothing_at_all() {
     let findings = analyze(&workflow(vec![node("x", None)]), &[]);
     assert!(findings.is_empty());
 }
+
+// --- DI-06: señales atadas a modos (§8.7, desbloqueadas por T9.1) -----------
+
+fn run_created_in_mode(mode: &str) -> Vec<Event> {
+    use std::collections::HashMap;
+    vec![event(
+        0,
+        None,
+        EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
+            manifest_hash: "h".to_string(),
+            inputs: HashMap::new(),
+            mode: mode.to_string(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "abc".to_string(),
+        }),
+    )]
+}
+
+fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
+    let mut wf = workflow(nodes);
+    wf.modes = Some(
+        mode_names
+            .iter()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    yunta_core::ModeSpec {
+                        include: yunta_core::ModeInclude::All,
+                    },
+                )
+            })
+            .collect(),
+    );
+    wf
+}
+
+#[test]
+fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
+    let wf = moded_workflow(vec![], &["quick", "standard", "full"]);
+    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+        .map(|_| run_created_in_mode("quick"))
+        .collect();
+    let findings = analyze(&wf, &history);
+    let unused: Vec<&str> = findings
+        .unused_modes
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(unused, vec!["standard", "full"]);
+    assert_eq!(
+        findings.unused_modes[0].runs_observed,
+        VERIFICATION_MIN_SAMPLES
+    );
+}
+
+#[test]
+fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
+    let wf = moded_workflow(vec![], &["quick", "full"]);
+    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES - 1)
+        .map(|_| run_created_in_mode("quick"))
+        .collect();
+    let findings = analyze(&wf, &history);
+    assert!(findings.unused_modes.is_empty());
+}
+
+#[test]
+fn a_mode_used_even_once_is_never_flagged() {
+    let wf = moded_workflow(vec![], &["quick", "full"]);
+    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+        .map(|_| run_created_in_mode("quick"))
+        .collect();
+    history.push(run_created_in_mode("full"));
+    let findings = analyze(&wf, &history);
+    assert!(findings.unused_modes.is_empty());
+}
+
+#[test]
+fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
+    // ✓ estructural de T7.10: "nunca sugiere quitar nodos `invariant:
+    // true`" — a verification node that never fails is doing its job;
+    // its never-fired re-route and its always-approved gate are
+    // excluded from the findings by construction.
+    use yunta_core::events::NodeFinishedPayload;
+    let mut lint = node(
+        "lint",
+        Some(OnFailure {
+            goto: "fix".into(),
+            max_reroutes: 2,
+        }),
+    );
+    lint.invariant = true;
+    let wf = workflow(vec![lint]);
+    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+        .map(|i| {
+            vec![event(
+                i as u64,
+                Some("lint"),
+                EventPayload::NodeFinished(NodeFinishedPayload {
+                    outcome: "clean".to_string(),
+                    tokens_used: Default::default(),
+                }),
+            )]
+        })
+        .collect();
+    let findings = analyze(&wf, &history);
+    assert!(
+        findings.never_triggered_reroutes.is_empty(),
+        "an invariant node's never-fired re-route must never be flagged: {findings:?}"
+    );
+}

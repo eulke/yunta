@@ -16,11 +16,12 @@
 //! criterion just added to a workflow with 50 historical runs starts
 //! with zero samples of its own, not the workflow's history.
 //!
-//! **Modes are out of scope here, not an oversight**: `modes:` (M9)
-//! isn't in this codebase's schema yet, so "modo sin uso" and "nunca
-//! sugiere quitar nodos `invariant: true`" (both mode-scoped signals in
-//! §8.7's own table) have nothing to analyze — see
-//! `docs/m0-status.md`'s T7.10 entry for the trigger to add them.
+//! **Mode-scoped signals (DI-06, unblocked by T9.1)**: a declared mode
+//! no run ever chose (with the same evidence floor), and the structural
+//! guard §8.7 demands — an `invariant: true` node is never the subject
+//! of a remove-shaped finding (its never-fired re-route or
+//! always-approved gate is the node doing its job, excluded by
+//! construction).
 
 use std::collections::HashMap;
 
@@ -57,12 +58,22 @@ pub struct AlwaysFirstTryTasks {
     pub sample_count: usize,
 }
 
+/// A declared mode no historical run ever chose (§8.7 "modo sin uso") —
+/// evidence is "enough runs happened and none picked it", never "it has
+/// existed a long time".
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnusedMode {
+    pub name: String,
+    pub runs_observed: usize,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VerificationFindings {
     pub never_red_criteria: Vec<NeverRedCriterion>,
     pub never_triggered_reroutes: Vec<NeverTriggeredReroute>,
     pub always_approved_gates: Vec<AlwaysApprovedGate>,
     pub always_first_try_tasks: Option<AlwaysFirstTryTasks>,
+    pub unused_modes: Vec<UnusedMode>,
 }
 
 impl VerificationFindings {
@@ -71,6 +82,7 @@ impl VerificationFindings {
             && self.never_triggered_reroutes.is_empty()
             && self.always_approved_gates.is_empty()
             && self.always_first_try_tasks.is_none()
+            && self.unused_modes.is_empty()
     }
 }
 
@@ -82,7 +94,36 @@ pub fn analyze(workflow: &Workflow, history: &[Vec<Event>]) -> VerificationFindi
         never_triggered_reroutes: never_triggered_reroutes(workflow, history),
         always_approved_gates: always_approved_gates(workflow, history),
         always_first_try_tasks: always_first_try_tasks(history),
+        unused_modes: unused_modes(workflow, history),
     }
+}
+
+/// §8.7 "modo sin uso" (DI-06): every declared mode against the mode
+/// each historical run actually recorded in its own `run_created`.
+fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> {
+    let Some(modes) = &workflow.modes else {
+        return Vec::new();
+    };
+    if history.len() < MIN_SAMPLES {
+        return Vec::new();
+    }
+    let used: std::collections::HashSet<&str> = history
+        .iter()
+        .filter_map(|events| {
+            events.iter().find_map(|e| match &e.payload {
+                EventPayload::RunCreated(p) => Some(p.mode.as_str()),
+                _ => None,
+            })
+        })
+        .collect();
+    modes
+        .keys()
+        .filter(|name| !used.contains(name.as_str()))
+        .map(|name| UnusedMode {
+            name: name.clone(),
+            runs_observed: history.len(),
+        })
+        .collect()
 }
 
 /// Every `criteria_checked` result, of any phase — pre-check red rate is
@@ -138,6 +179,12 @@ fn never_triggered_reroutes(
 ) -> Vec<NeverTriggeredReroute> {
     let mut findings = Vec::new();
     for node in flatten(&workflow.nodes) {
+        // §8.7's own structural guard (T7.10 ✓): an invariant node that
+        // never fails is verification doing its job — never a removal
+        // candidate, so never a finding.
+        if node.invariant {
+            continue;
+        }
         let Some(on_failure) = &node.on_failure else {
             continue;
         };
@@ -181,7 +228,7 @@ fn never_triggered_reroutes(
 fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<AlwaysApprovedGate> {
     let gate_node_ids: Vec<NodeId> = flatten(&workflow.nodes)
         .into_iter()
-        .filter(|n| matches!(n.kind, yunta_core::NodeKind::Gate { .. }))
+        .filter(|n| matches!(n.kind, yunta_core::NodeKind::Gate { .. }) && !n.invariant)
         .map(|n| n.id.clone())
         .collect();
     // Also every node with `on_failure` — T7.2's internal gate escalates
@@ -189,7 +236,7 @@ fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<Alw
     // by the same §5.3 object, even without `kind: gate`.
     let internal_gate_ids: Vec<NodeId> = flatten(&workflow.nodes)
         .into_iter()
-        .filter(|n| n.on_failure.is_some() && !gate_node_ids.contains(&n.id))
+        .filter(|n| n.on_failure.is_some() && !n.invariant && !gate_node_ids.contains(&n.id))
         .map(|n| n.id.clone())
         .collect();
 

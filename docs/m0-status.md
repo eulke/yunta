@@ -2598,7 +2598,13 @@ que aparece.
         pide evitar — M9 es su propio milestone, con su propia
         secuencia de dependencias (`M9 requiere M4+M5`, no M7).
         Documentado acá como gatillo: el día que `modes:` exista, estas
-        dos señales se agregan a este mismo módulo.
+        dos señales se agregan a este mismo módulo. **[Resuelto después
+        por DI-06, con T9.1 ya existente]**: señal `unused_modes` (modo
+        declarado que ningún run del historial eligió, mismo piso de
+        muestras) y el ✓ estructural — un nodo `invariant: true` queda
+        excluido por construcción de `never_triggered_reroutes` y
+        `always_approved_gates` (su re-ruta jamás disparada ES el nodo
+        haciendo su trabajo, nunca un candidato a remoción).
       - **Las tres guardas del ✓**: (a) "sugiere, jamás actúa" — cierto
         por construcción de tipos, `analyze` toma `&Workflow` (nunca
         `&mut`) y devuelve hallazgos poseídos, no hay forma de que
