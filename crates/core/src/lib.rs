@@ -13,6 +13,7 @@ mod config;
 mod error;
 pub mod events;
 mod ids;
+mod inputs;
 mod ledger;
 mod manifest;
 mod questions;
@@ -29,6 +30,7 @@ pub use config::{
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
+pub use inputs::InputSpec;
 pub use ledger::{Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, Manifest};
 pub use questions::{AnswerType, Question, QuestionsFile};

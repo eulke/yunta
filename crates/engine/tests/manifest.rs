@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{ConfigLayer, Workflow};
@@ -53,8 +54,22 @@ fn the_same_inputs_always_produce_the_same_manifest_hash() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let a = build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
-    let b = build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let a = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
+    let b = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(a.manifest_hash(), b.manifest_hash());
     assert_eq!(a.workflow_hash, b.workflow_hash);
@@ -78,7 +93,14 @@ nodes:
 "#,
     );
 
-    let frozen = build_manifest(&wf, &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let frozen = build_manifest(
+        &wf,
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
     assert_eq!(
         frozen.prompts.get(&"plan".into()).map(String::as_str),
         Some("first version")
@@ -91,7 +113,14 @@ nodes:
         frozen.prompts.get(&"plan".into()).map(String::as_str),
         Some("first version")
     );
-    let rebuilt = build_manifest(&wf, &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let rebuilt = build_manifest(
+        &wf,
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
     assert_ne!(frozen.manifest_hash(), rebuilt.manifest_hash());
 }
 
@@ -100,8 +129,14 @@ fn an_inline_prompt_freezes_nothing_from_disk() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let manifest =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert!(manifest.prompts.is_empty());
 }
@@ -121,7 +156,14 @@ nodes:
 "#,
     );
 
-    let err = build_manifest(&wf, &config(CONFIG), dir.path(), dir.path()).unwrap_err();
+    let err = build_manifest(
+        &wf,
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     match err {
         ManifestError::PromptFile { node, path, .. } => {
             assert_eq!(node.as_str(), "plan");
@@ -143,8 +185,14 @@ fn base_commit_is_the_repository_head() {
         .unwrap();
     let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
 
-    let manifest =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(manifest.base_commit, head);
 }
@@ -153,8 +201,14 @@ fn base_commit_is_the_repository_head() {
 fn a_non_git_directory_is_a_typed_error_not_a_panic() {
     let dir = tempfile::tempdir().unwrap(); // no git init
 
-    let err =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap_err();
+    let err = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
     assert!(matches!(err, ManifestError::Git { .. }));
 }
 
@@ -163,8 +217,14 @@ fn each_content_hash_reacts_only_to_its_own_content() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let base =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let base = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     let other_config = config(
         r#"
@@ -173,8 +233,14 @@ runners:
     - { adapter: mock, model: a-different-model }
 "#,
     );
-    let changed =
-        build_manifest(&workflow(WORKFLOW), &other_config, dir.path(), dir.path()).unwrap();
+    let changed = build_manifest(
+        &workflow(WORKFLOW),
+        &other_config,
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(base.workflow_hash, changed.workflow_hash);
     assert_ne!(base.config_hash, changed.config_hash);
@@ -186,8 +252,14 @@ fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let manifest =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     let yaml = serde_yaml::to_string(&manifest).unwrap();
     let reread: yunta_core::Manifest = serde_yaml::from_str(&yaml).unwrap();
@@ -201,8 +273,14 @@ fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let manifest =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(manifest.isolation, yunta_core::Isolation::Worktree);
 }
@@ -213,7 +291,14 @@ fn an_explicit_none_isolation_freezes_as_none() {
     init_repo(dir.path());
     let cfg = config("defaults:\n  isolation: none\n");
 
-    let manifest = build_manifest(&workflow(WORKFLOW), &cfg, dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &cfg,
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(manifest.isolation, yunta_core::Isolation::None);
 }
@@ -223,8 +308,14 @@ fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let manifest =
-        build_manifest(&workflow(WORKFLOW), &config(CONFIG), dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(manifest.max_parallel_nodes, 1);
 }
@@ -235,7 +326,67 @@ fn an_explicit_max_parallel_nodes_freezes_that_value() {
     init_repo(dir.path());
     let cfg = config("defaults:\n  max_parallel_nodes: 4\n");
 
-    let manifest = build_manifest(&workflow(WORKFLOW), &cfg, dir.path(), dir.path()).unwrap();
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &cfg,
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(manifest.max_parallel_nodes, 4);
+}
+
+// --- T1.5: inputs: freeze into the manifest (§2.3, D82) --------------------
+
+const WORKFLOW_WITH_INPUT: &str = r#"
+name: with-input
+inputs:
+  idea:
+    type: string
+    required: true
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+"#;
+
+#[test]
+fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let err = build_manifest(
+        &workflow(WORKFLOW_WITH_INPUT),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, ManifestError::Inputs(_)));
+    assert!(err.to_string().contains("idea"), "got: {err}");
+}
+
+#[test]
+fn a_provided_input_value_freezes_into_the_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let provided = HashMap::from([("idea".to_string(), "build a thing".to_string())]);
+    let manifest = build_manifest(
+        &workflow(WORKFLOW_WITH_INPUT),
+        &config(CONFIG),
+        dir.path(),
+        dir.path(),
+        &provided,
+    )
+    .unwrap();
+
+    assert_eq!(
+        manifest.inputs.get("idea").map(String::as_str),
+        Some("build a thing")
+    );
 }

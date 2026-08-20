@@ -3,13 +3,15 @@
 //! commit happen here, once, at run creation; everything downstream
 //! operates on the frozen value and never goes back to disk.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::{
     content_hash, ConfigLayer, Manifest, Node, NodeId, NodeKind, PromptSource, Workflow,
 };
+
+use crate::inputs::{resolve_inputs, InputsError};
 
 /// Version of the manifest's own schema (D07).
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -29,21 +31,29 @@ pub enum ManifestError {
         cwd: PathBuf,
         detail: String,
     },
+    #[error(transparent)]
+    Inputs(#[from] InputsError),
 }
 
 /// Freezes a manifest from already-parsed sources (Contrato §2.1).
 ///
 /// `workflow_dir` is the directory of the workflow file — `prompt:
 /// {file: ...}` paths resolve relative to it (§9.3). `repo` is the
-/// working tree whose `HEAD` becomes the base commit.
+/// working tree whose `HEAD` becomes the base commit, and also the base
+/// a `path`-typed input in `provided_inputs` resolves against (T1.5):
+/// inputs are validated before any worktree exists, so there is nowhere
+/// else for a relative path to mean.
 pub fn build_manifest(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_dir: &Path,
     repo: &Path,
+    provided_inputs: &HashMap<String, String>,
 ) -> Result<Manifest, ManifestError> {
     let mut workflow = workflow.clone();
     expand_implicit_dependencies(&mut workflow);
+
+    let inputs = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
 
     let mut prompts = BTreeMap::new();
     for node in &workflow.nodes {
@@ -60,6 +70,7 @@ pub fn build_manifest(
         config_hash: content_hash(config),
         workflow,
         config: config.clone(),
+        inputs,
         prompts,
         base_branch,
         base_commit,

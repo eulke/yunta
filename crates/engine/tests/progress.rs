@@ -42,6 +42,7 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
         description: None,
+        inputs: Default::default(),
         node_defaults: None,
         nodes,
     }

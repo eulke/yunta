@@ -10,17 +10,30 @@
 //! will extend these types when its own task lands (T1.1 proper, in true
 //! M1 execution), not before.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ids::NodeId;
+use crate::inputs::InputSpec;
 
-/// A workflow definition (Contrato §2, §10 — minus modes/inputs, out of
-/// scope for M-0).
+/// A workflow definition (Contrato §2, §10 — minus modes, out of scope
+/// for M-0/M7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// `inputs:` (T1.5, §2.3, D82) — name is the map key, so the schema's
+    /// own format guarantees uniqueness rather than a validation pass
+    /// over a `[{name, ...}]` list. A `BTreeMap` rather than the
+    /// declaration order: nothing in §2.3 or D82 gives that order any
+    /// meaning (unlike `modes:`, whose declaration order *is* the
+    /// promotion ladder, D44) — sorted iteration only makes catalog
+    /// output (`list_workflows`, `--help`) and `check` diagnostics
+    /// reproducible.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<String, InputSpec>,
     /// Workflow-level fallbacks a node inherits when it declares none of
     /// its own (T4.3, §11.1) — visible in the same file the team reads,
     /// never injected from a config layer (D81's own prohibition).

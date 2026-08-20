@@ -240,11 +240,10 @@ async fn execute_parallel(
 /// (the role name itself, known statically from the workflow — never the
 /// adapter/model a later resolution step picks, so no ordering
 /// dependency on `resolve_node_runner`); `project.*` mirrors whatever
-/// the merged config's `project:` group declares. `{{inputs.*}}` is
-/// deliberately absent — T1.5 owns declaring, validating and supplying
-/// input values at all; adding the namespace here first would mean
-/// inventing that schema unreviewed. See `docs/m0-status.md`'s T6.3
-/// entry.
+/// the merged config's `project:` group declares; `inputs.*` (T1.5) is
+/// every declared input's already-resolved-and-validated value, read
+/// straight from the frozen manifest — never re-resolved per node, since
+/// that would make a `default` non-deterministic across nodes (D82).
 pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, String> {
     let mut vars = BTreeMap::from([
         ("run.dir".to_string(), ctx.run_dir.display().to_string()),
@@ -266,6 +265,9 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
         if let Some(branch_prefix) = &project.branch_prefix {
             vars.insert("project.branch_prefix".to_string(), branch_prefix.clone());
         }
+    }
+    for (name, value) in &ctx.manifest.inputs {
+        vars.insert(format!("inputs.{name}"), value.clone());
     }
     vars
 }

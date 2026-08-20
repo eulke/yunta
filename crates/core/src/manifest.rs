@@ -7,9 +7,9 @@
 //! changes nothing — the manifest is a value, and `manifest_hash` is a
 //! pure function of it.
 //!
-//! Out of the M-0 cut, waiting for their schema to exist: `inputs`
-//! (T1.5), `mode` (§10), resolved `yunta_schema`, and `base_branch`
-//! (the `project:` config group is deferred from T1.2).
+//! Out of the M-0 cut, waiting for their schema to exist: `mode` (§10),
+//! resolved `yunta_schema`, and `base_branch` (the `project:` config
+//! group is deferred from T1.2). `inputs` itself landed in T1.5.
 
 use std::collections::BTreeMap;
 
@@ -30,6 +30,11 @@ pub struct Manifest {
     pub yunta_version: String,
     pub workflow: Workflow,
     pub config: ConfigLayer,
+    /// Every declared input resolved to its final string value — CLI-
+    /// provided or the spec's own `default`, already validated (T1.5,
+    /// §2.3). Frozen here so a node never resolves a default itself:
+    /// that would be per-node non-deterministic state (D82).
+    pub inputs: BTreeMap<String, String>,
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
     pub prompts: BTreeMap<NodeId, String>,

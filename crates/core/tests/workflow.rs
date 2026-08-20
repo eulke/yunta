@@ -630,3 +630,123 @@ context:
         "error was: {err}"
     );
 }
+
+// --- T1.5: inputs: (§2.3, D82) ------------------------------------------
+
+#[test]
+fn every_input_type_parses_with_its_own_type_specific_fields() {
+    let yaml = r#"
+name: with-inputs
+inputs:
+  idea:
+    type: string
+    required: true
+    description: "What to build"
+  target_branch:
+    type: string
+    default: "main"
+    pattern: "^[a-zA-Z0-9._/-]+$"
+  severity_floor:
+    type: enum
+    values: [blocking, major, minor]
+    default: major
+  max_tasks:
+    type: number
+    min: 1
+    max: 200
+    default: 40
+  changelog:
+    type: path
+  dry_run:
+    type: boolean
+    default: false
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).expect("should parse");
+    assert_eq!(workflow.inputs.len(), 6);
+
+    match &workflow.inputs["idea"] {
+        yunta_core::InputSpec::String {
+            required,
+            default,
+            description,
+            ..
+        } => {
+            assert_eq!(*required, Some(true));
+            assert_eq!(*default, None);
+            assert_eq!(description.as_deref(), Some("What to build"));
+        }
+        other => panic!("expected String, got {other:?}"),
+    }
+    match &workflow.inputs["target_branch"] {
+        yunta_core::InputSpec::String {
+            default, pattern, ..
+        } => {
+            assert_eq!(default.as_deref(), Some("main"));
+            assert_eq!(pattern.as_deref(), Some("^[a-zA-Z0-9._/-]+$"));
+        }
+        other => panic!("expected String, got {other:?}"),
+    }
+    match &workflow.inputs["severity_floor"] {
+        yunta_core::InputSpec::Enum {
+            values, default, ..
+        } => {
+            assert_eq!(values, &vec!["blocking", "major", "minor"]);
+            assert_eq!(default.as_deref(), Some("major"));
+        }
+        other => panic!("expected Enum, got {other:?}"),
+    }
+    match &workflow.inputs["max_tasks"] {
+        yunta_core::InputSpec::Number {
+            min, max, default, ..
+        } => {
+            assert_eq!(*min, Some(1.0));
+            assert_eq!(*max, Some(200.0));
+            assert_eq!(*default, Some(40.0));
+        }
+        other => panic!("expected Number, got {other:?}"),
+    }
+    assert!(matches!(
+        workflow.inputs["changelog"],
+        yunta_core::InputSpec::Path { .. }
+    ));
+    match &workflow.inputs["dry_run"] {
+        yunta_core::InputSpec::Boolean { default, .. } => assert_eq!(*default, Some(false)),
+        other => panic!("expected Boolean, got {other:?}"),
+    }
+}
+
+#[test]
+fn inputs_round_trip_through_serialization() {
+    let yaml = r#"
+name: with-inputs
+inputs:
+  idea:
+    type: string
+    required: true
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+"#;
+    let first: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let re_serialized = serde_yaml::to_string(&first).unwrap();
+    let second: yunta_core::Workflow = serde_yaml::from_str(&re_serialized).unwrap();
+    assert_eq!(first, second);
+}
+
+#[test]
+fn a_workflow_with_no_inputs_declares_an_empty_map_never_a_missing_field_error() {
+    let yaml = r#"
+name: no-inputs
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert!(workflow.inputs.is_empty());
+}

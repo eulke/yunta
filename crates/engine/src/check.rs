@@ -26,9 +26,10 @@
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
-use yunta_core::{ConfigLayer, Node, NodeId, NodeKind, Workflow};
+use yunta_core::{ConfigLayer, InputSpec, Node, NodeId, NodeKind, Workflow};
 
 use crate::ledger::globs_might_overlap;
+use crate::template::template_variables;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
@@ -81,6 +82,50 @@ pub enum CheckError {
     /// caught here rather than silently ignored at runtime (A6).
     #[error("node `{node}`: `context:` is only supported on `kind: prompt` nodes in this recorte")]
     ContextOnUnsupportedNode { node: NodeId },
+
+    /// T1.5/§2.3/D82: the two fields are mutually exclusive by
+    /// definition — a `default` is what makes an input optional at all.
+    #[error(
+        "input `{name}` declares both `required: true` and a `default` — \
+         §2.3 makes them mutually exclusive"
+    )]
+    InputRequiredWithDefault { name: String },
+
+    /// The mirror case: `required: false` with nothing to fall back to
+    /// would resolve to no value at all, which no `{{inputs.x}}` render
+    /// site can represent.
+    #[error(
+        "input `{name}` declares `required: false` with no `default` — \
+         give it a default, or drop `required: false` (the implicit default when neither is given)"
+    )]
+    InputOptionalWithoutDefault { name: String },
+
+    #[error("input `{name}` is type `enum` with an empty `values` list")]
+    InputEmptyEnumValues { name: String },
+
+    #[error("input `{name}`'s `min` ({min}) is greater than its `max` ({max})")]
+    InputMinExceedsMax {
+        name: String,
+        min: String,
+        max: String,
+    },
+
+    #[error("input `{name}`'s `pattern` `{pattern}` is not a valid regex: {detail}")]
+    InputInvalidPattern {
+        name: String,
+        pattern: String,
+        detail: String,
+    },
+
+    /// §2.3: "`check` verifica que todo `{{{{inputs.x}}}}` refiera a un
+    /// input declarado" — scanned wherever a template can appear inline
+    /// in the workflow (prompt text, `bash`/hook commands, `context:`
+    /// patterns and command/query text). A `prompt: {file: ...}` body
+    /// isn't scanned: `check` never reads files (see this module's own
+    /// doc comment), so an undeclared reference there still only
+    /// surfaces at run time, same as it did before T1.5.
+    #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
+    UndeclaredInput { node: NodeId, name: String },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -197,7 +242,152 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
         errors.push(CheckError::DependsOnCycle { path });
     }
 
+    check_input_specs(&workflow.inputs, &mut errors);
+    check_input_references(workflow, &mut errors);
+
     errors
+}
+
+/// T1.5/§2.3: each declared input's own fields are internally consistent
+/// — independent of anything else in the workflow, so this runs once
+/// over `inputs:` rather than per reference site.
+fn check_input_specs(
+    inputs: &std::collections::BTreeMap<String, InputSpec>,
+    errors: &mut Vec<CheckError>,
+) {
+    for (name, spec) in inputs {
+        let has_default = spec.has_default();
+        match spec.required_field() {
+            Some(true) if has_default => {
+                errors.push(CheckError::InputRequiredWithDefault { name: name.clone() });
+            }
+            Some(false) if !has_default => {
+                errors.push(CheckError::InputOptionalWithoutDefault { name: name.clone() });
+            }
+            _ => {}
+        }
+
+        match spec {
+            InputSpec::Enum { values, .. } if values.is_empty() => {
+                errors.push(CheckError::InputEmptyEnumValues { name: name.clone() });
+            }
+            InputSpec::Number {
+                min: Some(min),
+                max: Some(max),
+                ..
+            } if min > max => {
+                errors.push(CheckError::InputMinExceedsMax {
+                    name: name.clone(),
+                    min: min.to_string(),
+                    max: max.to_string(),
+                });
+            }
+            InputSpec::String {
+                pattern: Some(pattern),
+                ..
+            } => {
+                if let Err(e) = regex::Regex::new(pattern) {
+                    errors.push(CheckError::InputInvalidPattern {
+                        name: name.clone(),
+                        pattern: pattern.clone(),
+                        detail: e.to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// §2.3: every `{{inputs.x}}` appearing in an inline template must name
+/// a declared input. Scans exactly the text this recorte's runtime ever
+/// renders (`node_exec.rs`/`context_resolve.rs`'s own `render_template`
+/// call sites) — prompt text, bash/hook commands, and `context:`
+/// patterns/command/query — so a reference `check` accepts is guaranteed
+/// renderable and vice versa.
+fn check_input_references(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    if let Some(defaults) = &workflow.node_defaults {
+        if let Some(hooks) = &defaults.hooks {
+            for step in hooks.before.iter().chain(&hooks.after) {
+                check_template_text(&"node_defaults".into(), &step.run, workflow, errors);
+            }
+        }
+    }
+    check_input_references_in_nodes(&workflow.nodes, workflow, errors);
+}
+
+fn check_input_references_in_nodes(
+    nodes: &[Node],
+    workflow: &Workflow,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        match &node.kind {
+            NodeKind::Prompt {
+                prompt: yunta_core::PromptSource::Inline(text),
+            } => check_template_text(&node.id, text, workflow, errors),
+            NodeKind::Bash { run } => check_template_text(&node.id, run, workflow, errors),
+            NodeKind::Loop { until, prompt, .. } => {
+                check_template_text(&node.id, until, workflow, errors);
+                if let yunta_core::PromptSource::Inline(text) = prompt {
+                    check_template_text(&node.id, text, workflow, errors);
+                }
+            }
+            NodeKind::Parallel {
+                nodes: children, ..
+            } => {
+                check_input_references_in_nodes(children, workflow, errors);
+            }
+            _ => {}
+        }
+
+        if let Some(hooks) = &node.hooks {
+            for step in hooks.before.iter().chain(&hooks.after) {
+                check_template_text(&node.id, &step.run, workflow, errors);
+            }
+        }
+
+        for source in &node.context {
+            match source {
+                yunta_core::ContextSpec::Files { files } => {
+                    for pattern in files {
+                        check_template_text(&node.id, pattern, workflow, errors);
+                    }
+                }
+                yunta_core::ContextSpec::Command { command } => {
+                    check_template_text(&node.id, command, workflow, errors);
+                }
+                yunta_core::ContextSpec::Mcp { mcp } => {
+                    check_template_text(&node.id, &mcp.query, workflow, errors);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn check_template_text(
+    node: &NodeId,
+    text: &str,
+    workflow: &Workflow,
+    errors: &mut Vec<CheckError>,
+) {
+    let Ok(variables) = template_variables(text) else {
+        // An unclosed `{{` is a template-syntax error, not an inputs
+        // one — the runtime's own `render_template` reports that when
+        // this node actually executes; nothing new to say here.
+        return;
+    };
+    for variable in variables {
+        if let Some(name) = variable.strip_prefix("inputs.") {
+            if !workflow.inputs.contains_key(name) {
+                errors.push(CheckError::UndeclaredInput {
+                    node: node.clone(),
+                    name: name.to_string(),
+                });
+            }
+        }
+    }
 }
 
 /// Non-blocking findings — D100/§5.8's "can't verify, so warn" case.

@@ -43,6 +43,10 @@ rmcp = { version = "3", default-features = false, features = [
 # internally — rustls (not native-tls/OpenSSL), matching the TLS backend
 # the `reqwest` feature above already selects for rmcp's side.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# `inputs:`'s `pattern:` validation (T1.5, §2.3, D82) — the one place the
+# workspace validates a user-supplied regex against a string; nothing
+# already in the dependency tree exposes that.
+regex = "1"
 
 [dev-dependencies]
 chrono = "0.4"

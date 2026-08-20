@@ -73,9 +73,27 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
         description: None,
+        inputs: Default::default(),
         node_defaults: None,
         nodes,
     }
+}
+
+fn workflow_with_inputs(
+    nodes: Vec<Node>,
+    inputs: std::collections::BTreeMap<String, yunta_core::InputSpec>,
+) -> Workflow {
+    Workflow {
+        name: "fixture".to_string(),
+        description: None,
+        inputs,
+        node_defaults: None,
+        nodes,
+    }
+}
+
+fn input_spec(yaml: &str) -> yunta_core::InputSpec {
+    serde_yaml::from_str(yaml).unwrap()
 }
 
 fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
@@ -502,4 +520,118 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
             .any(|e| matches!(e, CheckError::DependsOnCycle { .. })),
         "a cycle formed purely through context-artifact references must be caught: {errors:?}"
     );
+}
+
+// --- T1.5: inputs: (§2.3, D82) --------------------------------------------
+
+#[test]
+fn required_true_together_with_a_default_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([(
+        "idea".to_string(),
+        input_spec("type: string\nrequired: true\ndefault: x\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, CheckError::InputRequiredWithDefault { name } if name == "idea")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn required_false_with_no_default_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([(
+        "idea".to_string(),
+        input_spec("type: string\nrequired: false\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, CheckError::InputOptionalWithoutDefault { name } if name == "idea")));
+}
+
+#[test]
+fn an_enum_input_with_no_values_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([(
+        "severity".to_string(),
+        input_spec("type: enum\nvalues: []\ndefault: x\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, CheckError::InputEmptyEnumValues { name } if name == "severity")));
+}
+
+#[test]
+fn a_number_input_with_min_above_max_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([(
+        "n".to_string(),
+        input_spec("type: number\nmin: 10\nmax: 1\ndefault: 5\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, CheckError::InputMinExceedsMax { name, .. } if name == "n")));
+}
+
+#[test]
+fn a_string_input_with_an_invalid_regex_pattern_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([(
+        "branch".to_string(),
+        input_spec("type: string\npattern: \"[\"\ndefault: main\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, CheckError::InputInvalidPattern { name, .. } if name == "branch")));
+}
+
+#[test]
+fn a_template_referencing_an_undeclared_input_is_a_check_error() {
+    let mut node = bash("plan", "echo {{inputs.idea}}", &[]);
+    node.hooks = None;
+    let wf = workflow_with_inputs(vec![node], std::collections::BTreeMap::new());
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(
+            |e| matches!(e, CheckError::UndeclaredInput { node, name } if node.as_str() == "plan" && name == "idea")
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_template_referencing_a_declared_input_passes_check() {
+    let inputs = std::collections::BTreeMap::from([(
+        "idea".to_string(),
+        input_spec("type: string\nrequired: true\n"),
+    )]);
+    let node = bash("plan", "echo {{inputs.idea}}", &[]);
+    let wf = workflow_with_inputs(vec![node], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::UndeclaredInput { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn an_undeclared_input_reference_inside_a_files_context_pattern_is_caught() {
+    let mut node = prompt("plan", "planner", &[]);
+    node.context = vec![yunta_core::ContextSpec::Files {
+        files: vec!["{{inputs.changelog}}".to_string()],
+    }];
+    let wf = workflow_with_inputs(vec![node], std::collections::BTreeMap::new());
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, CheckError::UndeclaredInput { name, .. } if name == "changelog")));
 }

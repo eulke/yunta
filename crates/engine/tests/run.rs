@@ -103,7 +103,14 @@ impl Bench {
     ) -> (RunTerminal, yunta_engine::RunState) {
         let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
         let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
-        let manifest = build_manifest(&workflow, &config, &self.worktree, &self.worktree).unwrap();
+        let manifest = build_manifest(
+            &workflow,
+            &config,
+            &self.worktree,
+            &self.worktree,
+            &HashMap::new(),
+        )
+        .unwrap();
 
         let run_dir = create_run(
             &self.run_id,
@@ -361,7 +368,14 @@ nodes:
     // no duplicate node execution (the log would show a second start).
     let workflow: Workflow = serde_yaml::from_str(workflow).unwrap();
     let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let report = execute_run(
         &bench.run_id,
         &manifest,
@@ -661,7 +675,14 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
     let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -758,7 +779,14 @@ nodes:
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_yaml::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -806,7 +834,14 @@ nodes:
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config = ConfigLayer::default();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -851,7 +886,14 @@ nodes:
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -924,7 +966,14 @@ nodes:
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -1144,7 +1193,14 @@ nodes:
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -2185,7 +2241,14 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
 
     let workflow: yunta_core::Workflow = serde_yaml::from_str(&concurrency_workflow(2)).unwrap();
     let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONCURRENCY_CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &bench.worktree, &bench.worktree).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
     let run_dir = create_run(
         &bench.run_id,
         &manifest,
@@ -3213,6 +3276,27 @@ nodes:
         }
         other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_declared_input_s_default_resolves_in_a_node_s_own_template() {
+    // T1.5: `Bench::run` never supplies `--input` values (`&HashMap::new()`
+    // throughout its own harness) — an input with a `default` is exactly
+    // the case that still has a value to resolve without one.
+    let bench = Bench::new();
+    let workflow = r#"
+name: default-input
+inputs:
+  greeting:
+    type: string
+    default: hola
+nodes:
+  - id: only
+    kind: bash
+    run: "test '{{inputs.greeting}}' = 'hola'"
+"#;
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
 }
 
 // --- T6.4: ensamblado estable-primero (§9.1) --------------------------------
