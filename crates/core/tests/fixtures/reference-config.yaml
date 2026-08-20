@@ -1,0 +1,92 @@
+# The canonical reference config (Notion: "Config y workflows de
+# referencia", Contrato v0.5) as a parse fixture — DI-13's T1.1/T1.2
+# round-trip criterion. Documented deltas from the Notion text:
+#   - limits use plain integers: YAML 1.2 resolves `2_000_000` as a
+#     string, so the canonical form drops the separators (recorded in
+#     the register, DI-05).
+version: 1
+
+project:
+  name: mi-repo
+  base_branch: main
+  branch_prefix: yunta/
+
+runners:
+  planner:
+    - { adapter: claude-code, model: claude-opus-4-8 }
+    - { adapter: codex, model: gpt-5-codex }
+  executor:
+    - { adapter: claude-code, model: claude-sonnet-4-6 }
+  reviewer:
+    - { adapter: claude-code, model: claude-sonnet-4-6, agent: benito }
+  reviewer-alt:
+    - { adapter: codex, model: gpt-5-codex }
+  mechanical:
+    - { adapter: claude-code, model: claude-haiku-4-5 }
+
+adapters:
+  claude-code:
+    binary: ~/.local/bin/claude
+  codex:
+    binary: /usr/local/bin/codex
+    adapter_settings: { sandbox: workspace-write }
+
+defaults:
+  runner: executor
+  isolation: worktree
+  timeout_minutes: 45
+  max_parallel_nodes: 4
+  on_failure: pause
+  on_interrupt: restart_node
+
+skills:
+  paths: [.yunta/skills, ~/.yunta/skills]
+  always: [conventions]
+  executors:
+    - { name: coverage-gate, kind: binary, path: .yunta/bin/coverage-gate }
+
+mcp_servers:
+  internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
+
+baseline:
+  suite: "cargo test --workspace"
+coverage:
+  cmd: "cargo llvm-cov --summary-only"
+  threshold: 90
+
+storage:
+  path: ~/.yunta/yunta.db
+  retention_days: 90
+
+paths:
+  runs: ~/.yunta/runs
+  worktrees: ~/.yunta/worktrees
+
+permissions:
+  commands:
+    deny: ["curl * | *", "sudo *"]
+  packs:
+    executors: prompt
+    publishers: { allow: [acme] }
+  network:
+    default: true
+
+limits:
+  max_tokens_per_run: 2000000
+  max_loop_iterations: 12
+  max_concurrent_runs: 3
+  max_workflow_depth: 4
+  max_artifact_bytes: 50000000
+  inline_context_bytes: 32000
+
+pricing:
+  claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
+  claude-sonnet-4-6: { cost_per_1k_tokens: 0.003 }
+
+secrets:
+  - GITHUB_TOKEN
+
+telemetry:
+  enabled: false
+  endpoint: "http://localhost:4317"
+  protocol: grpc

@@ -36,6 +36,18 @@ pub enum ProjectError {
         #[source]
         source: std::io::Error,
     },
+    /// DI-13: a layer declaring a `version:` this binary doesn't read is
+    /// refused up front — parsing on regardless could silently misread
+    /// a future format.
+    #[error(
+        "config layer `{path}` declares `version: {declared}` but this binary reads \
+         version {supported}"
+    )]
+    UnsupportedVersion {
+        path: PathBuf,
+        declared: u32,
+        supported: u32,
+    },
 }
 
 fn user_root() -> Result<PathBuf, ProjectError> {
@@ -59,10 +71,19 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
             })
         }
     };
-    let layer = serde_yaml::from_str(&contents).map_err(|e| ProjectError::Parse {
+    let layer: ConfigLayer = serde_yaml::from_str(&contents).map_err(|e| ProjectError::Parse {
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
+    if let Some(declared) = layer.version {
+        if declared != CONFIG_VERSION {
+            return Err(ProjectError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                declared,
+                supported: CONFIG_VERSION,
+            });
+        }
+    }
     Ok(Some(layer))
 }
 
@@ -86,6 +107,9 @@ pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>,
     }
     Ok(layers)
 }
+
+/// `version:` a layer may declare (DI-13) — the one this binary reads.
+const CONFIG_VERSION: u32 = 1;
 
 /// Finds an existing run's directory (DI-07's search order): (a) the
 /// current config's runs root, (b) the built-in default under the user

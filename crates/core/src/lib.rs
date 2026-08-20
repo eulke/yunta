@@ -23,10 +23,11 @@ pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
-    CommandPermissions, ConfigLayer, CoverageConfig, DefaultsConfig, ExecutorKind,
-    ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig, McpServerConfig,
-    NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
-    ProjectConfig, PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
+    CommandPermissions, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
+    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig,
+    McpServerConfig, NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig,
+    PermissionsConfig, PricingEntry, ProjectConfig, PublisherPermissions, RunnerCandidate,
+    SkillsConfig, StorageConfig, TelemetryConfig, TelemetryProtocol,
 };
 pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};

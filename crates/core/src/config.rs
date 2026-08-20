@@ -1,15 +1,11 @@
-//! Layered config types (T1.2) — **M-0 cut only**.
-//!
-//! Full T1.2 covers eight groups (`runners`, `adapters`, `mcp_servers`,
-//! `skills`, `baseline`/`coverage`, `storage`, `limits`, `paths`,
-//! `secrets`, `permissions` with its inverted merge, D51/§6.1). M-0 is not
-//! named in the Plan's own M-0 scope section at all, so this only builds
-//! the four groups something already planned for M-0 actually consumes:
-//! `runners` (resolves `Node.runner`, T1.1), `adapters` (T3.1/T7.3
-//! settings), `storage` (T2.1's SQLite path) and `paths` (run.dir/worktree
-//! locations for T7.1's real `resume`). The rest extends this module when
-//! its own consumer lands — not before (CLAUDE.md: "scope chico y
-//! declarado").
+//! Layered config types (T1.2, completed by DI-13): every group of the
+//! reference config parses and round-trips — `runners`, `adapters`,
+//! `mcp_servers`, `skills`, `baseline`/`coverage`, `storage`, `limits`,
+//! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets`,
+//! `telemetry` (the one sanctioned parse-and-hold group — inert until
+//! T13.3, per the reference's own text) and `version`. Each field
+//! entered with its consumer or an explicit refusal in `check` — never
+//! accepted and silently ignored (A6).
 //!
 //! Merge semantics (§2.2, D52): maps merge key by key, more specific layer
 //! wins per key; arrays (like a role's candidate list) replace wholesale
@@ -69,12 +65,18 @@ pub struct GitHubForgeConfig {
     pub token_env: String,
 }
 
-/// Adapter-specific settings that have a portable expression (D29): for
-/// now just a binary path override, matching the reference config.
+/// Adapter-specific settings: a portable binary override plus the
+/// reference config's opaque `adapter_settings` map (Spec Adapter §2 —
+/// only for what has NO portable expression; model/agent/permissions
+/// are typed request fields precisely so this stays small). Passed
+/// through to `SessionRequest.adapter_settings` untouched; the adapter
+/// validates what it can in `probe()` and rejects what it doesn't know.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AdapterSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// `storage:` (D53 — SQLite is the only backend).
@@ -138,15 +140,27 @@ pub enum Isolation {
     None,
 }
 
-/// `defaults:` — **M-0 cut**: `isolation` (T4.2's consumer) and
-/// `max_parallel_nodes` (T4.1's consumer). The reference config's
-/// `runner`/`timeout_minutes`/`on_failure`/`on_interrupt` wait for their
-/// own consumers (T4.4/T4.5) — same "extend when consumed" rule as every
-/// other group here.
+/// `defaults:` — the reference config's whole group (DI-13). Each field
+/// has its consumer: `isolation` (T4.2), `max_parallel_nodes` (T4.1),
+/// `on_interrupt` (T4.5), `runner` (a node that declares none),
+/// `timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is
+/// built — `check` refuses the others rather than accepting them
+/// silently, A6).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Isolation>,
+    /// The role a node without `runner:` resolves through (DI-13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
+    /// Per-session wall-clock budget (`Budget.timeout`), in minutes —
+    /// the granularity the reference schema uses for whole sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_minutes: Option<u64>,
+    /// What a failed node without its own `on_failure:` does. Only
+    /// `pause` (today's behavior) is built; `check` refuses the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<DefaultOnFailure>,
     /// How many DAG nodes with no dependency on each other the scheduler
     /// may run at once (T4.1). Absent means the schema's own default of
     /// `1`, not "unbounded" — §5.5 states the analogous rationale for
@@ -159,6 +173,45 @@ pub struct DefaultsConfig {
     /// schema's own, so absent here changes nothing either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_interrupt: Option<OnInterrupt>,
+}
+
+/// `defaults.on_failure` values (reference schema). Only `Pause` has an
+/// implementation — the enum still parses all three so the reference
+/// config round-trips, and `check` names the unimplemented ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultOnFailure {
+    Pause,
+    Abort,
+    Continue,
+}
+
+/// One `pricing:` entry (§8.4, reference shape): a struct rather than a
+/// bare number so a later per-direction price is a field addition, not
+/// a schema break.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PricingEntry {
+    pub cost_per_1k_tokens: f64,
+}
+
+/// `telemetry:` (§8.8) — parsed so the reference config round-trips;
+/// **inert until T13.3 (OTel)**, and the reference text itself says so:
+/// this is the one sanctioned parse-and-hold group.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TelemetryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<TelemetryProtocol>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryProtocol {
+    Grpc,
+    Http,
 }
 
 /// `limits:` (§8.3, DI-05) — declared budgets and guards. Every field is
@@ -351,6 +404,10 @@ pub struct NetworkPermissions {
 /// fields, only combine what layers actually set.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ConfigLayer {
+    /// `version: 1` (reference config) — the layer file's own format
+    /// version. The loader refuses any value this binary doesn't speak.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runners: Option<HashMap<String, Vec<RunnerCandidate>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -381,9 +438,16 @@ pub struct ConfigLayer {
     /// means everything stays in tokens — the engine has no opinion of
     /// its own on what a token costs, and never invents one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pricing: Option<HashMap<String, f64>>,
+    pub pricing: Option<HashMap<String, PricingEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forge: Option<ForgeConfig>,
+    /// `secrets:` (I12) — env var *names* a session may receive; values
+    /// only ever come from the process environment at spawn time, and
+    /// nothing undeclared reaches a session's env at all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<TelemetryConfig>,
 }
 
 impl ConfigLayer {
@@ -424,6 +488,15 @@ impl ConfigLayer {
             .unwrap_or_default()
     }
 
+    /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
+    /// hidden default: absent means unlimited, exactly as before.
+    pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {
+        self.defaults
+            .as_ref()
+            .and_then(|defaults| defaults.timeout_minutes)
+            .map(|minutes| std::time::Duration::from_secs(minutes * 60))
+    }
+
     /// `limits.max_loop_iterations`, with the reference default (`12`)
     /// applied — the only net under a ledger whose state oscillates
     /// forever, so "absent" means the reference cap, never "unbounded".
@@ -447,6 +520,19 @@ impl ConfigLayer {
 
 fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
     ConfigLayer {
+        version: more_specific.version.or(base.version),
+        // Union, order-preserving: every layer's declared secret names
+        // stand — a repo can add names, never silently drop the org's.
+        secrets: {
+            let mut secrets = base.secrets;
+            for name in more_specific.secrets {
+                if !secrets.contains(&name) {
+                    secrets.push(name);
+                }
+            }
+            secrets
+        },
+        telemetry: more_specific.telemetry.or(base.telemetry),
         runners: merge_map_replacing_values(base.runners, more_specific.runners),
         adapters: merge_map_of_fields(
             base.adapters,
@@ -664,6 +750,9 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
 fn merge_defaults_config(base: DefaultsConfig, more_specific: DefaultsConfig) -> DefaultsConfig {
     DefaultsConfig {
         isolation: more_specific.isolation.or(base.isolation),
+        runner: more_specific.runner.or(base.runner),
+        timeout_minutes: more_specific.timeout_minutes.or(base.timeout_minutes),
+        on_failure: more_specific.on_failure.or(base.on_failure),
         max_parallel_nodes: more_specific.max_parallel_nodes.or(base.max_parallel_nodes),
         on_interrupt: more_specific.on_interrupt.or(base.on_interrupt),
     }
@@ -757,6 +846,7 @@ fn merge_adapter_settings(
 ) -> AdapterSettings {
     AdapterSettings {
         binary: more_specific.binary.or(base.binary),
+        adapter_settings: more_specific.adapter_settings.or(base.adapter_settings),
     }
 }
 

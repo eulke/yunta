@@ -47,7 +47,14 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       del Contrato reportada, ver `docs/eventos.md` §0)
 - [x] **T0.1** — workspace de Cargo
 - [x] **T0.3** — tipos de error (`YuntaError`) + `tracing`
-- [x] **T1.1** (recorte) — schema `prompt`/`bash`/`loop` en `yunta-core`
+- [x] **T1.1** (recorte) — schema `prompt`/`bash`/`loop` en `yunta-core`.
+      **Recorte cerrado por DI-13**: el ✓ original ("los YAML de referencia
+      parsean round-trip") corre como test — `build-feature.yaml` y el
+      config de referencia son fixtures reales en
+      `crates/core/tests/fixtures/`, con dos deltas marcados en los
+      propios fixtures: el fan-out `runners: []` del nodo `review` es de
+      T9.4, y los enteros con `_` de `limits` usan la forma canónica sin
+      separador (YAML 1.2, decisión registrada en DI-05).
 - [x] **T2.1** — storage: SQLite WAL, event log append/read/list (`yunta-storage`)
 - [x] **T2.2** — los 31 tipos de payload de evento (`yunta_core::events`)
 - [x] **T2.3** — derivación de estado por replay (`yunta_engine::derive`)
@@ -166,6 +173,15 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
       Confirmado corriendo verde en GitHub Actions real (run `32094336162`, rama
       `claude/yunta-m0-bootstrap-60o1u2`) — ver nota de corrección abajo.
 - [x] **T1.2** (recorte) — config en capas: `runners`/`adapters`/`storage`/`paths`.
+      **Recorte cerrado por DI-13**: todos los grupos de la referencia
+      parsean y hacen round-trip, cada uno con consumidor o rechazo
+      explícito — `version` (validado == 1 al cargar), `defaults`
+      completo (`runner` como fallback de nodo, `timeout_minutes` →
+      `Budget.timeout`, `on_failure` solo `pause` — otro valor es error
+      de check), `skills.paths`/`always`, `adapter_settings` (passthrough
+      opaco), `secrets` (única fuente del env de sesión, I12),
+      `telemetry` (parse-and-hold sancionado por la propia referencia) y
+      `pricing` con la forma `{cost_per_1k_tokens}` de la doc.
 - [x] **T1.3** (recorte) — `yunta check` como función pura en `yunta-engine`.
 - [x] **Revisión de calidad autoiniciada** (regla de CLAUDE.md "nada de unwrap()/expect()
       fuera de tests"): 4 violaciones encontradas por grep en código de librería,

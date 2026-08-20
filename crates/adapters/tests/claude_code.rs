@@ -25,6 +25,7 @@ fn stub_path() -> PathBuf {
 
 fn adapter() -> ClaudeCodeAdapter {
     ClaudeCodeAdapter::new(&AdapterSettings {
+        adapter_settings: None,
         binary: Some(stub_path()),
     })
 }

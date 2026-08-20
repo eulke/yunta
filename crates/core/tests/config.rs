@@ -59,6 +59,7 @@ fn user_wins_over_org_for_a_field_repo_never_sets() {
             "claude-code".to_string(),
             AdapterSettings {
                 binary: Some(PathBuf::from("/usr/bin/claude")),
+                adapter_settings: None,
             },
         )])),
         ..Default::default()
@@ -68,6 +69,7 @@ fn user_wins_over_org_for_a_field_repo_never_sets() {
             "claude-code".to_string(),
             AdapterSettings {
                 binary: Some(PathBuf::from("~/.local/bin/claude")),
+                adapter_settings: None,
             },
         )])),
         ..Default::default()

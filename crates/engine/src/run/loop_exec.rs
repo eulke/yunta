@@ -80,6 +80,11 @@ pub(super) async fn execute_loop(
     } else {
         skills
     };
+    let setup = crate::task_cycle::SessionSetup {
+        skills,
+        adapter_settings: ctx.adapter_settings(&chosen.adapter),
+        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
+    };
 
     let Some(ledger) = load_registered_ledger(ctx)? else {
         return fail(
@@ -194,7 +199,7 @@ pub(super) async fn execute_loop(
                 adapter.as_ref(),
                 scope_expansion,
                 cancel,
-                &skills,
+                &setup,
             )
         }))
         .await;
@@ -643,7 +648,7 @@ async fn dispatch_task_in_isolation<'a>(
     adapter: &dyn yunta_adapters::Adapter,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     cancel: &tokio_util::sync::CancellationToken,
-    skills: &[PathBuf],
+    setup: &crate::task_cycle::SessionSetup,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
@@ -691,7 +696,7 @@ async fn dispatch_task_in_isolation<'a>(
         &granted_paths_for(events, &task.id),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
-        skills,
+        setup,
     )
     .await?;
 

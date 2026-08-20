@@ -59,7 +59,7 @@ pub use stats::{
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,
-    PreCheckOutcome, SessionObserver, TaskCycleError, TaskCycleReport, TaskOutcome,
+    PreCheckOutcome, SessionObserver, SessionSetup, TaskCycleError, TaskCycleReport, TaskOutcome,
     DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};

@@ -199,11 +199,18 @@ impl RunCtx<'_> {
     /// must not resurface as a zero-token session budget). `timeout`
     /// stays `None`: `defaults.timeout_minutes` is outside T1.2's cut.
     pub(crate) fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
+        // `defaults.timeout_minutes` (DI-13) applies on every path —
+        // the wall clock is orthogonal to the token cap and to a
+        // human's `continue`.
+        let timeout = self.manifest.config.resolved_session_timeout();
         if self
             .budget_lifted
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            return Ok(yunta_adapters::Budget::default());
+            return Ok(yunta_adapters::Budget {
+                timeout,
+                ..Default::default()
+            });
         }
         let Some(cap) = self
             .manifest
@@ -212,7 +219,10 @@ impl RunCtx<'_> {
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         else {
-            return Ok(yunta_adapters::Budget::default());
+            return Ok(yunta_adapters::Budget {
+                timeout,
+                ..Default::default()
+            });
         };
         let state = derive(&self.load_events()?);
         let non_terminal = flatten(&self.manifest.workflow.nodes)
@@ -230,8 +240,24 @@ impl RunCtx<'_> {
                 budget::tokens_spent(state.total_tokens),
                 non_terminal,
             )),
+            timeout,
             ..Default::default()
         })
+    }
+
+    /// The opaque `adapter_settings` the config declares for `adapter`
+    /// (DI-13) — passed through to the request untouched.
+    pub(crate) fn adapter_settings(
+        &self,
+        adapter: &str,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        self.manifest
+            .config
+            .adapters
+            .as_ref()
+            .and_then(|adapters| adapters.get(adapter))
+            .and_then(|settings| settings.adapter_settings.clone())
+            .unwrap_or_default()
     }
 }
 

@@ -292,7 +292,7 @@ fn format_pct(fraction: f64) -> String {
 
 fn currency_line(
     tokens: u64,
-    pricing: Option<&std::collections::HashMap<String, f64>>,
+    pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
 ) -> Option<String> {
     // §8.4: a currency estimate needs a *model* to price against; with
     // more than one model priced and no per-node attribution surfaced
@@ -302,7 +302,11 @@ fn currency_line(
     if pricing.is_empty() {
         return None;
     }
-    let avg_per_1k: f64 = pricing.values().sum::<f64>() / pricing.len() as f64;
+    let avg_per_1k: f64 = pricing
+        .values()
+        .map(|entry| entry.cost_per_1k_tokens)
+        .sum::<f64>()
+        / pricing.len() as f64;
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
         "  ~{estimate:.2} (avg of {} priced model(s), never authoritative)",
@@ -314,7 +318,7 @@ fn render_run_stats(
     run_id: &RunId,
     mode: &str,
     stats: &RunStats,
-    pricing: Option<&std::collections::HashMap<String, f64>>,
+    pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
 ) {
     println!("run {run_id} — mode {mode}");
     match stats.cptv {
@@ -599,7 +603,7 @@ impl RunStatsJson {
         run_id: &RunId,
         mode: &str,
         stats: &RunStats,
-        pricing: Option<&std::collections::HashMap<String, f64>>,
+        pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
     ) -> Self {
         let total = stats.total_tokens.input + stats.total_tokens.output;
         Self {

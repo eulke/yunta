@@ -321,6 +321,31 @@ pub async fn post_check(
     run_all_criteria(task, cwd, memo).await
 }
 
+/// Everything about *how* one node's sessions open (DI-13), resolved
+/// once by the engine and threaded through the cycle: the mounted
+/// skills, the adapter's opaque settings, and the env — which is ONLY
+/// the declared secret names present in the engine's own environment
+/// (I12: values never touch the log, nothing undeclared leaks).
+#[derive(Debug, Clone, Default)]
+pub struct SessionSetup {
+    pub skills: Vec<PathBuf>,
+    pub adapter_settings: serde_json::Map<String, serde_json::Value>,
+    pub env: std::collections::HashMap<String, String>,
+}
+
+impl SessionSetup {
+    /// The env a session may see (I12): declared names, present values.
+    pub fn secrets_env(
+        config: &yunta_core::ConfigLayer,
+    ) -> std::collections::HashMap<String, String> {
+        config
+            .secrets
+            .iter()
+            .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
+            .collect()
+    }
+}
+
 /// What a session dispatch needs from its surrounding run (DI-08/DI-09),
 /// abstracted so `run_task` stays callable without a full run context
 /// (its own integration tests): append the session's audit events, and
@@ -579,7 +604,7 @@ pub async fn run_task(
     already_granted_paths: &[String],
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     cancel: &CancellationToken,
-    skills: &[PathBuf],
+    setup: &SessionSetup,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -629,11 +654,11 @@ pub async fn run_task(
             model: None,
             agent: None,
             permissions: profile,
-            env: Default::default(),
+            env: setup.env.clone(),
             edit_constraints: Some(task.scope.clone()),
             budget,
-            adapter_settings: Default::default(),
-            skills: skills.to_vec(),
+            adapter_settings: setup.adapter_settings.clone(),
+            skills: setup.skills.clone(),
         };
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit)
             .await

@@ -867,12 +867,20 @@ pub(super) fn resolve_node_runner(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Result<yunta_core::RunnerCandidate, NodeEnd>, RunError> {
-    let Some(role) = &node.runner else {
+    // DI-13: a node without `runner:` falls back to `defaults.runner`.
+    let default_runner = ctx
+        .manifest
+        .config
+        .defaults
+        .as_ref()
+        .and_then(|defaults| defaults.runner.as_ref());
+    let Some(role) = node.runner.as_ref().or(default_runner) else {
         let end = fail(
             ctx,
             node,
             format!(
-                "node `{}` has no `runner:` and M-0 has no `defaults.runner` — declare one",
+                "node `{}` has no `runner:` and the config declares no `defaults.runner` — \
+                 declare one",
                 node.id
             ),
             false,
@@ -958,10 +966,10 @@ async fn execute_prompt(
         model: Some(chosen.model),
         agent: chosen.agent,
         permissions: session_profile(node),
-        env: Default::default(),
+        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
         edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
         budget: ctx.session_budget()?,
-        adapter_settings: Default::default(),
+        adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
     };
 

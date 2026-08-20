@@ -68,6 +68,17 @@ pub enum CheckError {
         glob_b: String,
     },
 
+    /// DI-13: `defaults.on_failure` values beyond `pause` (today's
+    /// behavior) have no implementation — refused, never silently read
+    /// as `pause`.
+    #[error(
+        "`defaults.on_failure: {on_failure:?}` is not built yet — only `pause` is; remove \
+         the field or declare `pause`"
+    )]
+    DefaultOnFailureUnsupported {
+        on_failure: yunta_core::DefaultOnFailure,
+    },
+
     /// DI-13: `fresh_context: false` requires session resume (DI-23),
     /// which isn't built — refused up front instead of accepted and
     /// silently ignored (A6).
@@ -276,6 +287,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     check_fanout_scopes(workflow, config, &mut errors);
     check_fresh_context(&workflow.nodes, &mut errors);
     check_yunta_schema(workflow, &mut errors);
+    check_config_defaults(config, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -1017,6 +1029,34 @@ fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
         }
     }
     None
+}
+
+/// DI-13: config values the schema parses but nothing implements yet
+/// must be refused, never accepted and ignored (A6). Today that is
+/// `defaults.on_failure` beyond `pause` (the built behavior), and a
+/// `defaults.runner` that `runners:` doesn't define.
+fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    let Some(defaults) = &config.defaults else {
+        return;
+    };
+    if let Some(on_failure) = defaults.on_failure {
+        if on_failure != yunta_core::DefaultOnFailure::Pause {
+            errors.push(CheckError::DefaultOnFailureUnsupported { on_failure });
+        }
+    }
+    if let Some(runner) = &defaults.runner {
+        let defined = config
+            .runners
+            .as_ref()
+            .and_then(|runners| runners.get(runner))
+            .is_some_and(|candidates| !candidates.is_empty());
+        if !defined {
+            errors.push(CheckError::UnknownRunner {
+                node: "defaults".into(),
+                runner: runner.clone(),
+            });
+        }
+    }
 }
 
 /// DI-13: `fresh_context: false` names a capability (session resume,

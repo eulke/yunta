@@ -632,7 +632,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   la aproximación estática (par sin orden relativo) es la regla, y se
   documenta como tal.
 
-### DI-13 — Schema completo de T1.1: round-trip de los YAML de referencia `[ ]`
+### DI-13 — Schema completo de T1.1: round-trip de los YAML de referencia `[x]`
 
 - **Origen:** el ✓ de T1.1 ("los tres YAML de referencia parsean sin
   pérdida, round-trip") sigue sin cumplirse. Faltantes confirmados
@@ -688,9 +688,27 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
      especificar" de T5.8 queda resuelto ahí, no con una degradación
      placeholder.
   6. Test de cierre: los tres YAML de referencia completos (menos los
-     bloques de T8.2/T9.3, marcados) como fixtures reales en
+     bloques de T8.2/T9.3 **y el fan-out `runners: []`/`agent:` por
+     nodo de T9.4**, marcados) como fixtures reales en
      `crates/core/tests/fixtures/`, round-trip byte-comparable a nivel
      de árbol serde.
+  7. **Ampliación al implementar (el ✓ del round-trip de config.yaml la
+     exige — faltantes confirmados contra la referencia real, no
+     listados arriba):** `version: 1` (validado == 1 al cargar la capa),
+     `defaults.runner` (consumidor: nodo sin `runner:`),
+     `defaults.timeout_minutes` (consumidor: `Budget.timeout` — cierra
+     la corrección de DI-05 etapa 3), `defaults.on_failure` (solo
+     `pause` implementado: otro valor es error de check accionable,
+     jamás aceptación muda), `adapters.*.adapter_settings` (passthrough
+     opaco a `SessionRequest.adapter_settings`), `secrets:` (nombres de
+     env vars; consumidor: `SessionRequest.env` se puebla SOLO con las
+     declaradas presentes en el ambiente — I12), `telemetry:` (parse y
+     nada más: la propia referencia lo declara inerte hasta T13.3), y
+     `pricing` con la forma de la referencia
+     (`{modelo: {cost_per_1k_tokens}}` — la doc gana sobre el
+     `{modelo: f64}` que T7.5 implementó). Los `2_000_000` con guión
+     bajo de la referencia no son enteros en YAML 1.2: el fixture usa
+     la forma canónica sin separador (decisión ya registrada en DI-05).
 - **✓ Criterios:** `build-feature.yaml` y `config.yaml` de referencia
   parsean round-trip; `cleanup: worktree` deja el disco sin el worktree
   tras un run terminado (y el run.dir intacto); `distill` declarado
