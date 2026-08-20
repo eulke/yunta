@@ -635,10 +635,11 @@ pub(crate) async fn dispatch_session(
 /// `profile` is the node's own rung of the same ladder, forwarded to
 /// every session this cycle opens.
 /// `scope_expansion` carries the loop node's own §6.2 settings (absent
-/// means the schema's own default, `deny`) plus how many expansions this
-/// run has already granted before this task cycle started — the caller
-/// derives that count from the log (§6.2's `max_per_run` is run-scoped,
-/// not task-scoped), `run_task` only reads and threads it through.
+/// means the schema's own default, `deny`); `grants` is the batch's
+/// shared [`crate::scope_expansion::GrantLedger`] (DI-16) — §6.2's
+/// `max_per_run` is run-scoped, not task-scoped, and the ledger's
+/// atomic cap window is what makes the count exact when several batch
+/// members request at once.
 /// `already_granted_paths` (DI-01) are the paths every *prior*
 /// `scope_expansion_granted` on the log authorized for this task — a
 /// human grant lands between attempts, so the retry's effective scope
@@ -655,7 +656,7 @@ pub async fn run_task(
     permissions: Option<&yunta_core::PermissionsConfig>,
     profile: PermissionProfile,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
-    granted_so_far: u32,
+    grants: &crate::scope_expansion::GrantLedger,
     already_granted_paths: &[String],
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     cancel: &CancellationToken,
@@ -695,7 +696,6 @@ pub async fn run_task(
     }
 
     let mut attempts = Vec::new();
-    let mut granted_this_call = granted_so_far;
     for attempt in 1..=(max_retries + 1) {
         // §5.2 step 3: minimal brief — the node's instruction plus which
         // task is this session's, never the plan as prose. Every attempt
@@ -765,7 +765,7 @@ pub async fn run_task(
                         mode,
                         within,
                         max_per_run,
-                        granted_this_call,
+                        grants,
                         &expansion_request,
                         cwd,
                     )
@@ -774,9 +774,6 @@ pub async fn run_task(
                         task: task.id.clone(),
                         source,
                     })?;
-                    if decision == crate::scope_expansion::Decision::Granted {
-                        granted_this_call += 1;
-                    }
                     Some(crate::scope_expansion::ScopeExpansionOutcome {
                         request: expansion_request,
                         precheck_exit,

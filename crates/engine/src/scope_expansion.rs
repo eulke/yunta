@@ -155,16 +155,55 @@ pub struct ScopeExpansionOutcome {
     pub decision: Decision,
 }
 
+/// The run's expansion-grant accounting under concurrency (DI-16): the
+/// expensive evaluation (proposed-criterion pre-check, rule matching,
+/// diffs) runs fully concurrent outside any lock; only the cap window —
+/// read the count, decide against `max_per_run`, commit the grant — is
+/// atomic, so `max_per_run` holds *exactly* even when a whole batch
+/// requests at once. One ledger per batch, seeded from the log (grants
+/// from prior batches are already events by the time a batch starts —
+/// integration is serial and completes first).
+pub struct GrantLedger {
+    granted: tokio::sync::Mutex<u32>,
+}
+
+impl GrantLedger {
+    pub fn new(granted_so_far: u32) -> Self {
+        Self {
+            granted: tokio::sync::Mutex::new(granted_so_far),
+        }
+    }
+
+    /// The atomic window: a provisional `Granted` commits (or turns
+    /// into `Escalate` if the cap is already spent); any other decision
+    /// passes through untouched — but an exhausted cap escalates
+    /// regardless of what the mode would have said, same precedence the
+    /// pre-DI-16 sequential check applied.
+    async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
+        let mut granted = self.granted.lock().await;
+        if let Some(cap) = cap {
+            if *granted >= cap {
+                return Decision::Escalate;
+            }
+        }
+        if provisional == Decision::Granted {
+            *granted += 1;
+        }
+        provisional
+    }
+}
+
 /// Decides one request (§6.2): the proposed criterion's own pre-check
 /// runs first, in every mode — a criterion that already passes is
 /// trivial and rejected without consulting anyone, the same "pre-check
-/// en rojo" logic §5.2 already applies to task criteria. Then the cap,
-/// then the mode.
+/// en rojo" logic §5.2 already applies to task criteria. Then the mode
+/// evaluates (still outside any lock), and the cap's atomic window
+/// (`GrantLedger::commit`) has the last word.
 pub async fn evaluate(
     mode: ScopeExpansionMode,
     within: &[String],
     max_per_run: Option<u32>,
-    granted_so_far: u32,
+    grants: &GrantLedger,
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
 ) -> Result<(Option<i32>, Decision), ScopeExpansionError> {
@@ -181,20 +220,14 @@ pub async fn evaluate(
         ));
     }
 
-    if let Some(cap) = max_per_run {
-        if granted_so_far >= cap {
-            return Ok((precheck_exit, Decision::Escalate));
-        }
-    }
-
-    let decision = match mode {
+    let provisional = match mode {
         ScopeExpansionMode::Deny => {
             Decision::Denied("scope_expansion mode is deny (the default)".to_string())
         }
         ScopeExpansionMode::Ask => Decision::Escalate,
         ScopeExpansionMode::Rules => evaluate_rules(within, request, task_worktree).await?,
     };
-    Ok((precheck_exit, decision))
+    Ok((precheck_exit, grants.commit(max_per_run, provisional).await))
 }
 
 async fn evaluate_rules(

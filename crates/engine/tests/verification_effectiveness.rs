@@ -103,6 +103,7 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
         exit_code,
         r#type: None,
         reused: false,
+        duration_ms: None,
     }
 }
 

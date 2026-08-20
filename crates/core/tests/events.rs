@@ -77,6 +77,7 @@ fn all_kinds() -> Vec<EventPayload> {
                 exit_code: 1,
                 r#type: None,
                 reused: false,
+                duration_ms: None,
             }],
         }),
         EventPayload::TaskStatusChanged(TaskStatusChangedPayload {

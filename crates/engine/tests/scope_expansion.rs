@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use yunta_core::events::{ProposedCriterion, ScopeExpansionMode};
-use yunta_engine::scope_expansion::{evaluate, Decision, ScopeExpansionRequest};
+use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
 
 fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
@@ -44,9 +44,16 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
     // consultar" — cierto incluso en `ask`, que de otro modo escalaría.
     let dir = repo();
     let req = request(&["src/x.rs"], Some("true"));
-    let (precheck, decision) = evaluate(ScopeExpansionMode::Ask, &[], None, 0, &req, dir.path())
-        .await
-        .unwrap();
+    let (precheck, decision) = evaluate(
+        ScopeExpansionMode::Ask,
+        &[],
+        None,
+        &GrantLedger::new(0),
+        &req,
+        dir.path(),
+    )
+    .await
+    .unwrap();
     assert_eq!(precheck, Some(0));
     match decision {
         Decision::Denied(reason) => assert!(reason.contains("already passes")),
@@ -58,9 +65,16 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
 async fn deny_mode_denies_without_running_any_rule() {
     let dir = repo();
     let req = request(&["src/x.rs"], None);
-    let (_precheck, decision) = evaluate(ScopeExpansionMode::Deny, &[], None, 0, &req, dir.path())
-        .await
-        .unwrap();
+    let (_precheck, decision) = evaluate(
+        ScopeExpansionMode::Deny,
+        &[],
+        None,
+        &GrantLedger::new(0),
+        &req,
+        dir.path(),
+    )
+    .await
+    .unwrap();
     match decision {
         Decision::Denied(reason) => assert!(reason.contains("deny")),
         other => panic!("expected Denied, got {other:?}"),
@@ -71,9 +85,16 @@ async fn deny_mode_denies_without_running_any_rule() {
 async fn ask_mode_escalates_instead_of_deciding() {
     let dir = repo();
     let req = request(&["src/x.rs"], Some("false"));
-    let (_precheck, decision) = evaluate(ScopeExpansionMode::Ask, &[], None, 0, &req, dir.path())
-        .await
-        .unwrap();
+    let (_precheck, decision) = evaluate(
+        ScopeExpansionMode::Ask,
+        &[],
+        None,
+        &GrantLedger::new(0),
+        &req,
+        dir.path(),
+    )
+    .await
+    .unwrap();
     assert_eq!(decision, Decision::Escalate);
 }
 
@@ -86,7 +107,7 @@ async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
         ScopeExpansionMode::Rules,
         &["src.rs".to_string()],
         None,
-        0,
+        &GrantLedger::new(0),
         &req,
         dir.path(),
     )
@@ -105,7 +126,7 @@ async fn rules_mode_denies_a_path_outside_within() {
         ScopeExpansionMode::Rules,
         &["src/**".to_string()],
         None,
-        0,
+        &GrantLedger::new(0),
         &req,
         dir.path(),
     )
@@ -126,7 +147,7 @@ async fn rules_mode_requires_a_proposed_criterion() {
         ScopeExpansionMode::Rules,
         &["src.rs".to_string()],
         None,
-        0,
+        &GrantLedger::new(0),
         &req,
         dir.path(),
     )
@@ -149,7 +170,7 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
         ScopeExpansionMode::Rules,
         &["f*.rs".to_string()],
         None,
-        0,
+        &GrantLedger::new(0),
         &req,
         dir.path(),
     )
@@ -170,7 +191,7 @@ async fn an_exhausted_cap_escalates_even_under_rules_mode() {
         ScopeExpansionMode::Rules,
         &["src.rs".to_string()],
         Some(2),
-        2, // already at the cap
+        &GrantLedger::new(2), // already at the cap
         &req,
         dir.path(),
     )
@@ -192,7 +213,7 @@ async fn a_cap_not_yet_reached_does_not_escalate() {
         ScopeExpansionMode::Rules,
         &["src.rs".to_string()],
         Some(3),
-        2,
+        &GrantLedger::new(2),
         &req,
         dir.path(),
     )

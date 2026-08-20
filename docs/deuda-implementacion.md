@@ -887,7 +887,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   aprendido reordena, `reused` sin duración, veredicto invariante ante
   permutación, payload viejo parsea).
 
-### DI-16 — Race de `max_per_run` bajo concurrencia `[ ]`
+### DI-16 — Race de `max_per_run` bajo concurrencia `[x]`
 
 - **Origen:** T5.10/T5.11 — "el cap puede excederse hasta en
   `concurrency - 1` dentro de un lote". Aceptada entonces porque
@@ -903,6 +903,15 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   2 granted, 2 escaladas, determinista en el conteo (no en el orden).
   Borrar el párrafo de "soft race documentada" de `m0-status.md` y el
   doc comment de `granted_count`.
+- **Nota de cierre:** `GrantLedger` (`scope_expansion.rs`, exportado):
+  un `tokio::Mutex<u32>` por lote, sembrado de `granted_count(log)`;
+  `evaluate` computa el pre-check y el modo fuera del lock y `commit`
+  aplica la precedencia de siempre (cap agotado → `Escalate` gane lo
+  que gane el modo; `Granted` provisional incrementa bajo el lock).
+  `run_task` cambió de firma (`granted_so_far: u32` →
+  `grants: &GrantLedger`). El solape teórico entre dos nodos loop
+  corriendo en paralelo (cada uno con su ledger de lote) queda igual
+  que siempre — el ítem nombraba la race intra-lote, que era la real.
 
 ### DI-17 — `context:` a nivel loop/tarea `[ ]`
 

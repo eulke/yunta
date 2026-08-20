@@ -5523,3 +5523,88 @@ sessions:
         "the node's own agent wins over the candidate's (§13.3)"
     );
 }
+
+#[tokio::test]
+async fn max_per_run_holds_exactly_under_a_fully_concurrent_batch() {
+    // DI-16: four tasks in ONE batch (`concurrency: 4`) all request an
+    // expansion under `rules` with `max_per_run: 2`. The cap window
+    // (read count → decide → commit) is atomic across the batch, so the
+    // count is deterministic — exactly 2 granted, 2 escalated — never
+    // "up to concurrency - 1 over".
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = r#"
+name: capped-concurrency
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    concurrency: 4
+    prompt: "Read your task from the ledger and implement it."
+    scope_expansion:
+      mode: rules
+      within: ["extra-*.txt"]
+      max_per_run: 2
+"#;
+    let mut ledger = String::from("tasks:\n");
+    for n in 1..=4 {
+        ledger.push_str(&task_yaml(
+            &format!("task-{n}"),
+            &format!("t{n}"),
+            &format!("a{n}.txt"),
+            &format!("test -f a{n}.txt"),
+        ));
+    }
+
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    for n in 1..=4 {
+        let request_yaml = format!(
+            "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"
+        );
+        fixture.push_str(&format!(
+            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: a{n}.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-{n} }}\n",
+            yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+            request_yaml,
+        ));
+    }
+
+    let (_terminal, _state) = bench.run(workflow, &fixture).await;
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let requested = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                yunta_core::events::EventPayload::ScopeExpansionRequested(_)
+            )
+        })
+        .count();
+    let granted = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                yunta_core::events::EventPayload::ScopeExpansionGranted(_)
+            )
+        })
+        .count();
+    assert_eq!(
+        requested, 4,
+        "every batch member's request must be recorded"
+    );
+    assert_eq!(
+        granted, 2,
+        "max_per_run: 2 must hold exactly under a concurrent batch"
+    );
+}

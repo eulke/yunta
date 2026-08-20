@@ -188,6 +188,10 @@ pub(super) async fn execute_loop(
         // captured once so all N tasks work from an identical snapshot.
         let base_commit = head_commit(ctx.worktree).await?;
 
+        // DI-16: one grant ledger per batch, seeded from the log —
+        // the atomic cap window every concurrent member's evaluation
+        // commits through, so `max_per_run` holds exactly.
+        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
         let dispatches = futures::future::join_all(batch.iter().map(|task| {
             dispatch_task_in_isolation(
                 ctx,
@@ -198,6 +202,7 @@ pub(super) async fn execute_loop(
                 &instruction,
                 adapter.as_ref(),
                 scope_expansion,
+                &grants,
                 cancel,
                 &setup,
             )
@@ -206,10 +211,9 @@ pub(super) async fn execute_loop(
 
         // Cumulative grants this run, kept live across the integration
         // loop below so each emitted `ScopeExpansionGranted` carries an
-        // accurate `count_this_run` — `dispatch_task_in_isolation` above
-        // already read its own (necessarily slightly stale, see
-        // `granted_count`'s own doc comment) snapshot for the cap check;
-        // this one only feeds the event payload, not any decision.
+        // accurate `count_this_run` — the cap *decision* already
+        // happened atomically in the batch's `GrantLedger` (DI-16);
+        // this count only feeds the event payload.
         let mut expansions_granted_this_run = granted_count(&events);
 
         // Integration is serial and follows the batch's own order, which
@@ -598,14 +602,11 @@ fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
 
 /// How many `scope_expansion_granted` events the run's whole log already
 /// has (§6.2: `max_per_run` is run-scoped, never per-task). Read once per
-/// batch, same moment as `base_commit` — a known, documented tradeoff:
-/// two tasks in the *same* concurrent batch that both get granted can
-/// each see the pre-batch count, so `max_per_run` may be overshot by up
-/// to `concurrency - 1` within one batch before the next batch's fresh
-/// read catches it. Serializing expansion evaluation to close this
-/// would undo T5.10's whole point (real concurrent dispatch) for a soft
-/// cap whose purpose is catching "ten grants in a row", not enforcing a
-/// hard security boundary — accepted, not fixed.
+/// batch to seed that batch's `GrantLedger` (DI-16): grants from prior
+/// batches are already events by then (integration is serial and
+/// completes before the next batch dispatches), and grants *within* the
+/// batch go through the ledger's atomic window — so the cap holds
+/// exactly, with dispatch itself still fully concurrent.
 fn granted_count(events: &[Event]) -> u32 {
     events
         .iter()
@@ -647,6 +648,7 @@ async fn dispatch_task_in_isolation<'a>(
     instruction: &str,
     adapter: &dyn yunta_adapters::Adapter,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    grants: &crate::scope_expansion::GrantLedger,
     cancel: &tokio_util::sync::CancellationToken,
     setup: &crate::task_cycle::SessionSetup,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
@@ -692,7 +694,7 @@ async fn dispatch_task_in_isolation<'a>(
         ctx.manifest.config.permissions.as_ref(),
         super::node_exec::session_profile(node),
         scope_expansion,
-        granted_count(events),
+        grants,
         &granted_paths_for(events, &task.id),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,

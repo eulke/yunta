@@ -1243,18 +1243,17 @@ que aparece.
         nuevos en `run.rs` (grant ensancha el scope del reintento, deny
         genera finding y la tarea cumple dentro del scope original,
         headless pausa igual que siempre).
-      - **`max_per_run` bajo concurrencia real: soft race documentada, no
-        corregida**: `granted_count` (cuenta de eventos
-        `scope_expansion_granted` ya en el log) se lee una vez por lote,
-        al mismo tiempo que `base_commit` — dos tareas del **mismo** lote
-        concurrente que ambas terminan concedidas pueden ver el mismo
-        conteo pre-lote, así que el cap puede excederse hasta en
-        `concurrency - 1` dentro de un lote antes de que el próximo lote
-        lo note. Serializar la evaluación cerraría el hueco pero anularía
-        el punto entero de T5.10 (dispatch concurrente real) por un cap
-        blando cuyo propósito es atajar "diez concesiones seguidas", no
-        imponer un límite de seguridad duro — aceptado, no arreglado,
-        documentado en el propio doc comment de `granted_count`.
+      - **`max_per_run` bajo concurrencia real (cerrado por DI-16)**: la
+        evaluación cara (pre-check del criterio propuesto, reglas,
+        diffs) corre 100% concurrente fuera de toda sección crítica;
+        solo la ventana del cap — leer conteo → decidir → commitear el
+        grant — es atómica (`GrantLedger`, un `tokio::Mutex<u32>` por
+        lote sembrado del log; los grants de lotes previos ya son
+        eventos porque la integración es serial y termina antes del
+        próximo lote). El cap se cumple **exacto** con el dispatch tan
+        concurrente como siempre — test: `concurrency: 4`, 4 requests
+        simultáneos bajo `rules` con `max_per_run: 2` → exactamente 2
+        granted, 2 escaladas.
       - **Un `Done` que igual queda con una decisión pendiente**: si el
         pre-check/mode de una tarea escala (`ask`, o cap agotado) pero
         la propia tarea termina satisfaciendo sus criterios y scope
