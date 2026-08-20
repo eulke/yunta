@@ -111,6 +111,34 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Prepares this repo for Yunta once: detects ecosystem, base branch
+    /// and available adapters, writes `.yunta/config.yaml` and the
+    /// mechanism skill.
+    Init {
+        /// Prompts to confirm/override detected values (degrades to
+        /// non-interactive without a TTY).
+        #[arg(short, long)]
+        interactive: bool,
+        /// Overwrites an existing `.yunta/config.yaml`.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Writes `.yunta/workflows/<name>.yaml` from a commented schema
+    /// skeleton and runs `check` on it.
+    New {
+        /// The workflow's name — becomes `.yunta/workflows/<name>.yaml`.
+        name: String,
+        /// Which skeleton to start from: one-node, lint-fix or ledger.
+        #[arg(long)]
+        shape: Option<String>,
+        /// Prompts to choose a shape when `--shape` is omitted (degrades
+        /// to `one-node` without a TTY).
+        #[arg(short, long)]
+        interactive: bool,
+        /// Overwrites an existing workflow file of the same name.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -163,6 +191,15 @@ async fn main() -> ExitCode {
             workflow,
             json,
         }) => commands::stats::stats(run_id.as_deref(), workflow.as_deref(), json),
+        Some(Command::Init { interactive, force }) => {
+            commands::init::init(interactive, force).await
+        }
+        Some(Command::New {
+            name,
+            shape,
+            interactive,
+            force,
+        }) => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
     }
 }
 

@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.5 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.6 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -2289,6 +2289,100 @@ que aparece.
         la estimación (en `run`, `list` y `stats --workflow` a la vez),
         `stats --workflow` sin runs, y el error de `stats` sin
         `run_id` ni `--workflow`.
+
+- [x] **T7.6 — Onboarding: `yunta init` y `yunta new` (D58).** Antes de
+      implementar se buscaron D58/D64/D74 en el propio doc de ADRs (no
+      estaban citadas en ningún lugar del código todavía) para no
+      inventar sobre un onboarding que la spec sí define con bastante
+      detalle.
+      - **`init`**: detecta ecosistema (`Cargo.toml`→rust,
+        `package.json`→node, `go.mod`→go, `pyproject.toml`→python, en
+        ese orden — primer match gana, documentado así porque un repo
+        con dos marcadores sigue siendo "principalmente" el primero),
+        rama base (`git symbolic-ref refs/remotes/origin/HEAD`, luego
+        `git branch --show-current`, luego `"main"`), y CLIs
+        disponibles vía `ClaudeCodeAdapter`/`CodexAdapter::probe()` —
+        el mismo `probe()` real que `doctor`/`run` usan, con
+        `AdapterSettings::default()` porque a esta altura todavía no
+        hay `runners:`/`adapters:` en ningún config (eso es
+        precisamente lo que `init` va a escribir). Escribe
+        `.yunta/config.yaml` (con `project:` resuelto, y `runners:`
+        como bloque **comentado** citando qué adapter se detectó —
+        nunca un modelo inventado: T7.5 y el resto del código ya
+        establecieron "jamás inventar" para nombres de modelo, y un
+        `model: claude-...` adivinado sería exactamente ese error) y
+        `.gitignore` (entradas defensivas — `paths.runs`/
+        `paths.worktrees` ya viven en `~/.yunta` por default, D58's
+        propio "lo personal en `~/.yunta/`", así que hoy no hay nada
+        que gitignorear; las entradas cubren el día que alguien
+        redirija `paths:` hacia el repo). Idempotente: rechaza
+        pisar `.yunta/config.yaml`/la skill sin `--force`.
+      - **Skill de mecanismo (D74)**: `.yunta/skills/yunta-mechanism/
+        SKILL.md`, instalada siempre (no opcional — D74 solo hace
+        opcional la línea de CLAUDE.md, no la skill), sin catálogo
+        embebido (consulta `yunta list`/`list_workflows` en el
+        momento, tal como D74 exige). **Formato `SKILL.md` con
+        frontmatter — decisión de implementación, no algo que ningún
+        doc especifique**: ni el ADR ni la página de "Config y
+        workflows de referencia" fijan un formato de archivo para el
+        contenido de una skill, solo que es un directorio montado por
+        `skills.paths` "por el mecanismo nativo del adapter" — se
+        adoptó el formato real de Claude Code (el adapter de
+        referencia del proyecto, T7.3) por ser el precedente concreto
+        más cercano, no una alternativa inventada sin apoyo.
+      - **Línea de CLAUDE.md — solo impresa, jamás escrita** (D74 es
+        explícito: "jamás escrita automáticamente"), ni siquiera
+        cuando el repo ya tiene un CLAUDE.md — verificado con un test
+        que crea un CLAUDE.md con contenido propio antes de correr
+        `init` y confirma que sigue byte a byte igual después.
+      - **D64 (cachés compartidas entre worktrees) — solo un tip
+        impreso por ecosistema, nunca una clave de config nueva.** El
+        ADR describe el patrón ("directorio de artefactos común,
+        dependencias enlazadas, worktrees reutilizables") sin fijar
+        una clave concreta en ningún schema de referencia — inventar
+        una (`cache_dir:` o similar) sería exactamente el tipo de
+        decisión de schema no pedida por ninguna tarea que CLAUDE.md
+        pide evitar. `init` imprime un tip específico del ecosistema
+        detectado (p. ej. `CARGO_TARGET_DIR` compartido para Rust) en
+        vez de escribir algo que el resto del engine no sabría leer.
+      - **`-i`/`--interactive`**: sin TTY, degrada avisando por stderr
+        y sigue con los valores detectados — nunca cuelga esperando
+        una línea que no va a llegar (mismo patrón que
+        `ConsoleInteraction`, T7.2, reutilizado: `stdin().is_terminal()`).
+        Con TTY, permite confirmar/editar nombre de proyecto y rama
+        base.
+      - **`new <name> [--shape one-node|lint-fix|ledger] [-i] [--force]`**:
+        tres esqueletos comentados, "más cerca de `cargo new` que de un
+        workflow real" (D58 verbatim) — **ninguno declara `runner:`**
+        (queda comentado, `# runner: implementer  # uncomment...`)
+        precisamente para que `check` nunca dependa de que
+        `runners:` ya exista en el config local; verificado con un
+        test que corre `new` en un repo donde `init` nunca corrió.
+        `one-node` es un `bash` con su propio exit code como criterio
+        más `scope:`; `lint-fix` es el ejemplo lint→fix-lint→lint del
+        Contrato §11.2 (mismo shape que el fixture de T4.4 en
+        `crates/engine/tests/run.rs`); `ledger` es el ciclo
+        plan→loop del bootstrap (`the_bootstrap_shape_runs_end_to_end_
+        plan_loop_and_gate`) despojado a su forma mínima. Corre
+        `check` sobre lo que acaba de escribir y reporta el resultado,
+        igual que `yunta check`. **`--shape` por default es `one-node`**
+        cuando no se pasa ni `--shape` ni `-i` con TTY — no está fijado
+        en ningún doc, elegido por ser el shape más simple posible (el
+        equivalente de `cargo new`'s "Hello, world!").
+      - **Nunca referencia un pack ni toca `yunta.lock`** (D58's regla
+        de verbos disjuntos: `new` crea contenido propio, `pack add`
+        —M11— trae contenido ajeno) — trivialmente cierto hoy (M-0 no
+        tiene schema de packs), pero igual cubierto por un test
+        estructural que falla si algún esqueleto futuro menciona
+        `pack` o si `new` llega a crear `yunta.lock`.
+      - Tests: 12 end-to-end en `crates/cli/tests/init_new_cmd.rs`
+        contra el binario real — escritura de config/gitignore/skill,
+        CLAUDE.md nunca tocado, idempotencia con y sin `--force` (init
+        y new), degradación sin TTY para ambos comandos (sin colgarse),
+        detección de ecosistema Rust, los tres shapes pasando `check`,
+        el test estructural de packs/lock, shape desconocido rechazado
+        sin escribir archivo, nombre inseguro rechazado, y `new` antes
+        de que `init` haya corrido nunca.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
