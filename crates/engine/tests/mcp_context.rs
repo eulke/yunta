@@ -176,6 +176,7 @@ async fn run_with_config(
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();

@@ -180,3 +180,85 @@ async fn releasing_a_worktree_isolated_run_leaves_the_worktree_on_disk() {
     // separate, not-yet-built concern (on_finish, out of M-0).
     assert!(worktree_path.join(".gitkeep").exists());
 }
+
+// --- DI-08: owner-aware `none` lock ------------------------------------------
+
+fn lock_file(repo: &std::path::Path) -> std::path::PathBuf {
+    repo.join(".git/yunta-none.lock")
+}
+
+#[tokio::test]
+async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+
+    // A pid that is certainly dead: a child we spawn and reap ourselves.
+    let dead = std::process::Command::new("true").spawn().unwrap();
+    let dead_pid = dead.id();
+    let _ = std::process::Child::wait(&mut { dead });
+    std::fs::write(lock_file(&repo), format!("{{ \"pid\": {dead_pid} }}")).unwrap();
+
+    let prepared = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
+        .await
+        .unwrap();
+    match prepared {
+        yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid: reported } => {
+            assert_eq!(reported, dead_pid);
+        }
+        other => panic!("expected the stale lock to be stolen, got {other:?}"),
+    }
+    // The lock now names this process as its owner.
+    let content = std::fs::read_to_string(lock_file(&repo)).unwrap();
+    assert!(
+        content.contains(&std::process::id().to_string()),
+        "got: {content}"
+    );
+}
+
+#[tokio::test]
+async fn a_live_owner_s_lock_still_refuses() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+
+    // This test process itself is the live owner.
+    std::fs::write(
+        lock_file(&repo),
+        format!("{{ \"pid\": {} }}", std::process::id()),
+    )
+    .unwrap();
+
+    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, WorktreeError::Locked { .. }), "got: {err:?}");
+}
+
+#[tokio::test]
+async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+
+    std::fs::write(lock_file(&repo), "").unwrap();
+
+    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
+        .await
+        .unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("yunta-none.lock"),
+        "the refusal must name the file to delete by hand: {message}"
+    );
+    assert!(
+        !matches!(err, WorktreeError::Locked { .. }),
+        "an unverifiable owner is its own case, not a live-owner refusal"
+    );
+}

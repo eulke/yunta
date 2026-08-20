@@ -156,6 +156,7 @@ impl Bench {
             DEFAULT_MAX_RETRIES,
             &NoInteraction,
             forge,
+            None,
         )
         .await
         .unwrap();

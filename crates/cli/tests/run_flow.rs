@@ -1077,3 +1077,314 @@ fn yunta_verify_reports_an_untouched_run_s_chain_intact() {
     let ghost = yunta_in(&repo, &home, &["verify", "run-ghost"]);
     assert!(!ghost.status.success(), "an unknown run must not verify");
 }
+
+#[test]
+fn a_live_run_registers_its_processes_in_engine_json_and_deletes_it_at_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // The bash node is itself a registered process group — it captures
+    // the registry mid-run from inside the run. The short sleep lets the
+    // engine's registration (which happens right after spawn, while the
+    // command already runs) land first.
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: registry
+nodes:
+  - id: capture
+    kind: bash
+    run: "sleep 0.2 && cp {{run.dir}}/scratch/engine.json {{run.dir}}/scratch/captured.json"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let run_id = run_id_from(&run);
+    let run_dir = home.join("runs").join(&run_id);
+
+    let captured = std::fs::read_to_string(run_dir.join("scratch/captured.json"))
+        .expect("the bash node must have seen engine.json while it ran");
+    let parsed: serde_json::Value = serde_json::from_str(&captured).unwrap();
+    assert!(
+        parsed["engine_pid"].as_u64().unwrap_or(0) > 0,
+        "got: {captured}"
+    );
+    assert!(
+        !parsed["process_groups"].as_array().unwrap().is_empty(),
+        "the bash node's own process group must be registered: {captured}"
+    );
+
+    assert!(
+        !run_dir.join("scratch/engine.json").exists(),
+        "engine.json must be deleted once the run reaches a terminal"
+    );
+}
+
+#[test]
+fn ctrl_c_pauses_the_run_kills_the_process_tree_and_releases_the_none_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    // The child ignores SIGINT on purpose (the T3.3 pattern): only the
+    // engine's interrupt→kill escalation can take it down, which is
+    // exactly what this proves.
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: stubborn
+nodes:
+  - id: stubborn
+    kind: bash
+    run: "echo $$ > child.pid; trap '' INT; sleep 30"
+"#,
+    );
+    // Isolation `none` requires a clean tree — commit the fixtures.
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let mut yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // Wait for the bash node to actually start (it writes its pid).
+    let pid_path = repo.join("child.pid");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !pid_path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the bash node never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let child_pid = std::fs::read_to_string(&pid_path)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Simulated Ctrl-C: SIGINT to the yunta process.
+    let killed = std::process::Command::new("kill")
+        .args(["-INT", &yunta.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+
+    let output = yunta.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("cancelled by user"),
+        "the pause must say why: {text}"
+    );
+
+    // Zero zombies: the SIGINT-ignoring child is dead anyway.
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &child_pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(!alive.success(), "the stubborn child must be dead");
+
+    // The `none` lock is released, and engine.json is gone.
+    assert!(!repo.join(".git/yunta-none.lock").exists());
+    let run_id = run_id_from(&output);
+    assert!(!home
+        .join("runs")
+        .join(&run_id)
+        .join("scratch/engine.json")
+        .exists());
+}
+
+/// Spawns `yunta run` detached and waits until the given file exists —
+/// the bash node's own signal that it is really running.
+fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Child {
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(repo)
+        .env("YUNTA_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the bash node never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    child
+}
+
+/// The one run id under `home/runs` — usable before the run's own
+/// process has printed anything.
+fn only_run_id(home: &Path) -> String {
+    let mut entries: Vec<String> = std::fs::read_dir(home.join("runs"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(entries.len(), 1, "expected exactly one run: {entries:?}");
+    entries.pop().unwrap()
+}
+
+#[test]
+fn yunta_cancel_stops_a_live_run_from_a_separate_process() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: long
+nodes:
+  - id: long
+    kind: bash
+    run: "echo $$ > child.pid; sleep 30"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let mut yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
+    let run_id = only_run_id(&home);
+
+    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    assert!(
+        cancel.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&cancel),
+        String::from_utf8_lossy(&cancel.stderr)
+    );
+    assert!(
+        stdout(&cancel).contains("cancelled"),
+        "got: {}",
+        stdout(&cancel)
+    );
+
+    // The run process exits, its child is dead, the log is terminal.
+    let output = yunta.wait_with_output().unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("cancelled by user"));
+    let child_pid = std::fs::read_to_string(repo.join("child.pid"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &child_pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(!alive.success(), "the sleeping child must be dead");
+
+    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    assert!(
+        stdout(&status).contains("cancelled by user"),
+        "got: {}",
+        stdout(&status)
+    );
+}
+
+#[test]
+fn yunta_cancel_cleans_up_after_a_crashed_engine() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: crashy
+nodes:
+  - id: long
+    kind: bash
+    run: "echo $$ > child.pid; sleep 30"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let mut yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
+    let run_id = only_run_id(&home);
+
+    // Simulated crash: SIGKILL gives the engine no chance to clean up —
+    // engine.json survives with the orphaned process group in it.
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &yunta.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let _ = yunta.wait();
+    let engine_json = home.join("runs").join(&run_id).join("scratch/engine.json");
+    assert!(
+        engine_json.exists(),
+        "the crash must leave engine.json behind"
+    );
+
+    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    assert!(
+        cancel.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&cancel.stderr)
+    );
+    assert!(
+        stdout(&cancel).contains("already dead"),
+        "got: {}",
+        stdout(&cancel)
+    );
+
+    // The orphaned child is dead, the registry is gone, the log records
+    // the crash-cancellation. `kill -0` succeeds on a zombie (the
+    // SIGKILLed engine never reaped it), so check the process state:
+    // gone or Z both mean the kill landed.
+    let child_pid = std::fs::read_to_string(repo.join("child.pid"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let state = std::process::Command::new("ps")
+        .args(["-o", "state=", "-p", &child_pid])
+        .output()
+        .unwrap();
+    let state = String::from_utf8_lossy(&state.stdout).trim().to_string();
+    assert!(
+        state.is_empty() || state.starts_with('Z'),
+        "the orphaned child must be dead, ps state: {state}"
+    );
+    assert!(!engine_json.exists());
+    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    assert!(
+        stdout(&status).contains("cancelled after crash"),
+        "got: {}",
+        stdout(&status)
+    );
+}

@@ -165,6 +165,7 @@ async fn run_with_mode(
         DEFAULT_MAX_RETRIES,
         interaction,
         None,
+        None,
     )
     .await
     .unwrap();

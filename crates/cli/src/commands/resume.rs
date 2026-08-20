@@ -72,6 +72,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
     // Same rule as `adapters` above: the manifest's own frozen config,
     // never the project's current one.
     let forge = super::real_forge(&manifest.config);
+    let root_cancel = super::cancel_on_ctrl_c();
     let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -83,6 +84,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
         DEFAULT_MAX_RETRIES,
         &crate::human_interaction::ConsoleInteraction,
         forge.as_deref(),
+        Some(&root_cancel),
     )
     .await;
 
@@ -98,6 +100,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
                 manifest,
                 worktree,
                 report,
+                Some(&root_cancel),
             )
             .await
             {
@@ -107,7 +110,10 @@ pub async fn resume(run_id: &str) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            if matches!(report.terminal, RunTerminal::Finished) {
+            // DI-08: a user cancellation also releases `none`'s lock —
+            // the engine process is exiting, and the register's own
+            // design says a Ctrl-C leaves nothing held.
+            if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
                 if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
                     eprintln!("error: {e}");
                     return ExitCode::FAILURE;

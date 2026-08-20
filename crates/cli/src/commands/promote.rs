@@ -85,6 +85,7 @@ pub(crate) async fn drive_promotions(
     mut manifest: Manifest,
     mut worktree: PathBuf,
     mut report: RunReport,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<(RunId, Manifest, PathBuf, RunReport), String> {
     while let RunTerminal::Promoted { suggested_mode } = &report.terminal {
         let suggested_mode = suggested_mode.clone();
@@ -140,6 +141,7 @@ pub(crate) async fn drive_promotions(
             DEFAULT_MAX_RETRIES,
             &crate::human_interaction::ConsoleInteraction,
             forge,
+            cancel,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -275,6 +277,7 @@ nodes:
             DEFAULT_MAX_RETRIES,
             &AlwaysPromote,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -293,6 +296,7 @@ nodes:
             manifest,
             worktree,
             report,
+            None,
         )
         .await
         .unwrap();

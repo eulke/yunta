@@ -329,9 +329,12 @@ pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
     request: SessionRequest,
     cancel: &CancellationToken,
+    process_registry: Option<&crate::process_registry::ProcessRegistry>,
 ) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
     let budget = request.budget;
     let mut session = adapter.spawn(request).await?;
+    // DI-08: on the map for a separate `yunta cancel` while it lives.
+    let _pgid_registration = crate::process_registry::register(process_registry, session.pgid());
 
     // Carries the timeout `Duration` alongside its computed `Instant` so
     // the timeout-exceeded branch can report it without re-deriving it
@@ -435,8 +438,10 @@ pub(crate) async fn dispatch_session(
     if cancelled {
         return Ok((
             DispatchOutcome::Failed {
-                message: "interrupted: a sibling in this join: any group finished first"
-                    .to_string(),
+                message:
+                    "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
+                          cancelled"
+                        .to_string(),
                 retryable: false,
             },
             tokens,
@@ -485,6 +490,7 @@ pub async fn run_task(
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     granted_so_far: u32,
     already_granted_paths: &[String],
+    process_registry: Option<&crate::process_registry::ProcessRegistry>,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -542,13 +548,17 @@ pub async fn run_task(
         // A loop task's own cancellation (mid-execution, from outside)
         // isn't wired in this recorte — see T4.6's debt note in
         // docs/m0-status.md — so this token is never triggered.
-        let (dispatch_outcome, tokens) =
-            dispatch_session(adapter, request, &CancellationToken::new())
-                .await
-                .map_err(|source| TaskCycleError::Spawn {
-                    task: task.id.clone(),
-                    source,
-                })?;
+        let (dispatch_outcome, tokens) = dispatch_session(
+            adapter,
+            request,
+            &CancellationToken::new(),
+            process_registry,
+        )
+        .await
+        .map_err(|source| TaskCycleError::Spawn {
+            task: task.id.clone(),
+            source,
+        })?;
 
         // §6.2: the agent never widens its own scope — it may have left a
         // request behind, which this attempt's own worktree is the only

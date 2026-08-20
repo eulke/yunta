@@ -141,6 +141,11 @@ pub(crate) struct RunCtx<'a> {
     /// every resume asks again before spending new money. Atomic because
     /// concurrent batch members read it while the scheduler loop writes.
     pub budget_lifted: std::sync::atomic::AtomicBool,
+    /// DI-08: `run.dir/scratch/engine.json`, so a separate process can
+    /// find this run's live process tree. `None` when the file could not
+    /// be written — the run proceeds, degraded loudly (A4's external
+    /// paths lose their map, the internal ones never needed it).
+    pub process_registry: Option<crate::process_registry::ProcessRegistry>,
 }
 
 impl RunCtx<'_> {
@@ -365,7 +370,12 @@ pub async fn execute_run(
     max_task_retries: u32,
     human_interaction: &dyn HumanInteraction,
     forge: Option<&dyn Forge>,
+    cancel: Option<&CancellationToken>,
 ) -> Result<RunReport, RunError> {
+    // DI-08: the root of every per-node token this invocation hands out.
+    // `None` (tests, callers with no signal source) gets a token nothing
+    // ever fires — the pre-DI-08 behavior exactly.
+    let root_cancel = cancel.cloned().unwrap_or_default();
     let ctx = RunCtx {
         run_id,
         manifest,
@@ -378,6 +388,17 @@ pub async fn execute_run(
         memo: Memo::new(manifest.config_hash.clone()),
         human_interaction,
         budget_lifted: std::sync::atomic::AtomicBool::new(false),
+        process_registry: match crate::process_registry::ProcessRegistry::create(
+            run_dir,
+            std::process::id(),
+            clock.now().to_rfc3339(),
+        ) {
+            Ok(registry) => Some(registry),
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot write engine.json — `yunta cancel` will                      not see this invocation's processes");
+                None
+            }
+        },
     };
 
     let events = ctx.load_events()?;
@@ -430,6 +451,25 @@ pub async fn execute_run(
     let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
 
     loop {
+        // DI-08: a Ctrl-C (or any root cancellation) between scheduler
+        // steps pauses here; one that lands mid-batch is honored by the
+        // per-node child tokens below, whose failed nodes land in the
+        // log first and then reach this same check.
+        if root_cancel.is_cancelled() {
+            ctx.emit(
+                None,
+                EventPayload::RunPaused(RunPausedPayload {
+                    reason: "cancelled by user".to_string(),
+                }),
+            )?;
+            ctx.export_events_jsonl()?;
+            return Ok(RunReport {
+                terminal: RunTerminal::Paused {
+                    reason: "cancelled by user".to_string(),
+                },
+                state: derive(&ctx.load_events()?),
+            });
+        }
         let events = ctx.load_events()?;
         match schedule::next_step(
             &manifest.workflow,
@@ -670,8 +710,10 @@ pub async fn execute_run(
                 // (T4.6), scoped to a named `parallel` group, not implicit
                 // `max_parallel_nodes` batches — so each node gets a token
                 // nothing ever cancels.
+                let cancel_for_batch = root_cancel.child_token();
                 let executions = batch.into_iter().map(|(node_id, attempt)| {
                     let ctx = &ctx;
+                    let cancel_for_batch = cancel_for_batch.clone();
                     let node = &manifest.workflow;
                     async move {
                         let node = node
@@ -683,8 +725,7 @@ pub async fn execute_run(
                                     "scheduler chose node `{node_id}` which the manifest's workflow does not define"
                                 ),
                             })?;
-                        node_exec::execute_node(ctx, node, attempt, &CancellationToken::new())
-                            .await
+                        node_exec::execute_node(ctx, node, attempt, &cancel_for_batch).await
                     }
                 });
                 for result in futures::future::join_all(executions).await {

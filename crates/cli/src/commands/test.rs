@@ -218,6 +218,7 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
         DEFAULT_MAX_RETRIES,
         &yunta_engine::NoInteraction,
         None,
+        None,
     )
     .await
     .map_err(|e| e.to_string())?;

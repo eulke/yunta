@@ -204,8 +204,10 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         dentro del working tree — si viviera ahí, ensuciaría el propio chequeo
         que lo requiere) para que un segundo run concurrente sobre el mismo
         checkout se rechace explícitamente en vez de pisarse con el primero.
-        `release_worktree` borra el lock solo cuando el run termina
-        (`RunTerminal::Finished`) — un run pausado retiene el lock porque un
+        `release_worktree` borra el lock cuando el run termina
+        (`RunTerminal::Finished`) o cuando el usuario lo cancela (DI-08:
+        el proceso engine sale, así que retenerlo solo fabricaría un lock
+        huérfano) — un run pausado por otra razón lo retiene porque un
         futuro `resume` es el mismo run lógico, no uno nuevo.
       - `container` no existe como valor del schema (confirmado con el
         usuario en la sesión de M-0 original) — solo `worktree`/`none`.
@@ -236,17 +238,13 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         ningún run; `none` opera directo y libera su lock al terminar;
         **`resume` continúa en el mismo worktree que `run` creó** — no uno
         nuevo, ni el checkout original).
-      - **Deuda no cubierta: el lock de `none` no detecta staleness.** Si un
-        run bajo `isolation: none` termina de forma abrupta (crash del
-        proceso `yunta`, no un `Paused` prolijo) mientras tiene el lock
-        tomado, nadie lo libera — `release_worktree` solo corre al final del
-        camino feliz de `run`/`resume`. Un humano tiene que borrar a mano
-        `<git-common-dir>/yunta-none.lock` antes de que un run nuevo pueda
-        arrancar ahí. No hay PID/timestamp en el lock file ni chequeo de
-        "¿el proceso que lo tomó sigue vivo?". Gatillo para resolverlo:
-        cuando un crash real deje un lock huérfano en la práctica (o antes,
-        si se decide que vale la pena el costo de detectar procesos muertos
-        de forma portable).
+      - **Staleness del lock de `none` ✓ (cerrado por DI-08)**: el lock
+        ahora lleva dueño (`{ "pid": ... }`); ante contención,
+        `prepare_worktree` verifica al dueño con `kill -0` — vivo →
+        `Locked` como siempre; muerto → lo roba y lo reporta
+        (`WorktreePrepared::StoleStaleLock`, warning en el CLI); lock
+        legacy vacío/corrupto → rechazo conservador que nombra el archivo
+        a borrar a mano (`LockedByUnknown`).
 
 - [x] **T4.1 — scheduler DAG con paralelismo real (`max_parallel_nodes`).**
       Confirmado con el usuario antes de codear (Notion no está espejado en
@@ -2952,20 +2950,19 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
      superficie; `max_loop_iterations` (default de referencia 12) escala
      igual desde el loop; cada sesión recibe `Budget.max_tokens =
      min(restante, cap / nodos_no_terminales)`.
-9. **Canal cross-process para `yunta cancel` (T7.1/A4)**: cada
-   sesión/hook/executor corre en su propio process group para que el
-   interrupt→kill *interno* funcione sin llevarse `yunta` — pero eso deja
-   sin forma de que una invocación separada de `cancel` encuentre y
-   señalice esos procesos (sin pidfile, sin daemon, sin socket). El mismo
-   gap hace que Ctrl-C sobre un `yunta run` en curso tampoco termine
-   limpiamente el árbol de procesos (el subproceso, en su propio process
-   group, no recibe el SIGINT que la terminal manda al foreground process
-   group) — documentado ya en `run/mod.rs` como decisión existente
-   ("Crash, restart y Ctrl-C son el mismo caso"), no introducido por T7.1.
-   Gatillo: `yunta run --detach` (M8, D101) es el primer consumidor real
-   de un run vivo fuera del proceso que lo creó, y por lo tanto el punto
-   natural para diseñar el canal (pidfile con process-group id, o algo
-   equivalente) que también resolvería esto.
+9. **Canal cross-process para `yunta cancel` (T7.1/A4) ✓ (cerrado por
+   DI-08)**: `run.dir/scratch/engine.json` registra el pid del engine y
+   los process groups vivos (sesiones vía `AgentSession::pgid()`, hooks,
+   bash y executors vía guard RAII); Ctrl-C dispara el
+   `CancellationToken` raíz → interrupt→kill ya construido → `run_paused
+   { reason: "cancelled by user" }`, lock de `none` liberado, engine.json
+   borrado; `yunta cancel` con engine vivo manda SIGINT y espera el
+   terminal en el log (escalación SIGKILL a los pgids con timeout), y con
+   engine muerto mata los pgids huérfanos, emite `run_paused { reason:
+   "cancelled after crash" }` y limpia. `--detach` (M8/D101) consumirá el
+   mismo engine.json. Deuda que sigue: las sesiones de un loop no son
+   cancel-aware (DI-11), así que un Ctrl-C durante una tarea de loop
+   espera a que la sesión cierre sola antes de pausar.
 10. **Retención a nivel de base de datos (§8.3/T7.1's `gc`)**: `gc` borra
     `run.dir`/worktree de runs terminales pasado `storage.retention_days`,
     pero §8.3 también dice que el event log *base* se conserva según esa

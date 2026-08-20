@@ -366,6 +366,8 @@ async fn run_hook(
             context: format!("spawn hook `{rendered}`"),
             source,
         })?;
+    let _pgid_registration =
+        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
 
     let exit_code = match step.timeout_seconds.map(std::time::Duration::from_secs) {
         None => child
@@ -734,6 +736,8 @@ async fn execute_bash(
             context: format!("spawn bash node `{}`", node.id),
             source,
         })?;
+    let _pgid_registration =
+        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
 
     let stderr_task = child.stderr.take().map(|mut pipe| {
         tokio::spawn(async move {
@@ -767,7 +771,9 @@ async fn execute_bash(
             fail(
                 ctx,
                 node,
-                "interrupted: a sibling in this join: any group finished first".to_string(),
+                "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
+                  cancelled"
+                    .to_string(),
                 false,
             )
         }
@@ -916,12 +922,17 @@ async fn execute_prompt(
         adapter_settings: Default::default(),
     };
 
-    let (outcome, tokens) = dispatch_session(adapter.as_ref(), request, cancel)
-        .await
-        .map_err(|source| RunError::Spawn {
-            node: node.id.clone(),
-            source,
-        })?;
+    let (outcome, tokens) = dispatch_session(
+        adapter.as_ref(),
+        request,
+        cancel,
+        ctx.process_registry.as_ref(),
+    )
+    .await
+    .map_err(|source| RunError::Spawn {
+        node: node.id.clone(),
+        source,
+    })?;
 
     match outcome {
         DispatchOutcome::Completed { summary } => close_node(ctx, node, summary, tokens).await,

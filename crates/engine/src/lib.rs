@@ -17,6 +17,7 @@ mod inputs;
 mod ledger;
 mod manifest;
 mod permissions;
+mod process_registry;
 mod progress;
 mod questions;
 mod replay;
@@ -39,6 +40,9 @@ pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
 pub use permissions::command_violation;
+pub use process_registry::{
+    process_alive, read_registry, registry_path, EngineProcessFile, ProcessRegistry,
+};
 pub use progress::render_progress;
 pub use questions::{register as register_questions, QuestionsError};
 pub use replay::{dedup_findings, derive, NodeState, RunState};
@@ -62,7 +66,7 @@ pub use verification_effectiveness::{
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
-pub use worktree::{prepare_worktree, release_worktree, WorktreeError};
+pub use worktree::{prepare_worktree, release_worktree, WorktreeError, WorktreePrepared};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-engine";

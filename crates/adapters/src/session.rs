@@ -157,4 +157,13 @@ pub trait AgentSession: Send {
     /// Forceful termination of the whole session process tree (A4) —
     /// never leaves anything running.
     async fn kill(&mut self) -> Result<()>;
+
+    /// The OS process-group id of the session's subprocess tree, when
+    /// the adapter runs one (DI-08) — what the engine registers in
+    /// `run.dir/scratch/engine.json` so a *separate* process (`yunta
+    /// cancel` after a crash) can still exterminate the tree (A4).
+    /// `None` for sessions with no subprocess of their own (mock).
+    fn pgid(&self) -> Option<u32> {
+        None
+    }
 }

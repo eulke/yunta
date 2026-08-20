@@ -28,7 +28,10 @@ tempfile = "3"
 thiserror = "2"
 # `yunta run`/`resume`/`test` drive the async engine; a current-thread
 # runtime is all the sequential M-0 scheduler needs.
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "signal", "time"] }
+# CancellationToken for the Ctrl-C -> root-token bridge (DI-08); the
+# engine already speaks this type on its execute_run surface.
+tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # `ConsoleInteraction` (T7.2) implements `yunta_engine::HumanInteraction`,

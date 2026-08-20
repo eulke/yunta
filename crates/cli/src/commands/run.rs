@@ -269,7 +269,7 @@ pub async fn run(
         Isolation::Worktree => project.worktrees_root.join(run_id.as_str()),
         Isolation::None => cwd.clone(),
     };
-    if let Err(e) = yunta_engine::prepare_worktree(
+    match yunta_engine::prepare_worktree(
         &cwd,
         &worktree,
         &manifest.base_commit,
@@ -278,8 +278,17 @@ pub async fn run(
     )
     .await
     {
-        eprintln!("error: {e}");
-        return ExitCode::FAILURE;
+        Ok(yunta_engine::WorktreePrepared::Ready) => {}
+        Ok(yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid }) => {
+            eprintln!(
+                "warning: this checkout's isolation lock belonged to a dead process \
+                 (pid {dead_pid}) — taking it over"
+            );
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
     }
 
     let clock = SystemClock;
@@ -326,6 +335,7 @@ pub async fn run(
     });
 
     let forge = super::real_forge(&manifest.config);
+    let root_cancel = super::cancel_on_ctrl_c();
     let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -337,6 +347,7 @@ pub async fn run(
         DEFAULT_MAX_RETRIES,
         &crate::human_interaction::ConsoleInteraction,
         forge.as_deref(),
+        Some(&root_cancel),
     )
     .await;
 
@@ -361,6 +372,7 @@ pub async fn run(
                 manifest,
                 worktree,
                 report,
+                Some(&root_cancel),
             )
             .await
             {
@@ -373,7 +385,10 @@ pub async fn run(
             // Only a *finished* run releases isolation `none`'s lock — a
             // paused run expects a future `resume` on the same checkout,
             // which is the same logical run, not a second concurrent one.
-            if matches!(report.terminal, RunTerminal::Finished) {
+            // DI-08: a user cancellation also releases `none`'s lock —
+            // the engine process is exiting, and the register's own
+            // design says a Ctrl-C leaves nothing held.
+            if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
                 if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
                     eprintln!("error: {e}");
                     return ExitCode::FAILURE;

@@ -134,6 +134,8 @@ pub(super) async fn execute_executor(
             context: format!("spawn executor `{executor}` for node `{}`", node.id),
             source,
         })?;
+    let _pgid_registration =
+        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
 
     let Some(mut stdin) = child.stdin.take() else {
         // Unreachable given `Stdio::piped()` above, but a typed error
@@ -198,7 +200,9 @@ pub(super) async fn execute_executor(
             return fail(
                 ctx,
                 node,
-                "interrupted: a sibling in this join: any group finished first".to_string(),
+                "interrupted: cancelled — a `join: any` sibling won, or the run itself was \
+                  cancelled"
+                    .to_string(),
                 false,
             );
         }

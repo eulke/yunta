@@ -256,6 +256,12 @@ impl AgentSession for CodexSession {
     async fn kill(&mut self) -> Result<()> {
         signal_group(self.pid, "-KILL").await
     }
+
+    fn pgid(&self) -> Option<u32> {
+        // Spawned with `process_group(0)`, so the child's pid is its
+        // process-group id.
+        Some(self.pid)
+    }
 }
 
 /// Sends `signal` to the whole process group (A4) — identical mechanism

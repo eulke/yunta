@@ -39,6 +39,15 @@ pub enum WorktreeError {
          is allowed on the same checkout (§7.3); use isolation `worktree` to run concurrently"
     )]
     Locked { path: PathBuf },
+    /// DI-08: a lock whose owner can't be verified — pre-owner-format
+    /// (empty) or corrupted. Conservative on purpose: guessing that an
+    /// unreadable lock is stale would break the old contract silently.
+    #[error(
+        "`{path}` has an isolation lock with no readable owner (`{lock_path}`) — written by \
+         an older build or corrupted; if no other run is active on this checkout, delete \
+         that file by hand and retry"
+    )]
+    LockedByUnknown { path: PathBuf, lock_path: PathBuf },
     #[error("failed to {action} for `{path}`")]
     Io {
         action: String,
@@ -54,13 +63,26 @@ pub enum WorktreeError {
 /// `base_commit`; for `Isolation::None`, verifies `repo` itself is clean
 /// and takes its lock (`worktree_path` is ignored — the run operates on
 /// `repo` directly).
+/// What taking isolation `none`'s lock involved (DI-08) — the caller
+/// (CLI) surfaces a takeover to the user; `Worktree` isolation always
+/// reports `Ready`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WorktreePrepared {
+    Ready,
+    /// The previous owner was dead — its lock was stolen. Explicit
+    /// degradation: report it, never steal silently.
+    StoleStaleLock {
+        dead_pid: u32,
+    },
+}
+
 pub async fn prepare_worktree(
     repo: &Path,
     worktree_path: &Path,
     base_commit: &str,
     branch_name: &str,
     isolation: Isolation,
-) -> Result<(), WorktreeError> {
+) -> Result<WorktreePrepared, WorktreeError> {
     match isolation {
         Isolation::Worktree => {
             if let Some(parent) = worktree_path.parent() {
@@ -82,7 +104,7 @@ pub async fn prepare_worktree(
                 ],
             )
             .await?;
-            Ok(())
+            Ok(WorktreePrepared::Ready)
         }
         Isolation::None => {
             if !is_clean(repo).await? {
@@ -136,10 +158,28 @@ async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
     Ok(common_dir.join("yunta-none.lock"))
 }
 
-async fn lock(repo: &Path) -> Result<(), WorktreeError> {
+/// The lock's content (DI-08): the owning `yunta` process. Liveness is
+/// decided by `kill -0` at contention time, never by age — which is why
+/// there is no timestamp here.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LockOwner {
+    pid: u32,
+}
+
+async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
     use std::io::Write;
 
     let lock_path = lock_path(repo).await?;
+    let write_err = |source, lock_path| WorktreeError::Io {
+        action: "create the isolation lock".to_string(),
+        path: lock_path,
+        source,
+    };
+    let owner_json = serde_json::to_string(&LockOwner {
+        pid: std::process::id(),
+    })
+    .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
+
     // `create_new` makes the check-and-create atomic — two processes
     // racing to lock the same repo can't both succeed.
     match std::fs::OpenOptions::new()
@@ -147,21 +187,38 @@ async fn lock(repo: &Path) -> Result<(), WorktreeError> {
         .create_new(true)
         .open(&lock_path)
     {
-        Ok(mut file) => file.write_all(b"").map_err(|source| WorktreeError::Io {
-            action: "create the isolation lock".to_string(),
-            path: lock_path,
-            source,
-        }),
-        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-            Err(WorktreeError::Locked {
-                path: repo.to_path_buf(),
-            })
+        Ok(mut file) => {
+            file.write_all(owner_json.as_bytes())
+                .map_err(|source| write_err(source, lock_path))?;
+            Ok(WorktreePrepared::Ready)
         }
-        Err(source) => Err(WorktreeError::Io {
-            action: "create the isolation lock".to_string(),
-            path: lock_path,
-            source,
-        }),
+        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+            // DI-08: the lock has an owner — is it still alive?
+            let owner: Option<LockOwner> = std::fs::read(&lock_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+            match owner {
+                Some(owner) if crate::process_registry::process_alive(owner.pid) => {
+                    Err(WorktreeError::Locked {
+                        path: repo.to_path_buf(),
+                    })
+                }
+                Some(owner) => {
+                    // Dead owner: steal, reported to the caller so the
+                    // takeover is explicit, never silent.
+                    std::fs::write(&lock_path, owner_json.as_bytes())
+                        .map_err(|source| write_err(source, lock_path))?;
+                    Ok(WorktreePrepared::StoleStaleLock {
+                        dead_pid: owner.pid,
+                    })
+                }
+                None => Err(WorktreeError::LockedByUnknown {
+                    path: repo.to_path_buf(),
+                    lock_path,
+                }),
+            }
+        }
+        Err(source) => Err(write_err(source, lock_path)),
     }
 }
 

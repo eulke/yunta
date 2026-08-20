@@ -460,7 +460,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   `paths.worktrees` en la config, `resume` completa usando el worktree
   original; manifest pre-DI-07 sigue resumible.
 
-### DI-08 — Canal cross-process: `cancel` real, Ctrl-C, lock huérfano `[ ]`
+### DI-08 — Canal cross-process: `cancel` real, Ctrl-C, lock huérfano `[x]`
 
 - **Origen:** T7.1 ("Pendiente explícito #9") + T4.2 (staleness del lock
   de `none`). Tres síntomas, una causa: nada identifica los procesos de
@@ -501,7 +501,13 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
      `engine.json` → el comportamiento actual (reportar lo que el log
      dice).
   5. **Lock de `none` con dueño:** el lock file pasa de vacío a
-     `{ "pid": ..., "created_at": ... }`. `prepare_worktree` ante lock
+     `{ "pid": ... }`. **Corrección al implementar:** la versión
+     anterior incluía `created_at` — se quita porque ninguna decisión lo
+     consume (la vida del dueño se decide con `kill -0`, jamás por
+     antigüedad) y poblarlo exigiría plumbing de `Clock` a
+     `prepare_worktree` solo para un campo informativo; el engine hoy no
+     tiene ni un `now()` directo y eso vale conservarlo.
+     `prepare_worktree` ante lock
      existente: dueño vivo → `Locked` (como hoy); dueño muerto → lo roba
      con un warning explícito por stderr (degradación explícita, nunca
      silenciosa). Lock legacy vacío → tratarlo como sin dueño

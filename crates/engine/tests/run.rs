@@ -165,6 +165,7 @@ impl Bench {
             DEFAULT_MAX_RETRIES,
             human_interaction,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -417,6 +418,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -741,6 +743,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -763,6 +766,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -925,6 +929,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -957,6 +962,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &interaction,
+        None,
         None,
     )
     .await
@@ -1070,6 +1076,7 @@ nodes:
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -1128,6 +1135,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -1201,6 +1209,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -1283,6 +1292,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -1540,6 +1550,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -2694,6 +2705,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
         None,
     )
     .await
@@ -4325,6 +4337,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -4349,6 +4362,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &interaction,
+        None,
         None,
     )
     .await
@@ -4553,6 +4567,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -4572,6 +4587,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &interaction,
+        None,
         None,
     )
     .await

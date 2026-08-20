@@ -22,6 +22,24 @@ use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForg
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
+/// DI-08: Ctrl-C → the run's root `CancellationToken`. The in-process
+/// interrupt→kill path (T3.3/T4.6) does the actual exterminating; this
+/// only bridges the signal to the token and tells the user what's
+/// happening. Installing the handler means SIGINT no longer kills the
+/// process outright — the run pauses cleanly with `run_paused
+/// { reason: "cancelled by user" }` instead.
+pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
+    let root = tokio_util::sync::CancellationToken::new();
+    let token = root.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("interrupt received — stopping the run (sessions get interrupt, then kill)");
+            token.cancel();
+        }
+    });
+    root
+}
+
 /// Prints a run's outcome and maps it to an exit code: success only when
 /// the run finished.
 pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {

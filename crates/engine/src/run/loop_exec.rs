@@ -645,6 +645,7 @@ async fn dispatch_task_in_isolation<'a>(
         scope_expansion,
         granted_count(events),
         &granted_paths_for(events, &task.id),
+        ctx.process_registry.as_ref(),
     )
     .await?;
 
