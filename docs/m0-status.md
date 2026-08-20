@@ -1802,11 +1802,200 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
+## M7 — CLI y UX (parcial: T7.1 — T7.3/T7.8/T7.9 ya hechos por M-0)
+
+- [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
+      T7.1 es su primer consumidor real.** M1 no tiene sección propia en
+      este documento (T1.1–T1.4 se hicieron como parte del recorte de
+      M-0); T1.5 quedó explícitamente diferida entonces ("Pendiente
+      explícito" #6, más abajo) con un gatillo concreto: "cuando algo
+      necesite inputs reales". Ese algo es T7.1's `--input k=v` — la
+      dependencia M1→M7 del Plan de implementación se cumple acá, no se
+      salta.
+      - **`InputSpec` como enum etiquetado por `type`, no un struct con
+        todos los campos opcionales.** `#[serde(tag = "type")]` con una
+        variante por tipo (`String`/`Number`/`Boolean`/`Enum`/`Path`,
+        cada una con solo sus propios campos) — parse-don't-validate:
+        `min`/`max` en un input `boolean` es irrepresentable por tipo,
+        nunca algo que `check` tenga que rechazar en runtime.
+      - **`required`/`default` mutuamente excluyentes, con `required`
+        implícito cuando ninguno se declara.** D82 dice que tener
+        `default` implica no requerido; la lectura simétrica (la única
+        consistente) es que la ausencia de `default` implica requerido
+        — `required: true` explícito es la forma redundante de decir lo
+        mismo. `required: false` sin `default` no tiene valor al que
+        caer, así que es un error de `check` (`InputOptionalWithoutDefault`),
+        igual que `required: true` + `default` a la vez
+        (`InputRequiredWithDefault`).
+      - **Validación en dos momentos, nunca solapados.** `check()`
+        valida lo que es estático: la forma del propio `InputSpec`
+        (conflicto required/default, `enum` sin `values`, `min > max`,
+        `pattern` que no compila como regex) y que todo `{{inputs.x}}`
+        inline en el workflow (prompt, `bash`/hook `run:`, patterns de
+        `files:`, `command:`, query de `mcp:`) refiera a un input
+        declarado — reutiliza `template_variables` (T6.3), nunca un
+        segundo parser de templates. `resolve_inputs` (nuevo,
+        `yunta-engine`) valida lo que necesita datos: tipo, `pattern`,
+        `min_length`, `min`/`max`, pertenencia a `values`, existencia de
+        `path` — todo antes del primer token, antes de tocar worktree
+        (D82's propio "convierte un error caro en uno inmediato").
+        `prompt: {file: ...}` queda fuera del escaneo estático de
+        `check` — `check` nunca lee archivos (ver el doc del propio
+        módulo) — así que un `{{inputs.x}}` no declarado ahí sigue
+        fallando recién en runtime, igual que antes de T1.5.
+      - **`user_state_root`-style compartido: `yunta_core::user_state_root`
+        no aplica acá, pero el patrón de una sola fuente de verdad sí**
+        — `build_manifest` gana un parámetro `provided_inputs:
+        &HashMap<String, String>` y es el único punto que llama a
+        `resolve_inputs`; el resultado (`BTreeMap<String, String>`) se
+        congela en `Manifest.inputs` y `template_vars` (T6.3) lo puebla
+        como `inputs.<nombre>` — nunca se re-resuelve por nodo (un
+        `default` recalculado por nodo sería estado no determinista,
+        exactamente lo que D82 prohíbe).
+      - **`regex` como dependencia nueva, solo en `yunta-engine`**: la
+        única validación de `pattern:` del workspace — se agrega donde
+        se usa, no al workspace entero ni a `yunta-core`.
+      - Tests: 3 de schema en `crates/core/tests/workflow.rs` (los cinco
+        tipos parsean con sus propios campos; round-trip; `inputs:`
+        ausente es un mapa vacío, no un error) + 10 de resolución en
+        `crates/engine/tests/inputs.rs` (default sin proveer; valor
+        provisto pisa el default; requerido sin valor falla nombrando el
+        input; `--input` no declarado falla; número con `min`/`max`,
+        entero sin `.0` de más; boolean solo `true`/`false`; enum solo
+        `values`; string con `min_length`/`pattern`; path validado
+        contra un `base_dir` explícito) + 7 de `check()` en
+        `crates/engine/tests/check.rs` (los dos conflictos
+        required/default; `enum` vacío; `min > max`; `pattern` inválido;
+        referencia declarada vs. no declarada, incluida una dentro de
+        `context: files:`) + 2 end-to-end (`crates/engine/tests/run.rs`:
+        un default resuelve en un `bash` real; `crates/engine/tests/manifest.rs`:
+        un requerido sin valor se rechaza en `build_manifest`, antes de
+        cualquier trabajo de worktree, y un valor provisto queda
+        congelado en el manifest).
+
+- [x] **T7.1 — CLI y UX (§7.1→§8.5), sobre el recorte parcial que ya
+      existía (`run`/`check`/`status`/`resume`).** Cubre todo lo listado
+      salvo dos piezas nombradas explícitamente como deuda, no como
+      olvido — ver abajo.
+      - **`--input k=v` (repetible)**: parsea `nombre=valor` a un
+        `HashMap`, delega toda validación de tipo/declaración a
+        `resolve_inputs` (T1.5) — el parseo del flag y la validación del
+        valor son responsabilidades separadas a propósito, para que no
+        puedan opinar distinto sobre el mismo error.
+      - **`--adapter <nombre>`**: `mock` se rechaza explícito citando
+        `yunta test` — un `run` real no tiene fixture que ejecutar
+        (`docs/m0-status.md`'s propia entrada de T6.1 ya fija que el
+        ruteo de fixtures es territorio de T7.9). Cualquier otro nombre
+        debe ser uno de los adapters reales que `real_adapters` ya
+        construiría — hoy solo `claude-code`; T7.4 (`codex`) agrega el
+        segundo caso real que le da sentido al flag más allá de
+        validación.
+      - **`--mode <nombre>`**: rechazado siempre, citando que `modes:`
+        (§10) no tiene schema todavía (M9). Silenciarlo hubiera
+        parecido que el modo se aplicó; rechazarlo es la única opción
+        honesta mientras el schema no exista.
+      - **`probe()` al crear un run**: Spec Adapter §2 dice que corre
+        "en `yunta doctor` y al crear runs" — antes T7.1 solo lo hacía
+        `doctor`. `commands::probe_or_refuse` ahora corre en `run`
+        también, antes de resolver inputs o tocar el worktree, así un
+        adapter roto (binario ausente, versión incompatible, auth
+        inválida) se detecta con el mismo costo que cualquier otra
+        refusal temprana.
+      - **`yunta list` / `yunta list --runs`**: sin servidor. Sin
+        `--runs`, recorre `.yunta/workflows/*.yaml` (la misma raíz que
+        `yunta test` ya resuelve) y muestra `description` + cada
+        `inputs:` con su tipo y si es requerido/opcional — packs (M11)
+        extenderían este catálogo, no lo reemplazan. Con `--runs`, cada
+        run local con su línea de progreso — comparte función
+        (`progress_summary`, movida a `commands::status` para ser
+        reusable) con `yunta status` y con el poller de `--follow`, así
+        las tres superficies nunca pueden mostrar cosas distintas para
+        el mismo log.
+      - **§8.5, contadores con contexto, nunca porcentaje**: `X/Y tasks
+        · A/B nodes · N reroutes · <fase>` — `Y`/`B` es el tamaño del
+        DAG congelado en el manifest (recorriendo `parallel` anidado),
+        nunca `state.nodes.len()` (que solo cuenta nodos que ya
+        arrancaron). `N reroutes` cuenta eventos `node_rerouted` del
+        log. `<fase>` es `waiting — <razón>` para un run pausado — la
+        propia razón de `run_paused` ya lee como el ejemplo del
+        Contrato ("waiting on gate approve-plan"), así que se reusa
+        textual en vez de inventar un segundo vocabulario para el mismo
+        hecho.
+      - **`yunta run --follow`**: un task en background que relee el
+        log cada 500ms y imprime el resumen cuando cambia. §8.5 dice
+        "consumiendo el stream de eventos" — esto hace polling, no
+        suscripción — `yunta-storage` no expone ningún mecanismo de
+        push (D53: interfaz de ~5 métodos, a propósito) y agregar uno
+        solo para esto hubiera sido diseñar una superficie nueva de
+        storage sin que T2.1 la pidiera. El contenido mostrado es
+        idéntico al de un stream real; solo la latencia (acotada por el
+        intervalo de poll) difiere. Abre su propia conexión SQLite de
+        solo lectura al mismo archivo — WAL (ya activado por
+        `Storage::open`) es exactamente lo que hace segura esa segunda
+        conexión concurrente con el `Storage` que `execute_run` usa
+        para escribir.
+      - **`yunta doctor`**: llama `probe()` sobre cada adapter real que
+        `runners:` nombra y reporta todos los resultados (a diferencia
+        de `probe_or_refuse`, que corta en el primero que falla).
+      - **`yunta gc [--dry-run]`**: primer consumidor real de
+        `storage.retention_days` (declarado desde T1.2, sin consumidor
+        hasta ahora). `release_worktree` es un no-op para
+        `isolation: worktree` a propósito (`worktree.rs`: "on disk...
+        for inspection") — `gc` es el mecanismo que después reclama ese
+        disco: para cada run terminal (`finished` o `broken`) cuyo
+        último evento supera `retention_days`, borra `run.dir` y su
+        worktree. **Alcance nombrado, no más chico en silencio que lo
+        que dice §8.3**: §8.3 también dice que el log base "se conserva
+        según `storage.retention_days`", lo que implicaría que las
+        filas de la base de datos tienen su propia política de
+        retención — pero `yunta-storage` no expone ningún
+        delete-events-older-than-X, y agregar uno como efecto
+        secundario de este comando hubiera sido exactamente el tipo de
+        deuda que CLAUDE.md pide no meter de contrabando. Ese consumidor
+        de la retención a nivel de base de datos sigue abierto — ver
+        "Pendiente explícito" más abajo.
+      - **`yunta cancel <run_id>` — deuda nombrada, no emulada.** Cada
+        sesión/hook/executor corre en su propio process group
+        (`process_group(0)`) precisamente para que el interrupt→kill
+        *interno* (presupuesto, timeout, `join: any`) pueda extinguirlo
+        sin llevarse el binario `yunta` — pero eso también significa
+        que nada hoy permite que una invocación *separada* de `yunta
+        cancel` encuentre y señalice esos procesos: no hay pidfile, ni
+        daemon, ni socket. `yunta run --detach` (M8, D101) es el primer
+        consumidor real de ese canal y el gatillo natural para
+        construirlo. Hasta entonces, `cancel` solo reporta lo que el
+        log ya dice: no-op limpio si el run ya terminó/pausó, y una
+        refusal explícita — nunca una cancelación fingida — si hay un
+        nodo en curso. El propio módulo (`commands/cancel.rs`) documenta
+        esto en detalle, incluida la conclusión técnica de que Ctrl-C
+        hoy tampoco es un camino limpio (los subprocesos, al estar en su
+        propio process group, no reciben el SIGINT que el terminal
+        manda al foreground process group) — un gap real, preexistente
+        a T7.1 (documentado ya en el módulo `run/mod.rs`: "Crash,
+        restart y Ctrl-C son el mismo caso"), registrado acá en vez de
+        parcheado de paso, tal como pide CLAUDE.md ("si encontrás un
+        problema fuera de tu alcance, registralo, no lo parchees al
+        pasar").
+      - **"árbol para composición" (§8.5) diferido, no un olvido**:
+        composición (`kind: workflow`, child runs) es M9 — no existe
+        nada que renderizar como árbol todavía.
+      - Tests: 13 end-to-end nuevos en `crates/cli/tests/run_flow.rs`
+        (`--input` con default y con override explícito; input
+        requerido faltante rechaza antes de crear el run; `--mode`
+        rechazado; `list` muestra workflows con sus inputs; `list
+        --runs` muestra el resumen de progreso; `doctor` sin adapters
+        configurados; `gc` sin `retention_days` configurado, `gc`
+        reclamando un run terminal viejo, `gc --dry-run` sin tocar
+        nada; `cancel` sobre un run ya terminado; `status` mostrando el
+        resumen normativo; `run --follow` imprimiendo al menos una línea
+        en curso antes de la línea final).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`
   desde T5.4. Sin `gate`/`executor`/`workflow`; sin `context:`, `skills:`,
-  `modes:`, `inputs:`, fan-out de `runners:`, `agent:` a nivel nodo,
+  `modes:`, `inputs:` (este último llegó después, vía T1.5 — ver la sección
+  M7 más abajo), fan-out de `runners:`, `agent:` a nivel nodo,
   `permissions:`, `scope_expansion:`, `coordination:`. Confirmado con el
   usuario.
 - **T1.2**: `runners`/`adapters`/`storage`/`paths`, más `baseline`/`coverage`
@@ -1903,10 +2092,9 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    `promotion_signaled` — existen como tipos (T2.2) pero `derive()` los ignora
    porque nada los emite todavía. Sumarlos a `RunState` cuando su schema/ciclo
    llegue (gates: M5/T7.2; composición: M9; findings: T5.12).
-6. **T1.5** — validación de inputs al crear el run. Depende de `inputs:` en el
-   schema, que T1.1 no implementó (fuera del recorte). Diferir hasta que algo
-   necesite inputs reales — probablemente cuando el workflow de bootstrap necesite
-   parametrizarse.
+6. **T1.5 — hecho.** Ver la sección M7 más abajo. El gatillo previsto acá
+   ("cuando algo necesite inputs reales") terminó siendo `--input` de T7.1,
+   no el workflow de bootstrap.
 7. **`event_hash` (T2.5)**: política ya definida en `docs/eventos.md` §3, sin
    implementar — explícitamente fuera de M-0.
 8. **El arco que cerraba M-0 está COMPLETO** (los seis pasos: artifacts al
@@ -1930,3 +2118,24 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    - **`run_paused` por límites de presupuesto de run (§8.3)**: los budgets por
      sesión (T3.3) están; `limits.max_tokens_per_run`/`max_loop_iterations`
      esperan a que `limits:` entre a la config (fuera del recorte de T1.2).
+9. **Canal cross-process para `yunta cancel` (T7.1/A4)**: cada
+   sesión/hook/executor corre en su propio process group para que el
+   interrupt→kill *interno* funcione sin llevarse `yunta` — pero eso deja
+   sin forma de que una invocación separada de `cancel` encuentre y
+   señalice esos procesos (sin pidfile, sin daemon, sin socket). El mismo
+   gap hace que Ctrl-C sobre un `yunta run` en curso tampoco termine
+   limpiamente el árbol de procesos (el subproceso, en su propio process
+   group, no recibe el SIGINT que la terminal manda al foreground process
+   group) — documentado ya en `run/mod.rs` como decisión existente
+   ("Crash, restart y Ctrl-C son el mismo caso"), no introducido por T7.1.
+   Gatillo: `yunta run --detach` (M8, D101) es el primer consumidor real
+   de un run vivo fuera del proceso que lo creó, y por lo tanto el punto
+   natural para diseñar el canal (pidfile con process-group id, o algo
+   equivalente) que también resolvería esto.
+10. **Retención a nivel de base de datos (§8.3/T7.1's `gc`)**: `gc` borra
+    `run.dir`/worktree de runs terminales pasado `storage.retention_days`,
+    pero §8.3 también dice que el event log *base* se conserva según esa
+    misma config — implicando una purga de filas, no solo de archivos.
+    `yunta-storage` no expone ningún delete-events-older-than-X. Gatillo:
+    cuando el tamaño de la base de datos importe lo suficiente como para
+    justificar esa superficie nueva en el crate de storage.

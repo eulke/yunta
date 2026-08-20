@@ -1,5 +1,9 @@
 //! One module per subcommand; `main.rs` only parses and dispatches.
 
+pub mod cancel;
+pub mod doctor;
+pub mod gc;
+pub mod list;
 pub mod resume;
 pub mod run;
 pub mod status;
@@ -81,6 +85,37 @@ pub(crate) fn refuse_unrunnable(
         return Err(ExitCode::FAILURE);
     }
     Ok(())
+}
+
+/// Health-checks every real adapter this run would use (Spec Adapter §2:
+/// `probe()` "corre en `yunta doctor` y al crear runs") — binary
+/// present, version compatible, auth valid — and refuses before any
+/// worktree or token is spent if one comes back unhealthy. `yunta
+/// doctor` (T7.1) calls the same adapters' `probe()` directly instead of
+/// through this helper, since it reports every result rather than
+/// stopping at the first failure.
+pub(crate) async fn probe_or_refuse(
+    adapters: &HashMap<String, Arc<dyn Adapter>>,
+) -> Result<(), ExitCode> {
+    let mut unhealthy = Vec::new();
+    for (name, adapter) in adapters {
+        match adapter.probe().await {
+            Ok(report) if report.healthy => {}
+            Ok(report) => unhealthy.push(format!(
+                "{name}: {}",
+                report.diagnostic.as_deref().unwrap_or("unhealthy")
+            )),
+            Err(e) => unhealthy.push(format!("{name}: {e}")),
+        }
+    }
+    if unhealthy.is_empty() {
+        return Ok(());
+    }
+    eprintln!("error: adapter health check failed — run `yunta doctor` for detail:");
+    for line in &unhealthy {
+        eprintln!("  {line}");
+    }
+    Err(ExitCode::FAILURE)
 }
 
 /// `yunta check` before running anything — a workflow that fails static

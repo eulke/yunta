@@ -173,11 +173,16 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
         }
     }
 
+    // Test cases don't declare input values yet (§14/T7.9's own recorte,
+    // `docs/m0-status.md`) — every input a tested workflow declares must
+    // have a `default`, same as any other consumer of `build_manifest`
+    // that has none to offer.
     let manifest = yunta_engine::build_manifest(
         &workflow,
         &config,
         workflow_path.parent().unwrap_or(Path::new(".")),
         &worktree,
+        &HashMap::new(),
     )
     .map_err(|e| e.to_string())?;
 

@@ -1,21 +1,146 @@
-//! `yunta run <workflow>` (T7.1 parcial): resolve config, check, freeze
-//! the manifest, prepare the run's isolated working tree (T4.2, §7.3),
+//! `yunta run <workflow>` (T7.1): resolve config, check, freeze the
+//! manifest, prepare the run's isolated working tree (T4.2, §7.3),
 //! create the run and execute it there.
 //!
 //! The run id comes from the wall clock + pid — the shell may use
 //! entropy, the engine never does.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
-use yunta_core::{Isolation, RunId, SystemClock, Workflow};
+use yunta_core::{Isolation, Manifest, RunId, SystemClock, Workflow};
 use yunta_engine::{RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
+use super::status::progress_summary;
 use crate::load_yaml;
 use crate::project;
 
-pub async fn run(workflow_path: &Path) -> ExitCode {
+/// Parses `--input name=value` entries into the raw map
+/// `yunta_engine::resolve_inputs` validates against the workflow's own
+/// `inputs:` (T1.5, §2.3) — this function only enforces the *syntax* of
+/// the flag (exactly one `=`, non-empty name); everything about whether
+/// a name is declared, required, or well-typed is `resolve_inputs`'s
+/// job, not this one's, so the two error paths never disagree about who
+/// owns which rule.
+fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
+    let mut inputs = HashMap::new();
+    for entry in raw {
+        let (name, value) = entry
+            .split_once('=')
+            .ok_or_else(|| format!("--input `{entry}` must have the form `name=value`"))?;
+        if name.is_empty() {
+            return Err(format!("--input `{entry}` has an empty name"));
+        }
+        if inputs.insert(name.to_string(), value.to_string()).is_some() {
+            return Err(format!("--input `{name}` was given more than once"));
+        }
+    }
+    Ok(inputs)
+}
+
+/// `--adapter <name>` (T7.1) picks which adapter a run's sessions use.
+/// `mock` is a legitimate adapter id (Spec Adapter §6) but its fixtures
+/// are `yunta test`'s territory (`docs/m0-status.md`'s T6.1 entry): a
+/// real `run` has no `.yunta/tests/` case to script it from, so naming
+/// it here degrades explicitly instead of spawning a mock with nothing
+/// to simulate. Any other name must be one `real_adapters` would
+/// actually construct — today, only `claude-code` (T7.4 adds a second).
+fn validate_adapter_flag(
+    name: &str,
+    adapters: &HashMap<String, std::sync::Arc<dyn yunta_adapters::Adapter>>,
+) -> Result<(), String> {
+    if name == "mock" {
+        return Err(
+            "`--adapter mock` has no fixture to run without a `.yunta/tests/` case — \
+             use `yunta test` instead"
+                .to_string(),
+        );
+    }
+    if !adapters.contains_key(name) {
+        return Err(format!(
+            "unknown adapter `{name}` — this binary can run: {}",
+            if adapters.is_empty() {
+                "(none configured — `runners:` names no adapter this build supports)".to_string()
+            } else {
+                let mut names: Vec<&str> = adapters.keys().map(String::as_str).collect();
+                names.sort();
+                names.join(", ")
+            }
+        ));
+    }
+    Ok(())
+}
+
+/// `run --follow` (§8.5): a background task that re-reads the run's own
+/// event log every 500ms and prints `progress_summary` whenever it
+/// changes. §8.5's own text says "consumiendo el stream de eventos" —
+/// this recorte polls rather than subscribing to a real push stream,
+/// since `yunta-storage` exposes no such subscription mechanism (D53:
+/// a ~5-method interface, on purpose); the *content* printed is
+/// identical either way, only the delivery latency (bounded by the
+/// poll interval) differs from a true stream. Opens its own `Storage`
+/// handle onto the same SQLite file — WAL mode (already set by
+/// `Storage::open`) is exactly what makes a second, read-only
+/// connection safe to run concurrently with the writer `execute_run`
+/// itself is using.
+fn spawn_follower(
+    storage_path: std::path::PathBuf,
+    run_id: RunId,
+    manifest: Manifest,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::sync::Arc<tokio::sync::Notify>,
+) {
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    let stop_follower = stop.clone();
+    let handle = tokio::spawn(async move {
+        let storage = match Storage::open(&storage_path) {
+            Ok(storage) => storage,
+            Err(_) => return, // `run` itself already opened this path fine.
+        };
+        let mut last = String::new();
+        loop {
+            tokio::select! {
+                _ = stop_follower.notified() => return,
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            }
+            let Ok(events) = storage.events_for_run(&run_id) else {
+                continue;
+            };
+            if events.is_empty() {
+                continue;
+            }
+            let summary = progress_summary(&events, &manifest);
+            if summary != last {
+                println!("run {run_id}: {summary}");
+                last = summary;
+            }
+        }
+    });
+    (handle, stop)
+}
+
+pub async fn run(
+    workflow_path: &Path,
+    raw_inputs: &[String],
+    adapter: Option<&str>,
+    mode: Option<&str>,
+    follow: bool,
+) -> ExitCode {
+    // `modes:` (§10) isn't in the schema this recorte parses (M9 owns
+    // it) — refusing the flag up front is honest; silently ignoring it
+    // would look like the mode was applied.
+    if let Some(mode) = mode {
+        eprintln!(
+            "error: `--mode {mode}` — this build doesn't implement `modes:` yet (§10, M9); \
+             every workflow this recorte runs has exactly one path"
+        );
+        return ExitCode::FAILURE;
+    }
+
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -42,16 +167,38 @@ pub async fn run(workflow_path: &Path) -> ExitCode {
     if let Err(code) = super::refuse_unrunnable(&workflow, &adapters) {
         return code;
     }
+    if let Some(name) = adapter {
+        if let Err(e) = validate_adapter_flag(name, &adapters) {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Err(code) = super::probe_or_refuse(&adapters).await {
+        return code;
+    }
+
+    let provided_inputs = match parse_inputs(raw_inputs) {
+        Ok(inputs) => inputs,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    let manifest =
-        match yunta_engine::build_manifest(&workflow, &project.config, workflow_dir, &cwd) {
-            Ok(manifest) => manifest,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        };
+    let manifest = match yunta_engine::build_manifest(
+        &workflow,
+        &project.config,
+        workflow_dir,
+        &cwd,
+        &provided_inputs,
+    ) {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let run_id = RunId::from(format!(
         "run-{}-{}",
@@ -95,6 +242,14 @@ pub async fn run(workflow_path: &Path) -> ExitCode {
         };
     println!("run {run_id}: created at {}", run_dir.display());
 
+    let follower = follow.then(|| {
+        spawn_follower(
+            project.storage_path.clone(),
+            run_id.clone(),
+            manifest.clone(),
+        )
+    });
+
     let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -106,6 +261,11 @@ pub async fn run(workflow_path: &Path) -> ExitCode {
         DEFAULT_MAX_RETRIES,
     )
     .await;
+
+    if let Some((handle, stop)) = follower {
+        stop.notify_one();
+        let _ = handle.await;
+    }
 
     match outcome {
         Ok(report) => {

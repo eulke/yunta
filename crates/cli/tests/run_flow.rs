@@ -576,3 +576,357 @@ nodes:
         "expected a D100 warning naming the group, got: {stderr}"
     );
 }
+
+// --- T1.5: `--input` (§2.3, D82) --------------------------------------------
+
+#[test]
+fn an_input_s_default_is_used_when_input_is_not_given_on_the_command_line() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: greet
+inputs:
+  greeting:
+    type: string
+    default: hola
+nodes:
+  - id: only
+    kind: bash
+    run: "test '{{inputs.greeting}}' = 'hola'"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn an_explicit_input_flag_overrides_the_default() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: greet
+inputs:
+  greeting:
+    type: string
+    default: hola
+nodes:
+  - id: only
+    kind: bash
+    run: "test '{{inputs.greeting}}' = 'bonjour'"
+"#,
+    );
+
+    let run = yunta_in(
+        &repo,
+        &home,
+        &["run", "wf.yaml", "--input", "greeting=bonjour"],
+    );
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn a_missing_required_input_refuses_before_creating_any_run() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: needs-idea
+inputs:
+  idea:
+    type: string
+    required: true
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(!run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("idea"), "got: {stderr}");
+    assert!(
+        !home.join("runs").exists(),
+        "no run must be created when input resolution fails"
+    );
+}
+
+#[test]
+fn mode_is_refused_since_modes_have_no_schema_yet() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--mode", "ship"]);
+    assert!(!run.status.success());
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("mode"), "got: {stderr}");
+}
+
+// --- T7.1: list, doctor, gc, cancel -----------------------------------------
+
+#[test]
+fn list_shows_workflows_under_the_repo_s_own_directory_with_their_inputs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/greet.yaml"),
+        r#"
+name: greet
+description: "Says hello"
+inputs:
+  greeting:
+    type: string
+    default: hola
+    description: "What to say"
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#,
+    );
+
+    let list = yunta_in(&repo, &home, &["list"]);
+    assert!(list.status.success());
+    let text = stdout(&list);
+    assert!(text.contains("greet: Says hello"), "got: {text}");
+    assert!(text.contains("greeting"), "got: {text}");
+    assert!(text.contains("optional"), "got: {text}");
+}
+
+#[test]
+fn list_runs_shows_local_runs_with_their_progress_summary() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+
+    let list = yunta_in(&repo, &home, &["list", "--runs"]);
+    assert!(list.status.success());
+    let text = stdout(&list);
+    assert!(text.contains(&run_id), "got: {text}");
+    assert!(text.contains("nodes"), "got: {text}");
+    assert!(text.contains("finished"), "got: {text}");
+}
+
+#[test]
+fn doctor_reports_no_adapter_when_runners_names_none_this_build_supports() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let doctor = yunta_in(&repo, &home, &["doctor"]);
+    assert!(doctor.status.success());
+    assert!(stdout(&doctor).contains("no adapter to probe"));
+}
+
+#[test]
+fn gc_does_nothing_when_retention_days_is_not_configured() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let gc = yunta_in(&repo, &home, &["gc"]);
+    assert!(gc.status.success());
+    assert!(stdout(&gc).contains("retention_days"));
+}
+
+#[test]
+fn gc_reclaims_a_finished_run_past_its_retention_window() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+    let run_dir = home.join("runs").join(&run_id);
+    assert!(run_dir.exists());
+
+    let gc = yunta_in(&repo, &home, &["gc"]);
+    assert!(
+        gc.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&gc.stderr)
+    );
+    assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
+    assert!(!run_dir.exists(), "run.dir should have been removed");
+}
+
+#[test]
+fn gc_dry_run_reports_without_removing_anything() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+    let run_dir = home.join("runs").join(&run_id);
+
+    let gc = yunta_in(&repo, &home, &["gc", "--dry-run"]);
+    assert!(gc.status.success());
+    assert!(
+        stdout(&gc).contains("would be reclaimed"),
+        "got: {}",
+        stdout(&gc)
+    );
+    assert!(run_dir.exists(), "dry-run must never remove anything");
+}
+
+#[test]
+fn cancel_on_an_already_finished_run_is_a_clean_no_op() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+
+    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    assert!(cancel.status.success());
+    assert!(stdout(&cancel).contains("nothing to cancel"));
+}
+
+#[test]
+fn status_shows_the_normative_counters_with_context_summary() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: two-nodes
+nodes:
+  - id: a
+    kind: bash
+    run: "true"
+  - id: b
+    kind: bash
+    depends_on: [a]
+    run: "true"
+"#,
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+
+    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    assert!(status.status.success());
+    let text = stdout(&status);
+    assert!(text.contains("2/2 nodes"), "got: {text}");
+    assert!(text.contains("0 reroutes"), "got: {text}");
+    assert!(text.contains("finished"), "got: {text}");
+}
+
+#[test]
+fn run_follow_prints_progress_while_the_run_is_still_in_progress() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // Long enough that the 500ms poller in `spawn_follower` gets at
+    // least one tick in before the node (and so the run) finishes.
+    write(
+        &repo.join("wf.yaml"),
+        "name: slow\nnodes:\n  - id: only\n    kind: bash\n    run: \"sleep 1.2\"\n",
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--follow"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let text = stdout(&run);
+    assert!(
+        text.contains("0/1 nodes") && text.contains("running"),
+        "expected at least one in-progress follow line, got: {text}"
+    );
+}

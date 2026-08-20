@@ -36,6 +36,20 @@ enum Command {
     Run {
         /// Path to the workflow YAML file.
         workflow: PathBuf,
+        /// Sets a declared input: `--input name=value`, repeatable.
+        #[arg(long = "input", value_name = "name=value")]
+        input: Vec<String>,
+        /// Runs every session with this adapter instead of `runners:`'s
+        /// own resolution. `mock` is refused here — see `yunta test`.
+        #[arg(long)]
+        adapter: Option<String>,
+        /// Selects a workflow mode. Not implemented yet (§10, M9).
+        #[arg(long)]
+        mode: Option<String>,
+        /// Prints progress (§8.5) as the run advances, polling the event
+        /// log every 500ms instead of only at the end.
+        #[arg(long)]
+        follow: bool,
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
     Status {
@@ -46,6 +60,31 @@ enum Command {
     Resume {
         /// The run id to resume.
         run_id: String,
+    },
+    /// Sends every running node's session an ordered interrupt,
+    /// escalating to `kill` if it doesn't close in time (Spec Adapter
+    /// §2, A4).
+    Cancel {
+        /// The run id to cancel.
+        run_id: String,
+    },
+    /// Lists workflows under `.yunta/workflows/`, or local runs with
+    /// `--runs`.
+    List {
+        /// Lists local runs and their derived state instead of
+        /// workflows.
+        #[arg(long)]
+        runs: bool,
+    },
+    /// Health-checks every adapter this project's `runners:` names —
+    /// binary present, version compatible, auth valid (Spec Adapter §2).
+    Doctor,
+    /// Removes orphaned run and worktree directories, respecting
+    /// `storage.retention_days`.
+    Gc {
+        /// Reports what would be removed without removing it.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Renders a workflow's DAG as Mermaid — optionally annotated with a
     /// run's derived state.
@@ -76,9 +115,34 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Command::Check { workflow, config }) => run_check(&workflow, config.as_deref()),
-        Some(Command::Run { workflow }) => commands::run::run(&workflow).await,
+        Some(Command::Run {
+            workflow,
+            input,
+            adapter,
+            mode,
+            follow,
+        }) => {
+            commands::run::run(
+                &workflow,
+                &input,
+                adapter.as_deref(),
+                mode.as_deref(),
+                follow,
+            )
+            .await
+        }
         Some(Command::Status { run_id }) => commands::status::status(&run_id),
         Some(Command::Resume { run_id }) => commands::resume::resume(&run_id).await,
+        Some(Command::Cancel { run_id }) => commands::cancel::cancel(&run_id).await,
+        Some(Command::List { runs }) => {
+            if runs {
+                commands::list::list_runs()
+            } else {
+                commands::list::list_workflows()
+            }
+        }
+        Some(Command::Doctor) => commands::doctor::doctor().await,
+        Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,
     }
