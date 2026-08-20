@@ -125,7 +125,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **No hacer:** no inventar un renderer de consola aparte — es el mismo
   `HumanInteraction.resolve()`; no persistir la decisión fuera del log.
 
-### DI-02 — `kind: questions` → superficie interactiva `[ ]`
+### DI-02 — `kind: questions` → superficie interactiva `[x]`
 
 - **Origen:** T5.14 (§4.1/D86). Entrada: "sigue sin superficie
   interactiva — deuda ya nombrada". Gatillo cumplido: T7.1 (TTY) y T7.2

@@ -512,20 +512,16 @@ pub(super) async fn close_node(
 
     match close_artifacts(node, ctx.run_dir) {
         Ok(verified) => {
-            // §4.1/T5.14: a `kind: questions` artifact's own session has
-            // already closed by this point (the same "artifact read only
-            // at node close" ordering `task-ledger`/`findings` already
-            // rely on) — nothing renders mid-session. This recorte has no
-            // TTY/MCP/PR answering surface (T7.1/T7.2/T8.x, none built
-            // yet), so every question artifact takes the Contrato's own
-            // "sin TTY" path: the run pauses citing exactly what's
-            // unanswered, never hangs, never silently proceeds as if
-            // nothing were asked (A6).
-            let pending_questions: Vec<&yunta_core::Question> = verified
-                .iter()
-                .filter_map(|artifact| artifact.questions.as_deref())
-                .flatten()
-                .collect();
+            // §4.1/T5.14/DI-02: a `kind: questions` artifact's own
+            // session has already closed by this point (the same
+            // "artifact read only at node close" ordering
+            // `task-ledger`/`findings` already rely on) — nothing
+            // renders mid-session. With a live surface the questions
+            // are put to the human right here (after the artifacts are
+            // recorded, below); without one — or on an invalid reply —
+            // the run pauses citing exactly what's unanswered, never
+            // hangs, never silently proceeds as if nothing were asked
+            // (A6).
 
             // §5.7/T5.13: a re-plan — this same node producing a task
             // ledger a second time, whether via a reroute back to it or a
@@ -597,16 +593,77 @@ pub(super) async fn close_node(
                     }
                 }
             }
-            if !pending_questions.is_empty() {
-                let ids: Vec<&str> = pending_questions.iter().map(|q| q.id.as_str()).collect();
+            let mut unanswered: Vec<String> = Vec::new();
+            for artifact in &verified {
+                let Some(questions) = &artifact.questions else {
+                    continue;
+                };
+                let file = yunta_core::QuestionsFile {
+                    questions: questions.clone(),
+                };
+                let Some(reply) = ctx.human_interaction.ask(&file).await else {
+                    // No surface (headless, `yunta test`) — the pre-DI-02
+                    // path, unchanged: cite every unanswered id.
+                    unanswered.extend(file.questions.iter().map(|q| q.id.clone()));
+                    continue;
+                };
+                let violations = yunta_core::validate_answers(&file, &reply.answers);
+                if !violations.is_empty() {
+                    // The surface answered but the reply doesn't satisfy
+                    // the questions' own declared rules — the engine is
+                    // the verdict-giver, so an invalid reply is refused
+                    // with the exact violations, never half-recorded.
+                    unanswered.extend(violations);
+                    continue;
+                }
+                // Engine-written artifact (I20), next to the questions it
+                // answers, then the event with hash + channel + responder
+                // (§4.1's own "hash, canal, respondiente").
+                // `artifact.path` is run.dir-relative (the event log's
+                // own convention) — the write goes to the absolute
+                // location, the event keeps the relative one.
+                let answers_path =
+                    std::path::PathBuf::from(format!("{}.answers.yaml", artifact.path.display()));
+                let answers_abs = ctx.run_dir.join(&answers_path);
+                let answers_file = yunta_core::AnswersFile {
+                    answers: reply.answers,
+                };
+                let bytes = serde_yaml::to_string(&answers_file)
+                    .map_err(|e| RunError::ManifestWrite {
+                        path: answers_abs.clone(),
+                        detail: e.to_string(),
+                    })?
+                    .into_bytes();
+                std::fs::write(&answers_abs, &bytes).map_err(|source| RunError::Io {
+                    context: format!("write `{}`", answers_abs.display()),
+                    source,
+                })?;
+                let answers_hash = yunta_core::sha256_hex(&bytes);
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ArtifactWritten(yunta_core::events::ArtifactWrittenPayload {
+                        path: answers_path,
+                        content_hash: answers_hash.clone(),
+                    }),
+                )?;
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
+                        answers_hash,
+                        channel: reply.channel,
+                        responder: reply.responder,
+                    }),
+                )?;
+            }
+            if !unanswered.is_empty() {
                 return fail_with_tokens(
                     ctx,
                     node,
                     format!(
                         "node `{}` asked {} question(s) awaiting an answer: {}",
                         node.id,
-                        ids.len(),
-                        ids.join(", ")
+                        unanswered.len(),
+                        unanswered.join(", ")
                     ),
                     false,
                     tokens,

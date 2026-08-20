@@ -10,10 +10,22 @@
 use std::io::{IsTerminal, Write};
 
 use async_trait::async_trait;
-use yunta_core::events::{GateResolvedPayload, GateWaitingPayload};
-use yunta_engine::HumanInteraction;
+use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::{Answer, AnswerType, QuestionsFile};
+use yunta_engine::{HumanInteraction, QuestionsReply};
 
 pub struct ConsoleInteraction;
+
+/// Reads one line from stdin; `None` on EOF (stdin closed mid-prompt —
+/// the same "can't interact" case as never having a TTY, never a
+/// silent default).
+fn read_line() -> Option<String> {
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+        return None;
+    }
+    Some(line.trim().to_string())
+}
 
 #[async_trait]
 impl HumanInteraction for ConsoleInteraction {
@@ -74,6 +86,72 @@ impl HumanInteraction for ConsoleInteraction {
             resolved_by: std::env::var("USER").ok(),
             free_text: (!free_text.is_empty()).then(|| free_text.to_string()),
             approved_sha: None,
+        })
+    }
+
+    /// §4.1/D86 (DI-02): question by question over the TTY, honoring
+    /// each `answer_type` at input time (the engine re-validates the
+    /// whole reply anyway — the surface's checks are UX, the engine's
+    /// are the verdict). A non-required question accepts an empty line
+    /// as "no answer"; a required one re-asks.
+    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
+        if !std::io::stdin().is_terminal() {
+            return None;
+        }
+
+        println!();
+        println!(
+            "=== questions: {} answer(s) needed ===",
+            questions.questions.len()
+        );
+        let mut answers = Vec::new();
+        for question in &questions.questions {
+            let value = loop {
+                match question.answer_type {
+                    AnswerType::Text => print!("{} ", question.text),
+                    AnswerType::Choice => {
+                        print!("{} [{}] ", question.text, question.values.join("/"))
+                    }
+                    AnswerType::Boolean => print!("{} [y/n] ", question.text),
+                }
+                if !question.required {
+                    print!("(enter to skip) ");
+                }
+                let _ = std::io::stdout().flush();
+                let line = read_line()?;
+                if line.is_empty() {
+                    if question.required {
+                        println!("`{}` is required", question.id);
+                        continue;
+                    }
+                    break None;
+                }
+                match question.answer_type {
+                    AnswerType::Text => break Some(line),
+                    AnswerType::Choice => {
+                        if question.values.contains(&line) {
+                            break Some(line);
+                        }
+                        println!("`{line}` isn't one of: {}", question.values.join(", "));
+                    }
+                    AnswerType::Boolean => match line.as_str() {
+                        "y" | "yes" | "true" => break Some("true".to_string()),
+                        "n" | "no" | "false" => break Some("false".to_string()),
+                        _ => println!("answer y or n"),
+                    },
+                }
+            };
+            if let Some(value) = value {
+                answers.push(Answer {
+                    id: question.id.clone(),
+                    value,
+                });
+            }
+        }
+        Some(QuestionsReply {
+            answers,
+            channel: Channel::Tty,
+            responder: std::env::var("USER").ok(),
         })
     }
 }

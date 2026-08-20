@@ -800,6 +800,138 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     );
 }
 
+// --- DI-02: kind: questions → superficie interactiva (§4.1, D86) ------------
+
+/// A test surface that answers questions from a script — `resolve`
+/// deliberately returns `None` so these tests prove `ask` alone drives
+/// the flow.
+struct ScriptedAnswers {
+    answers: Vec<yunta_core::Answer>,
+}
+
+#[async_trait::async_trait]
+impl yunta_engine::HumanInteraction for ScriptedAnswers {
+    async fn resolve(
+        &self,
+        _escalation: &yunta_core::events::GateWaitingPayload,
+    ) -> Option<yunta_core::events::GateResolvedPayload> {
+        None
+    }
+    async fn ask(
+        &self,
+        _questions: &yunta_core::QuestionsFile,
+    ) -> Option<yunta_engine::QuestionsReply> {
+        Some(yunta_engine::QuestionsReply {
+            answers: self.answers.clone(),
+            channel: yunta_core::events::Channel::Tty,
+            responder: Some("eulke".to_string()),
+        })
+    }
+}
+
+fn answer(id: &str, value: &str) -> yunta_core::Answer {
+    yunta_core::Answer {
+        id: id.to_string(),
+        value: value.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact() {
+    // DI-02: with a live surface, the questions are answered in the same
+    // invocation — the node finishes, the answers land as an artifact a
+    // following node can mount, and `questions_answered` records hash,
+    // channel and responder (§4.1's own contract, T5.14's missing 4th ✓).
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = questions_fixture(&artifacts_dir);
+
+    let interaction = ScriptedAnswers {
+        answers: vec![answer("q1", "staging")], // q2 is not required
+    };
+    let (terminal, state) = bench
+        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"ask".into()),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let answered = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::QuestionsAnswered(p) => Some(p),
+            _ => None,
+        })
+        .expect("questions_answered must be on the log");
+    assert_eq!(answered.channel, yunta_core::events::Channel::Tty);
+    assert_eq!(answered.responder.as_deref(), Some("eulke"));
+    assert!(!answered.answers_hash.is_empty());
+
+    // The answers are a real artifact next to the questions (I3), with
+    // the given values, consumable by a later node via `artifact:`.
+    let answers_path = artifacts_dir.join("questions.yaml.answers.yaml");
+    let raw = std::fs::read_to_string(&answers_path).expect("answers artifact must exist");
+    let parsed: yunta_core::AnswersFile = serde_yaml::from_str(&raw).unwrap();
+    assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
+}
+
+#[tokio::test]
+async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = questions_fixture(&artifacts_dir);
+
+    let interaction = ScriptedAnswers {
+        answers: vec![answer("q2", "just a note")], // q1 (required) missing
+    };
+    let (terminal, _state) = bench
+        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("q1"), "must cite the missing q1: {reason}");
+        }
+        other => panic!("an incomplete reply must pause, got {other:?}"),
+    }
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            &e.payload,
+            yunta_core::events::EventPayload::QuestionsAnswered(_)
+        )),
+        "an invalid reply must never be recorded as answered"
+    );
+}
+
+#[tokio::test]
+async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let fixture = questions_fixture(&artifacts_dir);
+
+    let interaction = ScriptedAnswers {
+        answers: vec![answer("q1", "qa")], // not in [staging, production]
+    };
+    let (terminal, _state) = bench
+        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(
+                reason.contains("qa") || reason.contains("q1"),
+                "must cite the invalid value or its question: {reason}"
+            );
+        }
+        other => panic!("an out-of-values choice must pause, got {other:?}"),
+    }
+}
+
 fn interval(worktree: &std::path::Path, id: &str) -> (i128, i128) {
     let start = std::fs::read_to_string(worktree.join(format!("{id}-start.txt"))).unwrap();
     let end = std::fs::read_to_string(worktree.join(format!("{id}-end.txt"))).unwrap();

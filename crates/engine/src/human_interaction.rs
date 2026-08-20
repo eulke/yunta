@@ -12,7 +12,19 @@
 //! MCP one is M8's `resolve_gate` tool, not built here.
 
 use async_trait::async_trait;
-use yunta_core::events::{GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::{Answer, QuestionsFile};
+
+/// One surface's reply to a `kind: questions` artifact (DI-02, §4.1):
+/// the answers plus which channel produced them and who answered — the
+/// implementation knows its own channel (console = `Tty`, M8's MCP tool
+/// = `Mcp`), the engine only records it into `questions_answered`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuestionsReply {
+    pub answers: Vec<Answer>,
+    pub channel: Channel,
+    pub responder: Option<String>,
+}
 
 /// Resolves one gate's escalation, or reports that this surface can't
 /// interact right now. `None` is not a failure — a headless run, a
@@ -27,6 +39,20 @@ use yunta_core::events::{GateResolvedPayload, GateWaitingPayload};
 #[async_trait]
 pub trait HumanInteraction: Send + Sync {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<GateResolvedPayload>;
+
+    /// §4.1/D86 (DI-02): puts a `kind: questions` artifact to the human,
+    /// question by question. `None` = this surface can't ask (same
+    /// convention as `resolve`), and the run degrades to waiting exactly
+    /// as it did before any surface existed. Deliberately a separate
+    /// method from `resolve`: questions (§4.1) and gate escalations
+    /// (§5.3) are two distinct normative shapes, and flattening them
+    /// into one payload would breed the ambiguous-object vice. A default
+    /// implementation returns `None` so surfaces that only handle gates
+    /// (and every existing implementor) stay valid unchanged.
+    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
+        let _ = questions;
+        None
+    }
 }
 
 /// Always reports "can't interact" — the default for any run not

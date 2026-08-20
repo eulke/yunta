@@ -2055,14 +2055,20 @@ que aparece.
         existe" además del menú, no en su lugar; mezclarlas hubiera
         hecho ambiguo qué significa una respuesta que no calza con
         ningún id.
-      - **`kind: questions` sigue sin superficie interactiva — deuda ya
-        nombrada, no nueva.** El propio comentario de T5.14 en
-        `node_exec.rs` decía "T7.1/T7.2/T8.x, none built yet"; T7.2 solo
-        construyó el trait para el caso de gates. Retrofitear
-        `questions` a `HumanInteraction` es un cambio real (su propio
-        ciclo cierra sesión antes de renderizar nada, §5.14) que
-        CLAUDE.md pide no colar de paso — queda con el mismo gatillo que
-        ya tenía.
+      - **`kind: questions` con superficie interactiva — resuelto por
+        DI-02** (originalmente deuda: T7.2 solo construyó el trait para
+        gates). El trait ganó `ask(&QuestionsFile) ->
+        Option<QuestionsReply>` con default `None` (método separado de
+        `resolve` a propósito: §4.1 y §5.3 son dos formas normativas
+        distintas); `ConsoleInteraction::ask` pregunta por pregunta en
+        TTY respetando `answer_type`/`required`; el engine valida la
+        respuesta completa (`validate_answers` en `yunta-core`, puro),
+        materializa `<name>.answers.yaml` como artifact del run (I20) y
+        emite `questions_answered{hash, channel, responder}` — el cuarto
+        ✓ de T5.14 que faltaba. Respuesta inválida o sin superficie →
+        pausa citando exactamente qué falta, igual que antes. El re-ask
+        interactivo en un `resume` llega con DI-03 (necesita el estado
+        `waiting` derivable).
       - **MCP (`resolve_gate`, M8) no se construyó** — el diseño (un
         trait, un objeto) es lo que garantiza que, cuando M8 lo agregue,
         no haya lógica de gate duplicada que reconciliar; construirlo

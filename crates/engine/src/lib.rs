@@ -34,7 +34,7 @@ pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use check::{check, check_warnings, CheckError, CheckWarning};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{register as register_findings, FindingsError};
-pub use human_interaction::{HumanInteraction, NoInteraction};
+pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
