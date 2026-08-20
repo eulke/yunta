@@ -1203,17 +1203,23 @@ que aparece.
         como parte del diff entregable de la tarea — lo cual de paso le
         da a "un request por intento" su único cumplimiento real (una
         segunda lectura contra el mismo worktree no encuentra nada).
-      - **`ask` degrada siempre a pausa, nunca a consulta real**: no
-        existe `kind: gate`/T7.2 en este codebase todavía, así que no hay
-        superficie interactiva por la que una persona decida. No es una
-        ambigüedad de diseño sino una consecuencia técnica dura: `ask`
-        evalúa exactamente como `rules`/`deny` en el pre-check y el cap,
-        pero cuando le toca renderizar el propio veredicto de modo
-        produce `Decision::Escalate` — que no tiene evento propio
-        (`scope_expansion_requested` se emite igual, pero no
-        `granted`/`denied`) y hace que `run_task` marque
-        `needs_human_decision`, la señal que `loop_exec.rs` usa para
-        pausar el run.
+      - **`ask` consulta de verdad — resuelto por DI-01** (originalmente:
+        "degrada siempre a pausa" porque T7.2 no existía). Hoy
+        `Decision::Escalate` llega a `loop_exec`, que arma el objeto §5.3
+        (summary con el reason del agente; evidencia mecánica: paths,
+        exit del pre-check del criterio propuesto, modo y estado del cap)
+        y lo pone a `ctx.human_interaction`. Grant →
+        `scope_expansion_granted{decided_by: Person, paths}` (el payload
+        ganó `paths`, aditivo D70, para que el grant sea auditable
+        autocontenido y el reintento derive su scope efectivo del log,
+        I2); deny → `denied{Person}` + finding (D80, misma conversión que
+        la vía por regla); en ambos casos la tarea vuelve a `Pending` y
+        reintenta. Sin superficie (`NoInteraction`) → pausa idéntica a la
+        de antes, sin `gate_waiting` grabado (convención T7.2: una
+        pregunta sin resolver re-pregunta en el resume). 3 tests e2e
+        nuevos en `run.rs` (grant ensancha el scope del reintento, deny
+        genera finding y la tarea cumple dentro del scope original,
+        headless pausa igual que siempre).
       - **`max_per_run` bajo concurrencia real: soft race documentada, no
         corregida**: `granted_count` (cuenta de eventos
         `scope_expansion_granted` ya en el log) se lee una vez por lote,

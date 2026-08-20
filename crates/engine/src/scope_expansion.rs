@@ -135,9 +135,11 @@ pub enum Decision {
     Granted,
     Denied(String),
     /// `ask` mode, or the run's `max_per_run` cap already exhausted —
-    /// neither is a verdict this recorte can render on its own (no gate
-    /// surface exists yet, T7.2), so the run pauses for a human instead
-    /// of guessing (A6: degradación explícita, jamás silenciosa).
+    /// neither is a verdict this pure evaluation renders on its own: the
+    /// caller (`loop_exec`, DI-01) builds the §5.3 escalation object and
+    /// puts it to `HumanInteraction`; only when no live surface answers
+    /// does the run pause instead of guessing (A6: degradación
+    /// explícita, jamás silenciosa).
     Escalate,
 }
 

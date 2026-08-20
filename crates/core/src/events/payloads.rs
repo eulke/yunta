@@ -327,6 +327,13 @@ pub struct ScopeExpansionGrantedPayload {
     pub decided_by: Decider,
     pub mode: ScopeExpansionMode,
     pub count_this_run: u32,
+    /// The exact paths this grant authorized (DI-01) — self-contained
+    /// audit, and what a later attempt's effective scope derives from
+    /// the log (I2), instead of re-pairing the grant with the
+    /// `requested` event that preceded it. `default` for logs written
+    /// before the field existed (D70's tolerant reader).
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

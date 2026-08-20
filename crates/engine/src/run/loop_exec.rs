@@ -87,17 +87,16 @@ pub(super) async fn execute_loop(
     // A resume starts empty — the log carries each task's *status*, and
     // the generic tail below still names which tasks are blocked.
     let mut blocked_reasons: Vec<String> = Vec::new();
-    // §6.2: a scope-expansion request left `Escalate`d (`ask` mode, or
-    // `max_per_run` exhausted) is a decision owed to a human — regardless
-    // of whether *this* attempt's own criteria happened to succeed
-    // without needing the grant. `TaskCycleReport.needs_human_decision`
-    // carries that even on a `Done` outcome, which the ordinary
-    // `Blocked`/`Done` branch below never surfaces on its own, so it's
-    // tracked here and checked once the whole batch has integrated.
-    let mut human_decisions_needed: Vec<String> = Vec::new();
-
     loop {
         iteration += 1;
+        // §6.2: a scope-expansion request left `Escalate`d (`ask` mode,
+        // or `max_per_run` exhausted) is a decision owed to a human —
+        // regardless of whether *this* attempt's own criteria happened
+        // to succeed without needing the grant. Collected per batch and
+        // resolved (DI-01) through `ctx.human_interaction` once the
+        // whole batch has integrated; only what stays unresolved (no
+        // live surface) pauses the run.
+        let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
         let events = ctx.load_events()?;
         let state = derive(&events);
 
@@ -168,6 +167,10 @@ pub(super) async fn execute_loop(
         for dispatch in dispatches {
             let (task, task_worktree, mut report) = dispatch?;
             let needs_human_decision = report.needs_human_decision;
+            // The escalated request itself (paths, reason, criterion +
+            // its pre-check exit), captured off the attempt that raised
+            // it — what the §5.3 object below is built from.
+            let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
 
             let mut last_check_seq = ctx.emit(
                 Some(&node.id),
@@ -207,6 +210,9 @@ pub(super) async fn execute_loop(
                         scope_expansion,
                         &mut expansions_granted_this_run,
                     )?;
+                    if outcome.decision == crate::scope_expansion::Decision::Escalate {
+                        escalated = Some((attempt.attempt, outcome.clone()));
+                    }
                 }
             }
 
@@ -266,34 +272,220 @@ pub(super) async fn execute_loop(
                     None
                 }
             };
+            let was_blocked = blocked_reason.is_some();
             if let Some(reason) = blocked_reason {
-                blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
+                // An escalation-blocked task is the escalation flow's to
+                // report (resolved below, or the pause diagnostic) — its
+                // interim Blocked never feeds the generic tail.
+                if !needs_human_decision {
+                    blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
+                }
             }
             if needs_human_decision {
-                human_decisions_needed.push(format!(
-                    "task `{}` has a scope expansion request awaiting a human decision",
-                    task.id
-                ));
+                if let Some((attempt_no, outcome)) = escalated {
+                    pending_escalations.push(PendingEscalation {
+                        task_id: task.id.clone(),
+                        attempt_no,
+                        outcome,
+                        was_blocked,
+                    });
+                }
             }
         }
 
-        if !human_decisions_needed.is_empty() {
-            // The whole batch integrates before pausing (serial
+        if !pending_escalations.is_empty() {
+            // The whole batch integrates before anything is asked (serial
             // integration order still holds — this only stops the *next*
             // batch from being dispatched while a decision is owed): a
             // pending `ask`/exhausted-cap request must reach a human
             // before the run spends any further budget, never be
             // bypassed just because the task that raised it happened to
-            // succeed on its own declared scope (A6).
-            let mut diagnostic =
-                "a scope expansion request needs a human decision before this run can continue"
-                    .to_string();
-            for reason in &human_decisions_needed {
-                diagnostic.push_str("; ");
-                diagnostic.push_str(reason);
+            // succeed on its own declared scope (A6). DI-01: with a live
+            // surface the human decides right here; only what stays
+            // unresolved pauses the run, exactly as before.
+            let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
+            let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
+            let mut unresolved: Vec<yunta_core::TaskId> = Vec::new();
+            for pending in pending_escalations.drain(..) {
+                let escalation =
+                    expansion_escalation(&pending, mode, max_per_run, expansions_granted_this_run);
+                let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
+                    unresolved.push(pending.task_id);
+                    continue;
+                };
+                // Same T7.2 convention as every other gate: waiting and
+                // resolved land together, only once actually resolved —
+                // an unresolved question re-asks on resume instead of
+                // remembering a decision nobody made.
+                ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+                let resolved_seq = ctx.emit(
+                    Some(&node.id),
+                    EventPayload::GateResolved(resolution.clone()),
+                )?;
+                let decided_by = Decider::Person {
+                    id: resolution
+                        .resolved_by
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                };
+                if resolution.chosen_option.as_deref() == Some("grant") {
+                    expansions_granted_this_run += 1;
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::ScopeExpansionGranted(ScopeExpansionGrantedPayload {
+                            task_id: pending.task_id.clone(),
+                            decided_by,
+                            mode,
+                            count_this_run: expansions_granted_this_run,
+                            paths: pending.outcome.request.paths.clone(),
+                        }),
+                    )?;
+                } else {
+                    // Anything that isn't an explicit grant denies — the
+                    // conservative reading of an ambiguous resolution,
+                    // and every denial converts to a finding (D80), same
+                    // as the rule-mode path.
+                    let reason = resolution
+                        .free_text
+                        .clone()
+                        .unwrap_or_else(|| "denied by a human at the gate".to_string());
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
+                            task_id: pending.task_id.clone(),
+                            decided_by,
+                            mode,
+                            count_this_run: expansions_granted_this_run,
+                            denial_reason: Some(reason.clone()),
+                        }),
+                    )?;
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::FindingPosted(FindingPostedPayload {
+                            finding: Finding {
+                                id: format!(
+                                    "scope-expansion-{}-{}",
+                                    pending.task_id, pending.attempt_no
+                                ),
+                                severity: FindingSeverity::Minor,
+                                title: format!(
+                                    "scope expansion denied for task `{}`",
+                                    pending.task_id
+                                ),
+                                location: pending.outcome.request.paths.join(", "),
+                                detail: format!(
+                                    "{reason} — agent's stated reason: {}",
+                                    pending.outcome.request.reason
+                                ),
+                                proposed_criterion: pending
+                                    .outcome
+                                    .request
+                                    .proposed_criterion
+                                    .clone(),
+                            },
+                        }),
+                    )?;
+                }
+                // Granted or denied, the task gets its retry: with the
+                // widened scope (from the log's own granted paths), or
+                // within the original one (§6.2 — a denial never kills
+                // the task, it re-runs inside what was declared).
+                if pending.was_blocked {
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                            task_id: pending.task_id.clone(),
+                            new_status: TaskStatus::Pending,
+                            caused_by: resolved_seq,
+                        }),
+                    )?;
+                }
             }
-            return fail_with_tokens(ctx, node, diagnostic, false, tokens);
+            if !unresolved.is_empty() {
+                let mut diagnostic =
+                    "a scope expansion request needs a human decision before this run can continue"
+                        .to_string();
+                for task_id in &unresolved {
+                    diagnostic.push_str(&format!(
+                        "; task `{task_id}` has a scope expansion request awaiting a human decision"
+                    ));
+                }
+                return fail_with_tokens(ctx, node, diagnostic, false, tokens);
+            }
+            // Everything resolved — the next iteration re-dispatches the
+            // (now Pending again) tasks with the decisions on the log.
         }
+    }
+}
+
+/// One `Escalate`d request waiting for the human's verdict (DI-01).
+struct PendingEscalation {
+    task_id: yunta_core::TaskId,
+    attempt_no: u32,
+    outcome: crate::scope_expansion::ScopeExpansionOutcome,
+    /// Whether the task ended `Blocked` on this escalation (vs. `Done`
+    /// with the question still owed) — decides whether resolution sets
+    /// it back to `Pending` for a retry.
+    was_blocked: bool,
+}
+
+/// Builds the §5.3 escalation object for a scope-expansion request — the
+/// engine assembles summary + mechanical evidence from what it already
+/// verified (the request, the proposed criterion's own pre-check exit,
+/// the cap state); the agent's only contribution is the reason it wrote
+/// into the request itself.
+fn expansion_escalation(
+    pending: &PendingEscalation,
+    mode: yunta_core::events::ScopeExpansionMode,
+    max_per_run: Option<u32>,
+    granted_so_far: u32,
+) -> yunta_core::events::GateWaitingPayload {
+    let request = &pending.outcome.request;
+    let precheck = match pending.outcome.precheck_exit {
+        Some(code) => format!("proposed criterion `{}` pre-check exit: {code}", {
+            request
+                .proposed_criterion
+                .as_ref()
+                .map(|c| c.cmd.as_str())
+                .unwrap_or("?")
+        }),
+        None => "no criterion proposed".to_string(),
+    };
+    let cap = match max_per_run {
+        Some(cap) => format!("{granted_so_far}/{cap} grant(s) used"),
+        None => format!("{granted_so_far} grant(s) so far, no cap declared"),
+    };
+    let mode_name = match mode {
+        yunta_core::events::ScopeExpansionMode::Rules => "rules",
+        yunta_core::events::ScopeExpansionMode::Ask => "ask",
+        yunta_core::events::ScopeExpansionMode::Deny => "deny",
+    };
+    yunta_core::events::GateWaitingPayload {
+        summary: format!(
+            "task `{}` requests scope expansion: {}",
+            pending.task_id, request.reason
+        ),
+        evidence: format!(
+            "paths: {}; {precheck}; mode: {mode_name}; {cap}",
+            request.paths.join(", ")
+        ),
+        options: vec![
+            yunta_core::events::GateOption {
+                id: "grant".to_string(),
+                label: format!("Grant access to {}", request.paths.join(", ")),
+                tradeoff: "The task's final diff is evaluated against its scope plus these \
+                           paths; consumes 1 of max_per_run"
+                    .to_string(),
+            },
+            yunta_core::events::GateOption {
+                id: "deny".to_string(),
+                label: "Deny the expansion".to_string(),
+                tradeoff: "The denial becomes a finding (D80); the task retries within its \
+                           original scope"
+                    .to_string(),
+            },
+        ],
+        external_ref: None,
     }
 }
 
@@ -358,6 +550,22 @@ fn granted_count(events: &[Event]) -> u32 {
         .count() as u32
 }
 
+/// Every path a prior `scope_expansion_granted` on the log authorized
+/// for `task_id` (DI-01) — the retry after a human grant derives its
+/// widened scope from here, never from in-memory state (I2).
+fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            EventPayload::ScopeExpansionGranted(p) if &p.task_id == task_id => {
+                Some(p.paths.iter().cloned())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 /// Isolates one batch member in its own worktree (§5.5: "cada tarea del
 /// lote recibe su propio worktree derivado del commit base actual") and
 /// runs it through the ordinary task cycle there — pre-check, dispatch,
@@ -420,6 +628,7 @@ async fn dispatch_task_in_isolation<'a>(
         super::node_exec::session_profile(node),
         scope_expansion,
         granted_count(events),
+        &granted_paths_for(events, &task.id),
     )
     .await?;
 
@@ -652,6 +861,7 @@ fn emit_scope_expansion_events(
                     decided_by: Decider::Rule,
                     mode,
                     count_this_run: *granted_this_run,
+                    paths: outcome.request.paths.clone(),
                 }),
             )?;
         }

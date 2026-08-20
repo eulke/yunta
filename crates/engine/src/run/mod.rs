@@ -127,6 +127,11 @@ pub(crate) struct RunCtx<'a> {
     /// call, never persisted: a resume simply starts cold, which is safe
     /// (over-verifying) rather than risking a stale cross-run hit.
     pub memo: Memo,
+    /// The one surface every §5.3 escalation goes through (T7.2, DI-01):
+    /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
+    /// so the deep execution paths (loop_exec) reach it without threading
+    /// one more parameter through every layer.
+    pub human_interaction: &'a dyn HumanInteraction,
 }
 
 impl RunCtx<'_> {
@@ -303,6 +308,7 @@ pub async fn execute_run(
         clock,
         max_task_retries,
         memo: Memo::new(manifest.config_hash.clone()),
+        human_interaction,
     };
 
     let events = ctx.load_events()?;
@@ -465,7 +471,7 @@ pub async fn execute_run(
                     options,
                     external_ref: None,
                 };
-                let resolution = human_interaction.resolve(&escalation).await;
+                let resolution = ctx.human_interaction.resolve(&escalation).await;
                 let Some(resolution) = resolution else {
                     // No live surface to ask (headless, no TTY, `yunta
                     // test`) — the pre-T7.2 behavior: pause and let a

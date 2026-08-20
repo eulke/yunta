@@ -67,7 +67,7 @@ Estos seis ítems quedaron en pausa esperando una pieza que **ya existe**.
 Mantenerlos abiertos ya no es recorte de alcance: es una promesa del
 Contrato que el binario actual no cumple pudiendo cumplirla.
 
-### DI-01 — Escalación de scope expansion → gate real `[ ]`
+### DI-01 — Escalación de scope expansion → gate real `[x]`
 
 - **Origen:** T5.11 (§6.2). Entrada en `m0-status.md`: "`ask` degrada
   siempre a pausa, nunca a consulta real: no existe `kind: gate`/T7.2 en

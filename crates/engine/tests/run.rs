@@ -2887,6 +2887,205 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     }
 }
 
+// --- DI-01: escalación de scope expansion → gate real (§6.2 + §5.3) ---------
+
+/// One `ask`-mode attempt that writes a.txt (in scope), b.txt (outside)
+/// and the request file asking for b.txt.
+fn requesting_session(task_id: &str) -> String {
+    let request_yaml = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    format!(
+        "  - match_prompt_contains: {task_id:?}\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    )
+}
+
+#[tokio::test]
+async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_scope() {
+    // DI-01: `mode: ask` with a live HumanInteraction consults instead of
+    // pausing. Grant → the task returns to ready and its next attempt's
+    // diff is evaluated against scope + the granted paths, which the
+    // engine derives from the log's own `scope_expansion_granted.paths`.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = scope_expansion_workflow("ask", &[], None);
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-h", "h", "a.txt", "test -f a.txt")
+    );
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    // Attempt 1: asks. Attempt 2 (after the human grants): same diff,
+    // no new request — b.txt must now be covered by the grant on the log.
+    fixture.push_str(&requesting_session("task-h"));
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
+    );
+
+    let interaction = ScriptedInteraction {
+        resolution: yunta_core::events::GateResolvedPayload {
+            chosen_option: Some("grant".to_string()),
+            resolved_by: Some("eulke".to_string()),
+            free_text: None,
+            approved_sha: None,
+        },
+    };
+    let (terminal, state) = bench
+        .run_with_interaction(&workflow, &fixture, &interaction)
+        .await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "grant must unblock the run"
+    );
+    assert_eq!(
+        state.tasks.get(&"task-h".into()),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "the retry's b.txt write must pass the widened scope check"
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let granted = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::ScopeExpansionGranted(p)
+                if p.task_id.as_str() == "task-h" =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("a human grant must be recorded as scope_expansion_granted");
+    assert_eq!(
+        granted.decided_by,
+        yunta_core::events::Decider::Person {
+            id: "eulke".to_string()
+        }
+    );
+    assert_eq!(
+        granted.paths,
+        vec!["b.txt".to_string()],
+        "the grant must name exactly what it authorized — self-contained audit"
+    );
+    // The interaction itself is on the log, same vocabulary as every
+    // other gate (T7.2): waiting + resolved, together.
+    assert!(events.iter().any(
+        |e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(p)
+            if p.summary.contains("task-h"))
+    ));
+    assert!(events.iter().any(|e| matches!(
+        &e.payload,
+        yunta_core::events::EventPayload::GateResolved(p)
+            if p.chosen_option.as_deref() == Some("grant")
+    )));
+}
+
+#[tokio::test]
+async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_retries_in_scope() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = scope_expansion_workflow("ask", &[], None);
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-n", "n", "a.txt", "test -f a.txt")
+    );
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    // Attempt 1 asks; the human denies; attempt 2 complies with the
+    // original scope (a.txt only) and succeeds.
+    fixture.push_str(&requesting_session("task-n"));
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
+    );
+
+    let interaction = ScriptedInteraction {
+        resolution: yunta_core::events::GateResolvedPayload {
+            chosen_option: Some("deny".to_string()),
+            resolved_by: Some("eulke".to_string()),
+            free_text: Some("out of this sprint".to_string()),
+            approved_sha: None,
+        },
+    };
+    let (terminal, state) = bench
+        .run_with_interaction(&workflow, &fixture, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get(&"task-n".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let denied = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+                if p.task_id.as_str() == "task-n" =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("the human denial must be recorded");
+    assert_eq!(
+        denied.decided_by,
+        yunta_core::events::Decider::Person {
+            id: "eulke".to_string()
+        }
+    );
+    assert!(denied
+        .denial_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("out of this sprint"));
+
+    // D80: every denial — human ones included — becomes a finding
+    // carrying the agent's own reason and proposed criterion.
+    let findings = findings_posted(&events);
+    let finding = findings
+        .iter()
+        .find(|f| f.detail.contains("adjacent fix in b.txt"))
+        .expect("the denial must convert into a finding");
+    assert_eq!(
+        finding.proposed_criterion,
+        Some(yunta_core::events::ProposedCriterion {
+            cmd: "test -f nonexistent-marker".to_string()
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
+    // DI-01 must not change the headless behavior: NoInteraction (yunta
+    // test, CI) keeps degrading to a pause, with no gate recorded (an
+    // unresolved question re-asks on resume, same convention as T7.2).
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+
+    let workflow = scope_expansion_workflow("ask", &[], None);
+    let ledger = format!(
+        "tasks:\n{}",
+        task_yaml("task-p", "p", "a.txt", "test -f a.txt")
+    );
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    fixture.push_str(&requesting_session("task-p"));
+
+    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    match terminal {
+        RunTerminal::Paused { .. } => {}
+        other => panic!("headless ask must pause, got {other:?}"),
+    }
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))),
+        "an unresolved escalation must not be recorded as a published gate"
+    );
+}
+
 // --- T5.13: re-plan (§5.7, D84) ---------------------------------------------
 
 #[tokio::test]

@@ -218,8 +218,9 @@ pub struct TaskCycleReport {
     /// `true` when any attempt's scope-expansion request escalated (§6.2:
     /// `ask` mode, or `max_per_run` already exhausted) — neither is a
     /// verdict `run_task` can render alone, so the cycle stops retrying
-    /// and the caller (`loop_exec.rs`) pauses the run for a human rather
-    /// than burning further sessions while one is waiting on a decision.
+    /// and the caller (`loop_exec.rs`, DI-01) puts the decision to
+    /// `HumanInteraction` — pausing only when no live surface answers —
+    /// rather than burning further sessions while one is owed.
     pub needs_human_decision: bool,
 }
 
@@ -466,6 +467,10 @@ pub(crate) async fn dispatch_session(
 /// run has already granted before this task cycle started — the caller
 /// derives that count from the log (§6.2's `max_per_run` is run-scoped,
 /// not task-scoped), `run_task` only reads and threads it through.
+/// `already_granted_paths` (DI-01) are the paths every *prior*
+/// `scope_expansion_granted` on the log authorized for this task — a
+/// human grant lands between attempts, so the retry's effective scope
+/// must include them from the very first diff it evaluates.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_task(
     task: &Task,
@@ -479,6 +484,7 @@ pub async fn run_task(
     profile: PermissionProfile,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     granted_so_far: u32,
+    already_granted_paths: &[String],
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -593,6 +599,7 @@ pub async fn run_task(
             .scope
             .iter()
             .cloned()
+            .chain(already_granted_paths.iter().cloned())
             .chain(granted_paths.iter().cloned())
             .collect();
 

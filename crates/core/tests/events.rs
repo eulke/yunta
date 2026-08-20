@@ -100,6 +100,7 @@ fn all_kinds() -> Vec<EventPayload> {
             decided_by: Decider::Rule,
             mode: ScopeExpansionMode::Rules,
             count_this_run: 1,
+            paths: vec!["crates/cli/src/**".to_string()],
         }),
         EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
             task_id: "graph-cmd".into(),
