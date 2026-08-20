@@ -3,15 +3,18 @@
 //! The `Adapter`/`AgentSession` traits and their implementations
 //! (`claude-code`, `codex`, `mock`) — Spec Adapter v0.2.
 //!
-//! `claude-code` (T7.3) is built; `codex` is out of M-0 scope. `mock`
-//! (T3.2) is what CI exercises the engine against (A8) — `claude-code`
-//! is tested against a scripted fake binary, never a real LLM in CI.
+//! `claude-code` (T7.3) and `codex` (T7.4) are built. `mock` (T3.2) is
+//! what CI exercises the engine against (A8) — the two real adapters
+//! are each tested against their own scripted fake binary, never a real
+//! LLM in CI.
 
 mod claude_code;
+mod codex;
 mod mock;
 mod session;
 
 pub use claude_code::ClaudeCodeAdapter;
+pub use codex::CodexAdapter;
 pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,

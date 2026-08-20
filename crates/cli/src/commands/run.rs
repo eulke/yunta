@@ -47,7 +47,7 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
 /// real `run` has no `.yunta/tests/` case to script it from, so naming
 /// it here degrades explicitly instead of spawning a mock with nothing
 /// to simulate. Any other name must be one `real_adapters` would
-/// actually construct — today, only `claude-code` (T7.4 adds a second).
+/// actually construct — `claude-code` and `codex`, today.
 fn validate_adapter_flag(
     name: &str,
     adapters: &HashMap<String, std::sync::Arc<dyn yunta_adapters::Adapter>>,

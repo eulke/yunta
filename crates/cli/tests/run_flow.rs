@@ -119,16 +119,18 @@ fn a_workflow_needing_agents_is_refused_before_creating_any_run() {
     init_repo(&repo);
     let home = root.path().join("state");
 
-    // `codex` names a real adapter in the schema but has no built
-    // implementation (out of M-0 scope) — exactly the case this refusal
-    // exists for. `claude-code` itself is built (T7.3), so it can no
-    // longer stand in for "an adapter this binary can't run" here.
+    // `adapter:` isn't a closed enum in the schema — any name `runners:`
+    // declares that `real_adapters` doesn't recognize is exactly "an
+    // adapter this binary can't run." Both real adapters this binary
+    // does build (`claude-code`, T7.3; `codex`, T7.4) are ruled out on
+    // purpose, so this can't accidentally start passing once a third
+    // one lands.
     write(
         &repo.join(".yunta/config.yaml"),
         r#"
 runners:
   executor:
-    - { adapter: codex, model: some-model }
+    - { adapter: some-future-cli, model: some-model }
 "#,
     );
     write(

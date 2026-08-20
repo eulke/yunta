@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter};
+use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
@@ -33,30 +33,41 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
 }
 
 /// The adapter registry a real invocation can offer: `claude-code` (T7.3)
-/// when `runners:` names it as a candidate somewhere in the merged
-/// config, built with that adapter's settings (a `binary` override, if
-/// declared). Mock fixtures stay routed through `yunta test` only — real
-/// invocations never touch the mock (A8 the other way around: a real run
-/// never gets a simulated agent either).
+/// and `codex` (T7.4), each built only when `runners:` names it as a
+/// candidate somewhere in the merged config, with that adapter's own
+/// settings (a `binary` override, if declared). Mock fixtures stay
+/// routed through `yunta test` only — real invocations never touch the
+/// mock (A8 the other way around: a real run never gets a simulated
+/// agent either).
 pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Adapter>> {
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-
-    let names_claude_code = config
+    let named: Vec<&str> = config
         .runners
         .iter()
         .flatten()
         .flat_map(|(_, candidates)| candidates.iter())
-        .any(|candidate| candidate.adapter == "claude-code");
-    if names_claude_code {
-        let settings = config
+        .map(|candidate| candidate.adapter.as_str())
+        .collect();
+
+    let settings_for = |id: &str| {
+        config
             .adapters
             .as_ref()
-            .and_then(|adapters| adapters.get("claude-code"))
+            .and_then(|adapters| adapters.get(id))
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_default()
+    };
+
+    if named.contains(&"claude-code") {
         adapters.insert(
             "claude-code".to_string(),
-            Arc::new(ClaudeCodeAdapter::new(&settings)),
+            Arc::new(ClaudeCodeAdapter::new(&settings_for("claude-code"))),
+        );
+    }
+    if named.contains(&"codex") {
+        adapters.insert(
+            "codex".to_string(),
+            Arc::new(CodexAdapter::new(&settings_for("codex"))),
         );
     }
 
@@ -78,9 +89,9 @@ pub(crate) fn refuse_unrunnable(
     if needs_sessions && adapters.is_empty() {
         eprintln!(
             "error: this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (only `claude-code` is built, T7.3). To\n\
-             exercise this workflow with the `mock` adapter instead, declare a test case\n\
-             under .yunta/tests/ and run `yunta test`."
+             names no adapter this binary can run (only `claude-code`/T7.3 and `codex`/T7.4\n\
+             are built). To exercise this workflow with the `mock` adapter instead, declare\n\
+             a test case under .yunta/tests/ and run `yunta test`."
         );
         return Err(ExitCode::FAILURE);
     }

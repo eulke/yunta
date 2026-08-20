@@ -30,7 +30,7 @@ pub async fn doctor() -> ExitCode {
     if adapters.is_empty() {
         println!(
             "no adapter to probe — `runners:` in the merged config names none this build \
-             supports (only `claude-code` is built, T7.4 adds more)"
+             supports (only `claude-code` and `codex` are built)"
         );
         return ExitCode::SUCCESS;
     }

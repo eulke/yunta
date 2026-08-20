@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1–T7.2 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -2072,6 +2072,98 @@ que aparece.
         explícitamente no-TTY, vía `Stdio::null()`, pausa en vez de
         colgarse).
 
+- [x] **T7.4 — adapter `codex` real (probe + spawn + mapeo de sandbox;
+      capacidades calculadas en el constructor).** Construido en
+      `yunta-adapters::codex`, mismo layout de tres archivos que
+      `claude_code` (`mod.rs`/`parse.rs`/`permissions.rs`) y mismo trato
+      de A1 (todo lo específico del CLI vive acá, nada se filtra al
+      engine).
+      - **Sin binario `codex` ni credenciales de OpenAI en este
+        sandbox** (`which codex` no encuentra nada) — a diferencia de
+        T7.3, que tuvo `claude` instalado y autenticado para probar en
+        vivo, acá no hubo forma de correr el CLI real. Toda la
+        implementación sale de documentación oficial y ejemplos de
+        corridas reales confirmados (citados en `codex/mod.rs`/`parse.rs`
+        directamente): un gist de 81 invocaciones empíricas de
+        `codex exec` con sus salidas crudas, más issues de
+        `github.com/openai/codex` donde hacía falta confirmar la
+        presencia o ausencia de un campo. **El criterio de aceptación
+        "✓ smoke test manual documentado" queda explícitamente sin
+        cumplir por esta razón — no es que se haya omitido, es que no
+        hay manera de correrlo desde acá.** Retomar en cuanto haya un
+        entorno con el binario y credenciales disponibles.
+      - **`probe()`**: `codex --version`, igual que `claude-code`.
+      - **`spawn()`/`resume()`**: `codex exec --json [resume <thread_id>]
+        [--model] <sandbox-args> <prompt>`. Confirmado (no `[inferido]`):
+        `--json`/`--experimental-json` para el stream JSONL; el
+        subcomando `resume [--last|<thread_id>]` para continuar una
+        conversación; `--model` para el modelo. `codex exec` en sí es no
+        interactivo por diseño (aprobación en modo `never` de fábrica,
+        según la propia documentación) — a diferencia de `claude -p`,
+        no hizo falta encontrar (ni mucho menos probar en vivo) un flag
+        que evite que se cuelgue esperando una aprobación.
+      - **Parser (`parse.rs`) puro**, mismo criterio "línea no
+        reconocida → sin eventos, nunca error" que `claude_code`:
+        `thread.started` → `SessionOpened` (el `thread_id` es el
+        `session_id`); `item.completed` con `item.type: agent_message` →
+        `Note`, con `item.type: command_execution` → `ToolUse` (digest =
+        el comando, o el hash del item si no hay comando); `reasoning`
+        deliberadamente no se expone, mismo trato que `thinking` en
+        Claude. `turn.completed` → `Usage` (`input_tokens`/
+        `output_tokens`/`cached_input_tokens`, nombre de campo literal,
+        sin el "cache_read_..." de Claude) + `Completed`. `turn.failed` →
+        `Failed { retryable: true }` (`[inferido]`, mismo default que
+        `claude_code` usa para su propio caso no documentado — el
+        `max_retries` de yunta ya acota el costo de una mala apuesta).
+      - **`SessionOpened.model` no sale del stream — es un gap
+        confirmado del CLI, no una decisión de este adapter**:
+        `thread.started` no lleva `model` (issue abierto
+        `openai/codex#14736`, comparado explícitamente ahí con
+        Claude Code y Gemini CLI, que sí lo incluyen). El modelo *pedido*
+        (`req.model`, o `"default"` si no se pidió ninguno) es lo único
+        que hay para poblar el campo que O1 exige.
+      - **Mapeo de sandbox (`permissions.rs`)**: `-s`/`--sandbox`
+        confirmado con tres valores — `read-only` (ReadOnly),
+        `workspace-write` (Edit), `danger-full-access` (Full) — mapeo
+        directo, uno a uno, tal como pide la Spec Adapter ("codex...
+        permission_profiles mapea a sus modos de sandbox"). Sin
+        confirmación en vivo, a diferencia del mapeo de permisos de
+        `claude_code` (probado empíricamente antes de elegir).
+      - **`capabilities()`**: `resume_session`/`permission_profiles`/
+        `usage_reporting` en `true` (todos confirmados por
+        documentación); `custom_agents` en `false` — honesto (A6):
+        `codex exec` no tiene documentado ningún selector de agente
+        nombrado equivalente a `--agent` de Claude Code, así que no hay
+        nada que mapear; `edit_hooks`/`run_tools` en `false`, mismo
+        motivo que `claude_code`.
+      - **`resume_session` fijo en `true`, no "calculado en el
+        constructor a partir de `probe()`" literalmente.** La prosa de
+        la Spec Adapter para `codex` sugiere ese cálculo, pero
+        `Adapter::new` es síncrono y `capabilities()` no tiene forma de
+        usar un resultado async de `probe()` sin volver asíncrono el
+        constructor — cambio que ni `claude_code` intenta pese a que el
+        mismo párrafo de la spec lo enmarca en general. `codex exec
+        resume` es un subcomando documentado y estable a la versión del
+        CLI contra la que se escribió esto, así que declarar la
+        capacidad fija es preciso hoy; version-gating real queda
+        pendiente de una razón concreta para pagar el costo de un
+        constructor async atravesando `real_adapters`.
+      - **`--adapter <nombre>` (T7.1) y `real_adapters` ahora reconocen
+        `codex`** — el flag deja de ser solo validación sin efecto
+        alternativo real: con dos adapters reales construidos, nombrar
+        uno explícito empieza a tener un segundo caso genuino que
+        distinguir, no solo el primero.
+      - Tests: 11 en `crates/adapters/tests/codex.rs` contra un binario
+        `codex` simulado por script (`fixtures/codex_stub.sh`, mismo
+        diseño que el stub de Claude) — sesión exitosa con `Usage` y
+        `Completed`, turno fallido con `retryable`, mapeo de
+        `command_execution` a `ToolUse`, sesión sin evento terminal,
+        fallback del modelo a `"default"` cuando no se pidió ninguno,
+        los tres modos de sandbox, `--model` como flag propio, `resume`
+        con el `thread_id`, y exterminio real del árbol de procesos
+        (mismo test de nieto que `claude_code`). Sin smoke test manual —
+        ver arriba.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`
@@ -2229,3 +2321,15 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     `yunta-storage` no expone ningún delete-events-older-than-X. Gatillo:
     cuando el tamaño de la base de datos importe lo suficiente como para
     justificar esa superficie nueva en el crate de storage.
+11. **T7.4's smoke test manual, sin correr** — el criterio de aceptación
+    lo pide explícito y este sandbox no tiene el binario `codex` ni
+    credenciales de OpenAI para cumplirlo (a diferencia de T7.3, que sí
+    tuvo `claude` real disponible). El mapeo de sandbox y el parser
+    quedan construidos desde documentación y ejemplos de corridas reales
+    confirmados, con la misma rigurosidad que T7.3 usó, pero sin el paso
+    de confirmación en vivo. Gatillo: correr el smoke test descrito en
+    `docs/m0-status.md`'s propia entrada de T7.4 (workflow de 3 nodos,
+    igual al de T7.3, contra el `codex` real) la próxima vez que exista
+    un entorno con el binario y credenciales — y si algo del mapeo de
+    sandbox o del parser resulta incorrecto, corregirlo ahí, no
+    silenciosamente al pasar por otra tarea.
