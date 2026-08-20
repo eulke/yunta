@@ -39,7 +39,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{Event, EventPayload, TaskStatus, TokenUsage};
-use yunta_core::{Node, NodeId, NodeKind, RunId, Workflow};
+use yunta_core::{Node, NodeId, RunId, Workflow};
 
 use crate::replay::{derive, RunState};
 
@@ -151,7 +151,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
 /// Pure: same input, same output, always.
 pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
     let state = derive(events);
-    let flat = flatten(&workflow.nodes);
+    let flat: Vec<&Node> = workflow.iter_nodes().collect();
     let depends_on: HashMap<&NodeId, &[NodeId]> = flat
         .iter()
         .map(|n| (&n.id, n.depends_on.as_slice()))
@@ -324,24 +324,6 @@ fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
             (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
         },
     }
-}
-
-/// Every node in declaration order, `parallel` children included — same
-/// convention as [`crate::progress`]'s own private `flatten`, duplicated
-/// rather than shared since neither module exports it (a node's tree
-/// position isn't part of either module's public surface).
-fn flatten(nodes: &[Node]) -> Vec<&Node> {
-    let mut flat = Vec::new();
-    for node in nodes {
-        flat.push(node);
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            flat.extend(flatten(children));
-        }
-    }
-    flat
 }
 
 // --- History across runs of the same workflow (§8.4's `--workflow`, §8.6) --

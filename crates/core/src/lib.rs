@@ -39,7 +39,7 @@ pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
     ContextSpec, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
     KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec, Node,
-    NodeDefaults, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep,
+    NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep,
     OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion, Workflow, WorkflowIsolation,
 };
 

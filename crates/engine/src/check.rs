@@ -386,11 +386,17 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     // with anything else — a sibling, a top-level node, another group's
     // child — would corrupt derivation, not just read oddly.
     let mut known_ids: HashSet<NodeId> = HashSet::new();
-    collect_ids(&workflow.nodes, &mut known_ids, &mut errors);
+    for node in workflow.iter_nodes() {
+        if !known_ids.insert(node.id.clone()) {
+            errors.push(CheckError::DuplicateNodeId {
+                id: node.id.clone(),
+            });
+        }
+    }
 
     check_parallel_scopes(&workflow.nodes, &mut errors);
     check_fanout_scopes(workflow, config, &mut errors);
-    check_fresh_context(&workflow.nodes, &mut errors);
+    check_fresh_context(workflow, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
@@ -970,22 +976,6 @@ fn collect_fanout_warnings(
     }
 }
 
-fn collect_ids(nodes: &[Node], known_ids: &mut HashSet<NodeId>, errors: &mut Vec<CheckError>) {
-    for node in nodes {
-        if !known_ids.insert(node.id.clone()) {
-            errors.push(CheckError::DuplicateNodeId {
-                id: node.id.clone(),
-            });
-        }
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            collect_ids(children, known_ids, errors);
-        }
-    }
-}
-
 /// One `parallel` group's scope-collision status (D100): every pair of
 /// children whose declared scopes might overlap — computed in one place
 /// so `check`'s error and `check_warnings`' warning can never disagree
@@ -1275,18 +1265,12 @@ fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
 
 /// DI-13: `fresh_context: false` names a capability (session resume,
 /// DI-23) that doesn't exist — error, never silent acceptance (A6).
-fn check_fresh_context(nodes: &[Node], errors: &mut Vec<CheckError>) {
-    for node in nodes {
+fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
         if node.fresh_context == Some(false) {
             errors.push(CheckError::FreshContextUnsupported {
                 node: node.id.clone(),
             });
-        }
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            check_fresh_context(children, errors);
         }
     }
 }
@@ -1353,25 +1337,16 @@ fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
 /// production declaration, both pre-render.
 fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let mut produced: HashSet<&str> = HashSet::new();
-    fn collect<'a>(nodes: &'a [Node], produced: &mut HashSet<&'a str>) {
-        for node in nodes {
-            if let Some(artifacts) = &node.artifacts {
-                for spec in &artifacts.produces {
-                    produced.insert(match spec {
-                        yunta_core::ArtifactSpec::Plain(name) => name,
-                        yunta_core::ArtifactSpec::Typed { name, .. } => name,
-                    });
-                }
-            }
-            if let NodeKind::Parallel {
-                nodes: children, ..
-            } = &node.kind
-            {
-                collect(children, produced);
+    for node in workflow.iter_nodes() {
+        if let Some(artifacts) = &node.artifacts {
+            for spec in &artifacts.produces {
+                produced.insert(match spec {
+                    yunta_core::ArtifactSpec::Plain(name) => name,
+                    yunta_core::ArtifactSpec::Typed { name, .. } => name,
+                });
             }
         }
     }
-    collect(&workflow.nodes, &mut produced);
     for step in &workflow.on_finish {
         let yunta_core::OnFinishStep::Distill { distill } = step else {
             continue;
@@ -1440,18 +1415,15 @@ pub fn check_workflow_refs(
     errors
 }
 
-/// Every `(node, use-name)` reference in `nodes`, `parallel` children
-/// included.
-fn workflow_uses(nodes: &[Node], out: &mut Vec<(NodeId, String)>) {
-    for node in nodes {
-        match &node.kind {
-            NodeKind::Workflow { r#use, .. } => out.push((node.id.clone(), r#use.clone())),
-            NodeKind::Parallel {
-                nodes: children, ..
-            } => workflow_uses(children, out),
-            _ => {}
-        }
-    }
+/// Every `(node, use-name)` reference, `parallel` children included.
+fn workflow_uses(workflow: &Workflow) -> Vec<(NodeId, String)> {
+    workflow
+        .iter_nodes()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Workflow { r#use, .. } => Some((node.id.clone(), r#use.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 fn walk_workflow_refs(
@@ -1461,9 +1433,7 @@ fn walk_workflow_refs(
     path: &mut Vec<String>,
     errors: &mut Vec<CheckError>,
 ) {
-    let mut uses = Vec::new();
-    workflow_uses(&workflow.nodes, &mut uses);
-    for (node, name) in uses {
+    for (node, name) in workflow_uses(workflow) {
         if path.contains(&name) {
             let chain = path
                 .iter()

@@ -234,8 +234,10 @@ impl RunCtx<'_> {
             });
         };
         let state = derive(&self.load_events()?);
-        let non_terminal = flatten(&self.manifest.workflow.nodes)
-            .into_iter()
+        let non_terminal = self
+            .manifest
+            .workflow
+            .iter_nodes()
             .filter(|node| {
                 !matches!(
                     state.nodes.get(&node.id),
@@ -287,22 +289,6 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     }
 }
 
-/// Every node in declaration order, `parallel` children included — the
-/// same local convention `progress.rs`/`stats.rs` each already follow.
-fn flatten(nodes: &[yunta_core::Node]) -> Vec<&yunta_core::Node> {
-    let mut flat = Vec::new();
-    for node in nodes {
-        flat.push(node);
-        if let yunta_core::NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            flat.extend(flatten(children));
-        }
-    }
-    flat
-}
-
 /// How `execute_run` came back: everything done, waiting on a human, or
 /// promoted onward.
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +316,20 @@ pub struct RunReport {
     pub state: RunState,
 }
 
+/// What [`create_run`] freezes (DI-19): the run's identity and its
+/// declared birth facts, bundled — `storage`/`clock` stay separate
+/// arguments because they are the caller's *infrastructure*, not this
+/// run's data.
+pub struct CreateRunParams<'a> {
+    pub run_id: &'a RunId,
+    pub manifest: &'a Manifest,
+    pub runs_root: &'a Path,
+    /// §10.1/D44 — frozen into `run_created.mode` and never re-resolved.
+    pub mode: &'a str,
+    /// §10.2/D22 — the predecessor this run inherits from, if any.
+    pub promoted_from: Option<&'a RunId>,
+}
+
 /// Creates the run's anatomy (§2): run.dir with `artifacts/` and
 /// `scratch/`, the frozen `manifest.yaml`, and the `run_created` event.
 /// Returns the run directory.
@@ -337,20 +337,23 @@ pub struct RunReport {
 /// `mode` (§10.1/D44) is frozen into `run_created.mode` right here and
 /// never re-resolved again — a resume reads the same name back off the
 /// log. `"default"` — the caller's choice when nothing else applies,
-/// same sentinel `stats.rs`'s own `mode_of` already falls back to for a
-/// pre-T9.1 log — always passes: a workflow declaring no `modes:` at
-/// all has nothing to validate a name against, and every node stays
-/// schedulable, exactly pre-T9.1 behavior. A workflow that *does*
-/// declare `modes:` rejects any other unrecognized name.
+/// same sentinel `events::run_mode` falls back to for a pre-T9.1 log —
+/// always passes: a workflow declaring no `modes:` at all has nothing
+/// to validate a name against, and every node stays schedulable,
+/// exactly pre-T9.1 behavior. A workflow that *does* declare `modes:`
+/// rejects any other unrecognized name.
 pub fn create_run(
-    run_id: &RunId,
-    manifest: &Manifest,
-    runs_root: &Path,
+    params: CreateRunParams<'_>,
     storage: &Storage,
     clock: &dyn Clock,
-    mode: &str,
-    promoted_from: Option<&RunId>,
 ) -> Result<PathBuf, RunError> {
+    let CreateRunParams {
+        run_id,
+        manifest,
+        runs_root,
+        mode,
+        promoted_from,
+    } = params;
     if mode != "default" {
         match &manifest.workflow.modes {
             Some(modes) if !modes.contains_key(mode) => {
@@ -551,10 +554,7 @@ pub(crate) async fn execute_run_at_depth(
     // reads the same name back off the log rather than re-deriving it,
     // same "resolved once, reused forever" discipline runner resolution
     // already follows (§13.1).
-    let mode_name = match &events[0].payload {
-        EventPayload::RunCreated(p) => p.mode.clone(),
-        _ => "default".to_string(),
-    };
+    let mode_name = yunta_core::events::run_mode(&events).to_string();
     let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
 
     loop {

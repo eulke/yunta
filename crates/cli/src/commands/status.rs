@@ -8,7 +8,7 @@
 use std::process::ExitCode;
 
 use yunta_core::events::{Event, EventPayload, TaskStatus};
-use yunta_core::{Manifest, Node, NodeId, RunId};
+use yunta_core::{Manifest, NodeId, RunId};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
@@ -29,26 +29,17 @@ fn mode_included_ids(
     yunta_engine::mode_included_nodes(workflow, mode)
 }
 
-fn all_node_ids(nodes: &[Node], out: &mut Vec<NodeId>) {
-    for node in nodes {
-        out.push(node.id.clone());
-        if let yunta_core::NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            all_node_ids(children, out);
-        }
-    }
-}
-
 /// §8.5's normative line — "contadores con contexto, no porcentajes" —
 /// derived from exactly `events` and the run's own frozen `manifest`.
 /// Shared by `yunta status` (one run, in detail) and `yunta list --runs`
 /// (every local run, one line each) so the two surfaces can never
 /// disagree about what a run's progress means.
 pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String {
-    let mut declared_nodes = Vec::new();
-    all_node_ids(&manifest.workflow.nodes, &mut declared_nodes);
+    let declared_nodes: Vec<NodeId> = manifest
+        .workflow
+        .iter_nodes()
+        .map(|node| node.id.clone())
+        .collect();
 
     let state = yunta_engine::derive(events);
 

@@ -178,7 +178,7 @@ fn never_triggered_reroutes(
     history: &[Vec<Event>],
 ) -> Vec<NeverTriggeredReroute> {
     let mut findings = Vec::new();
-    for node in flatten(&workflow.nodes) {
+    for node in workflow.iter_nodes() {
         // §8.7's own structural guard (T7.10 ✓): an invariant node that
         // never fails is verification doing its job — never a removal
         // candidate, so never a finding.
@@ -226,16 +226,16 @@ fn never_triggered_reroutes(
 /// right after it) rather than letting the node finish clean. One
 /// sample per `gate_resolved` this node ever emitted, across history.
 fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<AlwaysApprovedGate> {
-    let gate_node_ids: Vec<NodeId> = flatten(&workflow.nodes)
-        .into_iter()
+    let gate_node_ids: Vec<NodeId> = workflow
+        .iter_nodes()
         .filter(|n| matches!(n.kind, yunta_core::NodeKind::Gate { .. }) && !n.invariant)
         .map(|n| n.id.clone())
         .collect();
     // Also every node with `on_failure` — T7.2's internal gate escalates
     // *that* node once its re-routes are exhausted, so it's a gate too,
     // by the same §5.3 object, even without `kind: gate`.
-    let internal_gate_ids: Vec<NodeId> = flatten(&workflow.nodes)
-        .into_iter()
+    let internal_gate_ids: Vec<NodeId> = workflow
+        .iter_nodes()
         .filter(|n| n.on_failure.is_some() && !n.invariant && !gate_node_ids.contains(&n.id))
         .map(|n| n.id.clone())
         .collect();
@@ -304,22 +304,4 @@ fn always_first_try_tasks(history: &[Vec<Event>]) -> Option<AlwaysFirstTryTasks>
     } else {
         None
     }
-}
-
-/// Every node in declaration order, `parallel` children included — same
-/// convention `progress.rs`/`stats.rs` each already duplicate locally
-/// (neither module exports it; a node's tree position isn't part of
-/// either's public surface).
-fn flatten(nodes: &[yunta_core::Node]) -> Vec<&yunta_core::Node> {
-    let mut flat = Vec::new();
-    for node in nodes {
-        flat.push(node);
-        if let yunta_core::NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            flat.extend(flatten(children));
-        }
-    }
-    flat
 }

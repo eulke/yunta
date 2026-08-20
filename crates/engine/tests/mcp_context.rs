@@ -20,7 +20,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, NoInteraction, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunTerminal,
+    DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -151,13 +152,15 @@ async fn run_with_config(
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(
-        &run_id,
-        &manifest,
-        &runs_root,
+        CreateRunParams {
+            run_id: &run_id,
+            manifest: &manifest,
+            runs_root: &runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 

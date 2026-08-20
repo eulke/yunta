@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use serde::Serialize;
-use yunta_core::events::{Event, EventPayload};
+use yunta_core::events::Event;
 use yunta_core::{Manifest, RunId};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
@@ -46,16 +46,6 @@ fn resolve(cwd: &std::path::Path) -> Result<(Project, Storage), ExitCode> {
         ExitCode::FAILURE
     })?;
     Ok((project, storage))
-}
-
-fn mode_of(events: &[Event]) -> String {
-    events
-        .iter()
-        .find_map(|e| match &e.payload {
-            EventPayload::RunCreated(p) => Some(p.mode.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| "default".to_string())
 }
 
 fn stats_run(run_id: &str, json: bool) -> ExitCode {
@@ -98,7 +88,7 @@ fn stats_run(run_id: &str, json: bool) -> ExitCode {
     };
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
-    let mode = mode_of(&events);
+    let mode = yunta_core::events::run_mode(&events).to_string();
     let pricing = project.config.pricing.clone();
 
     if json {
@@ -185,7 +175,7 @@ pub(crate) fn collect_history(
         if manifest.workflow.name != workflow_name {
             continue;
         }
-        let mode = mode_of(&events);
+        let mode = yunta_core::events::run_mode(&events).to_string();
         let summary = run_summary(
             run_id,
             mode,

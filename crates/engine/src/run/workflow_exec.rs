@@ -41,6 +41,7 @@ use crate::replay::derive;
 use crate::template::render_template;
 
 use super::node_exec::{cancelled_end, close_node, fail, template_vars, NodeEnd};
+use super::CreateRunParams;
 use super::{RunCtx, RunError, RunTerminal};
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
@@ -300,13 +301,15 @@ pub(super) async fn execute_workflow(
         .and_then(|modes| modes.keys().next().cloned())
         .unwrap_or_else(|| "default".to_string());
     let child_run_dir = super::create_run(
-        &child_id,
-        &child_manifest,
-        &runs,
+        CreateRunParams {
+            run_id: &child_id,
+            manifest: &child_manifest,
+            runs_root: &runs,
+            mode: &child_mode,
+            promoted_from: None,
+        },
         ctx.storage,
         ctx.clock,
-        &child_mode,
-        None,
     )?;
 
     drive_child(

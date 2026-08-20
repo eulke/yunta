@@ -18,8 +18,8 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{EventPayload, GateResolvedPayload};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, HumanInteraction, NoInteraction, RunTerminal,
-    DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
+    RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -159,13 +159,15 @@ async fn run_with_mode_and_findings(
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(
-        &run_id,
-        &manifest,
-        &runs_root,
+        CreateRunParams {
+            run_id: &run_id,
+            manifest: &manifest,
+            runs_root: &runs_root,
+            mode: mode,
+            promoted_from: None,
+        },
         &storage,
         &FixedClock,
-        mode,
-        None,
     )
     .unwrap();
 

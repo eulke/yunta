@@ -319,13 +319,15 @@ pub async fn run(
     });
 
     let run_dir = match yunta_engine::create_run(
-        &run_id,
-        &manifest,
-        &project.runs_root,
+        yunta_engine::CreateRunParams {
+            run_id: &run_id,
+            manifest: &manifest,
+            runs_root: &project.runs_root,
+            mode: &resolved_mode,
+            promoted_from: None,
+        },
         &storage,
         &clock,
-        &resolved_mode,
-        None,
     ) {
         Ok(run_dir) => run_dir,
         Err(e) => {

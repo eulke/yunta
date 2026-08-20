@@ -6,7 +6,7 @@
 //! pure function of the log" principle [`crate::replay::derive`] follows,
 //! so it never accumulates narrative drift.
 
-use yunta_core::{Node, NodeKind, Workflow};
+use yunta_core::{Node, Workflow};
 
 use crate::replay::{derive, NodeState, RunState};
 
@@ -16,7 +16,7 @@ use crate::replay::{derive, NodeState, RunState};
 /// same log, same markdown, always.
 pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Event]) -> String {
     let state = derive(events);
-    let nodes = flatten(&workflow.nodes);
+    let nodes: Vec<&Node> = workflow.iter_nodes().collect();
 
     let mut out = String::new();
     out.push_str("# Progress\n");
@@ -99,22 +99,4 @@ fn finished_entry(state: &RunState, node: &Node, outcome: &str) -> String {
 /// `description`, or its id when it declares none.
 fn description_of(node: &Node) -> &str {
     node.description.as_deref().unwrap_or(node.id.as_str())
-}
-
-/// Every node in declaration order, `parallel` children included — a
-/// child is dispatched through the identical `execute_node` as a
-/// top-level node (T4.6) and gets its own `node_finished`/`node_failed`,
-/// so it belongs in `progress.md` on the same terms.
-fn flatten(nodes: &[Node]) -> Vec<&Node> {
-    let mut flat = Vec::new();
-    for node in nodes {
-        flat.push(node);
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            flat.extend(flatten(children));
-        }
-    }
-    flat
 }

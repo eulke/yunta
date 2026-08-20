@@ -962,7 +962,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   heurístico. El clamp del scheduler quedó como defensa en profundidad
   con su comentario actualizado.
 
-### DI-19 — Higiene: helpers duplicados, params de `create_run` `[ ]`
+### DI-19 — Higiene: helpers duplicados, params de `create_run` `[x]`
 
 - **Origen:** acumulado. (a) `flatten`/walk de nodos duplicado en
   `progress.rs`, `stats.rs`, `verification_effectiveness.rs`, `check.rs`
@@ -980,6 +980,18 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   como red.
 - **✓ Criterios:** cero duplicados de recorrido (grep estructural);
   clippy/tests verdes sin cambio de golden outputs.
+- **Nota de cierre:** (a) `Workflow::iter_nodes()` (pre-orden, iterador
+  con stack — sin recursión de tipos) migró los cuatro `flatten` +
+  `all_node_ids` (CLI status) + `collect_ids`/`check_fresh_context`/
+  `check_distill_paths`/`workflow_uses` (check) + `freeze_prompts`
+  (manifest, ahora `freeze_prompt` por nodo); las funciones que
+  necesitan la ESTRUCTURA (grupo + hijos como unidad:
+  `check_parallel_scopes`, `check_no_gate_in_parallel`,
+  `check_workflow_nodes`, `claim`) siguen recursivas a propósito. (b)
+  `events::run_mode(&[Event]) -> &str` en core — `execute_run` y
+  `stats` leen el mismo dueño. (c) `CreateRunParams { run_id, manifest,
+  runs_root, mode, promoted_from }` + `storage`/`clock` como argumentos
+  de infraestructura; ~22 call sites migrados mecánicamente.
 
 ### DI-20 — Techo en capas para `scope_expansion` `[ ]`
 

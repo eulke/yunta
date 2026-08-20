@@ -63,6 +63,37 @@ pub struct Workflow {
     pub on_finish: Vec<OnFinishStep>,
 }
 
+impl Workflow {
+    /// Every node in declaration (pre-)order, `parallel` children
+    /// included — THE one owner of node traversal (DI-19): replay,
+    /// progress, stats and check all derive per-node views from a flat
+    /// `NodeId` map, so they all need exactly this walk and must never
+    /// disagree about it. Sites that care about *structure* (a group
+    /// and its children as a unit) still recurse on their own.
+    pub fn iter_nodes(&self) -> NodeIter<'_> {
+        NodeIter {
+            stack: self.nodes.iter().rev().collect(),
+        }
+    }
+}
+
+/// See [`Workflow::iter_nodes`].
+pub struct NodeIter<'a> {
+    stack: Vec<&'a Node>,
+}
+
+impl<'a> Iterator for NodeIter<'a> {
+    type Item = &'a Node;
+
+    fn next(&mut self) -> Option<&'a Node> {
+        let node = self.stack.pop()?;
+        if let NodeKind::Parallel { nodes, .. } = &node.kind {
+            self.stack.extend(nodes.iter().rev());
+        }
+        Some(node)
+    }
+}
+
 /// One `on_finish:` entry — discriminated by its own field name, the
 /// same untagged convention `context:` uses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

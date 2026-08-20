@@ -57,8 +57,8 @@ pub fn build_manifest(
     let inputs = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
 
     let mut prompts = BTreeMap::new();
-    for node in &workflow.nodes {
-        freeze_prompts(node, workflow_dir, &mut prompts)?;
+    for node in workflow.iter_nodes() {
+        freeze_prompt(node, workflow_dir, &mut prompts)?;
     }
 
     let base_commit = git_line(repo, &["rev-parse", "HEAD"])?;
@@ -175,41 +175,27 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
     }
 }
 
-/// Freezes `node`'s own file prompt (if any) and recurses into a
-/// `parallel` node's children (T4.6) — a child's `prompt: {file: ...}`
-/// needs the same freeze-at-creation guarantee (§2.1) as a top-level
-/// node's, since it's dispatched through the identical `execute_node`.
-fn freeze_prompts(
+/// Freezes one node's own file prompt (if any) — `build_manifest` walks
+/// every node (`parallel` children included, via `iter_nodes`): a
+/// child's `prompt: {file: ...}` needs the same freeze-at-creation
+/// guarantee (§2.1) as a top-level node's, since it's dispatched
+/// through the identical `execute_node`.
+fn freeze_prompt(
     node: &Node,
     workflow_dir: &Path,
     prompts: &mut BTreeMap<NodeId, String>,
 ) -> Result<(), ManifestError> {
-    match &node.kind {
-        NodeKind::Prompt { prompt } | NodeKind::Loop { prompt, .. } => {
-            if let PromptSource::File(path) = prompt {
-                let full_path = workflow_dir.join(path);
-                let content = std::fs::read_to_string(&full_path).map_err(|source| {
-                    ManifestError::PromptFile {
-                        node: node.id.clone(),
-                        path: full_path.clone(),
-                        source,
-                    }
-                })?;
-                prompts.insert(node.id.clone(), content);
-            }
-        }
-        // A `workflow` node has no prompt of its own — the child
-        // resolves and freezes its own workflow (and prompts) at birth
-        // (§12), never through the parent's manifest.
-        NodeKind::Bash { .. }
-        | NodeKind::Check { .. }
-        | NodeKind::Executor { .. }
-        | NodeKind::Gate { .. }
-        | NodeKind::Workflow { .. } => {}
-        NodeKind::Parallel { nodes, .. } => {
-            for child in nodes {
-                freeze_prompts(child, workflow_dir, prompts)?;
-            }
+    if let NodeKind::Prompt { prompt } | NodeKind::Loop { prompt, .. } = &node.kind {
+        if let PromptSource::File(path) = prompt {
+            let full_path = workflow_dir.join(path);
+            let content = std::fs::read_to_string(&full_path).map_err(|source| {
+                ManifestError::PromptFile {
+                    node: node.id.clone(),
+                    path: full_path.clone(),
+                    source,
+                }
+            })?;
+            prompts.insert(node.id.clone(), content);
         }
     }
     Ok(())

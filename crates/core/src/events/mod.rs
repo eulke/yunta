@@ -83,6 +83,17 @@ pub enum EventPayload {
     RunFinished(RunFinishedPayload),
 }
 
+/// The mode `run_created` froze for this log (§10.1/D44) — always the
+/// log's own first event; `"default"` for a log without one (pre-modes,
+/// or truncated). One owner (DI-19): `execute_run`'s resume and the
+/// stats surfaces must never disagree about a run's mode.
+pub fn run_mode(events: &[Event]) -> &str {
+    match events.first().map(|event| &event.payload) {
+        Some(EventPayload::RunCreated(p)) => &p.mode,
+        _ => "default",
+    }
+}
+
 impl EventPayload {
     /// The persisted `kind` string — what storage (T2.1) writes to its
     /// `kind` column, independent of re-serializing the whole payload.

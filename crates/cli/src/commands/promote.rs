@@ -116,13 +116,15 @@ pub(crate) async fn drive_promotions(
         }
 
         let successor_run_dir = yunta_engine::create_run(
-            &successor_id,
-            &successor_manifest,
-            &project.runs_root,
+            yunta_engine::CreateRunParams {
+                run_id: &successor_id,
+                manifest: &successor_manifest,
+                runs_root: &project.runs_root,
+                mode: &suggested_mode,
+                promoted_from: Some(&run_id),
+            },
             storage,
             &SystemClock,
-            &suggested_mode,
-            Some(&run_id),
         )
         .map_err(|e| e.to_string())?;
 
@@ -252,13 +254,15 @@ nodes:
         .await
         .unwrap();
         let run_dir = create_run(
-            &run_id,
-            &manifest,
-            &project.runs_root,
+            yunta_engine::CreateRunParams {
+                run_id: &run_id,
+                manifest: &manifest,
+                runs_root: &project.runs_root,
+                mode: "quick",
+                promoted_from: None,
+            },
             &storage,
             &SystemClock,
-            "quick",
-            None,
         )
         .unwrap();
 

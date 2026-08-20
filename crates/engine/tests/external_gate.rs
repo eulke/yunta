@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockForge, MockForgeState};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, NoInteraction, NodeState, RunTerminal,
-    DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -117,13 +117,15 @@ impl Bench {
         )
         .unwrap();
         let run_dir = create_run(
-            &run_id,
-            &manifest,
-            &runs_root,
+            CreateRunParams {
+                run_id: &run_id,
+                manifest: &manifest,
+                runs_root: &runs_root,
+                mode: "default",
+                promoted_from: None,
+            },
             &storage,
             &FixedClock,
-            "default",
-            None,
         )
         .unwrap();
 

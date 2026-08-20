@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, NoInteraction, NodeState, RunError, RunTerminal,
-    DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunError,
+    RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -109,13 +109,15 @@ impl Bench {
         .unwrap();
         let run_id = RunId::from(run_id);
         let run_dir = create_run(
-            &run_id,
-            &manifest,
-            &self.runs_root,
+            CreateRunParams {
+                run_id: &run_id,
+                manifest: &manifest,
+                runs_root: &self.runs_root,
+                mode: mode,
+                promoted_from: None,
+            },
             &self.storage,
             &FixedClock,
-            mode,
-            None,
         )?;
 
         let adapter = MockAdapter::from_yaml(FIXTURE).unwrap();

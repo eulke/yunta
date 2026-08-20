@@ -196,13 +196,15 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
     // the full workflow is the more useful default for a fixture-driven
     // test than picking one mode out from under it.
     yunta_engine::create_run(
-        &run_id,
-        &manifest,
-        &runs_root,
+        yunta_engine::CreateRunParams {
+            run_id: &run_id,
+            manifest: &manifest,
+            runs_root: &runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &storage,
         &SystemClock,
-        "default",
-        None,
     )
     .map_err(|e| e.to_string())?;
     // A test case's every session comes from a scripted fixture — a

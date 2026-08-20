@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, NoInteraction, NodeState, RunTerminal,
-    DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -140,13 +140,15 @@ impl Bench {
         .unwrap();
 
         let run_dir = create_run(
-            &self.run_id,
-            &manifest,
-            &self.runs_root,
+            CreateRunParams {
+                run_id: &self.run_id,
+                manifest: &manifest,
+                runs_root: &self.runs_root,
+                mode: "default",
+                promoted_from: None,
+            },
             &self.storage,
             &FixedClock,
-            "default",
-            None,
         )
         .unwrap();
 
@@ -719,13 +721,15 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -905,13 +909,15 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -1056,13 +1062,15 @@ nodes:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -1116,13 +1124,15 @@ nodes:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -1173,13 +1183,15 @@ nodes:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -1258,13 +1270,15 @@ nodes:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -1490,13 +1504,15 @@ nodes:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -2543,13 +2559,15 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -4313,13 +4331,15 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
 
@@ -4544,13 +4564,15 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(BUDGET_FIXTURE).unwrap();
@@ -5033,13 +5055,15 @@ async fn run_with_recording_mock(
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
@@ -5280,13 +5304,15 @@ sessions:
     )
     .unwrap();
     let run_dir = create_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "quick",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "quick",
-        None,
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
@@ -5404,13 +5430,15 @@ sessions:
     .unwrap();
     let second_id = RunId::from("run-test-2");
     let run_dir = create_run(
-        &second_id,
-        &manifest,
-        &bench.runs_root,
+        CreateRunParams {
+            run_id: &second_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
         &bench.storage,
         &FixedClock,
-        "default",
-        None,
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
