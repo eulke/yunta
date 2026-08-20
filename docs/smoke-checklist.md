@@ -45,10 +45,12 @@ autenticada (`codex login status`).
    sandbox de codex, no por el scope-check de yunta. Repetir con `edit`
    (`workspace-write`).
 4. **Resume**: matar el engine a mitad de sesión (Ctrl-C dos veces o
-   `kill -9` al engine), `yunta resume <run>` → hoy re-corre el nodo
-   (`restart_node`); cuando DI-23 esté cableado, repetir con
-   `on_interrupt: resume_session` y verificar que
-   `codex exec resume <thread_id>` continúa la MISMA conversación.
+   `kill -9` al engine), `yunta resume <run>` → re-corre el nodo
+   (`restart_node`, el default). Repetir con `on_interrupt:
+   resume_session` (DI-23, ya cableado) y verificar que
+   `codex exec resume <thread_id>` continúa la MISMA conversación —
+   mismo `session_id` en el segundo `agent_session_opened`, y el agente
+   retiene lo dicho antes del corte.
 
 ## B. `GitHubForge` real (T7.7)
 
@@ -78,3 +80,36 @@ usuario.
    `yunta run` de nuevo → degrada a consola con evento
    (`capability_degraded`/pausa explicando), jamás un crash ni un
    silencio (D66).
+
+## C. `claude-code` — deltas posteriores a la sesión en vivo original
+
+El adapter se probó en vivo en su momento, pero estas superficies se
+construyeron después, contra documentación sola — merecen su corrida
+tanto como codex. Prerrequisitos: `claude` en el PATH, sesión
+autenticada.
+
+1. **Staging de skills (DI-13)**: un nodo con `skills: [mi-skill]` y el
+   skill en `.yunta/skills/mi-skill/` → verificar que la sesión ve el
+   skill (el symlink aparece en `<worktree>/.claude/skills/mi-skill` y
+   el CLI lo descubre — pedirle al agente que lo invoque), que el
+   scope-check NO reporta `.claude/skills` como trabajo del agente, y
+   que un segundo intento del nodo re-staged sin error (el symlink se
+   reemplaza).
+2. **`agent:` a nivel nodo (T9.4/D37)**: un nodo con `agent: <nombre>`
+   de un agente definido en el repo → la sesión corre con `--agent
+   <nombre>` y responde con la persona correcta; un nombre inexistente
+   → el error del CLI llega como fallo del nodo con diagnóstico, no
+   como cuelgue.
+3. **`resume_session` (DI-23)**: mismo caso que A.4 pero con
+   claude-code: matar el engine a mitad de sesión, `on_interrupt:
+   resume_session`, `yunta resume` → `claude --resume <session_id>`
+   continúa la MISMA conversación (mismo `session_id` en el log; el
+   agente retiene contexto previo). Degradación: borrar el
+   `session_id` del historial local del CLI (o correr en otro
+   `$HOME`) → degrada a `restart_node` con `capability_degraded`/
+   warning, jamás cuelga.
+4. **`adapter_settings` passthrough (DI-13)**: declarar en config
+   `adapters: { claude-code: { adapter_settings: {...} } }` con una
+   clave que el CLI honre → verificar que llega (comportamiento
+   observable o flag en el spawn), y que una clave desconocida no
+   rompe el spawn.
