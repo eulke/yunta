@@ -357,42 +357,12 @@ pub(super) async fn resolve_internal_gate(
     options: &[String],
     on: &indexmap::IndexMap<String, yunta_core::NodeId>,
 ) -> Result<GateStep, RunError> {
-    // Declared options (default: a single `approve`), each with a
-    // tradeoff derived from its own mapping; plus the engine's `abort`
-    // unless the author already claimed that id for themselves.
-    let declared: Vec<String> = if options.is_empty() {
-        vec!["approve".to_string()]
-    } else {
-        options.to_vec()
-    };
-    let mut gate_options: Vec<GateOption> = declared
-        .iter()
-        .map(|id| GateOption {
-            id: id.clone(),
-            label: id.clone(),
-            tradeoff: match on.get(id) {
-                Some(target) => format!("re-routes to `{target}` and asks again once it completes"),
-                None => "resolves this gate; the flow continues".to_string(),
-            },
-        })
-        .collect();
-    let engine_abort = !declared.iter().any(|id| id == "abort");
-    if engine_abort {
-        gate_options.push(GateOption {
-            id: "abort".to_string(),
-            label: "Abort the run".to_string(),
-            tradeoff: "Pauses here; nothing further executes".to_string(),
-        });
-    }
-
-    let escalation = GateWaitingPayload {
-        summary: message
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("gate `{}` needs a decision", node.id)),
-        evidence: format!("assignee: {assignee}"),
-        options: gate_options,
-        external_ref: None,
-    };
+    // Shared with `current_escalation` (M8/T8.1) so a `resolve_gate`
+    // MCP call, running in a process that never paused this run,
+    // reconstructs the identical object instead of a second copy that
+    // could drift.
+    let escalation =
+        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
     let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
         return Ok(GateStep::StillWaiting {
             reason: format!(
@@ -403,6 +373,10 @@ pub(super) async fn resolve_internal_gate(
     };
 
     let chosen = resolution.chosen_option.clone().unwrap_or_default();
+    // Whether `abort` is the engine's own appended option (never the
+    // author's) — same rule `build_internal_gate_escalation` used to
+    // decide whether to append it in the first place.
+    let engine_abort = !options.iter().any(|id| id == "abort");
     if engine_abort && chosen == "abort" {
         // T7.2's convention exactly: record the interaction, pause the
         // run, leave the node stateless so a resume re-asks if the

@@ -48,8 +48,8 @@ pub use progress::render_progress;
 pub use questions::{register as register_questions, QuestionsError};
 pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{
-    create_promotion_successor, create_run, execute_run, mode_included_nodes, session_token_budget,
-    CreateRunParams, PromotionSuccessor, RunError, RunReport, RunTerminal,
+    create_promotion_successor, create_run, current_escalation, execute_run, mode_included_nodes,
+    session_token_budget, CreateRunParams, PromotionSuccessor, RunError, RunReport, RunTerminal,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};

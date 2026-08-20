@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_adapters::{Adapter, AgentEvent, Budget, MockAdapter, PermissionProfile, SessionRequest};
-use yunta_core::{Capabilities, SessionId, YuntaError};
+use yunta_core::{Capabilities, SessionId};
 
 fn request(cwd: PathBuf) -> SessionRequest {
     SessionRequest {

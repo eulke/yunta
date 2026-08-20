@@ -25,6 +25,7 @@ mod budget;
 mod check_exec;
 mod context_resolve;
 mod distill;
+mod escalation;
 mod executor_exec;
 mod gate_exec;
 mod loop_exec;
@@ -42,9 +43,8 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload,
-    PromotionSignaledPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
-    RunResumedPayload, TerminalState,
+    Event, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
+    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
 };
 use yunta_core::{Clock, Manifest, NodeId, RunId, YuntaError};
 use yunta_storage::{Storage, StorageError};
@@ -55,6 +55,7 @@ use crate::scope::ScopeCheckError;
 use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
+pub use escalation::current_escalation;
 pub use promote::{create_promotion_successor, PromotionSuccessor};
 pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
@@ -695,48 +696,19 @@ pub(crate) async fn execute_run_at_depth(
                 // T7.2/§5.3: the engine assembles the escalation (summary
                 // + mechanical evidence from the log) — never the node
                 // that failed, which has no further say once it's
-                // failed. `retry`/`abort` are the two outcomes any
-                // exhausted re-route offers; §10.2's own "esto excede el
-                // modo" adds a third, `promote`, exactly when there's
-                // somewhere later in `modes:`'s own declaration order to
-                // promote *to* — never invented when there isn't.
+                // failed. Shared with `current_escalation` (M8/T8.1) so
+                // a `resolve_gate` MCP call, running in a process that
+                // never paused this run, reconstructs the identical
+                // object instead of a second copy that could drift.
                 let suggested_mode = schedule::next_mode_after(&manifest.workflow, &mode_name);
-                let mut options = vec![
-                    GateOption {
-                        id: "retry".to_string(),
-                        label: format!("Re-route to `{goto}` once more"),
-                        tradeoff: format!(
-                            "Uses one extra correction attempt beyond the declared \
-                             max_reroutes ({max_reroutes}); escalates again if `{goto}` \
-                             doesn't fix it"
-                        ),
-                    },
-                    GateOption {
-                        id: "abort".to_string(),
-                        label: "Abort the run".to_string(),
-                        tradeoff: "Stops here; nothing further executes".to_string(),
-                    },
-                ];
-                if let Some(next_mode) = &suggested_mode {
-                    options.push(GateOption {
-                        id: "promote".to_string(),
-                        label: format!("Promote to mode `{next_mode}`"),
-                        tradeoff: format!(
-                            "Closes this run (`run_finished: promoted`) and starts a \
-                             successor in `{next_mode}`, inheriting this run's artifacts; \
-                             §10.2 — there's no mechanism to demote back to `{mode_name}`"
-                        ),
-                    });
-                }
-                let escalation = GateWaitingPayload {
-                    summary: format!(
-                        "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` \
-                         are exhausted: {cause}"
-                    ),
-                    evidence: cause.clone(),
-                    options,
-                    external_ref: None,
-                };
+                let escalation = escalation::build_reroute_escalation(
+                    &manifest.workflow,
+                    &mode_name,
+                    &node,
+                    &goto,
+                    max_reroutes,
+                    &cause,
+                );
                 let resolution = ctx.human_interaction.resolve(&escalation).await;
                 let Some(resolution) = resolution else {
                     // No live surface to ask (headless, no TTY, `yunta
