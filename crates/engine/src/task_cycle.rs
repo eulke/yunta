@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
-use yunta_core::events::{CriterionType, TokenUsage};
+use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
 use yunta_core::{Task, TaskId, YuntaError};
 
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
@@ -309,6 +309,24 @@ pub async fn post_check(
     run_all_criteria(task, cwd, memo).await
 }
 
+/// What a session dispatch needs from its surrounding run (DI-08/DI-09),
+/// abstracted so `run_task` stays callable without a full run context
+/// (its own integration tests): append the session's audit events, and
+/// expose the process registry for pgid bookkeeping. `RunCtx` is the one
+/// real implementor.
+pub trait SessionObserver: Sync {
+    fn emit_session_event(&self, node_id: &yunta_core::NodeId, payload: EventPayload);
+    fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
+}
+
+/// The only shape of a note the log ever carries (I12/O3): its size and
+/// a content-hash prefix — enough to audit a claimed note against,
+/// never enough to reconstruct or leak it.
+fn note_summary(text: &str) -> String {
+    let hash = yunta_core::sha256_hex(text.as_bytes());
+    format!("{} bytes, sha256 {}", text.len(), &hash[..12])
+}
+
 /// Grace period between `interrupt` and the follow-up `kill` once a
 /// budget has been exceeded — long enough for a session that closes
 /// cleanly on interrupt to actually do so, short enough that a session
@@ -329,12 +347,26 @@ pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
     request: SessionRequest,
     cancel: &CancellationToken,
-    process_registry: Option<&crate::process_registry::ProcessRegistry>,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
     let budget = request.budget;
+    let requested_agent = request.agent.clone();
     let mut session = adapter.spawn(request).await?;
     // DI-08: on the map for a separate `yunta cancel` while it lives.
-    let _pgid_registration = crate::process_registry::register(process_registry, session.pgid());
+    let _pgid_registration = crate::process_registry::register(
+        audit.and_then(|(observer, _)| observer.process_registry()),
+        session.pgid(),
+    );
+    // DI-09: the session's own audit trail (`agent_session_opened` /
+    // `agent_message`), emitted as the stream arrives so a concurrent
+    // `status` sees the live session. A failed append warns instead of
+    // aborting the stream — the run's next mandatory event hits the same
+    // storage and fails the run properly if it's really down.
+    let audit_emit = |payload: yunta_core::events::EventPayload| {
+        if let Some((observer, node_id)) = audit {
+            observer.emit_session_event(node_id, payload);
+        }
+    };
 
     // Carries the timeout `Duration` alongside its computed `Instant` so
     // the timeout-exceeded branch can report it without re-deriving it
@@ -386,11 +418,64 @@ pub(crate) async fn dispatch_session(
             let Some(event) = next else { break };
 
             match event {
+                AgentEvent::SessionOpened { session_id, model } => {
+                    audit_emit(yunta_core::events::EventPayload::AgentSessionOpened(
+                        yunta_core::events::AgentSessionOpenedPayload {
+                            session_id,
+                            agent: requested_agent.clone(),
+                            model,
+                            capabilities: adapter.capabilities(),
+                        },
+                    ));
+                }
+                AgentEvent::ToolUse {
+                    name,
+                    target_digest,
+                } => {
+                    audit_emit(yunta_core::events::EventPayload::AgentMessage(
+                        yunta_core::events::AgentMessagePayload {
+                            message_type: yunta_core::events::AgentMessageType::ToolUse,
+                            tool_name: Some(name),
+                            target_digest: Some(target_digest),
+                            input_tokens: None,
+                            output_tokens: None,
+                            cached_input_tokens: None,
+                            text: None,
+                        },
+                    ));
+                }
+                AgentEvent::Note { text } => {
+                    audit_emit(yunta_core::events::EventPayload::AgentMessage(
+                        yunta_core::events::AgentMessagePayload {
+                            message_type: yunta_core::events::AgentMessageType::Note,
+                            tool_name: None,
+                            target_digest: None,
+                            input_tokens: None,
+                            output_tokens: None,
+                            cached_input_tokens: None,
+                            // I12/O3: a mechanical size+digest summary,
+                            // never the content — the log must not be
+                            // able to carry a secret the note contained.
+                            text: Some(note_summary(&text)),
+                        },
+                    ));
+                }
                 AgentEvent::Usage {
                     input_tokens,
                     output_tokens,
                     cached_input_tokens,
                 } => {
+                    audit_emit(yunta_core::events::EventPayload::AgentMessage(
+                        yunta_core::events::AgentMessagePayload {
+                            message_type: yunta_core::events::AgentMessageType::Usage,
+                            tool_name: None,
+                            target_digest: None,
+                            input_tokens: Some(input_tokens),
+                            output_tokens: Some(output_tokens),
+                            cached_input_tokens,
+                            text: None,
+                        },
+                    ));
                     tokens.input += input_tokens;
                     tokens.output += output_tokens;
                     if let Some(cached) = cached_input_tokens {
@@ -421,7 +506,6 @@ pub(crate) async fn dispatch_session(
                     });
                     break;
                 }
-                _ => {}
             }
         }
     } // the stream's borrow of `session` ends here — interrupt/kill need &mut self too.
@@ -490,7 +574,7 @@ pub async fn run_task(
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     granted_so_far: u32,
     already_granted_paths: &[String],
-    process_registry: Option<&crate::process_registry::ProcessRegistry>,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -548,17 +632,13 @@ pub async fn run_task(
         // A loop task's own cancellation (mid-execution, from outside)
         // isn't wired in this recorte — see T4.6's debt note in
         // docs/m0-status.md — so this token is never triggered.
-        let (dispatch_outcome, tokens) = dispatch_session(
-            adapter,
-            request,
-            &CancellationToken::new(),
-            process_registry,
-        )
-        .await
-        .map_err(|source| TaskCycleError::Spawn {
-            task: task.id.clone(),
-            source,
-        })?;
+        let (dispatch_outcome, tokens) =
+            dispatch_session(adapter, request, &CancellationToken::new(), audit)
+                .await
+                .map_err(|source| TaskCycleError::Spawn {
+                    task: task.id.clone(),
+                    source,
+                })?;
 
         // §6.2: the agent never widens its own scope — it may have left a
         // request behind, which this attempt's own worktree is the only

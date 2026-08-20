@@ -229,6 +229,23 @@ impl RunCtx<'_> {
     }
 }
 
+/// DI-09: `RunCtx` is the one real [`SessionObserver`] — audit events
+/// land in the run's own log as they arrive, so a concurrent `status`
+/// sees the live session. A failed append warns instead of aborting the
+/// stream: the run's next mandatory event hits the same storage and
+/// fails the run properly if it's really down.
+impl crate::task_cycle::SessionObserver for RunCtx<'_> {
+    fn emit_session_event(&self, node_id: &NodeId, payload: EventPayload) {
+        if let Err(e) = self.emit(Some(node_id), payload) {
+            tracing::warn!(error = %e, "failed to append a session audit event");
+        }
+    }
+
+    fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
+        self.process_registry.as_ref()
+    }
+}
+
 /// Every node in declaration order, `parallel` children included — the
 /// same local convention `progress.rs`/`stats.rs` each already follow.
 fn flatten(nodes: &[yunta_core::Node]) -> Vec<&yunta_core::Node> {

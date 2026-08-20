@@ -187,7 +187,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `target_digest` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.target_digest` — nunca contenido completo (O3) |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché (§8.4) |
-| `text` [inferido] | `Option<string>` | solo si `note`, acotado | de `Note.text` — nunca prompt/output completo (I12/O3) |
+| `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido (I12/O3): el log no debe poder portar un secreto que la nota contenía (DI-09 endureció el "acotado" original a contenido-cero con este racional) |
 
 ### 5.7 `artifact_written` — engine
 **Fuente:** node_id, path, content hash

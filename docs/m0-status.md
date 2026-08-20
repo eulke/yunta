@@ -2933,11 +2933,15 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    - **T2.4 (paths congelados)**: `resume` busca run.dir bajo el `paths.runs`
      de la config *actual* — cambiarlo entre run y resume no está soportado
      hasta T2.4.
-   - **Eventos `agent_session_opened`/`agent_message` sin emitir**: el ciclo
-     nodo/tarea ya es auditable (runner_resolved, criteria_checked,
-     scope_checked, artifact_written); emitir el detalle por sesión requiere un
-     emitter dentro de `dispatch_session`. Gatillo: T7.3 o cuando `status`
-     necesite mostrar la sesión viva.
+   - **Eventos `agent_session_opened`/`agent_message` ✓ (cerrado por
+     DI-09)**: `dispatch_session` los emite a medida que llega el stream
+     (un `status` concurrente ve la sesión viva) vía el trait
+     `SessionObserver` que `RunCtx` implementa. `agent_session_opened`
+     lleva session_id/agent/model/capabilities (prerequisito de DI-23
+     `resume_session`); `agent_message` es acotado: tool_use →
+     nombre+digest, usage → tokens, note → resumen mecánico
+     `N bytes, sha256 <prefijo>` — jamás contenido (I12/O3, con test de
+     redacción). `derive()` los ignora para el estado de nodos.
    - **`node-output` como artifact (§11.2)**: el stderr de un `bash` fallido va
      hoy en el diagnóstico de `node_failed` (acotado a 20 líneas), no como
      artifact montable por `context:` — eso es de T4.4/M6.

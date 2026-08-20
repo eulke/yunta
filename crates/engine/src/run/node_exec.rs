@@ -926,7 +926,7 @@ async fn execute_prompt(
         adapter.as_ref(),
         request,
         cancel,
-        ctx.process_registry.as_ref(),
+        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
     )
     .await
     .map_err(|source| RunError::Spawn {

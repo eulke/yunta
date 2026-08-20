@@ -58,7 +58,8 @@ pub use stats::{
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,
-    PreCheckOutcome, TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
+    PreCheckOutcome, SessionObserver, TaskCycleError, TaskCycleReport, TaskOutcome,
+    DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};
 pub use verification_effectiveness::{

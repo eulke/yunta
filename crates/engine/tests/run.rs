@@ -4783,3 +4783,91 @@ async fn a_source_under_the_default_inline_threshold_is_inlined() {
     let (terminal, _) = bench.run(INLINE_CONTEXT_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
+
+// --- DI-09: session events (agent_session_opened / agent_message) ------------
+
+const SESSION_EVENTS_WORKFLOW: &str = r#"
+name: session-events
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#;
+
+#[tokio::test]
+async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
+    let bench = Bench::new();
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let opened = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::AgentSessionOpened(p) => {
+                Some((e.node_id.clone(), p.clone()))
+            }
+            _ => None,
+        })
+        .expect("the session must leave agent_session_opened in the log");
+    assert_eq!(opened.0.as_ref().map(|n| n.as_str()), Some("work"));
+    assert!(!opened.1.session_id.as_str().is_empty());
+    assert_eq!(opened.1.model, "mock-model");
+}
+
+#[tokio::test]
+async fn agent_messages_are_bounded_summaries_that_never_carry_note_content() {
+    let bench = Bench::new();
+    let fixture = r#"
+sessions:
+  - steps:
+      - { type: note, text: "thinking about SECRET-TOKEN-123 carefully" }
+      - { type: usage, input_tokens: 40, output_tokens: 10 }
+      - { type: tool_use, name: edit, target_digest: abc123 }
+    outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::AgentMessage(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 3, "one agent_message per adapter event");
+
+    // I12/O3: never the content — a mechanical size+digest summary only.
+    let jsonl = serde_json::to_string(&messages).unwrap();
+    assert!(
+        !jsonl.contains("SECRET-TOKEN-123"),
+        "note content must never be persisted: {jsonl}"
+    );
+    let note = messages
+        .iter()
+        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Note)
+        .unwrap();
+    let summary = note.text.as_deref().unwrap_or_default();
+    assert!(summary.contains("bytes"), "got: {summary}");
+
+    let usage = messages
+        .iter()
+        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Usage)
+        .unwrap();
+    assert_eq!(usage.input_tokens, Some(40));
+    assert_eq!(usage.output_tokens, Some(10));
+
+    let tool = messages
+        .iter()
+        .find(|m| m.message_type == yunta_core::events::AgentMessageType::ToolUse)
+        .unwrap();
+    assert_eq!(tool.tool_name.as_deref(), Some("edit"));
+    assert_eq!(tool.target_digest.as_deref(), Some("abc123"));
+}

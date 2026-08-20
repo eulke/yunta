@@ -528,7 +528,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   archivo por run alcanza y muere con el run. No usar `libc`/unsafe
   (forbid está en todos los crates y no se toca).
 
-### DI-09 — Eventos de sesión: `agent_session_opened` / `agent_message` `[ ]`
+### DI-09 — Eventos de sesión: `agent_session_opened` / `agent_message` `[x]`
 
 - **Origen:** M-0 "Pendiente explícito #8": "emitir el detalle por sesión
   requiere un emitter dentro de `dispatch_session`. Gatillo: T7.3 o
@@ -544,7 +544,10 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
      cual, no rediseñarlos); al recibir eventos del adapter, un
      `agent_message` **acotado** (digest/kind + tamaño, jamás contenido
      completo — I12/O3: el payload no puede portar secretos ni contenido
-     íntegro).
+     íntegro). **Precisión al implementar:** para `note`, "acotado"
+     significa contenido cero — `text` lleva `N bytes, sha256 <prefijo>`
+     y nada más; un truncado seguiría pudiendo portar un secreto corto,
+     así que no alcanza (eventos.md §5.6 actualizado con el racional).
   2. `derive()` los ignora para el estado de nodos (no cambian
      transiciones) pero `stats` gana tokens por sesión y `status` puede
      mostrar "session open (model X)" para el nodo `running`.
