@@ -351,6 +351,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `child_run_id` | `RunId` | sí | referencia histórica inmutable (I28, D104) — el nodo `kind: workflow` del padre es el `node_id` del envelope |
 | `child_workflow_hash` | string | sí | fija qué versión del workflow hijo corrió — reproducir el padre nunca resuelve una versión nueva |
 | `terminal_state` | estado | solo en `child_run_finished` | — |
+| `tokens` | `TokenUsage` | solo en `child_run_finished` (aditivo D70, DI-25) | el gasto total derivado del hijo a su cierre — §12 "el Usage de los hijos agrega hacia arriba": el replay del padre lo suma exactamente una vez por miembro de cadena; el `node_finished` del nodo `workflow` deliberadamente no lleva tokens del hijo (doble conteo) |
 
 ### 5.24 `capability_degraded` — engine
 **Fuente:** capacidad, adapter, política aplicada

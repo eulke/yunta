@@ -330,19 +330,33 @@ sessions:
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    // §12: the children's Usage aggregates upward — the parent node's
-    // close carries the child run's whole spend, so the parent's own
-    // derived total (what `limits.max_tokens_per_run` compares against)
-    // includes it.
+    // §12: the children's Usage aggregates upward — each chain member's
+    // whole spend rides its own `child_run_finished.tokens` (DI-25), so
+    // the parent's derived total (what `limits.max_tokens_per_run`
+    // compares against) includes it exactly once. The node's own close
+    // deliberately carries none — it would double-count.
     assert_eq!(state.total_tokens.input, 100);
     assert_eq!(state.total_tokens.output, 20);
     match state.nodes.get(&"feat".into()) {
         Some(NodeState::Finished { tokens, .. }) => {
-            assert_eq!(tokens.input, 100);
-            assert_eq!(tokens.output, 20);
+            assert_eq!(
+                tokens.input, 0,
+                "the node close must not re-count the child"
+            );
+            assert_eq!(tokens.output, 0);
         }
-        other => panic!("expected feat finished with tokens, got {other:?}"),
+        other => panic!("expected feat finished, got {other:?}"),
     }
+    let events = bench.storage.events_for_run(&run_id).unwrap();
+    let recorded = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::ChildRunFinished(p) => Some(p.tokens),
+            _ => None,
+        })
+        .expect("child_run_finished must carry the child's spend");
+    assert_eq!(recorded.input, 100);
+    assert_eq!(recorded.output, 20);
 }
 
 // --- Pause and recursive resume ----------------------------------------------
@@ -720,4 +734,120 @@ nodes:
         other => panic!("expected feat failed, got {other:?}"),
     }
     assert!(bench.children_created(&run_id).is_empty());
+}
+
+// --- DI-25: a promoted child chains into its successor -----------------------
+
+struct AlwaysPromote;
+
+#[async_trait::async_trait]
+impl yunta_engine::HumanInteraction for AlwaysPromote {
+    async fn resolve(
+        &self,
+        _escalation: &yunta_core::events::GateWaitingPayload,
+    ) -> Option<yunta_core::events::GateResolvedPayload> {
+        Some(yunta_core::events::GateResolvedPayload {
+            chosen_option: Some("promote".to_string()),
+            resolved_by: Some("test".to_string()),
+            free_text: None,
+            approved_sha: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_promoted_child_chains_into_its_successor_automatically() {
+    let bench = Bench::new(&[(
+        "promotable",
+        r#"
+name: promotable
+modes:
+  quick: { include: [lint, fix-lint] }
+  full:  { include: [ship] }
+nodes:
+  - id: lint
+    kind: bash
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 0 }
+  - id: fix-lint
+    kind: bash
+    run: "true"
+  - id: ship
+    kind: bash
+    run: "echo shipped > shipped.txt"
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: promotable
+"#;
+    // The child starts in `quick` (the floor), exhausts its re-route,
+    // and the scripted human promotes — the parent must then create and
+    // drive the successor child (`full`) instead of failing the node.
+    let run_id = RunId::from("run-parent-chain");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            EMPTY_FIXTURE,
+            &AlwaysPromote,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"feat".into()),
+        Some(NodeState::Finished { .. })
+    ));
+
+    // Both chain members are linked children of the same node, in order.
+    let created = bench.children_created(&run_id);
+    let ids: Vec<&str> = created.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["run-parent-chain-feat", "run-parent-chain-feat-promoted"],
+        "the successor must be a new linked child, recorded on the parent log"
+    );
+    let finished = bench.children_finished(&run_id);
+    assert_eq!(
+        finished
+            .iter()
+            .map(|(id, t)| (id.as_str(), *t))
+            .collect::<Vec<_>>(),
+        vec![
+            ("run-parent-chain-feat", TerminalState::Promoted),
+            ("run-parent-chain-feat-promoted", TerminalState::Done),
+        ]
+    );
+
+    // The successor's own log carries the audited chain and mode.
+    let successor = RunId::from("run-parent-chain-feat-promoted");
+    let successor_created = bench
+        .storage
+        .events_for_run(&successor)
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::RunCreated(p) => Some(p),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        successor_created.promoted_from,
+        Some(RunId::from("run-parent-chain-feat"))
+    );
+    assert_eq!(successor_created.mode, "full");
+
+    // And the successor really did the `full` work, in its own tree.
+    let successor_tree = bench
+        ._root
+        .path()
+        .join("worktrees")
+        .join(successor.as_str());
+    assert!(successor_tree.join("shipped.txt").exists());
 }

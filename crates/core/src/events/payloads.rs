@@ -492,6 +492,14 @@ pub struct ChildRunFinishedPayload {
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
     pub terminal_state: TerminalState,
+    /// The child run's whole derived spend at its close (§12: "el
+    /// `Usage` de los hijos agrega hacia arriba") — replay adds it to
+    /// the parent's own total, so a promotion *chain*'s every member
+    /// counts exactly once, resumes included, and the parent node's own
+    /// `node_finished` carries no child tokens (they'd double-count).
+    /// Additive (D70): pre-DI-25 events parse as zero.
+    #[serde(default)]
+    pub tokens: TokenUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

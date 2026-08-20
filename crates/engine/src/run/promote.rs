@@ -1,0 +1,132 @@
+//! Creating a promotion successor (§10.2, D22 — extracted from the CLI
+//! by DI-25): a run that closed `run_finished: promoted` gets a fresh
+//! run in `suggested_mode`, `promoted_from` it, inheriting its
+//! `artifacts/` wholesale ("el contexto inicial incluye automáticamente
+//! artifacts, ledger y findings del antecesor" — all three are files
+//! under `artifacts/`, so one directory copy covers them). Lives in the
+//! engine so both drivers of a chain use the identical mechanics: the
+//! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
+//! a `kind: workflow` child that promotes mid-composition.
+
+use std::path::{Path, PathBuf};
+
+use yunta_core::{Clock, Isolation, Manifest, RunId};
+use yunta_storage::Storage;
+
+use super::{create_run, CreateRunParams, RunError};
+
+/// Everything the successor needs to be executed — the caller drives it
+/// through its own `execute_run` (with its own interaction surface,
+/// clock and cancellation).
+pub struct PromotionSuccessor {
+    pub run_id: RunId,
+    pub manifest: Manifest,
+    pub run_dir: PathBuf,
+    pub worktree: PathBuf,
+}
+
+/// Creates (never runs) the successor of `predecessor`, which just
+/// closed `Promoted` toward `suggested_mode`.
+///
+/// `repo` is the checkout a fresh worktree branches from (the original
+/// `cwd` for a top-level chain; the parent run's own tree for a child's,
+/// §12). Under `Isolation::None` the successor reuses the
+/// predecessor's checkout — the lock (if any) is the caller's and only
+/// releases when the whole chain ends.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_promotion_successor(
+    repo: &Path,
+    predecessor_id: &RunId,
+    predecessor_manifest: &Manifest,
+    predecessor_worktree: &Path,
+    predecessor_run_dir: &Path,
+    suggested_mode: &str,
+    runs_root: &Path,
+    worktrees_root: &Path,
+    storage: &Storage,
+    clock: &dyn Clock,
+) -> Result<PromotionSuccessor, RunError> {
+    let successor_id = RunId::from(format!("{predecessor_id}-promoted"));
+
+    let mut manifest = predecessor_manifest.clone();
+    // §7.3/§10.2: the successor builds on wherever the predecessor's own
+    // work left the tree, not on the original base.
+    manifest.base_commit = head_commit(predecessor_worktree)?;
+
+    let worktree = match manifest.isolation {
+        Isolation::Worktree => {
+            let worktree = worktrees_root.join(successor_id.as_str());
+            crate::worktree::prepare_worktree(
+                repo,
+                &worktree,
+                &manifest.base_commit,
+                &format!("yunta/{successor_id}"),
+                Isolation::Worktree,
+            )
+            .await?;
+            worktree
+        }
+        Isolation::None => predecessor_worktree.to_path_buf(),
+    };
+
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &successor_id,
+            manifest: &manifest,
+            runs_root,
+            mode: suggested_mode,
+            promoted_from: Some(predecessor_id),
+        },
+        storage,
+        clock,
+    )?;
+
+    copy_inherited_artifacts(predecessor_run_dir, &run_dir).map_err(|source| RunError::Io {
+        context: format!("inherit artifacts from `{predecessor_id}`"),
+        source,
+    })?;
+
+    Ok(PromotionSuccessor {
+        run_id: successor_id,
+        manifest,
+        run_dir,
+        worktree,
+    })
+}
+
+/// §10.2's automatic inheritance, at the filesystem level: every file
+/// directly under the predecessor's `artifacts/` copies into the
+/// successor's. Deliberately narrower than §12's general linked-run
+/// mounting (DI-26's own territory).
+fn copy_inherited_artifacts(from_run_dir: &Path, to_run_dir: &Path) -> std::io::Result<()> {
+    let from = from_run_dir.join("artifacts");
+    let to = to_run_dir.join("artifacts");
+    if !from.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&from)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            std::fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn head_commit(worktree: &Path) -> Result<String, RunError> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(worktree)
+        .output()
+        .map_err(|e| RunError::Git {
+            context: format!("resolve HEAD in `{}`", worktree.display()),
+            detail: e.to_string(),
+        })?;
+    if !output.status.success() {
+        return Err(RunError::Git {
+            context: format!("resolve HEAD in `{}`", worktree.display()),
+            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}

@@ -29,6 +29,7 @@ mod executor_exec;
 mod gate_exec;
 mod loop_exec;
 mod node_exec;
+mod promote;
 mod questions_exec;
 mod schedule;
 mod workflow_exec;
@@ -54,6 +55,7 @@ use crate::scope::ScopeCheckError;
 use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
+pub use promote::{create_promotion_successor, PromotionSuccessor};
 pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
 

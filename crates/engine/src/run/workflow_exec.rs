@@ -389,8 +389,15 @@ async fn resume_child(
 }
 
 /// Executes the child run to its next stop and maps that onto this
-/// node: a terminal child closes the node (its whole spend aggregating
-/// up, §12); a paused child keeps the node open and pauses the parent.
+/// node — chasing a promotion chain to its end (§10.2/DI-25): a chain
+/// member that closes `promoted` gets its successor created (fresh
+/// worktree off the parent's tree, artifacts inherited, `promoted_from`
+/// audited) and recorded as a NEW linked child of this same node, then
+/// driven in turn. A terminal child closes the node; each member's
+/// whole spend rides its own `child_run_finished.tokens` (replay
+/// aggregates it into the parent's total exactly once — the node's own
+/// close deliberately carries none); a paused child keeps the node open
+/// and pauses the parent.
 async fn drive_child(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -400,83 +407,119 @@ async fn drive_child(
     child_tree: &Path,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    // Boxed for the indirect recursion `execute_run_at_depth` →
-    // `execute_node` → here → `execute_run_at_depth`.
-    let report = {
-        let future: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<super::RunReport, RunError>> + '_>,
-        > = Box::pin(super::execute_run_at_depth(
-            child_id,
-            child_manifest,
-            child_run_dir,
-            child_tree,
-            ctx.adapters,
-            ctx.storage,
-            ctx.clock,
-            ctx.max_task_retries,
-            ctx.human_interaction,
-            ctx.forge,
-            Some(cancel),
-            ctx.depth + 1,
-        ));
-        future.await?
-    };
+    let mut current_id = child_id.clone();
+    let mut current_manifest = child_manifest.clone();
+    let mut current_run_dir = child_run_dir.to_path_buf();
+    let mut current_tree = child_tree.to_path_buf();
+    loop {
+        // Boxed for the indirect recursion `execute_run_at_depth` →
+        // `execute_node` → here → `execute_run_at_depth`.
+        let report = {
+            let future: std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<super::RunReport, RunError>> + '_>,
+            > = Box::pin(super::execute_run_at_depth(
+                &current_id,
+                &current_manifest,
+                &current_run_dir,
+                &current_tree,
+                ctx.adapters,
+                ctx.storage,
+                ctx.clock,
+                ctx.max_task_retries,
+                ctx.human_interaction,
+                ctx.forge,
+                Some(cancel),
+                ctx.depth + 1,
+            ));
+            future.await?
+        };
 
-    match report.terminal {
-        RunTerminal::Finished => {
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-                    child_run_id: child_id.clone(),
-                    child_workflow_hash: child_manifest.workflow_hash.clone(),
-                    terminal_state: TerminalState::Done,
-                }),
-            )?;
-            close_node(
-                ctx,
-                node,
-                format!("child run `{child_id}` finished"),
-                report.state.total_tokens,
-            )
-            .await
-        }
-        RunTerminal::Promoted { suggested_mode } => {
-            // The child's log is closed for good (`run_finished:
-            // promoted`, I3) — recorded here so the link graph stays
-            // whole, then failed explicitly: driving a child's
-            // promotion chain (fresh worktree, artifact inheritance)
-            // is registered debt (DI-25), not silently improvised.
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-                    child_run_id: child_id.clone(),
-                    child_workflow_hash: child_manifest.workflow_hash.clone(),
-                    terminal_state: TerminalState::Promoted,
-                }),
-            )?;
-            fail(
-                ctx,
-                node,
-                format!(
-                    "child run `{child_id}` closed promoted toward mode `{suggested_mode}` — \
-                     the engine does not drive a child's promotion chain yet (DI-25); run the \
-                     successor manually and re-route or re-run this node"
-                ),
-                false,
-            )
-        }
-        RunTerminal::Paused { reason } => {
-            if ctx.root_cancel.is_cancelled() || cancel.is_cancelled() {
-                // The child paused because a cancellation reached it,
-                // not on its own account — the shared epilogue decides
-                // orphan vs. join:any loss (DI-11).
-                return cancelled_end(ctx, node);
+        match report.terminal {
+            RunTerminal::Finished => {
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                        child_run_id: current_id.clone(),
+                        child_workflow_hash: current_manifest.workflow_hash.clone(),
+                        terminal_state: TerminalState::Done,
+                        tokens: report.state.total_tokens,
+                    }),
+                )?;
+                return close_node(
+                    ctx,
+                    node,
+                    format!("child run `{current_id}` finished"),
+                    yunta_core::events::TokenUsage::default(),
+                )
+                .await;
             }
-            Ok(NodeEnd::ChildPaused {
-                reason: format!(
-                    "child run `{child_id}` paused: {reason} — resuming this run resumes it"
-                ),
-            })
+            RunTerminal::Promoted { suggested_mode } => {
+                // The chain member's log is closed for good
+                // (`run_finished: promoted`, I3) — the link records it
+                // with its spend, and the successor becomes the node's
+                // next linked child.
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                        child_run_id: current_id.clone(),
+                        child_workflow_hash: current_manifest.workflow_hash.clone(),
+                        terminal_state: TerminalState::Promoted,
+                        tokens: report.state.total_tokens,
+                    }),
+                )?;
+                let successor = match super::promote::create_promotion_successor(
+                    ctx.worktree,
+                    &current_id,
+                    &current_manifest,
+                    &current_tree,
+                    &current_run_dir,
+                    &suggested_mode,
+                    &runs_root(ctx),
+                    &worktrees_root(ctx),
+                    ctx.storage,
+                    ctx.clock,
+                )
+                .await
+                {
+                    Ok(successor) => successor,
+                    Err(e) => {
+                        return fail(
+                            ctx,
+                            node,
+                            format!(
+                                "child run `{current_id}` promoted toward `{suggested_mode}` \
+                                 but its successor could not be created: {e}"
+                            ),
+                            false,
+                        );
+                    }
+                };
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+                        child_run_id: successor.run_id.clone(),
+                        child_workflow_hash: successor.manifest.workflow_hash.clone(),
+                    }),
+                )?;
+                current_id = successor.run_id;
+                current_manifest = successor.manifest;
+                current_run_dir = successor.run_dir;
+                current_tree = successor.worktree;
+            }
+            RunTerminal::Paused { reason } => {
+                if ctx.root_cancel.is_cancelled() || cancel.is_cancelled() {
+                    // The child paused because a cancellation reached
+                    // it, not on its own account — the shared epilogue
+                    // decides orphan vs. join:any loss (DI-11).
+                    return cancelled_end(ctx, node);
+                }
+                return Ok(NodeEnd::ChildPaused {
+                    reason: format!(
+                        "child run `{current_id}` paused: {reason} — resuming this run \
+                         resumes it"
+                    ),
+                });
+            }
         }
     }
 }

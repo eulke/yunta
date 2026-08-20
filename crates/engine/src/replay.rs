@@ -251,6 +251,14 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
                 .push(p.path.clone());
             Ok(())
         }
+        EventPayload::ChildRunFinished(p) => {
+            // §12/DI-25: the child's whole spend aggregates into the
+            // parent's total right here — once per chain member, at its
+            // close; the parent node's own `node_finished` deliberately
+            // carries none of it (see the payload's doc).
+            state.total_tokens = sum_tokens(state.total_tokens, p.tokens);
+            Ok(())
+        }
         // Every other kind is run-scoped bookkeeping that does not
         // change node/task/budget state (runner_resolved, baseline_captured,
         // agent_session_opened, agent_message,
@@ -262,7 +270,8 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
         // started/finished/failed events carry its derived state (child
         // tokens aggregate through node_finished.tokens_used), while the
         // link pair stays pure audit — `workflow_exec` reads it directly
-        // off the log to find an open child, no derived field needed.
+        // off the log to find an open child, no derived field needed
+        // (its tokens are handled in the arm above).
         _ => Ok(()),
     }
 }

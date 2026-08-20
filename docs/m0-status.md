@@ -2911,13 +2911,16 @@ que aparece.
         y el `child_run_id` del primero sigue apuntando a un manifest
         que hashea v1: el histórico jamás re-resuelve
         `nombre@versión-actual`.
-      - **Deltas registrados**: DI-25 (hijo que cierra `promoted` → el
-        padre registra el vínculo y falla el nodo con diagnóstico — no
-        improvisa la cadena de promoción) y DI-26 (montaje cross-run
-        declarativo de artifacts: la sintaxis no existe en la
-        referencia; el canal real hoy son los `inputs:` del hijo).
-        Los runs hijos no cuentan contra `max_concurrent_runs` (ese cap
-        gobierna invocaciones de `yunta run`, no el tamaño del árbol).
+      - **Deltas registrados**: DI-25 (cadena de promoción de un hijo —
+        cerrado después: el padre crea y corre el sucesor
+        automáticamente vía `create_promotion_successor`, compartido con
+        el CLI, y la contabilidad pasó a `child_run_finished.tokens`
+        para que cada miembro de cadena cuente exacto una vez) y DI-26
+        (montaje cross-run declarativo de artifacts: la sintaxis no
+        existe en la referencia; el canal real hoy son los `inputs:`
+        del hijo). Los runs hijos no cuentan contra
+        `max_concurrent_runs` (ese cap gobierna invocaciones de `yunta
+        run`, no el tamaño del árbol).
       - Tests: 7 en `crates/engine/tests/workflow_compose.rs` (run
         vinculado completo con inputs rendereados y árbol propio;
         agregación de tokens; pausa+resume recursivo vía gate interno;

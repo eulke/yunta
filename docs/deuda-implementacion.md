@@ -1100,7 +1100,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   mismo id, sin capacidad → evento, sin sesión → evento, primera corrida
   limpia sin eventos) + 1 check + 1 del mock.
 
-### DI-25 — Cadena de promoción de un run hijo `[ ]`
+### DI-25 — Cadena de promoción de un run hijo `[x]`
 
 - **Origen:** T9.3. Un run hijo (`kind: workflow`) puede cerrar
   `run_finished: promoted` (su propio gate de presupuesto/re-rutas
@@ -1122,6 +1122,20 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   sucesor automáticamente y el log del padre muestra ambos
   `child_run_created` (el segundo con el sucesor); `run_created.promoted_from`
   del sucesor apunta al hijo original.
+- **Nota de cierre:** `create_promotion_successor` en
+  `yunta-engine` (`run/promote.rs`): crea (jamás corre) el sucesor —
+  worktree nuevo desde el árbol del predecesor, `create_run` con
+  `promoted_from`, herencia de `artifacts/` — y lo consumen los DOS
+  drivers de cadena: el `drive_promotions` del CLI (que conserva solo su
+  superficie de consola y su reloj) y `drive_child` en `workflow_exec`
+  (loop: miembro promovido → `child_run_finished { promoted, tokens }` +
+  sucesor como NUEVO `child_run_created` del mismo nodo → se corre a su
+  vez). Cambio de contabilidad que esto exigió (corrige T9.3):
+  `child_run_finished.tokens` (aditivo D70) lleva el gasto total del
+  miembro y el replay del padre lo suma — el `node_finished` del nodo
+  workflow ya NO lleva tokens del hijo (con cadenas + resumes, el cierre
+  del nodo solo vería el último miembro; el evento por-miembro cuenta
+  exacto, una vez, siempre).
 
 ### DI-26 — Montaje cross-run de artifacts por vínculo `[ ]`
 
@@ -1193,9 +1207,9 @@ construir algo. Si alguna vez duelen de verdad, reabrirlos requiere ADR.
   recursivo, presupuestos en cascada, `isolation: inherit` con scopes
   disjuntos en check, grafo de referencias acíclico +
   `max_workflow_depth` (consumidor de DI-05 cerrado). Deltas que
-  quedaron con ítem propio: DI-25 (cadena de promoción de un hijo),
-  DI-26 (montaje cross-run declarativo — la sintaxis no existe en la
-  referencia, requiere ADR). El "árbol para composición" de `status`
+  quedaron con ítem propio: DI-25 (cadena de promoción de un hijo —
+  **cerrado**), DI-26 (montaje cross-run declarativo — la sintaxis no
+  existe en la referencia, requiere ADR). El "árbol para composición" de `status`
   (§8.5) sigue pendiente y es territorio de M10 (UX de status), no un
   mecanismo del engine.
 - **T9.4** — fan-out `runners: []` (§13.2) + `agent:` a nivel nodo

@@ -186,6 +186,7 @@ fn all_kinds() -> Vec<EventPayload> {
             child_run_id: "run-child-1".into(),
             child_workflow_hash: "sha256:444".to_string(),
             terminal_state: TerminalState::Done,
+            tokens: TokenUsage::default(),
         }),
         EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
             capability: "resume_session".to_string(),
