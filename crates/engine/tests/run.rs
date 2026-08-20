@@ -5706,3 +5706,82 @@ nodes:
         "one context_assembled per task, each carrying its task_id: {assembled_tasks:?}"
     );
 }
+
+// --- DI-21: events.jsonl on the Broken path ----------------------------------
+
+#[tokio::test]
+async fn a_broken_log_still_exports_events_jsonl_for_forensics() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: broken
+nodes:
+  - id: build
+    kind: bash
+    run: "true"
+"#;
+    // Corrupt the log by hand: a node_finished with no node_started —
+    // exactly the class of inconsistency `derive` refuses to guess over.
+    let wf: Workflow = serde_yaml::from_str(workflow).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &wf,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: "default",
+            promoted_from: None,
+        },
+        &bench.storage,
+        &FixedClock,
+    )
+    .unwrap();
+    bench
+        .storage
+        .append_event(&yunta_core::events::Event {
+            run_id: bench.run_id.clone(),
+            seq: 0,
+            timestamp: FixedClock.now(),
+            node_id: Some("ghost".into()),
+            payload: yunta_core::events::EventPayload::NodeFinished(
+                yunta_core::events::NodeFinishedPayload {
+                    outcome: "??".to_string(),
+                    tokens_used: yunta_core::events::TokenUsage::default(),
+                },
+            ),
+        })
+        .unwrap();
+
+    let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    let result = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+        None,
+    )
+    .await;
+
+    assert!(
+        matches!(result, Err(yunta_engine::RunError::Broken { .. })),
+        "a corrupt log is a Broken error, got {result:?}"
+    );
+    // The corrupt log is exactly the one you most want exported — the
+    // forensic copy exists even though the run errored (DI-21).
+    let exported = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(exported.contains("node_finished"));
+    assert!(exported.contains("run_created"));
+}

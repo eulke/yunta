@@ -15,10 +15,9 @@
 //! [`RunCtx::export_events_jsonl`] — unconditionally, independent of
 //! whether the workflow declares `on_finish:` at all (D20/§8.3's own
 //! phrasing reads as two actions conjoined at close, not one gated on the
-//! other). `ScheduleStep::Broken`'s early `Err` return is deliberately
-//! excluded: that path never reaches a `RunReport` at all today, and a
-//! corrupt-log export is its own design question, not silently folded
-//! into this one. `on_finish.distill` is DI-24's deterministic
+//! other). Since DI-21 the `ScheduleStep::Broken` path exports too,
+//! best-effort before its `Err` — a corrupt log is exactly the one a
+//! forensic reader most wants on disk. `on_finish.distill` is DI-24's deterministic
 //! transform (ADR D107) — see `distill.rs`; the close sequence is
 //! distill → `run_finished` → export → cleanup.
 
@@ -586,6 +585,18 @@ pub(crate) async fn execute_run_at_depth(
             mode_nodes.as_ref(),
         ) {
             ScheduleStep::Broken { diagnostic } => {
+                // DI-21: a corrupt log is exactly the one you most want
+                // exported — each event serializes on its own, so a
+                // broken *sequence* doesn't stop the forensic copy.
+                // Best-effort by design: if the export itself fails, the
+                // original diagnostic wins (never masked by an IO error
+                // about its own post-mortem).
+                if let Err(export_error) = ctx.export_events_jsonl() {
+                    tracing::warn!(
+                        error = %export_error,
+                        "could not export events.jsonl for the broken run"
+                    );
+                }
                 return Err(RunError::Broken { diagnostic });
             }
             ScheduleStep::Finish => {

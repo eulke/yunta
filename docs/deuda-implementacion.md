@@ -1024,7 +1024,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   (`CommandDenied` tampoco nombra capas). `strictness()`/`as_str()`
   ahora son métodos públicos de `ScopeExpansionMode`.
 
-### DI-21 — `events.jsonl` en el camino `Broken` `[ ]`
+### DI-21 — `events.jsonl` en el camino `Broken` `[x]`
 
 - **Origen:** T5.8 — el retorno temprano de `ScheduleStep::Broken` no
   exporta. Un log corrupto es exactamente el que más querés tener
@@ -1036,6 +1036,12 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   código deja claro el orden de prioridad de errores.
 - **✓ Criterios:** run con log truncado artificialmente → `execute_run`
   devuelve `Broken` **y** `events.jsonl` existe con los eventos legibles.
+- **Nota de cierre:** en el brazo `ScheduleStep::Broken` de
+  `execute_run`, antes del `Err` — export best-effort con `tracing::warn`
+  si la propia exportación falla (el diagnóstico original gana, nunca
+  enmascarado por el IO de su propia autopsia). El comentario del módulo
+  sobre la exclusión deliberada del camino `Broken` quedó obsoleto y se
+  actualizó.
 
 ### DI-22 — Smoke tests en vivo pendientes `[ ]`
 
