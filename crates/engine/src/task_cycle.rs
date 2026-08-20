@@ -720,6 +720,10 @@ pub async fn run_task(
             budget,
             adapter_settings: setup.adapter_settings.clone(),
             skills: setup.skills.clone(),
+            // T8.2c opens the per-session listener and fills this in;
+            // until then no session gets an endpoint — exactly the
+            // "sin la capacidad, ningún endpoint" resting state (§6.5).
+            run_tools_endpoint: None,
         };
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
             .await

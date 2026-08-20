@@ -23,7 +23,7 @@ pub use forge::{
 pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
-    ProbeReport, SessionRequest,
+    ProbeReport, RunToolsEndpoint, SessionRequest,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

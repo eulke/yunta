@@ -274,7 +274,7 @@ nodes:
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     match node.kind {
-        NodeKind::Parallel { join, nodes } => {
+        NodeKind::Parallel { join, nodes, .. } => {
             assert_eq!(join, JoinPolicy::All);
             assert_eq!(nodes.len(), 2);
             assert_eq!(nodes[0].id.as_str(), "write-docs");

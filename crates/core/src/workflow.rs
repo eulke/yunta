@@ -495,6 +495,17 @@ pub enum NodeKind {
     Parallel {
         #[serde(default)]
         join: JoinPolicy,
+        /// `coordination:` (§6.4, D49/D98, T8.2) — whether this group's
+        /// children share a blackboard. `independent` (default): the
+        /// blackboard tools are never even mounted — the right shape
+        /// for evaluative groups (reviewers), where cross-contamination
+        /// anchors judgments and kills the diversity the fan-out buys.
+        /// `blackboard`: children with `run_tools` get
+        /// `yunta_post_finding`/`yunta_get_blackboard` scoped to this
+        /// group (never the whole run); reading siblings' posts still
+        /// waits for the `join` (D98).
+        #[serde(default)]
+        coordination: Coordination,
         nodes: Vec<Node>,
     },
     /// Automatic verification against data the engine already has (§7.1,
@@ -681,6 +692,18 @@ pub enum CheckBuiltin {
     FindingsGate {
         max_severity: crate::events::FindingSeverity,
     },
+}
+
+/// `parallel.coordination` (§6.4, D49) — see the field's own doc on
+/// [`NodeKind::Parallel`]. A closed enum, not a bool: a third
+/// coordination shape (if one ever earns an ADR) lands as a variant
+/// with exhaustive match-checking, same reasoning as `JoinPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Coordination {
+    #[default]
+    Independent,
+    Blackboard,
 }
 
 /// `parallel.join` (§5.8, D97). `all` (default): the group finishes only

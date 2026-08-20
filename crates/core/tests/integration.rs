@@ -199,3 +199,41 @@ nodes:
     let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
+
+// --- T8.2/D49: `coordination:` on parallel groups ----------------------------
+
+#[test]
+fn parallel_coordination_parses_defaults_independent_and_round_trips() {
+    let yaml = r#"
+name: coordinated
+nodes:
+  - id: cooperative
+    kind: parallel
+    coordination: blackboard
+    nodes:
+      - id: a
+        kind: bash
+        run: "true"
+  - id: evaluative
+    kind: parallel
+    nodes:
+      - id: b
+        kind: bash
+        run: "true"
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let yunta_core::NodeKind::Parallel { coordination, .. } = &workflow.nodes[0].kind else {
+        panic!("expected a parallel node");
+    };
+    assert_eq!(*coordination, yunta_core::Coordination::Blackboard);
+    let yunta_core::NodeKind::Parallel { coordination, .. } = &workflow.nodes[1].kind else {
+        panic!("expected a parallel node");
+    };
+    // D49: `independent` is the default — evaluative groups (reviewers)
+    // must never see each other's findings unless the author opts in.
+    assert_eq!(*coordination, yunta_core::Coordination::Independent);
+
+    let reserialized = serde_yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(workflow, reparsed);
+}

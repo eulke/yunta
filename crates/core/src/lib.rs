@@ -37,9 +37,9 @@ pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest};
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
-    ContextSpec, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
-    KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec,
-    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
+    ContextSpec, Coordination, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks,
+    JoinPolicy, KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude,
+    ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
     NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsParams,
     ScopeExpansion, Workflow, WorkflowIsolation,
 };

@@ -99,7 +99,7 @@ pub(super) async fn execute_node(
         NodeKind::Loop { until, prompt, .. } => {
             super::loop_exec::execute_loop(ctx, node, until, prompt, cancel).await?
         }
-        NodeKind::Parallel { join, nodes } => {
+        NodeKind::Parallel { join, nodes, .. } => {
             execute_parallel(ctx, node, *join, nodes, cancel).await?
         }
         NodeKind::Check { builtin } => {
@@ -1097,6 +1097,10 @@ async fn execute_prompt(
         budget: ctx.session_budget()?,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
+        // T8.2c opens the per-session listener and fills this in; until
+        // then no session gets an endpoint — exactly the "sin la
+        // capacidad, ningún endpoint" resting state (§6.5).
+        run_tools_endpoint: None,
     };
 
     // DI-23/§8.1/D99: an orphaned node under `resume_session` picks its

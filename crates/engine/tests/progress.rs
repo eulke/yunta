@@ -171,6 +171,7 @@ fn a_running_node_appears_under_next_marked_running() {
 fn parallel_children_are_listed_on_the_same_terms_as_top_level_nodes() {
     let wf = workflow(vec![Node {
         kind: NodeKind::Parallel {
+            coordination: yunta_core::Coordination::Independent,
             join: yunta_core::JoinPolicy::All,
             nodes: vec![node("write-docs", Some("Writes docs"))],
         },

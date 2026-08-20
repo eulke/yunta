@@ -86,7 +86,11 @@ fn bash_with_scope(id: &str, run: &str, scope: &[&str]) -> Node {
 fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Parallel { join, nodes },
+        kind: NodeKind::Parallel {
+            join,
+            coordination: yunta_core::Coordination::Independent,
+            nodes,
+        },
         depends_on: Vec::new(),
         scope: Vec::new(),
         runner: None,

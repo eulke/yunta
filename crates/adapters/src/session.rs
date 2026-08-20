@@ -67,6 +67,26 @@ pub struct SessionRequest {
     /// `capabilities().skills` (the engine never populates this
     /// otherwise, A2/A6).
     pub skills: Vec<std::path::PathBuf>,
+    /// The per-run MCP endpoint for THIS session (§6.4/§6.5, D103,
+    /// T8.2): a loopback HTTP listener the engine started just before
+    /// this spawn, dead when the session ends — a resume always carries
+    /// fresh credentials, never a reused pair. The adapter translates
+    /// it to its CLI's native external-MCP mechanism (same pattern as
+    /// `agent:`/`edit_hooks`); only populated when it declared
+    /// `capabilities().run_tools` (A2/A6).
+    pub run_tools_endpoint: Option<RunToolsEndpoint>,
+}
+
+/// Where a session's per-run MCP server listens (§6.5, D103): a
+/// loopback URL plus the single-use bearer token that scopes every call
+/// to `(run_id, node_id, attempt)` by construction — no tool ever takes
+/// a run id as a caller argument (I27). The token is secret material:
+/// it must never reach the event log (I12) — the engine's own audit
+/// events carry the URL at most, never this pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunToolsEndpoint {
+    pub url: String,
+    pub token: String,
 }
 
 /// Health check result (`probe()` — binary present, version compatible,

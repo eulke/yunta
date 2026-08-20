@@ -46,6 +46,11 @@ pub struct MockAdapter {
     /// session id — recording which one proves the engine handed back
     /// the conversation it meant to continue.
     resumes_seen: Mutex<Vec<SessionId>>,
+    /// Every session's `req.run_tools_endpoint`, in claim order
+    /// (T8.2/A8) — same record-the-mount principle as `skills_seen`:
+    /// engine tests prove the endpoint reached the session (or
+    /// deliberately didn't) without a real CLI.
+    endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
 }
 
 impl MockAdapter {
@@ -57,6 +62,7 @@ impl MockAdapter {
             skills_seen: Mutex::new(Vec::new()),
             agents_seen: Mutex::new(Vec::new()),
             resumes_seen: Mutex::new(Vec::new()),
+            endpoints_seen: Mutex::new(Vec::new()),
         }
     }
 
@@ -79,6 +85,14 @@ impl MockAdapter {
     /// The `skills` of every session spawned so far, in claim order.
     pub fn skills_seen(&self) -> Vec<Vec<std::path::PathBuf>> {
         self.skills_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The `run_tools_endpoint` of every session so far, in claim order.
+    pub fn endpoints_seen(&self) -> Vec<Option<crate::RunToolsEndpoint>> {
+        self.endpoints_seen
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
@@ -164,6 +178,10 @@ impl MockAdapter {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(req.skills.clone());
+        self.endpoints_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req.run_tools_endpoint.clone());
         self.agents_seen
             .lock()
             .unwrap_or_else(|e| e.into_inner())

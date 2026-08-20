@@ -42,6 +42,7 @@ fn request(cwd: PathBuf) -> SessionRequest {
         budget: Budget::default(),
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
+        run_tools_endpoint: None,
     }
 }
 
