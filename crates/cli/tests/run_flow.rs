@@ -1838,3 +1838,165 @@ fn yunta_check_refuses_a_composition_cycle() {
         "stderr: {stderr}"
     );
 }
+
+// --- M8/T8.1.2: `yunta run --detach` -----------------------------------------
+
+#[test]
+fn yunta_run_detach_returns_immediately_and_the_workflow_finishes_in_a_detached_child() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: slow
+nodes:
+  - id: work
+    kind: bash
+    run: "sleep 2 && echo done > done.txt"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let started = std::time::Instant::now();
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--detach"]);
+    let elapsed = started.elapsed();
+
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(1),
+        "--detach must return before the workflow's own 2s node finishes, took {elapsed:?}"
+    );
+    let run_id = run_id_from(&run);
+
+    // The parent CLI invocation is gone; the workflow keeps running in a
+    // detached child until it finishes on its own.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        if stdout(&status).contains("finished") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the detached run never reached finished: {}",
+            stdout(&status)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.join("done.txt"))
+            .unwrap()
+            .trim(),
+        "done"
+    );
+}
+
+#[test]
+fn yunta_run_detach_survives_a_sigterm_to_its_own_launchers_process_group() {
+    // A shell's Ctrl-C delivers SIGINT (or a job-control kill delivers
+    // whatever signal) to the *whole foreground process group* the
+    // launched command sits in — never just that one pid. If the
+    // detached workflow process shared the launcher's group, this would
+    // kill it too, defeating the entire point of `--detach`. Simulated
+    // here by putting the launcher in its own fresh group (exactly what
+    // a shell's job control already does for a foreground command) and
+    // signalling that whole group right after the launcher itself has
+    // exited.
+    use std::os::unix::process::CommandExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: slow
+nodes:
+  - id: work
+    kind: bash
+    run: "sleep 2 && echo done > done.txt"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let launcher = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml", "--detach"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let launcher_pgid = launcher.id() as i32; // `process_group(0)`: pgid == its own pid
+    let output = launcher.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let run_id = stdout(&Output {
+        status: output.status,
+        stdout: output.stdout,
+        stderr: Vec::new(),
+    })
+    .lines()
+    .find_map(|line| {
+        line.strip_prefix("run ")
+            .and_then(|rest| rest.split(':').next())
+            .map(str::to_string)
+    })
+    .expect("run id in output");
+
+    // The launcher itself has already exited — this signals whatever
+    // else is still in its group.
+    unsafe {
+        libc_kill(-launcher_pgid, 15); // SIGTERM
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        if stdout(&status).contains("finished") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the detached run must survive a signal to its launcher's group, got: {}",
+            stdout(&status)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.join("done.txt"))
+            .unwrap()
+            .trim(),
+        "done"
+    );
+}
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
+    kill(pid, sig)
+}

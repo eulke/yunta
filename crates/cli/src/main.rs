@@ -53,6 +53,15 @@ enum Command {
         /// log every 500ms instead of only at the end.
         #[arg(long)]
         follow: bool,
+        /// Creates the run, then hands it off to a detached `yunta
+        /// resume` child and returns immediately with the run id — the
+        /// workflow keeps running independent of this invocation (M8,
+        /// D101: what `run_workflow` triggers internally so the MCP
+        /// control plane never blocks for a run's duration). Mutually
+        /// exclusive with `--follow` (there is nothing left in this
+        /// process to follow).
+        #[arg(long, conflicts_with = "follow")]
+        detach: bool,
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
     Status {
@@ -170,6 +179,7 @@ async fn main() -> ExitCode {
             adapter,
             mode,
             follow,
+            detach,
         }) => {
             commands::run::run(
                 &workflow,
@@ -177,6 +187,7 @@ async fn main() -> ExitCode {
                 adapter.as_deref(),
                 mode.as_deref(),
                 follow,
+                detach,
             )
             .await
         }

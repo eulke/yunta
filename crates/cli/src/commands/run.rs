@@ -6,7 +6,7 @@
 //! entropy, the engine never does.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -145,6 +145,7 @@ pub async fn run(
     adapter: Option<&str>,
     mode: Option<&str>,
     follow: bool,
+    detach: bool,
 ) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
@@ -336,6 +337,62 @@ pub async fn run(
         }
     };
     println!("run {run_id}: created at {}", run_dir.display());
+
+    // M8/D101: `run_workflow`'s own async pattern — create synchronously
+    // (fast, no agent I/O yet), then hand off to a fully independent
+    // `yunta resume` and return. No new execution path: the detached
+    // child is an ordinary resume, exactly what a human would run by
+    // hand later. Its own log goes to `run.dir/scratch` (never silently
+    // discarded — a long-lived process nobody is watching still needs a
+    // trail); its process group is its own so a signal to *this*
+    // invocation's group (a shell's Ctrl-C) can never reach it.
+    if detach {
+        let log_path = run_dir.join("scratch/detached.log");
+        let log = match std::fs::File::create(&log_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("error: cannot create `{}`: {e}", log_path.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        let log_err = match log.try_clone() {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("error: cannot duplicate `{}`: {e}", log_path.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut child_cmd = std::process::Command::new(
+            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
+        );
+        child_cmd
+            .arg("resume")
+            .arg(run_id.as_str())
+            .current_dir(&cwd)
+            .stdin(std::process::Stdio::null())
+            .stdout(log)
+            .stderr(log_err);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            child_cmd.process_group(0);
+        }
+        match child_cmd.spawn() {
+            Ok(_child) => {
+                // Deliberately not awaited, not tracked: the whole point
+                // of `--detach` is that this run's life stops depending
+                // on this process the moment it's launched (I25's own
+                // rule, applied here to the CLI launcher rather than an
+                // MCP session).
+                println!("run {run_id}: detached, driving forward independently");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("error: cannot spawn a detached `yunta resume {run_id}`: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
 
     let follower = follow.then(|| {
         spawn_follower(
