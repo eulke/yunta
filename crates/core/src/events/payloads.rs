@@ -278,6 +278,13 @@ pub struct ArtifactWrittenPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextAssembledPayload {
+    /// `Some` when this assembly built one *task's* brief inside a loop
+    /// node (DI-17) — the same task-vs-node convention
+    /// `ScopeCheckedPayload.task_id` already follows. `None` for a
+    /// node-level assembly (a `prompt` node's own context). Additive
+    /// (D70): pre-DI-17 events parse with `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<crate::ids::TaskId>,
     pub sources: Vec<ContextSourceRef>,
     /// Keys are `"stable" | "run-stable" | "volatile"` (§9.1's fixed
     /// stability classes) — kept as plain strings rather than an enum key

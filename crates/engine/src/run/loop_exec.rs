@@ -113,6 +113,11 @@ pub(super) async fn execute_loop(
         _ => None,
     };
 
+    // DI-17: stable/run-stable context resolved once and reused across
+    // every task brief this invocation builds; volatile sources
+    // re-resolve per brief.
+    let context_memo = super::context_resolve::StableContextMemo::default();
+
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
     // §8.3/DI-05: the only net under a ledger whose state oscillates
@@ -188,26 +193,43 @@ pub(super) async fn execute_loop(
         // captured once so all N tasks work from an identical snapshot.
         let base_commit = head_commit(ctx.worktree).await?;
 
+        // DI-17: each batch member's brief carries the loop's declared
+        // `context:` — resolved per task (volatile sources fresh, stable
+        // ones from the memo), audited as one `context_assembled` per
+        // task. A failing source is the node's failure (§9), before any
+        // session is spent.
+        let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
+        for task in &batch {
+            match super::context_resolve::resolve_for_task(ctx, node, &task.id, &context_memo)
+                .await?
+            {
+                Ok(Some(block)) => briefs.push(format!("{block}\n\n{instruction}")),
+                Ok(None) => briefs.push(instruction.clone()),
+                Err(end) => return Ok(end),
+            }
+        }
+
         // DI-16: one grant ledger per batch, seeded from the log —
         // the atomic cap window every concurrent member's evaluation
         // commits through, so `max_per_run` holds exactly.
         let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
-        let dispatches = futures::future::join_all(batch.iter().map(|task| {
-            dispatch_task_in_isolation(
-                ctx,
-                node,
-                task,
-                &events,
-                &base_commit,
-                &instruction,
-                adapter.as_ref(),
-                scope_expansion,
-                &grants,
-                cancel,
-                &setup,
-            )
-        }))
-        .await;
+        let dispatches =
+            futures::future::join_all(batch.iter().zip(&briefs).map(|(task, brief)| {
+                dispatch_task_in_isolation(
+                    ctx,
+                    node,
+                    task,
+                    &events,
+                    &base_commit,
+                    brief,
+                    adapter.as_ref(),
+                    scope_expansion,
+                    &grants,
+                    cancel,
+                    &setup,
+                )
+            }))
+            .await;
 
         // Cumulative grants this run, kept live across the integration
         // loop below so each emitted `ScopeExpansionGranted` carries an

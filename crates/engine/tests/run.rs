@@ -5608,3 +5608,73 @@ nodes:
         "max_per_run: 2 must hold exactly under a concurrent batch"
     );
 }
+
+// --- DI-17: `context:` at loop level ----------------------------------------
+
+#[tokio::test]
+async fn a_loop_s_context_reaches_every_task_s_brief() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    std::fs::write(bench.worktree.join("notes.md"), "the-shared-notes").unwrap();
+
+    let workflow = r#"
+name: loop-context
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    context:
+      - files: ["notes.md"]
+    prompt: "Read your task from the ledger and implement it."
+"#;
+    let ledger = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-1", "one", "one.txt", "test -f one.txt"),
+        task_yaml("task-2", "two", "two.txt", "test -f two.txt"),
+    );
+
+    // The executor sessions only match if their prompt actually carries
+    // the context block's content — a brief without it dispatches no
+    // session and the run fails, so a Finished terminal IS the proof.
+    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    for n in 1..=2 {
+        let file = if n == 1 { "one.txt" } else { "two.txt" };
+        fixture.push_str(&format!(
+            "  - match_prompt_contains: \"the-shared-notes\"\n    effects:\n      - {{ path: {file}, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-{n} }}\n",
+        ));
+    }
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    // One `context_assembled` per task brief, each naming its task.
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let assembled_tasks: Vec<String> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::ContextAssembled(p) => Some(
+                p.task_id
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+            ),
+            _ => None,
+        })
+        .collect();
+    let mut sorted = assembled_tasks.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        vec!["task-1".to_string(), "task-2".to_string()],
+        "one context_assembled per task, each carrying its task_id: {assembled_tasks:?}"
+    );
+}

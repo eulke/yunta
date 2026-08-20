@@ -192,7 +192,7 @@ pub(super) async fn resolve_and_assemble(
         return Ok(Ok(None));
     }
 
-    match resolve_all(ctx, node).await {
+    match resolve_all(ctx, node, None, None).await {
         Ok(block) => Ok(Ok(Some(block))),
         Err(error) => {
             let end = fail(ctx, node, error.to_string(), false)?;
@@ -201,7 +201,47 @@ pub(super) async fn resolve_and_assemble(
     }
 }
 
-async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextResolveError> {
+/// DI-17: resolved content cached across one loop node's task briefs,
+/// for the classes that cannot change within a run — `stable` (repo
+/// files, knowledge) and `run-stable` (frozen artifacts, I3). Volatile
+/// sources (`command`, `run-events`, `ledger`, `node-output`, `mcp`)
+/// re-resolve for every brief, which is the whole reason they're a
+/// class of their own (§9.1/D42).
+#[derive(Default)]
+pub(super) struct StableContextMemo {
+    cache: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+/// DI-17: one task brief's context — the same resolution, materialization
+/// and `context_assembled` audit a `prompt` node gets, keyed to the task
+/// (`task_id` in the event) and memoizing stable sources across briefs.
+/// Same error contract as [`resolve_and_assemble`]: a failing source is
+/// the node's own failure (§9), never a `RunError`.
+pub(super) async fn resolve_for_task(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: &yunta_core::TaskId,
+    memo: &StableContextMemo,
+) -> Result<Result<Option<String>, NodeEnd>, RunError> {
+    if node.context.is_empty() {
+        return Ok(Ok(None));
+    }
+
+    match resolve_all(ctx, node, Some(task_id), Some(memo)).await {
+        Ok(block) => Ok(Ok(Some(block))),
+        Err(error) => {
+            let end = fail(ctx, node, error.to_string(), false)?;
+            Ok(Err(end))
+        }
+    }
+}
+
+async fn resolve_all(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: Option<&yunta_core::TaskId>,
+    memo: Option<&StableContextMemo>,
+) -> Result<String, ContextResolveError> {
     let mut sources = Vec::with_capacity(node.context.len());
     let mut stable_blocks = Vec::new();
     let mut run_stable_blocks = Vec::new();
@@ -210,7 +250,30 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
     for spec in &node.context {
         let source_id = source_id_for(spec);
         let kind = kind_name(spec);
-        let content = resolve_one(ctx, node, &source_id, spec).await?;
+        // A stable/run-stable source already resolved for an earlier
+        // brief serves from the memo — same bytes by its own class's
+        // definition, so re-reading would only cost IO.
+        let memoizable = memo.filter(|_| stability_class(spec) != StabilityClass::Volatile);
+        let cached = memoizable.and_then(|memo| {
+            memo.cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&source_id)
+                .cloned()
+        });
+        let content = match cached {
+            Some(content) => content,
+            None => {
+                let content = resolve_one(ctx, node, &source_id, spec).await?;
+                if let Some(memo) = memoizable {
+                    memo.cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(source_id.clone(), content.clone());
+                }
+                content
+            }
+        };
         let (path, content_hash) =
             materialize(ctx.run_dir, &content).map_err(|source| ContextResolveError::Io {
                 node: node.id.clone(),
@@ -261,6 +324,7 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
     ctx.emit(
         Some(&node.id),
         EventPayload::ContextAssembled(ContextAssembledPayload {
+            task_id: task_id.cloned(),
             sources,
             segment_hashes,
         }),

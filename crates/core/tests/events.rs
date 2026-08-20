@@ -53,6 +53,7 @@ fn all_kinds() -> Vec<EventPayload> {
             artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
+            task_id: None,
             sources: vec![ContextSourceRef {
                 source_id: "files:docs".to_string(),
                 kind: "files".to_string(),

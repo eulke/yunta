@@ -142,12 +142,16 @@ pub enum CheckError {
     #[error("node `{node}`: {rule}")]
     CommandDenied { node: NodeId, rule: String },
 
-    /// §9/T6.1: `context:` is resolved into a session's own prompt —
-    /// only `kind: prompt` opens one in this recorte (a `bash`/`check`/
-    /// `executor`/`loop` node has nowhere to put it yet; see
-    /// `docs/m0-status.md`'s T6.1 entry). Declaring it elsewhere is
-    /// caught here rather than silently ignored at runtime (A6).
-    #[error("node `{node}`: `context:` is only supported on `kind: prompt` nodes in this recorte")]
+    /// §9/T6.1/DI-17: `context:` is resolved into a session's own
+    /// prompt — `kind: prompt` (the node's one session) and `kind:
+    /// loop` (once per task brief) are the kinds that open one; a
+    /// `bash`/`check`/`executor`/`gate` node has no session to consume
+    /// it. Declaring it there is caught here rather than silently
+    /// ignored at runtime (A6).
+    #[error(
+        "node `{node}`: `context:` is only supported on `kind: prompt` and `kind: loop` nodes \
+         — nothing else opens a session that could consume it"
+    )]
     ContextOnUnsupportedNode { node: NodeId },
 
     /// T1.5/§2.3/D82: the two fields are mutually exclusive by
@@ -429,7 +433,9 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
             }
         }
 
-        if !node.context.is_empty() && !matches!(node.kind, NodeKind::Prompt { .. }) {
+        if !node.context.is_empty()
+            && !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. })
+        {
             errors.push(CheckError::ContextOnUnsupportedNode {
                 node: node.id.clone(),
             });

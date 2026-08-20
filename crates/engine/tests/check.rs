@@ -1378,3 +1378,41 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
         yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path()).is_empty()
     );
 }
+
+// --- DI-17: `context:` allowed on loops --------------------------------------
+
+#[test]
+fn context_on_a_loop_node_is_accepted_and_on_bash_still_refused() {
+    let looped = r#"
+name: ctx
+runners: {}
+nodes:
+  - id: implement
+    kind: loop
+    until: all_tasks_complete
+    prompt: "work"
+    context:
+      - files: ["notes.md"]
+"#;
+    let wf: Workflow = serde_yaml::from_str(looped).unwrap();
+    assert!(
+        !check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })),
+        "a loop's context is resolved into every task brief (DI-17) — no refusal"
+    );
+
+    let bash = r#"
+name: ctx
+nodes:
+  - id: build
+    kind: bash
+    run: "true"
+    context:
+      - files: ["notes.md"]
+"#;
+    let wf: Workflow = serde_yaml::from_str(bash).unwrap();
+    assert!(check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })));
+}

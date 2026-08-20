@@ -913,7 +913,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   corriendo en paralelo (cada uno con su ledger de lote) queda igual
   que siempre — el ítem nombraba la race intra-lote, que era la real.
 
-### DI-17 — `context:` a nivel loop/tarea `[ ]`
+### DI-17 — `context:` a nivel loop/tarea `[x]`
 
 - **Origen:** T6.1 — `context:` solo se resuelve para `kind: prompt`;
   `check` lo rechaza en cualquier otro kind. El workflow de referencia
@@ -930,6 +930,15 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **✓ Criterios:** loop con `context: [{files: …}]` → cada brief de
   tarea lo incluye; `context_assembled` por tarea en el log; en `bash`
   sigue siendo error de `check`.
+- **Nota de cierre:** `resolve_for_task` en `context_resolve.rs` — la
+  misma resolución/materialización/auditoría del camino `prompt`, con
+  `StableContextMemo` por invocación del loop (memoiza `stable` Y
+  `run-stable` — un artifact es inmutable una vez escrito, I3 — y
+  re-resuelve volátiles por brief) y `context_assembled.task_id:
+  Option<TaskId>` aditivo (misma convención que `scope_checked`,
+  `docs/eventos.md` §5.8 actualizado). La resolución corre al armar el
+  lote, antes de despachar nada: una fuente que falla es fallo del nodo
+  (§9) sin gastar sesión.
 
 ### DI-18 — Reglas menores de `check` `[ ]`
 

@@ -212,13 +212,12 @@ pub struct Node {
     /// a guarantee the system never offered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<bool>,
-    /// `context:` (§9, T6.1) — data resolved and materialized *before*
-    /// the node's session opens, in declaration order. Only acted on for
-    /// `kind: prompt` in this recorte (`check` rejects it on any other
-    /// node kind, §9's own text never states the rule beyond the
-    /// implication that a session is what consumes it) — see
-    /// `docs/m0-status.md`'s T6.1 entry for the loop/task-level context
-    /// this deliberately doesn't cover yet.
+    /// `context:` (§9, T6.1/DI-17) — data resolved and materialized
+    /// *before* a session opens, in declaration order. Consumed by
+    /// `kind: prompt` (the node's one session) and `kind: loop` (once
+    /// per task brief, volatile sources fresh and stable ones memoized
+    /// per §9.1's classes); `check` rejects it on any kind that opens
+    /// no session (`bash`/`check`/`executor`/`gate`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextSpec>,
     /// `skills: [names]` (D47, DI-13) — instructions and capabilities

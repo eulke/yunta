@@ -1505,15 +1505,19 @@ que aparece.
         (`crates/engine/src/run/context_resolve.rs`) — nada impide una
         versión con dispatch dinámico el día que un pack la necesite de
         verdad.
-      - **Resuelto solo para `kind: prompt`.** `context:` vive en
-        `Node` para cualquier tipo, pero solo `execute_prompt` lo
-        resuelve — un `bash`/`check`/`executor` no abre sesión, no tiene
-        dónde inyectarlo, y una tarea de un `loop` despacha su propia
-        sesión por `run_task` (T5.2), un camino de código
-        *completamente distinto* de `execute_prompt` que este recorte no
-        toca. Declarar `context:` en cualquier otro tipo de nodo es
-        **error de `check`** (`CheckError::ContextOnUnsupportedNode`),
-        nunca un silencio — A6.
+      - **Resuelto para `kind: prompt` y, desde DI-17, `kind: loop`.**
+        `context:` vive en `Node` para cualquier tipo; `execute_prompt`
+        lo resuelve para su única sesión, y un `loop` lo resuelve **una
+        vez por brief de tarea** (`resolve_for_task`): las fuentes
+        volátiles (`command`, `run-events`, `ledger`, `node-output`,
+        `mcp`) se re-resuelven por brief y las `stable`/`run-stable` se
+        memoizan por invocación (`StableContextMemo` — §9.1/D42 da el
+        criterio de clases); cada ensamblado emite su
+        `context_assembled` con `task_id` (aditivo D70). Un
+        `bash`/`check`/`executor`/`gate` no abre sesión — declararlo ahí
+        sigue siendo **error de `check`**
+        (`CheckError::ContextOnUnsupportedNode`), nunca un silencio —
+        A6.
       - **`artifact:` crea de verdad una dependencia implícita, sin
         tocar `check`/`schedule.rs`.** `build_manifest` expande
         `context: [{ artifact: { node, ... } }]` en el propio
