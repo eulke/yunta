@@ -294,7 +294,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   entonces rama Y" como feature de DAG) — el único branching es la
   re-ruta declarada en `on`, igual que `on_failure.goto`.
 
-### DI-05 — `limits:` + presupuestos declarables `[ ]`
+### DI-05 — `limits:` + presupuestos declarables `[x]`
 
 - **Origen:** el grupo `limits:` está en la config de referencia desde el
   día uno y quedó fuera del recorte de T1.2. Hoy son consumidores
@@ -382,6 +382,19 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   - Precedencia repo>org verificada por test de merge.
 - **No hacer:** no convertir ningún límite en enforcement de OS (D105:
   eso no existe); no inventar campos fuera de los seis de referencia.
+- **Nota de cierre:** las etapas 2 y 3 interactúan más de lo que este
+  diseño anticipaba: con el Budget por sesión activo (etapa 3), una
+  sesión *obediente* nunca puede empujar el total del run por encima del
+  cap — su propia cuota `min(restante, cap/nodos_no_terminales)` la
+  corta antes. El chequeo a nivel de run (etapa 2) es la red para el
+  caso real: un *overshoot* (un solo evento de usage que revienta cuota
+  y cap a la vez — exactamente lo que hace un CLI que reporta usage a
+  posteriori), tras el cual el scheduler todavía quiere ejecutar más
+  (re-ruta, corrección, retry). Los tests lo ejercitan así. Además,
+  `continue` autorizado vuelve las sesiones a ilimitado — caparlas a
+  `restante = 0` contradiría la autorización. `max_workflow_depth`
+  queda en schema sin consumidor hasta T9.3, como este ítem ya
+  declaraba.
 
 ### DI-06 — Señales de modo en rendimiento de verificación `[x]`
 

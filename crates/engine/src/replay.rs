@@ -5,8 +5,8 @@
 //! `yunta resume` alike. It tracks what M-0's schema can actually produce
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
 //! and task status (`task_registered`/`task_status_changed`) — plus the
-//! running token total. Budgets beyond token counting aren't derived yet
-//! (presupuesto enforcement beyond tokens is T3.3). Since DI-03, §3.2's
+//! running token total `limits.max_tokens_per_run` (DI-05) is compared
+//! against. Since DI-03, §3.2's
 //! `waiting` is derived too: a published gate without its resolution
 //! (T7.7 — the state that outlives an invocation), and a node whose
 //! `kind: questions` artifact has no `questions_answered` yet (§4.1).

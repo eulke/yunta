@@ -50,7 +50,7 @@ artifacts:
 "#,
     );
 
-    let errors = close_artifacts(&n, run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&n, run_dir.path(), None).unwrap_err();
     match &errors[..] {
         [ArtifactError::Missing { node, name }] => {
             assert_eq!(node.as_str(), "report");
@@ -74,7 +74,7 @@ artifacts:
 "#,
     );
 
-    let errors = close_artifacts(&n, run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&n, run_dir.path(), None).unwrap_err();
     assert!(matches!(&errors[..], [ArtifactError::Empty { .. }]));
 }
 
@@ -91,7 +91,7 @@ artifacts:
 "#,
     );
 
-    let errors = close_artifacts(&n, run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&n, run_dir.path(), None).unwrap_err();
     assert_eq!(errors.len(), 2);
 }
 
@@ -111,7 +111,7 @@ artifacts:
 "#,
     );
 
-    let verified = close_artifacts(&n, run_dir.path()).unwrap();
+    let verified = close_artifacts(&n, run_dir.path(), None).unwrap();
     assert_eq!(verified.len(), 1);
     assert_eq!(verified[0].name, "report.md");
     assert_eq!(
@@ -126,7 +126,7 @@ fn a_valid_task_ledger_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "plan.yaml", VALID_LEDGER);
 
-    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path()).unwrap();
+    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap();
     let ledger = verified[0].ledger.as_ref().expect("a parsed ledger");
     let ids: Vec<&str> = ledger.tasks.iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ids, ["T001", "T002"]);
@@ -154,7 +154,7 @@ tasks:
 "#,
     );
 
-    let errors = close_artifacts(&node(PLAN_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
     match &errors[..] {
         [ArtifactError::InvalidLedger { node, name, errors }] => {
             assert_eq!(node.as_str(), "plan");
@@ -170,7 +170,7 @@ fn a_malformed_ledger_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "plan.yaml", "tasks: [not, a, ledger");
 
-    let errors = close_artifacts(&node(PLAN_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
     assert!(matches!(
         &errors[..],
         [ArtifactError::MalformedLedger { .. }]
@@ -205,7 +205,7 @@ fn a_valid_findings_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "findings.yaml", VALID_FINDINGS);
 
-    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap();
+    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap();
     let findings = verified[0].findings.as_ref().expect("parsed findings");
     let ids: Vec<&str> = findings.iter().map(|f| f.id.as_str()).collect();
     assert_eq!(ids, ["f1", "f2"]);
@@ -232,7 +232,7 @@ findings:
 "#,
     );
 
-    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
     match &errors[..] {
         [ArtifactError::InvalidFindings { node, name, errors }] => {
             assert_eq!(node.as_str(), "review");
@@ -248,7 +248,7 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "findings.yaml", "findings: [not, valid");
 
-    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
     assert!(matches!(
         &errors[..],
         [ArtifactError::MalformedFindings { .. }]
@@ -282,7 +282,7 @@ fn a_valid_questions_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "questions.yaml", VALID_QUESTIONS);
 
-    let verified = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap();
+    let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap();
     let questions = verified[0].questions.as_ref().expect("parsed questions");
     let ids: Vec<&str> = questions.iter().map(|q| q.id.as_str()).collect();
     assert_eq!(ids, ["q1", "q2"]);
@@ -303,7 +303,7 @@ questions:
 "#,
     );
 
-    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
     match &errors[..] {
         [ArtifactError::InvalidQuestions { node, name, errors }] => {
             assert_eq!(node.as_str(), "ask");
@@ -333,7 +333,7 @@ questions:
 "#,
     );
 
-    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
     match &errors[..] {
         [ArtifactError::InvalidQuestions { node, name, errors }] => {
             assert_eq!(node.as_str(), "ask");
@@ -349,7 +349,7 @@ fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "questions.yaml", "questions: [not, valid");
 
-    let errors = close_artifacts(&node(ASK_NODE), run_dir.path()).unwrap_err();
+    let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
     assert!(matches!(
         &errors[..],
         [ArtifactError::MalformedQuestions { .. }]
@@ -367,6 +367,59 @@ run: "true"
 "#,
     );
 
-    let verified = close_artifacts(&n, run_dir.path()).unwrap();
+    let verified = close_artifacts(&n, run_dir.path(), None).unwrap();
     assert!(verified.is_empty());
+}
+
+// --- DI-05 etapa 8: limits.max_artifact_bytes (§4) ---------------------------
+
+#[test]
+fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "report.md", "0123456789");
+    let n = node(
+        r#"
+id: report
+kind: prompt
+prompt: "Write the report."
+artifacts:
+  produces: [report.md]
+"#,
+    );
+
+    let errors = close_artifacts(&n, run_dir.path(), Some(5)).unwrap_err();
+    match &errors[..] {
+        [ArtifactError::Oversized {
+            node,
+            name,
+            bytes,
+            max_bytes,
+        }] => {
+            assert_eq!(node.as_str(), "report");
+            assert_eq!(name, "report.md");
+            assert_eq!(*bytes, 10);
+            assert_eq!(*max_bytes, 5);
+        }
+        other => panic!("expected one Oversized error, got {other:?}"),
+    }
+    let rendered = errors[0].to_string();
+    assert!(rendered.contains("max_artifact_bytes"), "got: {rendered}");
+}
+
+#[test]
+fn an_artifact_at_the_cap_or_with_no_cap_passes() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(run_dir.path(), "report.md", "0123456789");
+    let n = node(
+        r#"
+id: report
+kind: prompt
+prompt: "Write the report."
+artifacts:
+  produces: [report.md]
+"#,
+    );
+
+    assert!(close_artifacts(&n, run_dir.path(), Some(10)).is_ok());
+    assert!(close_artifacts(&n, run_dir.path(), None).is_ok());
 }

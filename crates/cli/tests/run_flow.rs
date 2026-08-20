@@ -975,3 +975,72 @@ fn run_follow_prints_progress_while_the_run_is_still_in_progress() {
         "expected at least one in-progress follow line, got: {text}"
     );
 }
+
+#[test]
+fn a_second_run_over_max_concurrent_runs_is_refused_while_one_is_paused() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "limits:\n  max_concurrent_runs: 1\n",
+    );
+    // A bash node that fails with no on_failure pauses the run, leaving
+    // it non-terminal.
+    write(
+        &repo.join("wf.yaml"),
+        "name: pauser\nnodes:\n  - id: boom\n    kind: bash\n    run: \"false\"\n",
+    );
+
+    // A paused run exits non-zero (it needs attention) but leaves its
+    // slot occupied — that's the state the second invocation must see.
+    let first = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(stdout(&first).contains("paused"), "got: {}", stdout(&first));
+
+    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        !second.status.success(),
+        "the second run must be refused while the first is paused"
+    );
+    let err = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        err.contains("max_concurrent_runs"),
+        "the refusal must name the limit: {err}"
+    );
+    assert!(
+        err.contains("resume") || err.contains("cancel"),
+        "the refusal must say what to do about it: {err}"
+    );
+}
+
+#[test]
+fn a_finished_run_never_counts_against_max_concurrent_runs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "limits:\n  max_concurrent_runs: 1\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: ok\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let first = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(first.status.success());
+    assert!(stdout(&first).contains("finished"));
+
+    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        second.status.success(),
+        "a finished run holds no slot: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+}

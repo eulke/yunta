@@ -510,7 +510,13 @@ pub(super) async fn close_node(
         }
     }
 
-    match close_artifacts(node, ctx.run_dir) {
+    let max_artifact_bytes = ctx
+        .manifest
+        .config
+        .limits
+        .as_ref()
+        .and_then(|limits| limits.max_artifact_bytes);
+    match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
         Ok(verified) => {
             // §4.1/T5.14/DI-02: a `kind: questions` artifact's own
             // session has already closed by this point (the same

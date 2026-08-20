@@ -32,6 +32,19 @@ pub enum ArtifactError {
     )]
     Empty { node: NodeId, name: String },
 
+    /// §4's guard against accidents (DI-05): a runaway artifact fails
+    /// the node with both numbers on the table, never a truncation.
+    #[error(
+        "node `{node}` produced artifact `{name}` at {bytes} bytes — \
+         `limits.max_artifact_bytes` is {max_bytes}"
+    )]
+    Oversized {
+        node: NodeId,
+        name: String,
+        bytes: u64,
+        max_bytes: u64,
+    },
+
     #[error("node `{node}`: artifact `{path}` exists but cannot be read")]
     Unreadable {
         node: NodeId,
@@ -103,10 +116,12 @@ pub struct VerifiedArtifact {
 
 /// Verifies every artifact a node declared, collecting every violation
 /// instead of stopping at the first — the node fails once with the whole
-/// picture, not once per missing file.
+/// picture, not once per missing file. `max_bytes` is
+/// `limits.max_artifact_bytes` when declared — `None` means unbounded.
 pub fn close_artifacts(
     node: &Node,
     run_dir: &Path,
+    max_bytes: Option<u64>,
 ) -> Result<Vec<VerifiedArtifact>, Vec<ArtifactError>> {
     let Some(artifacts) = &node.artifacts else {
         return Ok(Vec::new());
@@ -149,6 +164,18 @@ pub fn close_artifacts(
                 name: name.clone(),
             });
             continue;
+        }
+
+        if let Some(max_bytes) = max_bytes {
+            if bytes.len() as u64 > max_bytes {
+                errors.push(ArtifactError::Oversized {
+                    node: node.id.clone(),
+                    name: name.clone(),
+                    bytes: bytes.len() as u64,
+                    max_bytes,
+                });
+                continue;
+            }
         }
 
         let mut ledger = None;

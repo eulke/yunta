@@ -49,8 +49,8 @@ pub use run::{
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{
-    compute_run_stats, prior_estimation, run_summary, NodeStat, Percentiles, PriorEstimation,
-    RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
+    budget_p90_warning, compute_run_stats, prior_estimation, run_summary, NodeStat, Percentiles,
+    PriorEstimation, RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,

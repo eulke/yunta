@@ -83,6 +83,66 @@ fn escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> GateWaitingPayload {
     }
 }
 
+/// Escalates a loop that hit `limits.max_loop_iterations` (§8.3, the
+/// same continue/abort mechanism as the token cap — the only net under a
+/// ledger whose state oscillates forever). Node-scoped, unlike the run
+/// budget: the pair is recorded on the loop node (T7.2's synchronous
+/// internal-pair convention, invisible to derived state), and the same
+/// per-invocation rule applies — `Continue` lifts the cap only for the
+/// `execute_loop` call that asked.
+pub async fn authorize_loop_overrun(
+    ctx: &RunCtx<'_>,
+    node_id: &yunta_core::NodeId,
+    iteration: u32,
+    cap: u32,
+) -> Result<BudgetDecision, RunError> {
+    let reason = format!(
+        "loop `{node_id}` exceeded `limits.max_loop_iterations` ({cap}) — resume with an \
+         interactive surface to continue past the cap or abort"
+    );
+    let escalation = GateWaitingPayload {
+        summary: format!(
+            "loop `{node_id}` needs iteration {iteration} but `limits.max_loop_iterations` \
+             is {cap}"
+        ),
+        evidence: format!(
+            "iterations already run this invocation: {}; limits.max_loop_iterations: {cap}; \
+             the ledger still has ready tasks",
+            iteration - 1
+        ),
+        options: vec![
+            GateOption {
+                id: "continue".to_string(),
+                label: "Keep iterating".to_string(),
+                tradeoff: "Lifts the cap for this invocation only; a later resume \
+                           will ask again"
+                    .to_string(),
+            },
+            GateOption {
+                id: "abort".to_string(),
+                label: "Fail the loop node".to_string(),
+                tradeoff: "The node fails naming the limit and the run pauses; a \
+                           resume re-runs the loop and re-asks"
+                    .to_string(),
+            },
+        ],
+        external_ref: None,
+    };
+    match ctx.human_interaction.resolve(&escalation).await {
+        Some(resolution) => {
+            let chosen = resolution.chosen_option.clone();
+            ctx.emit(Some(node_id), EventPayload::GateWaiting(escalation))?;
+            ctx.emit(Some(node_id), EventPayload::GateResolved(resolution))?;
+            if chosen.as_deref() == Some("continue") {
+                Ok(BudgetDecision::Continue)
+            } else {
+                Ok(BudgetDecision::Pause { reason })
+            }
+        }
+        None => Ok(BudgetDecision::Pause { reason }),
+    }
+}
+
 /// `input + output` — cached reads are informational (a subset of
 /// input), never double-counted.
 pub fn tokens_spent(totals: yunta_core::events::TokenUsage) -> u64 {

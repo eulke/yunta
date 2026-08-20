@@ -65,17 +65,10 @@ use crate::template::render_template;
 use super::node_exec::{fail, template_vars, NodeEnd};
 use super::{RunCtx, RunError};
 
-/// Below this many materialized bytes, a source's content is embedded
-/// directly in the prompt; at or above it, only a pointer to the
-/// materialized file is. No config knob exists for this yet (§9 calls it
-/// "umbral configurable" without a number) — the same treatment T5.11
-/// gave `MAX_EXPANSION_FILES`.
-const INLINE_THRESHOLD_BYTES: usize = 4096;
-
 /// Bound on how long any single external call (`command:`'s subprocess,
 /// `mcp:`'s round trip) may run before this recorte gives up and fails
 /// the node — §9 says "command: stdout con timeout" but names no number;
-/// same treatment as `INLINE_THRESHOLD_BYTES` above.
+/// same "no number in §9" treatment T5.11 gave `MAX_EXPANSION_FILES`.
 const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
@@ -226,7 +219,11 @@ async fn resolve_all(ctx: &RunCtx<'_>, node: &Node) -> Result<String, ContextRes
                 source,
             })?;
 
-        let block = render_block(&source_id, kind, &content, &path);
+        // §9's "umbral configurable" (DI-05): `limits.inline_context_bytes`,
+        // reference default 32000 — the resolved value lives in
+        // `ConfigLayer`, never re-invented here.
+        let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
+        let block = render_block(&source_id, kind, &content, &path, inline_threshold);
         match stability_class(spec) {
             StabilityClass::Stable => stable_blocks.push(block),
             StabilityClass::RunStable => run_stable_blocks.push(block),
@@ -702,8 +699,17 @@ fn materialize(run_dir: &Path, content: &[u8]) -> std::io::Result<(PathBuf, Stri
     Ok((path, hash))
 }
 
-fn render_block(source_id: &str, kind: &str, content: &[u8], materialized_path: &Path) -> String {
-    if content.len() <= INLINE_THRESHOLD_BYTES {
+/// Below `inline_threshold` materialized bytes, a source's content is
+/// embedded directly in the prompt; at or above it, only a pointer to
+/// the materialized file is.
+fn render_block(
+    source_id: &str,
+    kind: &str,
+    content: &[u8],
+    materialized_path: &Path,
+    inline_threshold: usize,
+) -> String {
+    if content.len() <= inline_threshold {
         format!(
             "--- context: {source_id} ({kind}) ---\n{}",
             String::from_utf8_lossy(content)

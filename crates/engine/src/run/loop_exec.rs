@@ -81,6 +81,12 @@ pub(super) async fn execute_loop(
 
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
+    // §8.3/DI-05: the only net under a ledger whose state oscillates
+    // forever. Checked only when a non-empty batch wants to run — the
+    // closing empty-batch pass never trips it. `continue` lifts the cap
+    // for this invocation only (same rule as the run token budget).
+    let max_iterations = ctx.manifest.config.resolved_max_loop_iterations();
+    let mut iterations_lifted = false;
     // Blocked reasons gathered this invocation, so the loop's own failure
     // can cite them (§6.1 for permission blocks; useful for every block).
     // A resume starts empty — the log carries each task's *status*, and
@@ -131,6 +137,17 @@ pub(super) async fn execute_loop(
             }
             return fail_with_tokens(ctx, node, diagnostic, false, tokens);
         };
+
+        if iteration > max_iterations && !iterations_lifted {
+            match super::budget::authorize_loop_overrun(ctx, &node.id, iteration, max_iterations)
+                .await?
+            {
+                super::budget::BudgetDecision::Continue => iterations_lifted = true,
+                super::budget::BudgetDecision::Pause { reason } => {
+                    return fail_with_tokens(ctx, node, reason, false, tokens);
+                }
+            }
+        }
 
         // Every batch member's worktree branches from the same starting
         // point (§5.5: "worktree por tarea desde el commit base actual"),

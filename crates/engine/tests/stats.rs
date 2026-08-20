@@ -367,3 +367,41 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     assert_eq!(summary.tasks_total, 1);
     assert_eq!(summary.wall_clock, Some(std::time::Duration::from_secs(37)));
 }
+
+// --- DI-05 etapa 4: budget-vs-p90 warning (§8.6) -----------------------------
+
+#[test]
+fn a_cap_below_the_historical_p90_produces_the_warning() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = prior_estimation(&history);
+    let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
+        .expect("cap 250 < p90 300 must warn");
+    assert!(warning.contains("250"), "must name the cap: {warning}");
+    assert!(warning.contains("300"), "must name the p90: {warning}");
+}
+
+#[test]
+fn a_cap_at_or_above_the_p90_or_missing_pieces_stay_silent() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = prior_estimation(&history);
+    // Cap covers the p90: nothing to say.
+    assert_eq!(
+        yunta_engine::budget_p90_warning(Some(300), estimation.as_ref()),
+        None
+    );
+    // No cap declared: nothing to compare.
+    assert_eq!(
+        yunta_engine::budget_p90_warning(None, estimation.as_ref()),
+        None
+    );
+    // Not enough history (<3 runs): the estimation itself is None.
+    assert_eq!(yunta_engine::budget_p90_warning(Some(1), None), None);
+}

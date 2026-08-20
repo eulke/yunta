@@ -411,6 +411,27 @@ pub struct PriorEstimation {
 
 pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
 
+/// §8.6/DI-05: the informative — never blocking — line `yunta run`
+/// prints when the declared run budget sits below what history says this
+/// workflow typically needs. `None` without a cap to compare, or without
+/// enough history (the estimation's own ≥3-run floor).
+pub fn budget_p90_warning(
+    cap: Option<u64>,
+    estimation: Option<&PriorEstimation>,
+) -> Option<String> {
+    let cap = cap?;
+    let estimation = estimation?;
+    if (cap as f64) < estimation.tokens.p90 {
+        Some(format!(
+            "warning: `limits.max_tokens_per_run` ({cap}) is below this workflow's \
+             historical p90 ({:.0} tokens over {} run(s)) — the run may pause on its budget",
+            estimation.tokens.p90, estimation.sample_count
+        ))
+    } else {
+        None
+    }
+}
+
 pub fn prior_estimation(history: &[RunSummary]) -> Option<PriorEstimation> {
     if history.len() < MIN_SAMPLES_FOR_ESTIMATION {
         return None;

@@ -4590,3 +4590,180 @@ fn session_token_budget_is_an_equal_share_bounded_by_what_remains() {
     // A degenerate node count never divides by zero.
     assert_eq!(yunta_engine::session_token_budget(1000, 0, 0), 1000);
 }
+
+// --- DI-05 etapa 5: limits.max_loop_iterations (§8.3) ------------------------
+
+/// Three sequential tasks at concurrency 1 need four loop iterations
+/// (one per batch plus the closing empty-batch check) — a cap of 2 trips
+/// mid-ledger.
+const LOOP_CAP_WORKFLOW: &str = r#"
+name: loop-cap
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the ledger and implement it."
+"#;
+
+const LOOP_CAP_CONFIG: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+limits:
+  max_loop_iterations: 2
+"#;
+
+fn loop_cap_fixture(artifacts_dir: &std::path::Path) -> String {
+    format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"a\"\n    scope: [\"a.txt\"]\n    criteria:\n      - cmd: \"test -f a.txt\"\n  - id: T002\n    title: \"b\"\n    scope: [\"b.txt\"]\n    criteria:\n      - cmd: \"test -f b.txt\"\n    depends_on: [T001]\n  - id: T003\n    title: \"c\"\n    scope: [\"c.txt\"]\n    criteria:\n      - cmd: \"test -f c.txt\"\n    depends_on: [T002]\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+  - effects:
+      - {{ path: a.txt, content: "a" }}
+    outcome: {{ type: completed, summary: "did T001" }}
+  - effects:
+      - {{ path: b.txt, content: "b" }}
+    outcome: {{ type: completed, summary: "did T002" }}
+  - effects:
+      - {{ path: c.txt, content: "c" }}
+    outcome: {{ type: completed, summary: "did T003" }}
+"#,
+        artifacts = artifacts_dir.display()
+    )
+}
+
+#[tokio::test]
+async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless() {
+    let bench = Bench::new();
+    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, state) = bench
+        .run_with_config(LOOP_CAP_WORKFLOW, &fixture, LOOP_CAP_CONFIG)
+        .await;
+
+    match &terminal {
+        RunTerminal::Paused { reason } => assert!(
+            reason.contains("max_loop_iterations"),
+            "the pause must name the limit: {reason}"
+        ),
+        other => panic!("an exhausted iteration cap with no surface must pause, got {other:?}"),
+    }
+    assert!(matches!(
+        state.nodes.get(&"implement".into()),
+        Some(NodeState::Failed { .. })
+    ));
+    // T003 never ran: iteration 3 was refused, so it stays registered
+    // but untouched.
+    assert_eq!(
+        state.tasks.get(&"T003".into()),
+        Some(&yunta_core::events::TaskStatus::Pending)
+    );
+}
+
+#[tokio::test]
+async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
+    let bench = Bench::new();
+    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let interaction = SequencedInteraction::choosing(&["continue"]);
+    let (terminal, state) = bench
+        .run_full(LOOP_CAP_WORKFLOW, &fixture, LOOP_CAP_CONFIG, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get(&"T003".into()),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    // One authorization covers the whole invocation — the script had a
+    // single `continue`, and iterations 3 AND 4 both ran on it.
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let resolutions = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.payload,
+                yunta_core::events::EventPayload::GateResolved(_)
+            )
+        })
+        .count();
+    assert_eq!(resolutions, 1, "asked once, not once per iteration");
+}
+
+#[tokio::test]
+async fn a_ledger_within_the_default_iteration_cap_runs_unasked() {
+    // No `limits:` declared — the reference default (12) covers a
+    // three-task ledger with room to spare, and nothing escalates.
+    let bench = Bench::new();
+    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, _) = bench.run(LOOP_CAP_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(!events
+        .iter()
+        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+}
+
+// --- DI-05 etapa 6: limits.inline_context_bytes (§9) -------------------------
+
+/// A ~60-byte file source: inlined under the reference default (32000),
+/// referenced by pointer when the configured threshold is below it.
+const INLINE_CONTEXT_WORKFLOW: &str = r#"
+name: inline-context
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Use the context above."
+    context:
+      - files: ["notes.txt"]
+"#;
+
+#[tokio::test]
+async fn a_source_over_the_configured_inline_threshold_is_referenced_not_inlined() {
+    let bench = Bench::new();
+    std::fs::write(
+        bench.worktree.join("notes.txt"),
+        "MARKER-NOTES-CONTENT repeated enough to pass ten bytes",
+    )
+    .unwrap();
+    let config = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+limits:
+  inline_context_bytes: 10
+"#;
+    // The only script matches the pointer wording — if the content were
+    // inlined instead, no session would match and the node would fail.
+    let fixture = "sessions:\n  - match_prompt_contains: \"bytes, referenced\"\n    outcome: { type: completed, summary: ok }\n";
+    let (terminal, _) = bench
+        .run_with_config(INLINE_CONTEXT_WORKFLOW, fixture, config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn a_source_under_the_default_inline_threshold_is_inlined() {
+    let bench = Bench::new();
+    std::fs::write(
+        bench.worktree.join("notes.txt"),
+        "MARKER-NOTES-CONTENT repeated enough to pass ten bytes",
+    )
+    .unwrap();
+    // No `limits:` — the reference default (32000 bytes) inlines it.
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-NOTES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let (terminal, _) = bench.run(INLINE_CONTEXT_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}

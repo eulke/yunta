@@ -2263,20 +2263,11 @@ que aparece.
         se inventa nada (I20). Con `pricing:` declarado, se agrega una
         línea de estimado en moneda **además de** los tokens, nunca en
         su lugar.
-      - **Deuda explícita — advertencia de presupuesto vs. p90 (§8.6)
-        no implementada.** El texto normativo dice "cuando el
-        presupuesto declarado queda por debajo del p90 histórico, el
-        engine advierte antes de gastar" — pero **no existe ningún
-        campo `limits:`/presupuesto declarable en el schema todavía**
-        (`Budget` en `yunta-adapters::session` existe como tipo pero
-        `node_exec.rs` lo construye siempre como `Budget::default()`;
-        `docs/eventos.md`/`config.rs` documentan `limits:` como
-        pendiente de T1.2 completo). Inventar un campo de schema no
-        pedido por ninguna tarea del plan para destrabar esto violaría
-        "scope chico y declarado". Gatillo: la tarea que introduzca
-        `limits:`/presupuesto declarable en el schema — ese día,
-        `stats`/`run` comparan el presupuesto contra
-        `PriorEstimation.tokens.p90` y emiten la advertencia.
+      - **Advertencia de presupuesto vs. p90 (§8.6) ✓ (cerrada por
+        DI-05)**: `limits:` entró a la config y `yunta run` compara
+        `limits.max_tokens_per_run` contra `PriorEstimation.tokens.p90`
+        (`yunta_engine::budget_p90_warning`, pura) — informativa, jamás
+        bloqueante, y muda con <3 corridas o sin cap declarado.
       - **`pricing:` con más de un modelo priceado**: la línea de moneda
         promedia el costo-por-1k de todos los modelos declarados
         (`sum/count`), documentado en el propio código como una
@@ -2942,9 +2933,13 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
      artifact montable por `context:` — eso es de T4.4/M6.
    - **Subgrafo de corrección**: la re-ruta ejecuta solo el nodo destino; "su
      subgrafo" completo llega con T4.4.
-   - **`run_paused` por límites de presupuesto de run (§8.3)**: los budgets por
-     sesión (T3.3) están; `limits.max_tokens_per_run`/`max_loop_iterations`
-     esperan a que `limits:` entre a la config (fuera del recorte de T1.2).
+   - **`run_paused` por límites de presupuesto de run (§8.3) ✓ (cerrado por
+     DI-05)**: `limits:` entró a la config; `max_tokens_per_run` escala §5.3
+     (continue/abort, autorización por invocación) antes de cada paso que
+     gasta tokens y degrada a `run_paused { reason: budget… }` sin
+     superficie; `max_loop_iterations` (default de referencia 12) escala
+     igual desde el loop; cada sesión recibe `Budget.max_tokens =
+     min(restante, cap / nodos_no_terminales)`.
 9. **Canal cross-process para `yunta cancel` (T7.1/A4)**: cada
    sesión/hook/executor corre en su propio process group para que el
    interrupt→kill *interno* funcione sin llevarse `yunta` — pero eso deja

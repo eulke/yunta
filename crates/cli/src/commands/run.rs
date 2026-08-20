@@ -123,6 +123,22 @@ fn spawn_follower(
     (handle, stop)
 }
 
+/// Every run in storage with events but no `run_finished` — paused runs
+/// hold a slot (they expect a `resume`), finished ones never do.
+fn count_non_terminal_runs(storage: &Storage) -> Result<usize, yunta_storage::StorageError> {
+    let mut active = 0;
+    for run_id in storage.list_run_ids()? {
+        let events = storage.events_for_run(&run_id)?;
+        let finished = events
+            .iter()
+            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::RunFinished(_)));
+        if !events.is_empty() && !finished {
+            active += 1;
+        }
+    }
+    Ok(active)
+}
+
 pub async fn run(
     workflow_path: &Path,
     raw_inputs: &[String],
@@ -200,8 +216,47 @@ pub async fn run(
     // §8.6: informative, never blocking — the history a run's own log
     // will later join once it finishes.
     let history = super::stats::collect_history(&project, &storage, &workflow.name);
-    if let Some(estimation) = yunta_engine::prior_estimation(&history) {
-        println!("{}", super::stats::format_estimation_line(&estimation));
+    let estimation = yunta_engine::prior_estimation(&history);
+    if let Some(estimation) = &estimation {
+        println!("{}", super::stats::format_estimation_line(estimation));
+    }
+    // §8.6/DI-05: budget-vs-p90, informative and never blocking.
+    if let Some(warning) = yunta_engine::budget_p90_warning(
+        manifest
+            .config
+            .limits
+            .as_ref()
+            .and_then(|limits| limits.max_tokens_per_run),
+        estimation.as_ref(),
+    ) {
+        println!("{warning}");
+    }
+
+    // §8.3/DI-05: a soft budget, not a safety limit — best-effort by
+    // design (two simultaneous `yunta run` invocations can both pass the
+    // count), checked before anything is created so the refusal costs
+    // nothing.
+    if let Some(cap) = manifest
+        .config
+        .limits
+        .as_ref()
+        .and_then(|limits| limits.max_concurrent_runs)
+    {
+        match count_non_terminal_runs(&storage) {
+            Ok(active) if active >= cap as usize => {
+                eprintln!(
+                    "error: {active} run(s) are still active and `limits.max_concurrent_runs` \
+                     is {cap} — resume or cancel one (`yunta list` names them) before starting \
+                     another"
+                );
+                return ExitCode::FAILURE;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
     }
 
     let run_id = RunId::from(format!(
