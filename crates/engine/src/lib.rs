@@ -27,6 +27,7 @@ pub mod scope_expansion;
 mod stats;
 mod task_cycle;
 mod template;
+mod verification_effectiveness;
 mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
@@ -53,6 +54,11 @@ pub use task_cycle::{
     PreCheckOutcome, TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};
+pub use verification_effectiveness::{
+    analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
+    NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
+    MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
+};
 pub use worktree::{prepare_worktree, release_worktree, WorktreeError};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

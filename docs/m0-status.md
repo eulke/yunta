@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.7 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (completo: T7.1–T7.10 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -2540,6 +2540,73 @@ que aparece.
         cambios pedidos postea findings y falla retryable, PR cerrado
         falla no-retryable, y degradación a consola sin forja nunca
         publica nada.
+
+- [x] **T7.10 — Rendimiento de la verificación (§8.7, D93). Cierra M7.**
+      Módulo puro (`verification_effectiveness.rs`, mismo functional
+      core que `stats.rs`) que deriva señales del histórico de runs de
+      un workflow; `stats --workflow` y `yunta check` hacen el IO
+      (juntar los logs crudos) y lo imprimen — nunca bloquea, nunca
+      cambia el exit code de ninguno de los dos.
+      - **Métrica núcleo: tasa de rojo en pre-check** — un criterio que
+        nunca estuvo rojo ANTES del trabajo se marca; uno rojo-antes/
+        verde-después, por más veces que corra, nunca aparece (test
+        explícito para la distinción, tal como pide el ✓).
+      - **Cuatro señales con evidencia**, cada una con su propio piso de
+        `MIN_SAMPLES = 3` (igual al de la estimación de T7.5,
+        deliberadamente — "sin distribución detrás es adivinanza"):
+        criterio nunca rojo en pre-check (dos lecturas: redundante O
+        mal escrito, mostradas juntas); re-ruta que nunca se disparó
+        (**corregido durante el desarrollo**: la primera versión solo
+        contaba una muestra cuando el nodo *fallaba* — pero un nodo que
+        SIEMPRE termina limpio, sin fallar nunca, es exactamente el
+        caso más fuerte de "el flujo previo es más confiable de lo
+        previsto"; el smoke test manual lo mostró en blanco donde
+        debía mostrar un hallazgo, se corrigió a contar toda ejecución
+        del nodo, no solo sus fallos); gate siempre aprobado sin ajuste
+        (`approved_sha` en `None` es la marca de "necesitó ajuste" —
+        cubre tanto el "retry" interno de T7.2 como el
+        changes-requested/closed externo de T7.7, sin lógica separada
+        por mecanismo); tareas que siempre pasan al primer intento
+        (agregado a nivel de **workflow, no por tarea** — el id de una
+        tarea no es una identidad estable entre corridas con ledgers
+        re-planeados distintos, así que "esta tarea exacta" no es una
+        afirmación que el log pueda sostener entre runs; "cualquier
+        tarea en cualquier run" sí).
+      - **Evidencia por criterio/re-ruta/gate, nunca por workflow**: el
+        piso de muestras se aplica a cada cmd/nodo/gate por separado —
+        un criterio nuevo en un workflow con 50 corridas de historial
+        arranca en cero muestras propias.
+      - **Modos — deliberadamente sin implementar, no un olvido.**
+        §8.7 pide dos señales atadas a `modes:` ("modo sin uso" y
+        "nunca sugiere quitar nodos `invariant: true`") — `modes:`
+        (M9) no existe en el schema de este codebase todavía. Inventar
+        un schema de modos completo solo para que estas dos señales
+        tengan algo que analizar hubiera sido exactamente la clase de
+        decisión de diseño no pedida por ninguna tarea que CLAUDE.md
+        pide evitar — M9 es su propio milestone, con su propia
+        secuencia de dependencias (`M9 requiere M4+M5`, no M7).
+        Documentado acá como gatillo: el día que `modes:` exista, estas
+        dos señales se agregan a este mismo módulo.
+      - **Las tres guardas del ✓**: (a) "sugiere, jamás actúa" — cierto
+        por construcción de tipos, `analyze` toma `&Workflow` (nunca
+        `&mut`) y devuelve hallazgos poseídos, no hay forma de que
+        mute nada; (b) "nunca sugiere quitar `invariant: true`" — vacío
+        hasta que exista `modes:` (ver arriba), no aplicable todavía;
+        (c) evidencia por criterio — cubierta arriba.
+      - **Superficies**: `yunta check` (stderr, junto a sus propios
+        warnings — nunca cambia el exit code, verificado con test) y
+        `yunta stats --workflow` (stdout, y en el DTO de `--json`).
+        Ambas comparten exactamente el mismo texto renderizado
+        (`render_verification_findings`, una sola función, nunca
+        redactado dos veces).
+      - Tests: 11 en `crates/engine/tests/verification_effectiveness.rs`
+        (las cuatro señales, cada una con su caso positivo y negativo,
+        el piso de muestras, la distinción rojo-antes/nunca-rojo, y sin
+        historial no hay nada que decir) + 2 end-to-end en
+        `crates/cli/tests/verification_effectiveness_cmd.rs` contra el
+        binario real (el hallazgo aparece en `check` Y en `stats
+        --workflow`/`--json` sin romper ninguno de los dos; menos de 3
+        corridas no muestra nada).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

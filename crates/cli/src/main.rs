@@ -267,6 +267,27 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
+
+    // §8.7/T7.10: "en el momento en que alguien ya está tocando ese
+    // workflow" — surfaced here too, not just `stats --workflow`. Best
+    // effort: a project with no state root yet (nothing ever ran) or an
+    // unnamed workflow simply shows nothing, same as `list_workflows`'s
+    // own stance on missing history.
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Ok(project) = project::resolve(&cwd) {
+            if let Ok(storage) = yunta_storage::Storage::open(&project.storage_path) {
+                let (history, _) =
+                    commands::stats::collect_raw_history(&project, &storage, &workflow.name);
+                let findings =
+                    yunta_engine::analyze_verification_effectiveness(&workflow, &history);
+                let text = commands::stats::render_verification_findings(&findings);
+                if !text.is_empty() {
+                    eprintln!("\n{text}");
+                }
+            }
+        }
+    }
+
     if errors.is_empty() {
         println!("{}: OK", workflow_path.display());
         ExitCode::SUCCESS

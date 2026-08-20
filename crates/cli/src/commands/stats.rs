@@ -128,11 +128,25 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // §8.7/T7.10: needs the raw per-run logs `RunSummary` doesn't keep,
+    // and the workflow shape those runs actually exercised to match
+    // criteria/re-routes/gates against.
+    let (raw_history, workflow) = collect_raw_history(&project, &storage, workflow_name);
+    let findings = workflow
+        .as_ref()
+        .map(|wf| yunta_engine::analyze_verification_effectiveness(wf, &raw_history));
+
     if json {
-        let dto = WorkflowHistoryJson::from(workflow_name, &history);
+        let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
         println!("{}", serde_json::to_string_pretty(&dto).unwrap());
     } else {
         render_workflow_history(workflow_name, &history);
+        if let Some(findings) = &findings {
+            let text = render_verification_findings(findings);
+            if !text.is_empty() {
+                println!("\n{text}");
+            }
+        }
     }
     ExitCode::SUCCESS
 }
@@ -182,6 +196,56 @@ pub(crate) fn collect_history(
     }
     dated.sort_by_key(|(ts, _)| *ts);
     dated.into_iter().map(|(_, s)| s).collect()
+}
+
+/// Every past run's own full event log for `workflow_name` (§8.7,
+/// T7.10), plus the most recent run's own frozen workflow definition —
+/// [`collect_history`]'s raw-events twin: `RunSummary` throws away
+/// exactly the per-criterion/re-route/gate detail
+/// `analyze_verification_effectiveness` needs, so this keeps the whole
+/// log instead. The returned workflow isn't necessarily byte-identical
+/// to what's on disk right now — it's the shape those runs actually
+/// exercised, close enough for `analyze` to match nodes/`on_failure`/
+/// gates against. Same skip-what-can't-be-read stance as
+/// [`collect_history`].
+pub(crate) fn collect_raw_history(
+    project: &Project,
+    storage: &Storage,
+    workflow_name: &str,
+) -> (Vec<Vec<Event>>, Option<yunta_core::Workflow>) {
+    let run_ids = storage.list_run_ids().unwrap_or_default();
+    let mut logs = Vec::new();
+    let mut latest_workflow = None;
+    for run_id in run_ids {
+        let Ok(events) = storage.events_for_run(&run_id) else {
+            continue;
+        };
+        let Some(first) = events.first() else {
+            continue;
+        };
+        let manifest_path = project
+            .runs_root
+            .join(run_id.as_str())
+            .join("manifest.yaml");
+        let Some(manifest) = std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|c| serde_yaml::from_str::<Manifest>(&c).ok())
+        else {
+            continue;
+        };
+        if manifest.workflow.name != workflow_name {
+            continue;
+        }
+        let is_newer = match &latest_workflow {
+            Some((ts, _)) => first.timestamp > *ts,
+            None => true,
+        };
+        if is_newer {
+            latest_workflow = Some((first.timestamp, manifest.workflow));
+        }
+        logs.push(events);
+    }
+    (logs, latest_workflow.map(|(_, wf)| wf))
 }
 
 // --- Terminal rendering (D77) — colorless by construction, so "degrada
@@ -365,6 +429,53 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
             history.len()
         );
     }
+}
+
+/// §8.7/T7.10's own findings — advisory only, never a reason `stats` or
+/// `check` exits non-zero: these are suggestions for a person to weigh,
+/// not errors. Returns the rendered text (empty if there's nothing to
+/// say) so each caller can send it to stdout (`stats`) or stderr
+/// (`check`, alongside its own warnings) without duplicating the
+/// wording.
+pub(crate) fn render_verification_findings(
+    findings: &yunta_engine::VerificationFindings,
+) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    out.push_str(
+        "verification performance (§8.7) — advisory, nothing here is acted on automatically:\n",
+    );
+    for c in &findings.never_red_criteria {
+        out.push_str(&format!(
+            "  criterion `{}` was never red in pre-check across {} run(s) — \
+             either redundant, or mis-written (both readings shown, never just one)\n",
+            c.cmd, c.sample_count
+        ));
+    }
+    for r in &findings.never_triggered_reroutes {
+        out.push_str(&format!(
+            "  node `{}`'s re-route to `{}` never fired across {} run(s) — \
+             the prior flow is more reliable than expected\n",
+            r.node, r.goto, r.sample_count
+        ));
+    }
+    for g in &findings.always_approved_gates {
+        out.push_str(&format!(
+            "  gate `{}` was approved without adjustment across {} resolution(s) — \
+             still adding value, or become ritual?\n",
+            g.node, g.sample_count
+        ));
+    }
+    if let Some(t) = &findings.always_first_try_tasks {
+        out.push_str(&format!(
+            "  every task passed on its first try across {} task instance(s) — \
+             the plan may be cutting too fine\n",
+            t.sample_count
+        ));
+    }
+    out
 }
 
 fn sparkline(values: &[f64]) -> String {
@@ -556,14 +667,83 @@ struct WorkflowHistoryJson {
     workflow: String,
     runs: Vec<RunSummaryJson>,
     estimation: Option<EstimationJson>,
+    verification_findings: Option<VerificationFindingsJson>,
 }
 
 impl WorkflowHistoryJson {
-    fn from(workflow: &str, history: &[RunSummary]) -> Self {
+    fn from(
+        workflow: &str,
+        history: &[RunSummary],
+        findings: Option<&yunta_engine::VerificationFindings>,
+    ) -> Self {
         Self {
             workflow: workflow.to_string(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
             estimation: prior_estimation(history).as_ref().map(EstimationJson::from),
+            verification_findings: findings.map(VerificationFindingsJson::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct VerificationFindingsJson {
+    never_red_criteria: Vec<NeverRedCriterionJson>,
+    never_triggered_reroutes: Vec<NeverTriggeredRerouteJson>,
+    always_approved_gates: Vec<AlwaysApprovedGateJson>,
+    always_first_try_tasks: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct NeverRedCriterionJson {
+    cmd: String,
+    sample_count: usize,
+}
+
+#[derive(Serialize)]
+struct NeverTriggeredRerouteJson {
+    node: String,
+    goto: String,
+    sample_count: usize,
+}
+
+#[derive(Serialize)]
+struct AlwaysApprovedGateJson {
+    node: String,
+    sample_count: usize,
+}
+
+impl VerificationFindingsJson {
+    fn from(findings: &yunta_engine::VerificationFindings) -> Self {
+        Self {
+            never_red_criteria: findings
+                .never_red_criteria
+                .iter()
+                .map(|c| NeverRedCriterionJson {
+                    cmd: c.cmd.clone(),
+                    sample_count: c.sample_count,
+                })
+                .collect(),
+            never_triggered_reroutes: findings
+                .never_triggered_reroutes
+                .iter()
+                .map(|r| NeverTriggeredRerouteJson {
+                    node: r.node.to_string(),
+                    goto: r.goto.to_string(),
+                    sample_count: r.sample_count,
+                })
+                .collect(),
+            always_approved_gates: findings
+                .always_approved_gates
+                .iter()
+                .map(|g| AlwaysApprovedGateJson {
+                    node: g.node.to_string(),
+                    sample_count: g.sample_count,
+                })
+                .collect(),
+            always_first_try_tasks: findings
+                .always_first_try_tasks
+                .as_ref()
+                .map(|t| t.sample_count),
         }
     }
 }
