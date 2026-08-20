@@ -181,7 +181,7 @@ pub(crate) fn check_or_refuse(workflow: &Workflow, config: &ConfigLayer) -> Resu
     // Warnings (D100: a `parallel` group that can't verify its children
     // won't collide) are visible but never block — only `check()`'s
     // errors do.
-    for warning in yunta_engine::check_warnings(workflow) {
+    for warning in yunta_engine::check_warnings(workflow, config) {
         eprintln!("warning: {warning}");
     }
     let errors = yunta_engine::check(workflow, config);

@@ -68,6 +68,25 @@ pub enum CheckError {
         glob_b: String,
     },
 
+    /// DI-12: D100 extended to the DAG's *implicit* fan-out — two
+    /// top-level nodes with no dependency path between them can be
+    /// `ready` together, and with `max_parallel_nodes > 1` they share
+    /// one worktree at once, exactly the physical risk `parallel`
+    /// already errors on. Static approximation by design: "no relative
+    /// order declared" is the rule, never a simulation of what the
+    /// scheduler would actually interleave.
+    #[error(
+        "nodes `{a}` and `{b}` have no dependency path between them and declare overlapping \
+         scope (`{glob_a}` / `{glob_b}`) — with `max_parallel_nodes` > 1 they can write the \
+         same paths at once (D100); chain them with `depends_on` or make their scopes disjoint"
+    )]
+    OverlappingFanOutScope {
+        a: NodeId,
+        b: NodeId,
+        glob_a: String,
+        glob_b: String,
+    },
+
     /// §6.1's first enforcement moment (T5.7): the command as written in
     /// the YAML already violates the merged `permissions` model. The scan
     /// matches the *literal* text — a command assembled by template gets
@@ -199,6 +218,17 @@ pub enum CheckWarning {
          to make the check real"
     )]
     UndeclaredParallelScope { group: NodeId },
+
+    /// DI-12: the fan-out analogue of `UndeclaredParallelScope` — one
+    /// warning per connected component of mutually-independent,
+    /// write-capable, scope-less top-level nodes (per pair would drown
+    /// the signal in noise).
+    #[error(
+        "nodes {nodes} have no dependency paths between them and can all write without \
+         declared scope — with `max_parallel_nodes` > 1 the engine can't verify they won't \
+         collide (D100); declare `scope` on each or chain them with `depends_on`"
+    )]
+    UndeclaredFanOutScope { nodes: String },
 }
 
 /// Validates a workflow against the M-0 rule set. Every applicable rule is
@@ -225,6 +255,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     collect_ids(&workflow.nodes, &mut known_ids, &mut errors);
 
     check_parallel_scopes(&workflow.nodes, &mut errors);
+    check_fanout_scopes(workflow, config, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -535,10 +566,165 @@ fn check_template_text(
 /// read-only|edit|full`, a child declaring `read-only` is out of the
 /// collision count by declaration. A child without the field stays
 /// implicitly write-capable (the engine's default profile is `edit`).
-pub fn check_warnings(workflow: &Workflow) -> Vec<CheckWarning> {
+pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWarning> {
     let mut warnings = Vec::new();
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
+    collect_fanout_warnings(workflow, config, &mut warnings);
     warnings
+}
+
+/// Both halves of DI-12 need the same question answered: which pairs of
+/// top-level nodes have no dependency path between them in either
+/// direction (transitive closure of `depends_on`, with a dependency on
+/// a `parallel` child counting as one on its enclosing group)?
+fn independent_top_level_pairs(workflow: &Workflow) -> Vec<(usize, usize)> {
+    let nodes = &workflow.nodes;
+    // Any id (child of a group included) → the top-level index it
+    // belongs to.
+    let mut owner: std::collections::HashMap<&NodeId, usize> = std::collections::HashMap::new();
+    fn claim<'a>(
+        node: &'a Node,
+        top: usize,
+        owner: &mut std::collections::HashMap<&'a NodeId, usize>,
+    ) {
+        owner.insert(&node.id, top);
+        if let NodeKind::Parallel { nodes, .. } = &node.kind {
+            for child in nodes {
+                claim(child, top, owner);
+            }
+        }
+    }
+    for (i, node) in nodes.iter().enumerate() {
+        claim(node, i, &mut owner);
+    }
+
+    // reachable[i] = every top-level index i transitively depends on.
+    let mut reachable: Vec<std::collections::HashSet<usize>> =
+        vec![Default::default(); nodes.len()];
+    fn walk(
+        i: usize,
+        nodes: &[Node],
+        owner: &std::collections::HashMap<&NodeId, usize>,
+        reachable: &mut Vec<std::collections::HashSet<usize>>,
+        visiting: &mut Vec<bool>,
+    ) {
+        if visiting[i] || !reachable[i].is_empty() {
+            return;
+        }
+        visiting[i] = true;
+        let deps: Vec<usize> = nodes[i]
+            .depends_on
+            .iter()
+            .filter_map(|dep| owner.get(dep).copied())
+            .collect();
+        for dep in deps {
+            if dep == i {
+                continue;
+            }
+            walk(dep, nodes, owner, reachable, visiting);
+            let transitively: Vec<usize> = reachable[dep].iter().copied().collect();
+            reachable[i].insert(dep);
+            reachable[i].extend(transitively);
+        }
+        visiting[i] = false;
+    }
+    let mut visiting = vec![false; nodes.len()];
+    for i in 0..nodes.len() {
+        walk(i, nodes, &owner, &mut reachable, &mut visiting);
+    }
+
+    let mut pairs = Vec::new();
+    for i in 0..nodes.len() {
+        for j in (i + 1)..nodes.len() {
+            if !reachable[i].contains(&j) && !reachable[j].contains(&i) {
+                pairs.push((i, j));
+            }
+        }
+    }
+    pairs
+}
+
+/// A top-level node that can write the shared worktree (same rule as
+/// `parallel`'s children, D100): anything not declared `read-only`.
+fn writes(node: &Node) -> bool {
+    node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
+}
+
+/// DI-12's error half: overlapping *declared* scope on an unordered
+/// pair — verifiable in advance, so an error, same rank as `parallel`.
+fn check_fanout_scopes(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    if config.resolved_max_parallel_nodes() <= 1 {
+        // Sequential scheduling: successive writes to one worktree are
+        // legitimate, there is no concurrency to collide under.
+        return;
+    }
+    for (i, j) in independent_top_level_pairs(workflow) {
+        let (a, b) = (&workflow.nodes[i], &workflow.nodes[j]);
+        if !(writes(a) && writes(b)) {
+            continue;
+        }
+        for glob_a in &a.scope {
+            for glob_b in &b.scope {
+                if globs_might_overlap(glob_a, glob_b) {
+                    errors.push(CheckError::OverlappingFanOutScope {
+                        a: a.id.clone(),
+                        b: b.id.clone(),
+                        glob_a: glob_a.clone(),
+                        glob_b: glob_b.clone(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// DI-12's warning half: connected components of mutually-independent,
+/// write-capable, scope-less top-level nodes — one warning per
+/// component, members named.
+fn collect_fanout_warnings(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    warnings: &mut Vec<CheckWarning>,
+) {
+    if config.resolved_max_parallel_nodes() <= 1 {
+        return;
+    }
+    let nodes = &workflow.nodes;
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+    let eligible: Vec<bool> = nodes
+        .iter()
+        .map(|node| writes(node) && node.scope.is_empty())
+        .collect();
+    for (i, j) in independent_top_level_pairs(workflow) {
+        if eligible[i] && eligible[j] {
+            adjacency[i].push(j);
+            adjacency[j].push(i);
+        }
+    }
+    let mut seen = vec![false; nodes.len()];
+    for start in 0..nodes.len() {
+        if seen[start] || adjacency[start].is_empty() {
+            continue;
+        }
+        let mut component = Vec::new();
+        let mut stack = vec![start];
+        while let Some(i) = stack.pop() {
+            if seen[i] {
+                continue;
+            }
+            seen[i] = true;
+            component.push(nodes[i].id.clone());
+            stack.extend(adjacency[i].iter().copied());
+        }
+        component.sort();
+        warnings.push(CheckWarning::UndeclaredFanOutScope {
+            nodes: component
+                .iter()
+                .map(|id| format!("`{id}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
 }
 
 fn collect_ids(nodes: &[Node], known_ids: &mut HashSet<NodeId>, errors: &mut Vec<CheckError>) {

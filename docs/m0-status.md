@@ -298,16 +298,18 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
         vez de un error de config visible. Validar `max_parallel_nodes >= 1`
         en `yunta check` sigue sin existir (T1.3 no cubre semántica de
         `defaults:` todavía).
-      - **Deuda no cubierta: sin detección de colisión de escritura entre
-        ramas del DAG que corren en paralelo por `max_parallel_nodes`.**
-        §5.8/D100 solo la exige para `kind: parallel` (nodos declarados a
-        mano en un grupo). El riesgo físico es idéntico (mismo worktree
-        compartido — T4.2 da un worktree por *run*, no por nodo), pero acá
-        no hay warning de `check` si dos nodos con permisos de escritura y
-        scope solapado (o sin scope declarado) quedan `ready` al mismo
-        tiempo. Gatillo: extender T4.6's warning (D100) a este caso también,
-        o decidir explícitamente que el fan-out implícito exige `scope`
-        declarado para habilitarse.
+      - **Colisión de escritura en el fan-out implícito ✓ (cerrado por
+        DI-12)**: D100 extendido a nodos top-level — con
+        `max_parallel_nodes` resuelto > 1, cada par escribible sin camino
+        de dependencia (clausura transitiva de `depends_on`; una
+        dependencia sobre un hijo de `parallel` cuenta como sobre su
+        grupo) con scope declarado solapado es **error**, y 2+
+        escribibles sin scope declarado producen **un warning por
+        componente conexa** (no por par). Con `max_parallel_nodes: 1` no
+        aplica: la ejecución es secuencial y las escrituras sucesivas son
+        legítimas. Aproximación estática documentada: "sin orden relativo
+        declarado" es la regla, jamás simular el interleaving del
+        scheduler.
       - Tests: 3 en `crates/core/tests/config.rs` (default 1, parseo,
         override repo\>org), 2 en `crates/engine/tests/manifest.rs` (default
         y explícito se congelan), 2 en `crates/engine/tests/run.rs` —

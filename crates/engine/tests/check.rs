@@ -585,7 +585,7 @@ fn two_children_with_disjoint_declared_scope_has_no_error_or_warning() {
         ],
     )]);
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
-    assert_eq!(check_warnings(&wf), Vec::new());
+    assert_eq!(check_warnings(&wf, &ConfigLayer::default()), Vec::new());
 }
 
 #[test]
@@ -596,7 +596,7 @@ fn two_children_without_declared_scope_produce_a_warning_not_an_error() {
         vec![bash("a", "true", &[]), bash("b", "true", &[])],
     )]);
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
-    let warnings = check_warnings(&wf);
+    let warnings = check_warnings(&wf, &ConfigLayer::default());
     assert!(
         warnings.iter().any(|w| matches!(
             w,
@@ -614,7 +614,7 @@ fn a_single_child_group_never_warns_about_collision() {
         vec![bash("a", "true", &[])],
     )]);
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
-    assert_eq!(check_warnings(&wf), Vec::new());
+    assert_eq!(check_warnings(&wf, &ConfigLayer::default()), Vec::new());
 }
 
 #[test]
@@ -752,7 +752,7 @@ fn a_read_only_parallel_child_does_not_count_toward_the_write_collision_warning(
         JoinPolicy::All,
         vec![reader, writer],
     )]);
-    let warnings = check_warnings(&wf);
+    let warnings = check_warnings(&wf, &ConfigLayer::default());
     assert!(
         warnings.is_empty(),
         "one writer alone cannot collide: {warnings:?}"
@@ -954,4 +954,85 @@ fn an_undeclared_input_reference_inside_a_files_context_pattern_is_caught() {
     assert!(errors
         .iter()
         .any(|e| matches!(e, CheckError::UndeclaredInput { name, .. } if name == "changelog")));
+}
+
+// --- DI-12: top-level fan-out write collision (D100 extended) ----------------
+
+fn config_with_fanout(max_parallel_nodes: u32) -> ConfigLayer {
+    serde_yaml::from_str(&format!(
+        "defaults:\n  max_parallel_nodes: {max_parallel_nodes}\n"
+    ))
+    .unwrap()
+}
+
+fn scoped(id: &str, scope: &[&str], depends_on: &[&str]) -> Node {
+    let mut node = bash(id, "true", depends_on);
+    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node
+}
+
+#[test]
+fn independent_nodes_with_overlapping_scope_error_under_parallel_fanout() {
+    let wf = workflow(vec![
+        scoped("a", &["src/shared.rs"], &[]),
+        scoped("b", &["src/shared.rs"], &[]),
+    ]);
+    let errors = check(&wf, &config_with_fanout(2));
+    assert!(
+        errors.iter().any(|e| {
+            let text = e.to_string();
+            text.contains("`a`") && text.contains("`b`")
+        }),
+        "the error must cite both nodes: {errors:?}"
+    );
+}
+
+#[test]
+fn sequential_execution_makes_the_same_overlap_legitimate() {
+    let wf = workflow(vec![
+        scoped("a", &["src/shared.rs"], &[]),
+        scoped("b", &["src/shared.rs"], &[]),
+    ]);
+    assert_eq!(
+        check(&wf, &config_with_fanout(1)),
+        Vec::new(),
+        "with max_parallel_nodes 1, successive writes to one worktree are legitimate"
+    );
+}
+
+#[test]
+fn a_depends_on_chain_is_never_a_fanout_collision() {
+    let wf = workflow(vec![
+        scoped("a", &["src/shared.rs"], &[]),
+        scoped("b", &["src/shared.rs"], &["a"]),
+        scoped("c", &["src/shared.rs"], &["b"]),
+    ]);
+    assert_eq!(
+        check(&wf, &config_with_fanout(4)),
+        Vec::new(),
+        "a dependency path orders the writes — transitively too"
+    );
+}
+
+#[test]
+fn scopeless_independent_writers_warn_once_per_component() {
+    let wf = workflow(vec![
+        bash("a", "true", &[]),
+        bash("b", "true", &[]),
+        bash("c", "true", &[]),
+    ]);
+    assert_eq!(check(&wf, &config_with_fanout(2)), Vec::new());
+    let warnings = check_warnings(&wf, &config_with_fanout(2));
+    assert_eq!(
+        warnings.len(),
+        1,
+        "one warning per connected component, never per pair: {warnings:?}"
+    );
+    let text = warnings[0].to_string();
+    for id in ["a", "b", "c"] {
+        assert!(text.contains(id), "must name `{id}`: {text}");
+    }
+
+    // Sequential execution: nothing to warn about.
+    assert_eq!(check_warnings(&wf, &config_with_fanout(1)), Vec::new());
 }

@@ -611,7 +611,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   cero zombies, y el resume posterior lo re-trata por `on_interrupt`;
   ídem con `check` y `executor` (test parametrizado).
 
-### DI-12 — Colisión de escritura en el fan-out implícito del DAG `[ ]`
+### DI-12 — Colisión de escritura en el fan-out implícito del DAG `[x]`
 
 - **Origen:** T4.1 — "el riesgo físico es idéntico (mismo worktree
   compartido) pero acá no hay warning de check".

@@ -272,7 +272,7 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     };
 
     let errors = yunta_engine::check(&workflow, &config);
-    let warnings = yunta_engine::check_warnings(&workflow);
+    let warnings = yunta_engine::check_warnings(&workflow, &config);
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
