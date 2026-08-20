@@ -540,3 +540,108 @@ outcome: { type: completed, summary: "should never be reached" }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
 }
+
+// --- DI-15: learned criterion ordering by historical duration ----------------
+
+#[tokio::test]
+async fn pre_check_orders_criteria_by_learned_median_duration() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new("config-hash");
+    let slow = "sleep 0.2; test -f never.txt";
+    let fast = "test -f never.txt";
+    let t = task("T1", &["**"], vec![cmd(slow), cmd(fast)]);
+
+    // First pass: no history — declared order, real durations recorded.
+    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+        .await
+        .unwrap();
+    assert_eq!(outcome, PreCheckOutcome::Red);
+    assert_eq!(runs[0].cmd, slow);
+    assert_eq!(runs[1].cmd, fast);
+    assert!(
+        runs.iter().all(|run| run.duration_ms.is_some()),
+        "executed criteria must record their duration: {runs:?}"
+    );
+
+    // The tree changes (no memo reuse), and the learned medians reorder:
+    // the historically-fast criterion now runs first (D62's fail-fast).
+    std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
+    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        PreCheckOutcome::Red,
+        "ordering never alters the verdict"
+    );
+    assert_eq!(
+        runs[0].cmd, fast,
+        "learned order must put the fast criterion first"
+    );
+    assert_eq!(runs[1].cmd, slow);
+}
+
+#[tokio::test]
+async fn reused_criteria_carry_no_duration() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new("config-hash");
+    let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
+
+    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo)
+        .await
+        .unwrap();
+    assert!(!runs[0].reused);
+    assert!(runs[0].duration_ms.is_some());
+
+    // Same tree: the memo answers, and a reused result has no duration
+    // of its own (nothing ran).
+    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo)
+        .await
+        .unwrap();
+    assert!(runs[0].reused);
+    assert!(runs[0].duration_ms.is_none());
+}
+
+#[tokio::test]
+async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    // A trivially-green criterion among red ones: the verdict must be
+    // TrivialCriterion no matter how the declaration is permuted.
+    let criteria = vec![cmd("test -f never.txt"), cmd("true"), guard("true")];
+    let mut permutations: Vec<Vec<Criterion>> = vec![
+        criteria.clone(),
+        criteria.iter().rev().cloned().collect(),
+        vec![
+            criteria[1].clone(),
+            criteria[2].clone(),
+            criteria[0].clone(),
+        ],
+    ];
+    let mut verdicts = Vec::new();
+    for (i, permutation) in permutations.drain(..).enumerate() {
+        let memo = Memo::new(format!("config-{i}"));
+        let t = task("T1", &["**"], permutation);
+        let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+            .await
+            .unwrap();
+        verdicts.push(outcome);
+    }
+    assert!(
+        verdicts
+            .iter()
+            .all(|v| matches!(v, PreCheckOutcome::TrivialCriterion { .. })),
+        "got: {verdicts:?}"
+    );
+}
+
+#[test]
+fn criterion_results_without_duration_still_parse() {
+    // D70: additive payload evolution — a pre-DI-15 event without
+    // `duration_ms` parses, and the field reads back `None`.
+    let old = r#"{ "cmd": "cargo test", "exit_code": 0, "reused": false }"#;
+    let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
+    assert_eq!(result.duration_ms, None);
+}

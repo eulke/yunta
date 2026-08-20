@@ -857,7 +857,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 
 ## Nivel 3 — calidad, optimización e higiene
 
-### DI-15 — Orden aprendido de criterios (duración histórica) `[ ]`
+### DI-15 — Orden aprendido de criterios (duración histórica) `[x]`
 
 - **Origen:** T5.9 — el short-circuit por duración histórica (§5.4/D62)
   no se construyó porque el log no registra duraciones por criterio.
@@ -873,6 +873,19 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   test existente).
 - **✓ Criterios:** el ✓ original de T5.9 pendiente, ejecutado; payloads
   viejos sin `duration_ms` parsean.
+- **Nota de cierre:** la mediana vive en el `Memo` (intra-invocación —
+  la opción "solo intra-run" que este ítem ya contemplaba: cero cambio
+  de firmas, y un resume re-aprende en una pasada en orden declarado);
+  keyed por comando pelado, no por clave de memo, porque el perfil de
+  costo sobrevive cambios de árbol — que es exactamente cuándo el orden
+  importa (un hit de memo no re-ejecuta nada). Solo el pre-check ordena
+  (lo que este ítem pedía); el post-check corre en orden declarado. La
+  duración se mide con `Instant` en la cáscara imperativa — es un hecho
+  observado del proceso externo, mismo estatus que su exit code; el
+  `Clock` inyectado gobierna timestamps y estado derivado, que esto no
+  alimenta. Tests: 4 en `crates/engine/tests/task_cycle.rs` (orden
+  aprendido reordena, `reused` sin duración, veredicto invariante ante
+  permutación, payload viejo parsea).
 
 ### DI-16 — Race de `max_per_run` bajo concurrencia `[ ]`
 

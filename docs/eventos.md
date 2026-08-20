@@ -222,7 +222,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check (§5.2) |
-| `results` | lista de `{cmd, exit_code, type?, reused: bool}` | sí | `reused=true` cuando la memoización (§5.4, fuera de alcance de implementación en M-0 salvo lo mínimo de T5.9) sirvió el resultado sin re-ejecutar |
+| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?}` | sí | `reused=true` cuando la memoización (§5.4, fuera de alcance de implementación en M-0 salvo lo mínimo de T5.9) sirvió el resultado sin re-ejecutar; `duration_ms` (DI-15, aditivo D70) es el costo observado de la ejecución — ausente en `reused=true` y en eventos pre-DI-15 |
 
 ### 5.11 `task_status_changed` — engine
 **Fuente:** task_id, estado nuevo, evento que lo justifica

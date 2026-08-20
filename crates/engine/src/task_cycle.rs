@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
-use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
+use yunta_core::events::{Criterion, CriterionType, EventPayload, TokenUsage};
 use yunta_core::{Task, TaskId, YuntaError};
 
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
@@ -64,6 +64,9 @@ pub struct CriterionRun {
     /// an actual execution — `criteria_checked` records it so recibo/replay
     /// show what ran versus what was reused, nothing verified in silence.
     pub reused: bool,
+    /// Wall-clock milliseconds the execution took (DI-15) — what D62's
+    /// learned ordering feeds on. `None` when `reused` (nothing ran).
+    pub duration_ms: Option<u64>,
 }
 
 /// Per-run memoization cache (§5.4): a criterion's result is reused when
@@ -80,6 +83,14 @@ pub struct CriterionRun {
 pub struct Memo {
     config_hash: String,
     cache: Mutex<HashMap<String, i32>>,
+    /// DI-15: observed wall-clock durations per criterion command, this
+    /// invocation only — the same lifetime discipline as the result
+    /// cache above (a resume starts cold and re-learns, which only
+    /// costs one declared-order pass). Keyed by the bare command, not
+    /// the memo key: a criterion's cost profile survives tree changes,
+    /// which is exactly when the ordering matters (a memo hit never
+    /// re-runs anything, so there is nothing to reorder).
+    durations: Mutex<HashMap<String, Vec<u64>>>,
 }
 
 impl Memo {
@@ -87,7 +98,26 @@ impl Memo {
         Self {
             config_hash: config_hash.into(),
             cache: Mutex::new(HashMap::new()),
+            durations: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn record_duration(&self, cmd: &str, duration_ms: u64) {
+        let mut durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
+        durations
+            .entry(cmd.to_string())
+            .or_default()
+            .push(duration_ms);
+    }
+
+    /// The median of this command's observed durations, `None` with no
+    /// history yet.
+    fn median_duration(&self, cmd: &str) -> Option<u64> {
+        let durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
+        let samples = durations.get(cmd)?;
+        let mut sorted = samples.clone();
+        sorted.sort_unstable();
+        Some(sorted[sorted.len() / 2])
     }
 
     fn key(&self, cmd: &str, tree_hash: &str) -> String {
@@ -239,7 +269,16 @@ pub struct TaskCycleReport {
 /// Default retry cap (§5.2: "cap configurable, default 2").
 pub const DEFAULT_MAX_RETRIES: u32 = 2;
 
-async fn run_criterion(task_id: &TaskId, cwd: &Path, cmd: &str) -> Result<i32, TaskCycleError> {
+/// Runs one criterion command, measuring its wall-clock cost (DI-15) —
+/// an observed fact about an external process, same standing as its
+/// exit code; the injected `Clock` governs event timestamps and derived
+/// state, neither of which this feeds.
+async fn run_criterion(
+    task_id: &TaskId,
+    cwd: &Path,
+    cmd: &str,
+) -> Result<(i32, u64), TaskCycleError> {
+    let started = std::time::Instant::now();
     let status = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(cmd)
@@ -251,26 +290,31 @@ async fn run_criterion(task_id: &TaskId, cwd: &Path, cmd: &str) -> Result<i32, T
             cmd: cmd.to_string(),
             source,
         })?;
-    Ok(status.code().unwrap_or(-1))
+    let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    Ok((status.code().unwrap_or(-1), duration_ms))
 }
 
 /// Tree hash computed once per call and shared across every criterion in
 /// it (§5.4) — criteria are read-only, so the tree can't change between
-/// them, and one `git` round-trip beats N.
+/// them, and one `git` round-trip beats N. `criteria` arrives already in
+/// the order the caller wants executed (declared, or DI-15's learned
+/// order) — this function only runs and records.
 async fn run_all_criteria(
-    task: &Task,
+    task_id: &TaskId,
+    criteria: &[Criterion],
     cwd: &Path,
     memo: &Memo,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let tree_hash = tree_hash(cwd).await?;
-    let mut runs = Vec::with_capacity(task.criteria.len());
-    for criterion in &task.criteria {
-        let (exit_code, reused) = match memo.get(&criterion.cmd, &tree_hash) {
-            Some(exit_code) => (exit_code, true),
+    let mut runs = Vec::with_capacity(criteria.len());
+    for criterion in criteria {
+        let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {
+            Some(exit_code) => (exit_code, true, None),
             None => {
-                let exit_code = run_criterion(&task.id, cwd, &criterion.cmd).await?;
+                let (exit_code, duration_ms) = run_criterion(task_id, cwd, &criterion.cmd).await?;
                 memo.put(&criterion.cmd, &tree_hash, exit_code);
-                (exit_code, false)
+                memo.record_duration(&criterion.cmd, duration_ms);
+                (exit_code, false, Some(duration_ms))
             }
         };
         runs.push(CriterionRun {
@@ -278,6 +322,7 @@ async fn run_all_criteria(
             exit_code,
             is_guard: criterion.r#type == Some(CriterionType::Guard),
             reused,
+            duration_ms,
         });
     }
     Ok(runs)
@@ -286,12 +331,22 @@ async fn run_all_criteria(
 /// Pre-check in rojo (§5.2 step 2): every non-`guard` criterion must
 /// fail, every `guard` must pass. Runs every criterion regardless — the
 /// report should show all of them, not stop at the first surprise.
+/// Execution order is D62's learned one (DI-15): ascending historical
+/// median duration, criteria without history last in declared order —
+/// the fast, likely-to-fail evidence lands first while the verdict
+/// (computed over the complete set) stays order-independent by
+/// construction.
 pub async fn pre_check(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
 ) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
-    let runs = run_all_criteria(task, cwd, memo).await?;
+    let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
+    // Stable sort: no-history criteria (u64::MAX key) keep declared
+    // order among themselves.
+    ordered.sort_by_key(|criterion| memo.median_duration(&criterion.cmd).unwrap_or(u64::MAX));
+    let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
+    let runs = run_all_criteria(&task.id, &ordered, cwd, memo).await?;
 
     let mut outcome = PreCheckOutcome::Red;
     for run in &runs {
@@ -318,7 +373,7 @@ pub async fn post_check(
     cwd: &Path,
     memo: &Memo,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    run_all_criteria(task, cwd, memo).await
+    run_all_criteria(&task.id, &task.criteria, cwd, memo).await
 }
 
 /// Everything about *how* one node's sessions open (DI-13), resolved

@@ -34,6 +34,11 @@ pub struct CriterionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<CriterionType>,
     pub reused: bool,
+    /// Wall-clock milliseconds this execution took (DI-15) — the datum
+    /// D62's learned ordering feeds on. `None` for a `reused: true`
+    /// result (nothing ran) and for pre-DI-15 events (additive, D70).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

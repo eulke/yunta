@@ -746,6 +746,7 @@ async fn integrate_task(
                     exit_code: 1,
                     r#type: None,
                     reused: false,
+                    duration_ms: None,
                 }],
             }),
         )?;
@@ -979,6 +980,7 @@ fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
             exit_code: run.exit_code,
             r#type: run.is_guard.then_some(CriterionType::Guard),
             reused: run.reused,
+            duration_ms: run.duration_ms,
         })
         .collect()
 }

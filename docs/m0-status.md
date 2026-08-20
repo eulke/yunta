@@ -630,14 +630,14 @@ que aparece.
         (nuevo parámetro `memo: &Memo`) — afecta a los ~9 call sites de su
         propia suite de tests (`crates/engine/tests/task_cycle.rs`), todos
         actualizados.
-      - **Deuda no cubierta**: el short-circuit con "orden aprendido"
-        (ordenar criterios por duración histórica del log, §5.4 párrafo
-        final) no se construyó — depende de tener duraciones históricas
-        accesibles desde el log, que hoy no se registran por criterio.
-        Es una optimización de UX/velocidad, no de corrección (el
-        Contrato es explícito: "la heurística solo afecta el orden de
-        evaluación — nunca el veredicto"), así que se puede sumar después
-        sin tocar la semántica ya construida acá.
+      - **Orden aprendido (cerrado por DI-15)**: `CriterionResult` y
+        `CriterionRun` llevan `duration_ms: Option<u64>` (aditivo D70;
+        `reused` → `None`), el `Memo` acumula duraciones observadas por
+        comando (intra-invocación — un resume re-aprende en una pasada),
+        y el **pre-check** ejecuta en orden de mediana ascendente, sin
+        historial al final en orden declarado (D62: fallan-rápido
+        primero). El veredicto se computa sobre el conjunto completo,
+        así que el orden jamás lo altera — con test de permutación.
       - Tests: 3 nuevos en `crates/engine/tests/task_cycle.rs` (primer
         check ejecuta de verdad, segundo check sobre árbol sin cambios
         reusa — verificado contando líneas en un marker **fuera** del
