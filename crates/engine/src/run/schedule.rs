@@ -221,11 +221,11 @@ pub fn next_step(
         })
     };
 
-    // A degenerate 0 would starve every ready node forever, turning a
-    // config mistake into a silent-looking stuck run instead of visible
-    // progress — `yunta check` validating `max_parallel_nodes >= 1` is
-    // still open debt (T1.3 doesn't cover `defaults:` semantics yet), so
-    // the scheduler clamps rather than deadlock on it.
+    // A degenerate 0 would starve every ready node forever. `yunta
+    // check` refuses it up front since DI-18 (`MaxParallelNodesZero`);
+    // this clamp stays as defense in depth for a manifest frozen before
+    // that rule existed — a stuck-looking run is worse than a
+    // sequential one either way.
     let capacity = max_parallel_nodes.max(1) as usize;
 
     let mut history: std::collections::HashMap<NodeId, NodeHistory> = Default::default();

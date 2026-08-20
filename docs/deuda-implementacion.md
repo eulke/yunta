@@ -940,7 +940,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   lote, antes de despachar nada: una fuente que falla es fallo del nodo
   (§9) sin gastar sesión.
 
-### DI-18 — Reglas menores de `check` `[ ]`
+### DI-18 — Reglas menores de `check` `[x]`
 
 - **Origen:** T1.3 diferidas + nota de `schedule.rs`.
 - **Solución propuesta:** (1) `max_parallel_nodes >= 1` como error de
@@ -953,6 +953,14 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **✓ Criterios:** fixture con `max_parallel_nodes: 0` → error; workflow
   de referencia (`pr` hace push a `{{run.branch}}`, no a base) → limpio;
   un `git push origin main` directo → warning que nombra D48.
+- **Nota de cierre:** el warning D48 matchea el nombre de la rama base
+  como token (split por whitespace y `:` — `main` jamás matchea
+  `domain`) o el template `{{project.base_branch}}` literal, en comandos
+  `bash` y hooks (hijos de `parallel` heredan la ancestría del grupo), y
+  se apaga con cualquier gate transitivo en `depends_on` — el `pr` de
+  referencia queda limpio por su gate `ship`, no por suerte del
+  heurístico. El clamp del scheduler quedó como defensa en profundidad
+  con su comentario actualizado.
 
 ### DI-19 — Higiene: helpers duplicados, params de `create_run` `[ ]`
 

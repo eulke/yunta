@@ -277,6 +277,15 @@ pub enum CheckError {
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
+    /// DI-18: a 0 would starve every ready node forever — a config
+    /// mistake surfaced here as a refusal (the scheduler's clamp to 1
+    /// stays as defense in depth for runs created before this rule).
+    #[error(
+        "`defaults.max_parallel_nodes: 0` would starve every node forever — declare 1 or more, \
+         or drop the field (default: 1)"
+    )]
+    MaxParallelNodesZero,
+
     /// T9.3: a composition reference that can't resolve today — the
     /// same broken-reference class as `UnknownGotoTarget`, across
     /// files. Advisory about the *current* catalog by design: the child
@@ -337,6 +346,16 @@ pub enum CheckWarning {
          collide (D100); declare `scope` on each or chain them with `depends_on`"
     )]
     UndeclaredFanOutScope { nodes: String },
+
+    /// DI-18/D48: a literal `git push` aimed at the base branch with no
+    /// gate anywhere before it in the DAG — warning, not error (D48's
+    /// own rank): a team may genuinely want it, but nobody should
+    /// discover an ungated push to `main` from the push itself.
+    #[error(
+        "node `{node}` pushes to the base branch (`{branch}`) with no gate anywhere before it \
+         in the DAG — D48: put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
+    )]
+    PushToBaseWithoutGate { node: NodeId, branch: String },
 }
 
 /// Validates a workflow against the M-0 rule set. Every applicable rule is
@@ -691,7 +710,110 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     let mut warnings = Vec::new();
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
     collect_fanout_warnings(workflow, config, &mut warnings);
+    collect_push_to_base_warnings(workflow, config, &mut warnings);
     warnings
+}
+
+/// DI-18/D48: scans every literal `bash`/hook command for a `git push`
+/// aimed at the base branch — the `{{project.base_branch}}` template,
+/// or the configured literal name as its own token (whitespace/refspec
+/// boundaries, so a branch named `main` never matches `domain`) — and
+/// warns unless a gate sits somewhere before the node in the DAG
+/// (transitive `depends_on`; a `parallel` child inherits its group's
+/// ancestry). Literal text only, same stance as `check_commands`: a
+/// command assembled at runtime is the runtime moment's problem.
+fn collect_push_to_base_warnings(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    warnings: &mut Vec<CheckWarning>,
+) {
+    let base_branch = config
+        .project
+        .as_ref()
+        .and_then(|project| project.base_branch.as_deref());
+    let pushes_to_base = |command: &str| -> Option<String> {
+        if !command.contains("git push") {
+            return None;
+        }
+        if command.contains("{{project.base_branch}}") {
+            return Some(
+                base_branch
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "{{project.base_branch}}".to_string()),
+            );
+        }
+        let base = base_branch?;
+        let named = command
+            .split_whitespace()
+            .flat_map(|token| token.split(':'))
+            .any(|token| token == base);
+        named.then(|| base.to_string())
+    };
+
+    // Which top-level nodes have a gate somewhere in their transitive
+    // `depends_on` ancestry.
+    let nodes = &workflow.nodes;
+    let index_of: HashMap<&NodeId, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| (&node.id, i))
+        .collect();
+    fn gate_protected(
+        i: usize,
+        nodes: &[Node],
+        index_of: &HashMap<&NodeId, usize>,
+        cache: &mut Vec<Option<bool>>,
+    ) -> bool {
+        if let Some(known) = cache[i] {
+            return known;
+        }
+        cache[i] = Some(false); // cycle guard; real cycles error elsewhere
+        let protected = nodes[i].depends_on.iter().any(|dep| {
+            index_of.get(dep).is_some_and(|&d| {
+                matches!(nodes[d].kind, NodeKind::Gate { .. })
+                    || gate_protected(d, nodes, index_of, cache)
+            })
+        });
+        cache[i] = Some(protected);
+        protected
+    }
+    let mut cache: Vec<Option<bool>> = vec![None; nodes.len()];
+
+    for (i, node) in nodes.iter().enumerate() {
+        let protected = gate_protected(i, nodes, &index_of, &mut cache);
+        // A parallel child's commands push from the same ancestry as
+        // its group.
+        let mut targets: Vec<(&Node, &str)> = Vec::new();
+        fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a str)>) {
+            if let NodeKind::Bash { run } = &node.kind {
+                targets.push((node, run));
+            }
+            if let Some(hooks) = &node.hooks {
+                for step in hooks.before.iter().chain(&hooks.after) {
+                    targets.push((node, &step.run));
+                }
+            }
+            if let NodeKind::Parallel {
+                nodes: children, ..
+            } = &node.kind
+            {
+                for child in children {
+                    collect_commands(child, targets);
+                }
+            }
+        }
+        collect_commands(node, &mut targets);
+        for (owner, command) in targets {
+            if let Some(branch) = pushes_to_base(command) {
+                if !protected {
+                    warnings.push(CheckWarning::PushToBaseWithoutGate {
+                        node: owner.id.clone(),
+                        branch,
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Both halves of DI-12 need the same question answered: which pairs of
@@ -1128,6 +1250,9 @@ fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     let Some(defaults) = &config.defaults else {
         return;
     };
+    if defaults.max_parallel_nodes == Some(0) {
+        errors.push(CheckError::MaxParallelNodesZero);
+    }
     if let Some(on_failure) = defaults.on_failure {
         if on_failure != yunta_core::DefaultOnFailure::Pause {
             errors.push(CheckError::DefaultOnFailureUnsupported { on_failure });

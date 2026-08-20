@@ -1416,3 +1416,97 @@ nodes:
         .iter()
         .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })));
 }
+
+// --- DI-18: minor check rules ------------------------------------------------
+
+#[test]
+fn max_parallel_nodes_zero_is_a_check_error() {
+    let wf: Workflow =
+        serde_yaml::from_str("name: x\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
+            .unwrap();
+    let config: ConfigLayer = serde_yaml::from_str("defaults: { max_parallel_nodes: 0 }").unwrap();
+    assert!(
+        check(&wf, &config)
+            .iter()
+            .any(|e| matches!(e, CheckError::MaxParallelNodesZero)),
+        "a 0 would starve every node forever — refused, not clamped silently"
+    );
+    assert!(!check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::MaxParallelNodesZero)));
+}
+
+#[test]
+fn a_push_to_the_base_branch_without_a_prior_gate_warns_d48() {
+    let config: ConfigLayer = serde_yaml::from_str("project: { base_branch: main }").unwrap();
+
+    // Direct push to the configured base, no gate anywhere upstream.
+    let ungated = r#"
+name: pushy
+nodes:
+  - id: build
+    kind: bash
+    run: "cargo build"
+  - id: pr
+    kind: bash
+    depends_on: [build]
+    run: "git push origin main"
+"#;
+    let wf: Workflow = serde_yaml::from_str(ungated).unwrap();
+    assert!(
+        check_warnings(&wf, &config)
+            .iter()
+            .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { node, .. } if node.as_str() == "pr")),
+        "got: {:?}",
+        check_warnings(&wf, &config)
+    );
+
+    // The same push behind a gate is deliberate — no warning (D48's own
+    // carve-out).
+    let gated = r#"
+name: pushy
+nodes:
+  - id: build
+    kind: bash
+    run: "cargo build"
+  - id: ship
+    kind: gate
+    depends_on: [build]
+    assignee: lead
+  - id: pr
+    kind: bash
+    depends_on: [ship]
+    run: "git push origin main"
+"#;
+    let wf: Workflow = serde_yaml::from_str(gated).unwrap();
+    assert!(check_warnings(&wf, &config)
+        .iter()
+        .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+
+    // A push referencing the template form counts the same.
+    let templated = r#"
+name: pushy
+nodes:
+  - id: pr
+    kind: bash
+    run: "git push origin {{project.base_branch}}"
+"#;
+    let wf: Workflow = serde_yaml::from_str(templated).unwrap();
+    assert!(check_warnings(&wf, &config)
+        .iter()
+        .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+
+    // The reference workflow's own `pr` node pushes to {{run.branch}} —
+    // clean.
+    let run_branch = r#"
+name: pushy
+nodes:
+  - id: pr
+    kind: bash
+    run: "git push -u origin {{run.branch}}"
+"#;
+    let wf: Workflow = serde_yaml::from_str(run_branch).unwrap();
+    assert!(check_warnings(&wf, &config)
+        .iter()
+        .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+}
