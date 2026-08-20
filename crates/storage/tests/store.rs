@@ -307,3 +307,29 @@ fn purge_run_removes_every_row_for_exactly_that_run() {
         "other runs' rows are untouched"
     );
 }
+
+// --- T8.2: a reopened handle interleaves writes safely -----------------------
+
+#[test]
+fn reopened_handle_appends_interleaved_with_the_original_and_seq_stays_monotonic() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&dir.path().join("events.db")).unwrap();
+    let second = storage.reopen().unwrap();
+
+    let run_id = RunId::from("run-reopen");
+    let seq1 = storage.append_event(&created_event("run-reopen")).unwrap();
+    let mut event = created_event("run-reopen");
+    event.payload =
+        yunta_core::events::EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
+            reason: "from the second handle".to_string(),
+        });
+    let seq2 = second.append_event(&event).unwrap();
+
+    assert_eq!((seq1, seq2), (1, 2));
+    let events = storage.events_for_run(&run_id).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[1].payload,
+        yunta_core::events::EventPayload::RunPaused(_)
+    ));
+}

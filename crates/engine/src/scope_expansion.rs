@@ -86,7 +86,7 @@ pub enum ScopeExpansionError {
 
 /// The request object §6.2 requires to be identical across all three
 /// modes: paths, reason, and a verifiable criterion the agent proposes.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 pub struct ScopeExpansionRequest {
     pub paths: Vec<String>,
     pub reason: String,

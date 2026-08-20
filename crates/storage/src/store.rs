@@ -107,6 +107,9 @@ fn genesis_hash(manifest_hash: &str) -> String {
 /// without blocking on that writer.
 pub struct Storage {
     conn: Mutex<Connection>,
+    /// Where this handle was opened — what [`Storage::reopen`] uses to
+    /// mint an independent connection onto the same database.
+    path: std::path::PathBuf,
 }
 
 fn lock(conn: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
@@ -131,6 +134,14 @@ impl Storage {
         let conn = Connection::open(path).map_err(open_err)?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(open_err)?;
+        // WAL admits exactly one writer at a time; a second handle onto
+        // the same database (a status/follower reader, a per-session
+        // run-tools listener, T8.2) must wait for a busy writer instead
+        // of surfacing SQLITE_BUSY as a spurious append failure. Writes
+        // here are all sub-millisecond appends — 5s of patience means
+        // something is truly wedged, not busy.
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(open_err)?;
         conn.execute_batch(SCHEMA_V1).map_err(open_err)?;
 
         // T2.5 migration: a database created before the chain existed
@@ -148,7 +159,20 @@ impl Storage {
 
         Ok(Self {
             conn: Mutex::new(conn),
+            path: path.to_path_buf(),
         })
+    }
+
+    /// A second, independent handle onto the same database — what a
+    /// concurrent reader/writer with a `'static` life of its own (the
+    /// per-session run-tools listener, T8.2; the CLI's `--follow`
+    /// poller already does this by path from outside) opens instead of
+    /// sharing this handle's connection. WAL + the busy timeout above
+    /// are what make the concurrency safe; `seq` assignment stays
+    /// correct because [`Storage::append_event`] computes it inside its
+    /// own transaction.
+    pub fn reopen(&self) -> Result<Self> {
+        Self::open(&self.path)
     }
 
     /// Appends one event, assigning the next `seq` for its `run_id`
