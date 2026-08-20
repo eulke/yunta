@@ -43,6 +43,9 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         network: None,
         context: Vec::new(),
         invariant: false,
+        skills: Vec::new(),
+        interactive: None,
+        fresh_context: None,
     }
 }
 
@@ -64,6 +67,9 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         network: None,
         context: Vec::new(),
         invariant: false,
+        skills: Vec::new(),
+        interactive: None,
+        fresh_context: None,
     }
 }
 
@@ -89,6 +95,9 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         network: None,
         context: Vec::new(),
         invariant: false,
+        skills: Vec::new(),
+        interactive: None,
+        fresh_context: None,
     }
 }
 
@@ -118,6 +127,9 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         network: None,
         context: Vec::new(),
         invariant: false,
+        skills: Vec::new(),
+        interactive: None,
+        fresh_context: None,
     }
 }
 
@@ -141,6 +153,8 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
         inputs: Default::default(),
         node_defaults: None,
         nodes,
+        yunta_schema: None,
+        on_finish: Vec::new(),
     }
 }
 
@@ -155,6 +169,8 @@ fn workflow_with_inputs(
         inputs,
         node_defaults: None,
         nodes,
+        yunta_schema: None,
+        on_finish: Vec::new(),
     }
 }
 
@@ -1035,4 +1051,53 @@ fn scopeless_independent_writers_warn_once_per_component() {
 
     // Sequential execution: nothing to warn about.
     assert_eq!(check_warnings(&wf, &config_with_fanout(1)), Vec::new());
+}
+
+// --- DI-13: fresh_context / yunta_schema -------------------------------------
+
+#[test]
+fn fresh_context_false_is_refused_until_session_resume_exists() {
+    let mut node = bash("a", "true", &[]);
+    node.fresh_context = Some(false);
+    let wf = workflow(vec![node]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("fresh_context") && e.to_string().contains("not")),
+        "must refuse with an actionable message: {errors:?}"
+    );
+
+    // `true` and absent are both fine — every session is fresh today.
+    let mut node = bash("a", "true", &[]);
+    node.fresh_context = Some(true);
+    assert_eq!(
+        check(&workflow(vec![node]), &ConfigLayer::default()),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
+    let mut wf = workflow(vec![bash("a", "true", &[])]);
+    wf.yunta_schema = Some(">=1 <2".to_string());
+    assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+
+    wf.yunta_schema = Some(">=2".to_string());
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("yunta_schema")),
+        "an out-of-range requirement must fail check: {errors:?}"
+    );
+
+    wf.yunta_schema = Some("not-a-range".to_string());
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("yunta_schema")),
+        "an unparseable range must fail loudly, never be ignored: {errors:?}"
+    );
 }

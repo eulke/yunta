@@ -49,6 +49,39 @@ pub struct Workflow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_defaults: Option<NodeDefaults>,
     pub nodes: Vec<Node>,
+    /// `yunta_schema: ">=1 <2"` (§2.1, DI-13) — a version range the
+    /// binary's own schema major (`YUNTA_SCHEMA`) is checked against at
+    /// `yunta check`, and frozen resolved into `run_created`. Absent
+    /// means "whatever this binary speaks" (the reference text's own
+    /// rule) — inferred, never an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yunta_schema: Option<String>,
+    /// `on_finish:` (§8.3/D20, DI-13): close-of-run steps. The engine
+    /// imposes the phase order (distill before any cleanup, §8.3) —
+    /// declaration order in the YAML carries no meaning.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_finish: Vec<OnFinishStep>,
+}
+
+/// One `on_finish:` entry — discriminated by its own field name, the
+/// same untagged convention `context:` uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OnFinishStep {
+    Cleanup {
+        cleanup: CleanupTarget,
+    },
+    /// Run artifacts the workflow declares durable (D20): distilled
+    /// deterministically into `.yunta/knowledge/` at close (DI-24).
+    Distill {
+        distill: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupTarget {
+    Worktree,
 }
 
 /// One `modes:` entry's own scope (§10.1).
@@ -110,6 +143,10 @@ impl<'de> Deserialize<'de> for ModeInclude {
 pub struct NodeDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<Hooks>,
+    /// Skills every node mounts unless it declares its own list (DI-13)
+    /// — same replace-wholesale inheritance as `hooks`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
 }
 
 /// A single node. Fields here are the ones the M-0 recorte names
@@ -173,6 +210,25 @@ pub struct Node {
     /// this deliberately doesn't cover yet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextSpec>,
+    /// `skills: [names]` (D47, DI-13) — instructions and capabilities
+    /// the adapter mounts by its native mechanism: *how* to work, where
+    /// `context:` injects *what* to work on. Resolved against
+    /// `skills.paths` (repo first); an adapter with no native mechanism
+    /// degrades with `capability_degraded`, never a fatal error (A6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// `interactive: true` (§4.1, DI-02/DI-13) — presentation datum for
+    /// this node's questions: the surface renders them as a live
+    /// conversation when it can. With no surface, nothing changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<bool>,
+    /// `fresh_context:` (§8.2, DI-13) — `true` (and absent) means this
+    /// node's session opens fresh, pure rehydration from the log.
+    /// `false` requires session resume (DI-23), which isn't built:
+    /// `check` refuses it with an actionable error instead of accepting
+    /// it silently (A6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh_context: Option<bool>,
     /// `invariant: true` (§10.1, D44) — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A

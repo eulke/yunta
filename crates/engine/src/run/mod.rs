@@ -368,7 +368,16 @@ pub fn create_run(
             inputs: HashMap::new(), // `inputs:` schema is T1.5, out of M-0
             mode: mode.to_string(),
             promoted_from: promoted_from.cloned(),
-            yunta_schema: None,
+            // §2.1/DI-13: resolved once here — declared range as
+            // written, or the binary's own schema when absent (the
+            // reference text's "se infiere del binario").
+            yunta_schema: Some(
+                manifest
+                    .workflow
+                    .yunta_schema
+                    .clone()
+                    .unwrap_or_else(|| format!("={}", yunta_core::YUNTA_SCHEMA)),
+            ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
         }),
@@ -519,6 +528,39 @@ pub async fn execute_run(
                     }),
                 )?;
                 ctx.export_events_jsonl()?;
+                // §8.3/DI-13: `on_finish.cleanup: worktree` — after the
+                // export, only at a real Finish (a paused run expects a
+                // resume in that tree; a promoted one seeds its
+                // successor's worktree from it). A cleanup failure warns
+                // and never un-finishes the run the log already closed.
+                let wants_cleanup = manifest.workflow.on_finish.iter().any(|step| {
+                    matches!(
+                        step,
+                        yunta_core::OnFinishStep::Cleanup {
+                            cleanup: yunta_core::CleanupTarget::Worktree
+                        }
+                    )
+                });
+                if wants_cleanup && manifest.isolation == yunta_core::Isolation::Worktree {
+                    match crate::worktree::cleanup_worktree(
+                        ctx.worktree,
+                        &format!("yunta/{run_id}"),
+                    )
+                    .await
+                    {
+                        Ok(crate::worktree::WorktreeCleanup::Removed) => {}
+                        Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
+                            tracing::warn!(
+                                worktree = %ctx.worktree.display(),
+                                "on_finish.cleanup: worktree skipped — the run's tree is not \
+                                 a linked git worktree"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "on_finish.cleanup: worktree failed");
+                        }
+                    }
+                }
                 return Ok(RunReport {
                     terminal: RunTerminal::Finished,
                     state,

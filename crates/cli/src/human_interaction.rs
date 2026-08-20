@@ -94,7 +94,7 @@ impl HumanInteraction for ConsoleInteraction {
     /// whole reply anyway — the surface's checks are UX, the engine's
     /// are the verdict). A non-required question accepts an empty line
     /// as "no answer"; a required one re-asks.
-    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
+    async fn ask(&self, questions: &QuestionsFile, _interactive: bool) -> Option<QuestionsReply> {
         if !std::io::stdin().is_terminal() {
             return None;
         }

@@ -798,6 +798,7 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
     async fn ask(
         &self,
         _questions: &yunta_core::QuestionsFile,
+        _interactive: bool,
     ) -> Option<yunta_engine::QuestionsReply> {
         Some(yunta_engine::QuestionsReply {
             answers: self.answers.clone(),

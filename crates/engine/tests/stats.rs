@@ -30,6 +30,9 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         network: None,
         context: Vec::new(),
         invariant: false,
+        skills: Vec::new(),
+        interactive: None,
+        fresh_context: None,
     }
 }
 
@@ -41,6 +44,8 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
         inputs: Default::default(),
         node_defaults: None,
         nodes,
+        yunta_schema: None,
+        on_finish: Vec::new(),
     }
 }
 

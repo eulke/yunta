@@ -10,11 +10,12 @@
 //! the agent's work from the user's) and refuses a second concurrent run
 //! on that same repo via a lock file next to git's own metadata.
 //!
-//! Cleanup (`on_finish.cleanup: worktree`) is out of M-0 — `on_finish:`
-//! doesn't exist in the schema recorte yet. A prepared worktree is left
-//! on disk after the run for inspection; only `none`'s lock is released,
-//! since holding it forever would make every run after the first
-//! permanently refuse to start.
+//! Cleanup: a prepared worktree is left on disk after the run for
+//! inspection by default; a workflow that declares
+//! `on_finish.cleanup: worktree` (DI-13) gets [`cleanup_worktree`] at
+//! its real Finish instead. `none`'s lock is always released at
+//! Finish, since holding it forever would make every run after the
+//! first permanently refuse to start.
 
 use std::path::{Path, PathBuf};
 
@@ -136,6 +137,60 @@ pub async fn release_worktree(repo: &Path, isolation: Isolation) -> Result<(), W
             }
         }
     }
+}
+
+/// What [`cleanup_worktree`] did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WorktreeCleanup {
+    Removed,
+    /// The path isn't a *linked* worktree (its git dir is the common
+    /// dir) — removing it would delete a primary checkout, so nothing
+    /// is touched. The caller reports it; this function never guesses.
+    NotALinkedWorktree,
+}
+
+/// `on_finish.cleanup: worktree` (§8.3/DI-13): removes the run's linked
+/// worktree and then deletes the run branch only if git agrees it's
+/// safe (`branch -d`, never `-D`) — a branch still carrying unmerged,
+/// unpushed commits (a fresh distill, DI-24) survives, and that is not
+/// an error. The worktree removal itself is `--force`: the workflow
+/// declared this checkout disposable, and un-committed leftovers are
+/// exactly what it wants gone.
+pub async fn cleanup_worktree(
+    worktree: &Path,
+    branch: &str,
+) -> Result<WorktreeCleanup, WorktreeError> {
+    let git_dir = run_git(
+        worktree,
+        &["rev-parse", "--path-format=absolute", "--git-dir"],
+    )
+    .await?;
+    let common_dir = run_git(
+        worktree,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await?;
+    if git_dir.trim() == common_dir.trim() {
+        return Ok(WorktreeCleanup::NotALinkedWorktree);
+    }
+    let main_repo = PathBuf::from(common_dir.trim())
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("/"));
+
+    run_git(
+        &main_repo,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            &worktree.display().to_string(),
+        ],
+    )
+    .await?;
+    // Best-effort by design: `-d` refusing is the branch's protection.
+    let _ = run_git(&main_repo, &["branch", "-d", branch]).await;
+    Ok(WorktreeCleanup::Removed)
 }
 
 async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {

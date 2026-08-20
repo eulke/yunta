@@ -49,8 +49,12 @@ pub trait HumanInteraction: Send + Sync {
     /// into one payload would breed the ambiguous-object vice. A default
     /// implementation returns `None` so surfaces that only handle gates
     /// (and every existing implementor) stay valid unchanged.
-    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
-        let _ = questions;
+    /// `interactive` is the node's own `interactive:` flag (§4.1,
+    /// DI-13) — a presentation datum: a surface that can hold a live
+    /// conversation should when it's `true`; one that can't ignores it,
+    /// and nothing else changes.
+    async fn ask(&self, questions: &QuestionsFile, interactive: bool) -> Option<QuestionsReply> {
+        let _ = (questions, interactive);
         None
     }
 }

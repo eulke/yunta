@@ -68,6 +68,24 @@ pub enum CheckError {
         glob_b: String,
     },
 
+    /// DI-13: `fresh_context: false` requires session resume (DI-23),
+    /// which isn't built — refused up front instead of accepted and
+    /// silently ignored (A6).
+    #[error(
+        "node `{node}` declares `fresh_context: false` but session resume is not supported \
+         yet — remove the field (every session is fresh today) or wait for `resume_session`"
+    )]
+    FreshContextUnsupported { node: NodeId },
+
+    /// DI-13/§2.1: the workflow demands a schema this binary doesn't
+    /// speak, or a range the parser can't read.
+    #[error("`yunta_schema: \"{range}\"` — {detail} (this binary speaks schema {binary})")]
+    YuntaSchemaMismatch {
+        range: String,
+        detail: String,
+        binary: u32,
+    },
+
     /// DI-12: D100 extended to the DAG's *implicit* fan-out — two
     /// top-level nodes with no dependency path between them can be
     /// `ready` together, and with `max_parallel_nodes > 1` they share
@@ -256,6 +274,8 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 
     check_parallel_scopes(&workflow.nodes, &mut errors);
     check_fanout_scopes(workflow, config, &mut errors);
+    check_fresh_context(&workflow.nodes, &mut errors);
+    check_yunta_schema(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -997,4 +1017,78 @@ fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
         }
     }
     None
+}
+
+/// DI-13: `fresh_context: false` names a capability (session resume,
+/// DI-23) that doesn't exist — error, never silent acceptance (A6).
+fn check_fresh_context(nodes: &[Node], errors: &mut Vec<CheckError>) {
+    for node in nodes {
+        if node.fresh_context == Some(false) {
+            errors.push(CheckError::FreshContextUnsupported {
+                node: node.id.clone(),
+            });
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_fresh_context(children, errors);
+        }
+    }
+}
+
+/// DI-13/§2.1: `yunta_schema` is a space-separated list of comparators
+/// over the schema major (`>=1 <2`, `=1`, `<3`…), all of which must
+/// hold for [`yunta_core::YUNTA_SCHEMA`]. Deliberately a ~20-line
+/// parser instead of a semver dependency: the schema version is one
+/// integer, and the small static binary is a product feature.
+fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let Some(range) = &workflow.yunta_schema else {
+        return;
+    };
+    match yunta_schema_satisfied(range, yunta_core::YUNTA_SCHEMA) {
+        Ok(true) => {}
+        Ok(false) => errors.push(CheckError::YuntaSchemaMismatch {
+            range: range.clone(),
+            detail: "this binary's schema is outside the required range".to_string(),
+            binary: yunta_core::YUNTA_SCHEMA,
+        }),
+        Err(detail) => errors.push(CheckError::YuntaSchemaMismatch {
+            range: range.clone(),
+            detail,
+            binary: yunta_core::YUNTA_SCHEMA,
+        }),
+    }
+}
+
+/// `Ok(bool)` = every comparator evaluated against `binary`; `Err` = the
+/// range doesn't parse. Empty ranges don't parse either — a declared
+/// requirement that constrains nothing is a typo, not a wildcard.
+fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
+    let mut any = false;
+    for comparator in range.split_whitespace() {
+        let (op, number) = comparator
+            .find(|c: char| c.is_ascii_digit())
+            .map(|i| comparator.split_at(i))
+            .ok_or_else(|| format!("comparator `{comparator}` has no version number"))?;
+        let number: u32 = number
+            .parse()
+            .map_err(|_| format!("`{number}` is not a whole schema version"))?;
+        let holds = match op {
+            ">=" => binary >= number,
+            "<=" => binary <= number,
+            ">" => binary > number,
+            "<" => binary < number,
+            "=" | "==" | "" => binary == number,
+            other => return Err(format!("unknown comparator `{other}`")),
+        };
+        any = true;
+        if !holds {
+            return Ok(false);
+        }
+    }
+    if !any {
+        return Err("the range is empty".to_string());
+    }
+    Ok(true)
 }

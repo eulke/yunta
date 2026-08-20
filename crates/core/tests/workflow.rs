@@ -884,3 +884,70 @@ nodes:
     let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
     assert!(workflow.inputs.is_empty());
 }
+
+// --- DI-13: reference-schema fields (interactive, fresh_context,
+// yunta_schema, skills, on_finish) --------------------------------------------
+
+#[test]
+fn the_reference_workflow_header_fields_round_trip() {
+    let yaml = r#"
+name: build-feature
+yunta_schema: ">=1 <2"
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    skills: [grill]
+    interactive: true
+    prompt: "Ask the questions."
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [grill]
+    fresh_context: true
+    until: all_tasks_complete
+    prompt: "Implement."
+on_finish:
+  - cleanup: worktree
+  - distill: [plan.yaml]
+"#;
+    let wf: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(wf.nodes[0].skills, vec!["grill"]);
+    assert_eq!(wf.nodes[0].interactive, Some(true));
+    assert_eq!(wf.nodes[1].fresh_context, Some(true));
+    assert_eq!(
+        wf.on_finish,
+        vec![
+            yunta_core::OnFinishStep::Cleanup {
+                cleanup: yunta_core::CleanupTarget::Worktree
+            },
+            yunta_core::OnFinishStep::Distill {
+                distill: vec!["plan.yaml".to_string()]
+            },
+        ]
+    );
+
+    // Round-trip: serialize and re-parse to the same tree.
+    let reserialized = serde_yaml::to_string(&wf).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(wf, reparsed);
+}
+
+#[test]
+fn node_defaults_can_declare_skills_for_every_node() {
+    let yaml = r#"
+name: defaults
+node_defaults:
+  skills: [conventions]
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#;
+    let wf: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(
+        wf.node_defaults.unwrap().skills,
+        vec!["conventions".to_string()]
+    );
+}

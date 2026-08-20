@@ -67,7 +67,10 @@ pub use verification_effectiveness::{
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
-pub use worktree::{prepare_worktree, release_worktree, WorktreeError, WorktreePrepared};
+pub use worktree::{
+    cleanup_worktree, prepare_worktree, release_worktree, WorktreeCleanup, WorktreeError,
+    WorktreePrepared,
+};
 
 /// Identifies this crate to integration tests elsewhere in the workspace.
 pub const CRATE_NAME: &str = "yunta-engine";

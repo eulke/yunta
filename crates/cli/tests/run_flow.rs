@@ -1572,3 +1572,56 @@ nodes:
         stdout(&resume)
     );
 }
+
+#[test]
+fn on_finish_cleanup_removes_the_worktree_and_keeps_the_run_dir() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: tidy
+nodes:
+  - id: fine
+    kind: bash
+    run: "true"
+on_finish:
+  - cleanup: worktree
+"#,
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let run_id = run_id_from(&run);
+
+    assert!(
+        !home.join("worktrees").join(&run_id).exists(),
+        "the declared cleanup must remove the run's worktree"
+    );
+    assert!(
+        home.join("runs")
+            .join(&run_id)
+            .join("manifest.yaml")
+            .exists(),
+        "run.dir stays — cleanup is about the checkout, never the audit trail"
+    );
+    // The run branch pointed at the base commit (nothing was committed),
+    // so `git branch -d` agreed to delete it.
+    let branches = std::process::Command::new("git")
+        .args(["branch", "--list", &format!("yunta/{run_id}")])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&branches.stdout).trim().is_empty(),
+        "a merged run branch is deleted"
+    );
+}
