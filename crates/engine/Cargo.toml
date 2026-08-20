@@ -54,9 +54,14 @@ regex = "1"
 # M8) is exactly this kind of boundary (CLAUDE.md's own "traits solo en
 # fronteras reales").
 async-trait = "0.1"
+# `stats::compute_run_stats` (T7.5, §8.4/§8.6) derives wall-clock and
+# blocked-time per node from `Event.timestamp` — already this exact
+# `chrono` version via `yunta-core`'s own dependency, promoted here from
+# dev-only now that production code (not just tests) needs to subtract
+# and format timestamps.
+chrono = "0.4"
 
 [dev-dependencies]
-chrono = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
 # Toy MCP server (T6.2's own ✓: "test contra server MCP de juguete") —

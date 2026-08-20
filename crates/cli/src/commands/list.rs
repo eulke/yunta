@@ -22,6 +22,16 @@ pub fn list_workflows() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // §8.6: best-effort — a project with no state root yet (never ran
+    // anything) simply shows no estimation, same as "fewer than three
+    // runs" does; neither is an error worth refusing the catalog over.
+    let history_source = project::resolve(&cwd).ok().and_then(|project| {
+        yunta_storage::Storage::open(&project.storage_path)
+            .ok()
+            .map(|storage| (project, storage))
+    });
+
     let workflows_dir = cwd.join(".yunta/workflows");
     let entries = match std::fs::read_dir(&workflows_dir) {
         Ok(entries) => entries,
@@ -85,6 +95,12 @@ pub fn list_workflows() -> ExitCode {
                     format!(" — {description}")
                 }
             );
+        }
+        if let Some((project, storage)) = &history_source {
+            let history = super::stats::collect_history(project, storage, &workflow.name);
+            if let Some(estimation) = yunta_engine::prior_estimation(&history) {
+                println!("  {}", super::stats::format_estimation_line(&estimation));
+            }
         }
     }
     ExitCode::SUCCESS

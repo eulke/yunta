@@ -99,6 +99,18 @@ enum Command {
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
     Test,
+    /// Shows verification cost stats: one run (`run_id`) or a workflow's
+    /// own history (`--workflow`), never both.
+    Stats {
+        /// The run id to inspect.
+        run_id: Option<String>,
+        /// Aggregates every past run of this workflow instead of one run.
+        #[arg(long, conflicts_with = "run_id")]
+        workflow: Option<String>,
+        /// Prints machine-readable JSON instead of the terminal view.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -146,6 +158,11 @@ async fn main() -> ExitCode {
         Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,
+        Some(Command::Stats {
+            run_id,
+            workflow,
+            json,
+        }) => commands::stats::stats(run_id.as_deref(), workflow.as_deref(), json),
     }
 }
 

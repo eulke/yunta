@@ -24,6 +24,7 @@ mod run;
 mod runner;
 mod scope;
 pub mod scope_expansion;
+mod stats;
 mod task_cycle;
 mod template;
 mod worktree;
@@ -43,6 +44,10 @@ pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{create_run, execute_run, RunError, RunReport, RunTerminal};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
+pub use stats::{
+    compute_run_stats, prior_estimation, run_summary, NodeStat, Percentiles, PriorEstimation,
+    RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
+};
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,
     PreCheckOutcome, TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,

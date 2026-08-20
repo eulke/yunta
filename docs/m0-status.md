@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.5 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -2183,6 +2183,113 @@ que aparece.
         query como digest, y confirmación de que `reasoning` nunca se
         expone. Sin smoke test manual — ver arriba.
 
+- [x] **T7.5 — `yunta stats <run_id>` y `--workflow X` (§8.4/§8.6, D77/D91).**
+      `crates/engine/src/stats.rs` (pura, sin IO) deriva todo del log +
+      workflow; `crates/cli/src/commands/stats.rs` hace el IO (leer
+      storage/manifest) y renderiza.
+      - **CPTV** (§8.4: tokens totales del run / tareas `done`) — la
+        implementación que ya existía en `run/mod.rs` (usada para
+        `RunFinished.metrics.cptv`) se movió tal cual a
+        `stats::cptv(&RunState)`, para que los dos call sites nunca
+        puedan desacordar.
+      - **Tasa de re-trabajo**: tokens de todo attempt con `attempt > 1`
+        (`NodeStartedPayload.attempt` ya distingue un primer intento de
+        un reintento o de la corrección de una re-ruta) sobre tokens
+        totales del run.
+      - **Tasa de cache**: `cached_input_tokens` sobre input total —
+        `None` (no "0%") si ningún adapter del run reportó la extensión
+        opcional, distinto de `Some(0.0)` si reportó y dio cero.
+      - **Costo por nodo y por rol**: sumado a través de todos los
+        attempts de cada nodo (no solo el último, a diferencia de
+        `NodeState` de `replay.rs`, que pisa con el attempt más
+        reciente); por rol agrupa por el último `runner_resolved.role`
+        visto para ese nodo. **Costo por modo no aplica dentro de un
+        run** — un run tiene un solo `mode` (M9/`modes:` no existe
+        todavía) — por eso vive en `--workflow`'s tabla comparativa, no
+        en `stats <run_id>`.
+      - **Tiempo de pared por nodo con fracción bloqueada**: `blocked`
+        = gap entre que un nodo queda listo (máximo de los timestamps
+        terminales de sus `depends_on`, o el primer evento del run si no
+        tiene dependencias) y su primer `node_started`; `active` = suma
+        de (terminal − started) de cada attempt. **Best-effort, no
+        replay del scheduler** — documentado explícitamente en el propio
+        doc del módulo: un hijo de `parallel` solo es tan preciso como
+        su propio `depends_on` declarado, sin simular semántica de join.
+        Es exactamente el insumo que A-08 pide (dato de wall-clock desde
+        `stats` como gatillo), no una verdad absoluta.
+      - **Visualización de terminal (D77)**: barras horizontales por
+        nodo y por rol, sparkline (8 niveles Unicode) de CPTV histórico
+        por workflow, tabla comparativa por modo — las tres, sin ANSI ni
+        color en absoluto (no solo "degradable sin color": no hay color
+        que degradar). Cada línea se construye con ancho fijo
+        (`BAR_WIDTH=20`, `LABEL_WIDTH=12`) para caber en 80 columnas;
+        verificado con un test end-to-end real contra el binario
+        compilado, no solo por inspección.
+      - **`--json`**: DTOs propios en el CLI (`RunStatsJson`,
+        `WorkflowHistoryJson`, etc.) en vez de derivar `Serialize`
+        directo sobre los tipos del engine — así la forma del JSON
+        (duraciones en segundos `f64`, no la forma de
+        `std::time::Duration`) es una decisión de presentación del CLI,
+        no una fuga del tipo interno del engine.
+      - **Estimación previa (§8.6/D91)**: mediana y p90 de tokens,
+        wall-clock y cantidad de tareas sobre el historial de runs del
+        mismo `workflow.name`, mostrada en `yunta run` (antes de crear
+        el run, con el historial de runs *anteriores* — el run que se
+        está por crear nunca se cuenta a sí mismo) y en `list_workflows`
+        (una línea por workflow catalogado). Percentil por
+        nearest-rank, determinista (sin interpolación) — necesario para
+        que el golden test sea reproducible. **Menos de 3 runs → no
+        dice nada en absoluto**, verificado con un test end-to-end que
+        corre el mismo workflow 4 veces y confirma que las corridas 1–3
+        no muestran estimación y la 4ª sí (con 3 corridas previas ya
+        terminadas).
+      - **`pricing:` (§8.4)**: campo nuevo en `ConfigLayer`
+        (`{model: cost_per_1k_tokens}`) — no estaba en el recorte de
+        T1.2, agregado ahora porque T7.5 es exactamente el consumidor
+        que el propio comentario de módulo de `config.rs` pedía antes de
+        construirlo. Sin `pricing:` declarado, todo queda en tokens y no
+        se inventa nada (I20). Con `pricing:` declarado, se agrega una
+        línea de estimado en moneda **además de** los tokens, nunca en
+        su lugar.
+      - **Deuda explícita — advertencia de presupuesto vs. p90 (§8.6)
+        no implementada.** El texto normativo dice "cuando el
+        presupuesto declarado queda por debajo del p90 histórico, el
+        engine advierte antes de gastar" — pero **no existe ningún
+        campo `limits:`/presupuesto declarable en el schema todavía**
+        (`Budget` en `yunta-adapters::session` existe como tipo pero
+        `node_exec.rs` lo construye siempre como `Budget::default()`;
+        `docs/eventos.md`/`config.rs` documentan `limits:` como
+        pendiente de T1.2 completo). Inventar un campo de schema no
+        pedido por ninguna tarea del plan para destrabar esto violaría
+        "scope chico y declarado". Gatillo: la tarea que introduzca
+        `limits:`/presupuesto declarable en el schema — ese día,
+        `stats`/`run` comparan el presupuesto contra
+        `PriorEstimation.tokens.p90` y emiten la advertencia.
+      - **`pricing:` con más de un modelo priceado**: la línea de moneda
+        promedia el costo-por-1k de todos los modelos declarados
+        (`sum/count`), documentado en el propio código como una
+        decisión explícita — no hay atribución de tokens a modelo
+        específico expuesta en `RunStats` hoy, así que promediar es
+        preferible a elegir arbitrariamente la primera entrada de un
+        `HashMap`. Si el atributo por-modelo llega a necesitarse, es una
+        extensión de `NodeStat`/`RunnerResolved` para rastrear qué
+        modelo corrió cada nodo, no un cambio de `stats.rs`.
+      - **Rendimiento de la verificación (§8.7/D93) — explícitamente
+        fuera de esta tarea.** El Plan lo separa en T7.10, no T7.5;
+        no se tocó nada de eso acá.
+      - Tests: 11 en `crates/engine/tests/stats.rs` (golden, sobre un
+        log fixture con un reintento y una re-ruta — construido a mano,
+        mismo estilo que `tests/progress.rs`) cubriendo CPTV, tasa de
+        re-trabajo, tasa de cache (con y sin reporte), tokens/attempts
+        por nodo, tiempo bloqueado, agrupación por rol, wall-clock total,
+        un nodo que nunca arrancó, estimación con <3 y con ≥3 runs, y que
+        `run_summary` reusa `compute_run_stats`. 4 tests end-to-end en
+        `crates/cli/tests/stats_cmd.rs` contra el binario real: ancho de
+        80 columnas + ausencia de códigos ANSI, la floor de 3 runs para
+        la estimación (en `run`, `list` y `stats --workflow` a la vez),
+        `stats --workflow` sin runs, y el error de `stats` sin
+        `run_id` ni `--workflow`.
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`
@@ -2352,3 +2459,11 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     un entorno con el binario y credenciales — y si algo del mapeo de
     sandbox o del parser resulta incorrecto, corregirlo ahí, no
     silenciosamente al pasar por otra tarea.
+12. **T7.5's advertencia de presupuesto vs. p90 histórico (§8.6), sin
+    implementar** — mismo gatillo que el ítem 8's `limits.max_tokens_per_run`:
+    no existe ningún campo de presupuesto declarable en el schema todavía
+    (`Budget` es un tipo del trait Adapter que `node_exec.rs` construye
+    siempre en blanco). El resto de §8.6 (mediana/p90 de tokens,
+    wall-clock y tareas, mostrado en `yunta run`/`list_workflows`, mudo
+    con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
+    la tarea que introduzca `limits:` en la config.

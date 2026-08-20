@@ -6,6 +6,7 @@ pub mod gc;
 pub mod list;
 pub mod resume;
 pub mod run;
+pub mod stats;
 pub mod status;
 pub mod test;
 

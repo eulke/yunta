@@ -47,6 +47,7 @@ use yunta_storage::{Storage, StorageError};
 use crate::human_interaction::HumanInteraction;
 use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
+use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 use schedule::ScheduleStep;
 
@@ -456,19 +457,4 @@ pub async fn execute_run(
             }
         }
     }
-}
-
-/// CPTV (§8.4): total run tokens / tasks done — `None` until at least
-/// one task is done, never a made-up number.
-fn cptv(state: &RunState) -> Option<f64> {
-    let done = state
-        .tasks
-        .values()
-        .filter(|status| matches!(status, yunta_core::events::TaskStatus::Done))
-        .count();
-    if done == 0 {
-        return None;
-    }
-    let total = state.total_tokens.input + state.total_tokens.output;
-    Some(total as f64 / done as f64)
 }

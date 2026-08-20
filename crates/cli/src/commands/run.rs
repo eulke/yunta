@@ -156,6 +156,14 @@ pub async fn run(
         }
     };
 
+    let storage = match Storage::open(&project.storage_path) {
+        Ok(storage) => storage,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
         Ok(w) => w,
         Err(code) => return code,
@@ -200,6 +208,13 @@ pub async fn run(
         }
     };
 
+    // §8.6: informative, never blocking — the history a run's own log
+    // will later join once it finishes.
+    let history = super::stats::collect_history(&project, &storage, &workflow.name);
+    if let Some(estimation) = yunta_engine::prior_estimation(&history) {
+        println!("{}", super::stats::format_estimation_line(&estimation));
+    }
+
     let run_id = RunId::from(format!(
         "run-{}-{}",
         chrono::Utc::now().format("%Y%m%d-%H%M%S"),
@@ -223,13 +238,6 @@ pub async fn run(
         return ExitCode::FAILURE;
     }
 
-    let storage = match Storage::open(&project.storage_path) {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
     let clock = SystemClock;
 
     let run_dir =

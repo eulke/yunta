@@ -300,6 +300,13 @@ pub struct ConfigLayer {
     pub skills: Option<SkillsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<PermissionsConfig>,
+    /// `pricing:` (§8.4, T7.5) — `{model: cost_per_1k_tokens}`, an
+    /// optional currency conversion `yunta stats` and the receipt add
+    /// *alongside* their token figures, never in place of them. Absent
+    /// means everything stays in tokens — the engine has no opinion of
+    /// its own on what a token costs, and never invents one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<HashMap<String, f64>>,
 }
 
 impl ConfigLayer {
@@ -354,6 +361,9 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
             more_specific.mcp_servers,
             |_base, more| more,
         ),
+        // Per-model, same as `mcp_servers`: a repo layer overriding one
+        // model's price doesn't discard the rest a user/org layer priced.
+        pricing: merge_maps(base.pricing, more_specific.pricing, |_base, more| more),
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
         project: merge_fields(base.project, more_specific.project, merge_project_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),
