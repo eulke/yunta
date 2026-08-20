@@ -3005,13 +3005,15 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    dispatch, y la cancelación del usuario deja nodos huérfanos que el
    resume re-trata por `on_interrupt` en vez de `node_failed`
    fabricados que lo dejarían sin salida.
-10. **Retención a nivel de base de datos (§8.3/T7.1's `gc`)**: `gc` borra
-    `run.dir`/worktree de runs terminales pasado `storage.retention_days`,
-    pero §8.3 también dice que el event log *base* se conserva según esa
-    misma config — implicando una purga de filas, no solo de archivos.
-    `yunta-storage` no expone ningún delete-events-older-than-X. Gatillo:
-    cuando el tamaño de la base de datos importe lo suficiente como para
-    justificar esa superficie nueva en el crate de storage.
+10. **Retención a nivel de base de datos ✓ (cerrado por DI-14)**:
+    `Storage::purge_run(run_id)` (un método, no un query language — D53)
+    y `gc` con orden de muerte explícito: primero `run.dir` (cuyo
+    `events.jsonl` exportado es la copia autocontenida), y las filas
+    recién en una corrida posterior, solo para runs cuyo run.dir ya no
+    existe — la DB jamás es la primera copia en morir. Un run no
+    terminal (pausado incluido) jamás se purga; un run purgado se lee
+    como "unknown", nunca como estado corrupto; `--dry-run` reporta
+    ambas fases.
 11. **T7.4's smoke test manual, sin correr** — el criterio de aceptación
     lo pide explícito y este sandbox no tiene el binario `codex` ni
     credenciales de OpenAI para cumplirlo (a diferencia de T7.3, que sí

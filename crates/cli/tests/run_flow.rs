@@ -1689,3 +1689,59 @@ on_finish:
         String::from_utf8_lossy(&second.stderr)
     );
 }
+
+#[test]
+fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: short\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+    let run_dir = home.join("runs").join(&run_id);
+    assert!(run_dir.exists());
+
+    // Pass 1: files die, rows survive — the DB is never first to go.
+    let first = yunta_in(&repo, &home, &["gc"]);
+    assert!(first.status.success());
+    assert!(!run_dir.exists(), "run.dir reclaimed: {}", stdout(&first));
+    // The rows survive pass 1 — `verify` (which needs only the DB)
+    // still walks the chain.
+    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    assert!(
+        verify.status.success() && stdout(&verify).contains("intact"),
+        "rows still readable after pass 1: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+
+    // Pass 2: the dir is gone, so the rows go now.
+    let second = yunta_in(&repo, &home, &["gc"]);
+    assert!(second.status.success());
+    assert!(
+        stdout(&second).contains("purged"),
+        "got: {}",
+        stdout(&second)
+    );
+
+    // A purged run reads back as unknown — never corrupt state.
+    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    assert!(!status.status.success());
+    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    assert!(!verify.status.success());
+    assert!(
+        String::from_utf8_lossy(&verify.stderr).contains("no events"),
+        "got: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+}

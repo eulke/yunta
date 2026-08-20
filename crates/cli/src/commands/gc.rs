@@ -10,15 +10,11 @@
 //! `gc` is the mechanism that eventually reclaims that disk, not
 //! `release_worktree` (a no-op for `Isolation::Worktree` by design).
 //!
-//! **Scope, named rather than silently narrower than §8.3's own text:**
-//! this command only ever touches the filesystem (`run.dir` and its
-//! worktree). §8.3 also says the base event log "se conserva según
-//! `storage.retention_days`" — implying the *database* rows have their
-//! own retention story — but `yunta-storage` exposes no
-//! delete-events-older-than-X call today, and inventing one as a side
-//! effect of a CLI command would be exactly the kind of debt CLAUDE.md
-//! asks not to smuggle in. The database's own retention consumer is
-//! still open; see `docs/m0-status.md`.
+//! Database retention (DI-14): the event-log rows have their own
+//! deadline per §8.3, with one explicit death order — run.dir (whose
+//! exported `events.jsonl` is the self-contained copy) dies first, rows
+//! die on a *later* gc pass, only for a run whose run.dir is already
+//! gone. The database is never the first copy of a run to die.
 
 use std::process::ExitCode;
 
@@ -97,8 +93,26 @@ pub fn gc(dry_run: bool) -> ExitCode {
             continue;
         }
 
-        if remove_run(&project, &run_id, dry_run) {
+        // DI-14's death order: files first, rows on a later pass. A run
+        // whose run.dir is already gone (a previous gc, or a human) has
+        // its rows purged now; one whose files still exist loses only
+        // the files this pass.
+        let run_dir = project.runs_root.join(run_id.as_str());
+        if run_dir.exists() {
+            if remove_run(&project, &run_id, dry_run) {
+                reclaimed += 1;
+            }
+        } else if dry_run {
+            println!("would purge {} event(s) for run {run_id}", events.len());
             reclaimed += 1;
+        } else {
+            match storage.purge_run(&run_id) {
+                Ok(purged) => {
+                    println!("purged {purged} event(s) for run {run_id}");
+                    reclaimed += 1;
+                }
+                Err(e) => eprintln!("warning: run `{run_id}`: {e}"),
+            }
         }
     }
 

@@ -279,3 +279,31 @@ fn verifying_an_unknown_run_is_an_error_not_a_vacuous_intact() {
     let (_dir, storage) = open_temp();
     assert!(storage.verify_chain(&RunId::from("run-ghost")).is_err());
 }
+
+// --- DI-14: database-level retention -----------------------------------------
+
+#[test]
+fn purge_run_removes_every_row_for_exactly_that_run() {
+    let (_dir, storage) = open_temp();
+    storage.append_event(&created_event("run-old")).unwrap();
+    storage
+        .append_event(&paused_event("run-old", "done"))
+        .unwrap();
+    storage.append_event(&created_event("run-live")).unwrap();
+
+    let purged = storage.purge_run(&RunId::from("run-old")).unwrap();
+    assert_eq!(purged, 2);
+
+    assert!(
+        storage
+            .events_for_run(&RunId::from("run-old"))
+            .unwrap()
+            .is_empty(),
+        "a purged run reads back as unknown, never as corrupt state"
+    );
+    assert_eq!(
+        storage.list_run_ids().unwrap(),
+        vec![RunId::from("run-live")],
+        "other runs' rows are untouched"
+    );
+}

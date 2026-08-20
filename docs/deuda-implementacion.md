@@ -717,7 +717,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **Dependencias:** DI-04 (gate interno) es parte de este cierre; DI-02
   consume `interactive`; DI-23 destraba `fresh_context: false`.
 
-### DI-14 — Retención a nivel de base de datos `[ ]`
+### DI-14 — Retención a nivel de base de datos `[x]`
 
 - **Origen:** T7.1 ("Pendiente explícito #10"): `gc` borra archivos pero
   §8.3 implica purga de filas del event log según `retention_days`.

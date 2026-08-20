@@ -406,6 +406,27 @@ impl Storage {
         Ok(events)
     }
 
+    /// DI-14/§8.3: deletes every row for `run_id` — the database side
+    /// of `storage.retention_days`. The one deliberate exception to the
+    /// append-only discipline, and the *caller* (`yunta gc`) owns the
+    /// safety rule: rows die only after the run.dir (whose exported
+    /// `events.jsonl` is the self-contained copy) is already gone — the
+    /// database is never the first copy to die. Returns how many rows
+    /// were removed.
+    pub fn purge_run(&self, run_id: &RunId) -> Result<usize> {
+        let conn = lock(&self.conn);
+        let removed = conn
+            .execute(
+                "DELETE FROM events WHERE run_id = ?1",
+                params![run_id.as_str()],
+            )
+            .map_err(|source| StorageError::Read {
+                run_id: run_id.clone(),
+                source,
+            })?;
+        Ok(removed)
+    }
+
     /// Every distinct `run_id` with at least one event, for `yunta run
     /// --runs` (T7.1) to enumerate.
     pub fn list_run_ids(&self) -> Result<Vec<RunId>> {
