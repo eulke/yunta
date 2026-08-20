@@ -61,6 +61,12 @@ fn the_reference_workflow_parses_and_round_trips() {
     let implement = &workflow.nodes[3];
     assert_eq!(implement.fresh_context, Some(true));
     assert!(implement.invariant);
+    let review = workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "review")
+        .unwrap();
+    assert_eq!(review.runners, vec!["reviewer", "reviewer-alt"]);
 
     let reserialized = serde_yaml::to_string(&workflow).unwrap();
     let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();

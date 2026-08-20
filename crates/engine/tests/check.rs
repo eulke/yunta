@@ -46,6 +46,8 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         interactive: None,
         fresh_context: None,
+        runners: Vec::new(),
+        agent: None,
     }
 }
 
@@ -70,6 +72,8 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         interactive: None,
         fresh_context: None,
+        runners: Vec::new(),
+        agent: None,
     }
 }
 
@@ -98,6 +102,8 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         skills: Vec::new(),
         interactive: None,
         fresh_context: None,
+        runners: Vec::new(),
+        agent: None,
     }
 }
 
@@ -130,6 +136,8 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         interactive: None,
         fresh_context: None,
+        runners: Vec::new(),
+        agent: None,
     }
 }
 
@@ -1129,4 +1137,53 @@ on_finish:
     let yaml_ok = yaml.replace(", ghost.md", "");
     let wf: Workflow = serde_yaml::from_str(&yaml_ok).unwrap();
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
+}
+
+// --- T9.4: fan-out declaration rules -----------------------------------------
+
+#[test]
+fn a_node_with_both_runner_and_runners_is_refused() {
+    let yaml = r#"
+name: conflicted
+nodes:
+  - id: review
+    kind: prompt
+    runner: reviewer
+    runners: [reviewer, reviewer-alt]
+    prompt: "Audit."
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::BothRunnerAndRunners { node } if node.as_str() == "review"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_reroute_targeting_a_fanout_node_is_refused() {
+    let yaml = r#"
+name: ambiguous
+nodes:
+  - id: lint
+    kind: bash
+    run: "true"
+    on_failure: { goto: review, max_reroutes: 1 }
+  - id: review
+    kind: prompt
+    runners: [reviewer, reviewer-alt]
+    prompt: "Audit."
+"#;
+    let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::FanOutTarget { target, .. } if target.as_str() == "review"
+        )),
+        "got: {errors:?}"
+    );
 }

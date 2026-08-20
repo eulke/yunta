@@ -33,6 +33,8 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         interactive: None,
         fresh_context: None,
+        runners: Vec::new(),
+        agent: None,
     }
 }
 

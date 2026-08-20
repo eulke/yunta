@@ -484,6 +484,28 @@ fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
     Hooks { before, after }
 }
 
+/// T9.4: the declared artifact names re-render with the node's own
+/// template vars (`{{runner.role}}` above all), so each fan-out sibling
+/// declares — and verifies — its own file. Nodes without templates in
+/// their names come back unchanged.
+fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, String> {
+    if node.artifacts.is_none() {
+        return Ok(node.clone());
+    }
+    let vars = template_vars(ctx, node);
+    let mut rendered = node.clone();
+    if let Some(artifacts) = &mut rendered.artifacts {
+        for spec in &mut artifacts.produces {
+            let name = match spec {
+                yunta_core::ArtifactSpec::Plain(name) => name,
+                yunta_core::ArtifactSpec::Typed { name, .. } => name,
+            };
+            *name = render_template(name, &vars).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(rendered)
+}
+
 /// Runs after-hooks, then verifies scope and artifacts — the close
 /// sequence every successful node body goes through (§11.1's order:
 /// session → after → verificación).
@@ -540,6 +562,14 @@ pub(super) async fn close_node(
         .limits
         .as_ref()
         .and_then(|limits| limits.max_artifact_bytes);
+    // T9.4: artifact names are templates too (`findings-{{runner.role}}`
+    // in the reference workflow) — rendered per node so every fan-out
+    // sibling verifies its own file.
+    let node_rendered = match render_artifact_names(ctx, node) {
+        Ok(rendered) => rendered,
+        Err(detail) => return fail_with_tokens(ctx, node, detail, false, tokens),
+    };
+    let node = &node_rendered;
     match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
         Ok(verified) => {
             // §4.1/T5.14/DI-02: a `kind: questions` artifact's own
@@ -892,15 +922,45 @@ pub(super) fn resolve_node_runner(
         ctx.adapters.contains_key(adapter)
     }) {
         Ok(resolved) => {
+            let mut chosen = resolved.chosen.clone();
+            // §13.3/T9.4: the node's own `agent:` wins over the
+            // candidate's.
+            if let Some(agent) = &node.agent {
+                chosen.agent = Some(agent.clone());
+            }
+            // A6: an adapter without `custom_agents` fails the node
+            // rather than silently dropping the requested agent.
+            if chosen.agent.is_some() {
+                let has_custom_agents = ctx
+                    .adapters
+                    .get(&chosen.adapter)
+                    .is_some_and(|adapter| adapter.capabilities().custom_agents);
+                if !has_custom_agents {
+                    let end = fail(
+                        ctx,
+                        node,
+                        format!(
+                            "node `{}` requests agent `{}` but adapter `{}` does not declare \
+                             `custom_agents` — pick a candidate on an adapter that does, or \
+                             drop the agent",
+                            node.id,
+                            chosen.agent.as_deref().unwrap_or(""),
+                            chosen.adapter
+                        ),
+                        false,
+                    )?;
+                    return Ok(Err(end));
+                }
+            }
             ctx.emit(
                 Some(&node.id),
                 EventPayload::RunnerResolved(RunnerResolvedPayload {
                     role: resolved.role.clone(),
-                    chosen: resolved.chosen.clone(),
+                    chosen: chosen.clone(),
                     discarded: resolved.discarded.clone(),
                 }),
             )?;
-            Ok(Ok(resolved.chosen))
+            Ok(Ok(chosen))
         }
         Err(e) => {
             let end = fail(ctx, node, e.to_string(), false)?;

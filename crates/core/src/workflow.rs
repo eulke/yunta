@@ -165,6 +165,17 @@ pub struct Node {
     pub scope: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
+    /// `runners: [role, role]` (§13.2, T9.4) — static fan-out: the
+    /// manifest expands this node into one `<id>@<role>` node per role
+    /// before anything runs. Mutually exclusive with `runner:` (check).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runners: Vec<String>,
+    /// `agent:` at node level (§13.3, D37) — overrides the resolved
+    /// candidate's own agent for this node. Portable field: each
+    /// adapter maps it to its native mechanism, and one without
+    /// `custom_agents` fails the node rather than silently ignoring it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Artifacts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,9 +1,6 @@
 # The canonical reference workflow (Notion: "Config y workflows de
 # referencia", Contrato v0.5) as a parse fixture — DI-13's T1.1
-# round-trip criterion. Documented delta from the Notion text: the
-# `review` node's multi-runner fan-out (`runners: [reviewer,
-# reviewer-alt]`) is T9.4's schema and is written here as a single
-# `runner:` until that task lands — marked, never silently dropped.
+# round-trip criterion, complete since T9.4 landed `runners:`.
 name: build-feature
 description: Feature completa con grill, ledger verificado, review multi-runner y PR
 yunta_schema: ">=1 <2"
@@ -98,7 +95,7 @@ nodes:
   - id: review
     kind: prompt
     depends_on: [tests]
-    runner: reviewer
+    runners: [reviewer, reviewer-alt]
     permissions: read-only
     prompt: "Auditá los cambios; hallazgos a {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
     artifacts:

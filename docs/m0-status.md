@@ -2640,7 +2640,7 @@ que aparece.
         --workflow`/`--json` sin romper ninguno de los dos; menos de 3
         corridas no muestra nada).
 
-## M9 — Modos, promoción y composición (parcial: T9.1–T9.2)
+## M9 — Modos, promoción y composición (parcial: T9.1–T9.2, T9.4)
 
 - [x] **T9.1 — Modos abiertos (§10.1, D44).** `modes:` no existía en
       absoluto en el schema hasta ahora — el propio `Workflow` de M-0/M7
@@ -2820,6 +2820,27 @@ que aparece.
         punta contra git real, sucesor creado y corrido, artifact real
         heredado, cadena auditada en el `run_created.promoted_from` del
         sucesor y el `promotion_signaled` del padre).
+
+- [x] **T9.4 — Fan-out `runners:` (§13.2) + `agent:` a nivel nodo
+      (§13.3, D37).** Expansión **estática en el manifest**
+      (`expand_runner_fanout`, antes de las dependencias implícitas):
+      un nodo con `runners: [a, b]` se vuelve `<id>@a` y `<id>@b`, cada
+      uno con su `runner:` propio — visibles en `status` sin que el
+      scheduler sepa nada de fan-out. Todo lo que referenciaba el id
+      original sigue la expansión: `depends_on` aguas abajo se recablea
+      a todos los hermanos y las listas `include:` de modos los nombran
+      a todos. Re-rutas, `on:` de gates y referencias de contexto
+      `artifact:` sobre un nodo fan-out son error de `check`
+      (`FanOutTarget` — no hay "volver a review" inequívoco cuando
+      review son varios nodos); `runner:` + `runners:` juntos también
+      (`BothRunnerAndRunners`). Los nombres de artifacts se re-renderizan
+      por nodo (`findings-{{runner.role}}.yaml` produce un archivo por
+      hermano). `agent:` a nivel nodo pisa el del candidato del runner;
+      un adapter sin `custom_agents` falla el nodo con mensaje accionable
+      en vez de ignorarlo (A6). El fixture de referencia
+      `build-feature.yaml` ahora usa el `runners: [reviewer,
+      reviewer-alt]` literal de la doc — su último delta marcado quedó
+      cerrado.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

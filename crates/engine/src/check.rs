@@ -79,6 +79,20 @@ pub enum CheckError {
         on_failure: yunta_core::DefaultOnFailure,
     },
 
+    /// T9.4: `runner:` and `runners:` on one node is a contradiction,
+    /// not a merge.
+    #[error("node `{node}` declares both `runner:` and `runners:` — use exactly one")]
+    BothRunnerAndRunners { node: NodeId },
+
+    /// T9.4: once `review` is many nodes there is no unambiguous
+    /// "return control to review" — a re-route, gate `on:` or context
+    /// artifact reference must name a specific node.
+    #[error(
+        "node `{node}` targets `{target}`, which is a `runners:` fan-out — target one of its \
+         expanded nodes (`{target}@<role>`) or a non-fan-out node"
+    )]
+    FanOutTarget { node: NodeId, target: NodeId },
+
     /// DI-24: `on_finish.distill` names a path no node declares
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
@@ -280,10 +294,14 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     // expands the same way), never a narrower one that misses a cycle
     // formed only through context references.
     let mut workflow = workflow.clone();
+    let mut errors = Vec::new();
+    // T9.4: fan-out declarations validate on the *original* shape (the
+    // rules are about the declaration itself), then the graph expands so
+    // every later rule sees what will actually run.
+    check_runner_fanout(&workflow, &mut errors);
+    crate::manifest::expand_runner_fanout(&mut workflow);
     crate::manifest::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
-
-    let mut errors = Vec::new();
 
     // Global, not per-group: replay derives node state from one flat
     // NodeId -> NodeState map (I2), so a `parallel` child's id colliding
@@ -1178,4 +1196,53 @@ fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {
             }
         }
     }
+}
+
+/// T9.4's declaration rules, checked before expansion.
+fn check_runner_fanout(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let fanout_ids: HashSet<&NodeId> = workflow
+        .nodes
+        .iter()
+        .filter(|node| !node.runners.is_empty())
+        .map(|node| &node.id)
+        .collect();
+    for node in &workflow.nodes {
+        if !node.runners.is_empty() && node.runner.is_some() {
+            errors.push(CheckError::BothRunnerAndRunners {
+                node: node.id.clone(),
+            });
+        }
+        if let Some(on_failure) = &node.on_failure {
+            if fanout_ids.contains(&on_failure.goto) {
+                errors.push(CheckError::FanOutTarget {
+                    node: node.id.clone(),
+                    target: on_failure.goto.clone(),
+                });
+            }
+        }
+        if let NodeKind::Gate { on, .. } = &node.kind {
+            for target in on.values() {
+                if fanout_ids.contains(target) {
+                    errors.push(CheckError::FanOutTarget {
+                        node: node.id.clone(),
+                        target: target.clone(),
+                    });
+                }
+            }
+        }
+        for spec in &node.context {
+            if let yunta_core::ContextSpec::Artifact { artifact } = spec {
+                if fanout_ids.contains(&artifact.node) {
+                    errors.push(CheckError::FanOutTarget {
+                        node: node.id.clone(),
+                        target: artifact.node.clone(),
+                    });
+                }
+            }
+        }
+    }
+    // An explicit `runners: []` parses identically to an absent field
+    // (Vec + serde default), so it degrades to the ordinary
+    // no-runner-declared path — reported there, never silently special-
+    // cased here.
 }

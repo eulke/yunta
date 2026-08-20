@@ -390,3 +390,81 @@ fn a_provided_input_value_freezes_into_the_manifest() {
         Some("build a thing")
     );
 }
+
+// --- T9.4: `runners:` fan-out expands statically in the manifest -------------
+
+#[test]
+fn a_runners_fanout_node_expands_into_one_node_per_role() {
+    let yaml = r#"
+name: fanout
+modes:
+  quick: { include: [work, review] }
+  full: { include: all }
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+  - id: review
+    kind: prompt
+    runners: [reviewer, reviewer-alt]
+    depends_on: [work]
+    prompt: "Audit as {{runner.role}}."
+  - id: ship
+    kind: bash
+    depends_on: [review]
+    run: "true"
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(
+        "runners:\n  reviewer:\n    - { adapter: mock, model: m }\n  reviewer-alt:\n    - { adapter: mock, model: m }\n",
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let manifest = yunta_engine::build_manifest(
+        &workflow,
+        &config,
+        dir.path(),
+        dir.path(),
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let ids: Vec<&str> = manifest
+        .workflow
+        .nodes
+        .iter()
+        .map(|n| n.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["work", "review@reviewer", "review@reviewer-alt", "ship"]
+    );
+
+    let expanded = &manifest.workflow.nodes[1];
+    assert_eq!(expanded.runner.as_deref(), Some("reviewer"));
+    assert!(expanded.runners.is_empty());
+
+    // Downstream dependencies rewire onto every expanded sibling.
+    let ship = manifest
+        .workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "ship")
+        .unwrap();
+    let deps: Vec<&str> = ship.depends_on.iter().map(|d| d.as_str()).collect();
+    assert_eq!(deps, vec!["review@reviewer", "review@reviewer-alt"]);
+
+    // Mode include lists rewrite too — `quick` still covers the review.
+    let quick = &manifest.workflow.modes.as_ref().unwrap()["quick"];
+    match &quick.include {
+        yunta_core::ModeInclude::Nodes(nodes) => {
+            let names: Vec<&str> = nodes.iter().map(|n| n.as_str()).collect();
+            assert_eq!(
+                names,
+                vec!["work", "review@reviewer", "review@reviewer-alt"]
+            );
+        }
+        other => panic!("got {other:?}"),
+    }
+}

@@ -5437,3 +5437,89 @@ sessions:
         "the consumer session only matches if the distilled content reached its prompt"
     );
 }
+
+// --- T9.4: runners fan-out end-to-end + node-level agent ---------------------
+
+#[tokio::test]
+async fn a_fanout_review_runs_one_session_per_role_with_rendered_artifacts() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: fanout
+nodes:
+  - id: review
+    kind: prompt
+    runners: [reviewer, reviewer-alt]
+    prompt: "Audit as {{runner.role}}; write {{run.dir}}/artifacts/findings-{{runner.role}}.md"
+    artifacts:
+      produces: ["findings-{{runner.role}}.md"]
+"#;
+    let config = r#"
+runners:
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }
+"#;
+    let artifacts = bench.run_dir().join("artifacts");
+    let fixture = format!(
+        r#"
+sessions:
+  - match_prompt_contains: "Audit as reviewer;"
+    effects:
+      - {{ path: "{artifacts}/findings-reviewer.md", content: "r1\n" }}
+    outcome: {{ type: completed, summary: "reviewed" }}
+  - match_prompt_contains: "Audit as reviewer-alt"
+    effects:
+      - {{ path: "{artifacts}/findings-reviewer-alt.md", content: "r2\n" }}
+    outcome: {{ type: completed, summary: "reviewed-alt" }}
+"#,
+        artifacts = artifacts.display()
+    );
+
+    let (terminal, state) = bench.run_with_config(workflow, &fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    for node in ["review@reviewer", "review@reviewer-alt"] {
+        assert!(
+            matches!(
+                state.nodes.get(&node.into()),
+                Some(NodeState::Finished { .. })
+            ),
+            "node `{node}` should be finished, got {:?}",
+            state.nodes.get(&node.into())
+        );
+    }
+    // The templated artifact names rendered per expanded node.
+    assert!(artifacts.join("findings-reviewer.md").exists());
+    assert!(artifacts.join("findings-reviewer-alt.md").exists());
+}
+
+#[tokio::test]
+async fn a_node_level_agent_overrides_the_runner_candidate_s_agent() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: agent-override
+nodes:
+  - id: audit
+    kind: prompt
+    runner: reviewer
+    agent: security-auditor
+    prompt: "Audit."
+"#;
+    let config = r#"
+runners:
+  reviewer:
+    - { adapter: mock, model: mock-model, agent: benito }
+"#;
+    let fixture = r#"
+capabilities: { custom_agents: true }
+sessions:
+  - outcome: { type: completed, summary: "audited" }
+"#;
+    let (terminal, _, adapter) = run_with_recording_mock(&bench, workflow, fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        adapter.agents_seen(),
+        vec![Some("security-auditor".to_string())],
+        "the node's own agent wins over the candidate's (§13.3)"
+    );
+}

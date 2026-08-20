@@ -38,6 +38,9 @@ pub struct MockAdapter {
     /// mock's "native mount" is recording what it was asked to mount,
     /// so engine tests assert the whole resolution chain without a CLI.
     skills_seen: Mutex<Vec<Vec<std::path::PathBuf>>>,
+    /// Every `spawn()`'s `req.agent`, in claim order (T9.4/A8) — same
+    /// record-the-mount principle as `skills_seen`.
+    agents_seen: Mutex<Vec<Option<String>>>,
 }
 
 impl MockAdapter {
@@ -47,7 +50,16 @@ impl MockAdapter {
             fixture,
             consumed,
             skills_seen: Mutex::new(Vec::new()),
+            agents_seen: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The `agent` of every session spawned so far, in claim order.
+    pub fn agents_seen(&self) -> Vec<Option<String>> {
+        self.agents_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// The `skills` of every session spawned so far, in claim order.
@@ -113,6 +125,10 @@ impl Adapter for MockAdapter {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(req.skills.clone());
+        self.agents_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req.agent.clone());
         let index = {
             let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
             let claim = self
