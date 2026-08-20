@@ -3338,3 +3338,47 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     wall-clock y tareas, mostrado en `yunta run`/`list_workflows`, mudo
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
+
+## M10 — Empaquetado y docs (en progreso: T10.1)
+
+- [~] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
+      escribe un workflow de tres nodos a mano antes de mencionar packs,
+      tabla de comandos, ciclo de vida del run) y `docs/guide.md` (nodos,
+      `context:`, permisos, hooks, modos, gates, MCP, y los dos patrones
+      de primera clase que pide D64: granularidad de criterios y cachés
+      de build compartidas entre worktrees — esta última documenta el
+      mecanismo real que `yunta init` ya sugiere por ecosistema
+      (`CARGO_TARGET_DIR`, caché de npm, etc.), no uno inventado). La
+      guía también resuelve P-04/P-05 (posturas cerradas: `include:` de
+      modos solo nombra nodos top-level, convención de paths de
+      artifacts en gates externos) — documentadas, no re-abiertas.
+      Verificado contra el binario real, no solo leído: cada comando del
+      quickstart se corrió (con `mock` vía `yunta test`, o con
+      `claude-code` real cuando hacía falta ejercitar una sesión de
+      verdad) antes de darlo por válido.
+  - **Bug de producto encontrado verificando el quickstart, DI-29
+    (cerrado):** el propio ejemplo `lint → fix-lint` del §11.2 —
+    exactamente el patrón "innegociable" de M-0 y el criterio de
+    aceptación de T4.4 — resultó no estar realmente probado en el caso
+    que importa. Un nodo destino de `on_failure.goto` (o de un `on:` de
+    gate) que no declara `depends_on` propio — la forma que el propio
+    Contrato ejemplifica ("existe solo para esto") — corría en **toda**
+    corrida, fallara o no el nodo que se suponía debía corregir: el
+    scheduler no distinguía "nodo sin dependencias porque es raíz" de
+    "nodo sin dependencias porque solo debe correr vía re-ruta". Se
+    detectó con un `yunta test` en rojo (mock, sin gastar tokens) y se
+    confirmó además con Claude Code real durante la propia verificación
+    del quickstart: `fix-lint` abrió sesión y editó 14 archivos fuera de
+    `scope` con `lint` ya en verde. Cerrado test-first en
+    `schedule.rs`: un destino de re-ruta se excluye del batch genérico
+    solo si además de no declarar `depends_on` propio, ningún otro nodo
+    lo nombra en el suyo (la señal real es "nodo aislado, fuera del
+    camino principal" — no "sin `depends_on`", que también describe la
+    raíz legítima del DAG). Detalle completo en `deuda-implementacion.md`.
+- [ ] **T10.2 — Packs de fábrica** (`yunta/starter`, `yunta/fragua`) —
+      pendiente; depende de mecanismo de pack (M11) para "instalable, no
+      embebido" en sentido estricto — a scopear.
+- [ ] **T10.3 — Release** (binario musl, instalador, `doctor` primero) —
+      pendiente.
+- [ ] **T10.4 — Verified Work Receipt** (`yunta receipt`) — pendiente.
+- [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — pendiente.
