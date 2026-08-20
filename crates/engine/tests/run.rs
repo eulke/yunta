@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, NodeState, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, NoInteraction, NodeState, RunTerminal,
+    DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -134,6 +135,56 @@ impl Bench {
             &self.storage,
             &FixedClock,
             DEFAULT_MAX_RETRIES,
+            &NoInteraction,
+        )
+        .await
+        .unwrap();
+        (report.terminal, report.state)
+    }
+
+    /// Same as [`Bench::run`] but with a caller-chosen
+    /// [`yunta_engine::HumanInteraction`] — for T7.2 tests that need to
+    /// script a gate's resolution instead of always degrading to pause.
+    async fn run_with_interaction(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        human_interaction: &dyn yunta_engine::HumanInteraction,
+    ) -> (RunTerminal, yunta_engine::RunState) {
+        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let manifest = build_manifest(
+            &workflow,
+            &config,
+            &self.worktree,
+            &self.worktree,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        let run_dir = create_run(
+            &self.run_id,
+            &manifest,
+            &self.runs_root,
+            &self.storage,
+            &FixedClock,
+        )
+        .unwrap();
+
+        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
+        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".to_string(), Arc::new(adapter));
+
+        let report = execute_run(
+            &self.run_id,
+            &manifest,
+            &run_dir,
+            &self.worktree,
+            &adapters,
+            &self.storage,
+            &FixedClock,
+            DEFAULT_MAX_RETRIES,
+            human_interaction,
         )
         .await
         .unwrap();
@@ -385,6 +436,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -704,6 +756,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -725,6 +778,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -805,6 +859,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -860,6 +915,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -929,6 +985,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -1007,6 +1064,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -1260,6 +1318,7 @@ nodes:
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -2409,6 +2468,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &bench.storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();
@@ -3527,5 +3587,146 @@ async fn requesting_the_org_knowledge_layer_fails_the_node_naming_the_layer_not_
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+// --- T7.2: HumanInteraction — gates (§5.3) ----------------------------------
+
+struct ScriptedInteraction {
+    resolution: yunta_core::events::GateResolvedPayload,
+}
+
+#[async_trait::async_trait]
+impl yunta_engine::HumanInteraction for ScriptedInteraction {
+    async fn resolve(
+        &self,
+        _escalation: &yunta_core::events::GateWaitingPayload,
+    ) -> Option<yunta_core::events::GateResolvedPayload> {
+        Some(self.resolution.clone())
+    }
+}
+
+/// A never-refuses `on_failure.goto` corrective node whose *second*
+/// attempt actually fixes what its first attempt didn't — so a human
+/// authorizing exactly one extra retry at the exhausted-reroutes gate is
+/// what turns this workflow from perpetually failing into finished.
+const HOPELESS_UNTIL_RETRIED_WORKFLOW: &str = r#"
+name: hopeless-until-retried
+nodes:
+  - id: lint
+    kind: bash
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+  - id: fix-lint
+    kind: prompt
+    runner: executor
+    prompt: "Try to fix it."
+"#;
+
+const HOPELESS_UNTIL_RETRIED_FIXTURE: &str = r#"
+sessions:
+  - outcome: { type: completed, summary: "did nothing useful" }
+  - effects:
+      - { path: fixed.txt, content: "fixed" }
+    outcome: { type: completed, summary: "actually fixed it this time" }
+"#;
+
+#[tokio::test]
+async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_finish() {
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction {
+        resolution: yunta_core::events::GateResolvedPayload {
+            chosen_option: Some("retry".to_string()),
+            resolved_by: Some("eulke".to_string()),
+            free_text: None,
+        },
+    };
+
+    let (terminal, state) = bench
+        .run_with_interaction(
+            HOPELESS_UNTIL_RETRIED_WORKFLOW,
+            HOPELESS_UNTIL_RETRIED_FIXTURE,
+            &interaction,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"lint".into()),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let reroutes = events
+        .iter()
+        .filter(|e| matches!(e.payload, yunta_core::events::EventPayload::NodeRerouted(_)))
+        .count();
+    assert_eq!(
+        reroutes, 2,
+        "the automatic reroute plus the gate-authorized one"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::GateWaiting(_))),
+        "the escalation itself must be on the log, not just its resolution"
+    );
+    let resolved = events.iter().find_map(|e| match &e.payload {
+        yunta_core::events::EventPayload::GateResolved(p) => Some(p),
+        _ => None,
+    });
+    assert_eq!(
+        resolved.and_then(|p| p.chosen_option.as_deref()),
+        Some("retry")
+    );
+}
+
+#[tokio::test]
+async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction {
+        resolution: yunta_core::events::GateResolvedPayload {
+            chosen_option: Some("abort".to_string()),
+            resolved_by: Some("eulke".to_string()),
+            free_text: Some("not worth chasing today".to_string()),
+        },
+    };
+
+    let (terminal, _) = bench
+        .run_with_interaction(
+            HOPELESS_UNTIL_RETRIED_WORKFLOW,
+            HOPELESS_UNTIL_RETRIED_FIXTURE,
+            &interaction,
+        )
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("abort"), "got: {reason}");
+            assert!(reason.contains("not worth chasing today"), "got: {reason}");
+        }
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before_t7_2() {
+    // Regression: `NoInteraction` (what every other test in this suite
+    // already uses) must reproduce the pre-T7.2 pause behavior byte for
+    // byte — a gate existing must never change what an unattended run
+    // does.
+    let bench = Bench::new();
+    let (terminal, _) = bench
+        .run(
+            HOPELESS_UNTIL_RETRIED_WORKFLOW,
+            HOPELESS_UNTIL_RETRIED_FIXTURE,
+        )
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("re-route"), "got: {reason}");
+        }
+        other => panic!("expected Paused, got {other:?}"),
     }
 }

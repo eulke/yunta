@@ -38,12 +38,13 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::Adapter;
 use yunta_core::events::{
-    Event, EventPayload, NodeReroutedPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics,
-    RunPausedPayload, RunResumedPayload, TerminalState,
+    Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload, RunCreatedPayload,
+    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
 };
 use yunta_core::{Clock, Manifest, NodeId, RunId, YuntaError};
 use yunta_storage::{Storage, StorageError};
 
+use crate::human_interaction::HumanInteraction;
 use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::{Memo, TaskCycleError};
@@ -230,6 +231,7 @@ pub async fn execute_run(
     storage: &Storage,
     clock: &dyn Clock,
     max_task_retries: u32,
+    human_interaction: &dyn HumanInteraction,
 ) -> Result<RunReport, RunError> {
     let ctx = RunCtx {
         run_id,
@@ -329,6 +331,96 @@ pub async fn execute_run(
                         max_reroutes,
                     }),
                 )?;
+            }
+            ScheduleStep::GateExhaustedReroutes {
+                node,
+                goto,
+                max_reroutes,
+                cause,
+            } => {
+                // T7.2/§5.3: the engine assembles the escalation (summary
+                // + mechanical evidence from the log) — never the node
+                // that failed, which has no further say once it's
+                // failed. `retry`/`abort` are exactly the two well-
+                // defined outcomes at this pause: try the same
+                // corrective node once more (human-authorized, since the
+                // declared cap is spent), or stop here.
+                let escalation = GateWaitingPayload {
+                    summary: format!(
+                        "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` \
+                         are exhausted: {cause}"
+                    ),
+                    evidence: cause.clone(),
+                    options: vec![
+                        GateOption {
+                            id: "retry".to_string(),
+                            label: format!("Re-route to `{goto}` once more"),
+                            tradeoff: format!(
+                                "Uses one extra correction attempt beyond the declared \
+                                 max_reroutes ({max_reroutes}); escalates again if `{goto}` \
+                                 doesn't fix it"
+                            ),
+                        },
+                        GateOption {
+                            id: "abort".to_string(),
+                            label: "Abort the run".to_string(),
+                            tradeoff: "Stops here; nothing further executes".to_string(),
+                        },
+                    ],
+                };
+                let resolution = human_interaction.resolve(&escalation).await;
+                let Some(resolution) = resolution else {
+                    // No live surface to ask (headless, no TTY, `yunta
+                    // test`) — the pre-T7.2 behavior: pause and let a
+                    // later `yunta resume` (or a future MCP client)
+                    // carry the decision instead.
+                    ctx.emit(
+                        None,
+                        EventPayload::RunPaused(RunPausedPayload {
+                            reason: escalation.summary.clone(),
+                        }),
+                    )?;
+                    ctx.export_events_jsonl()?;
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Paused {
+                            reason: escalation.summary,
+                        },
+                        state: derive(&ctx.load_events()?),
+                    });
+                };
+                ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))?;
+                ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))?;
+                if resolution.chosen_option.as_deref() == Some("retry") {
+                    ctx.emit(
+                        Some(&node),
+                        EventPayload::NodeRerouted(NodeReroutedPayload {
+                            to_node: goto,
+                            cause,
+                            attempt: max_reroutes + 1,
+                            max_reroutes,
+                        }),
+                    )?;
+                } else {
+                    let reason = format!(
+                        "node `{node}`'s gate was resolved to abort{}",
+                        resolution
+                            .free_text
+                            .as_deref()
+                            .map(|text| format!(": {text}"))
+                            .unwrap_or_default()
+                    );
+                    ctx.emit(
+                        None,
+                        EventPayload::RunPaused(RunPausedPayload {
+                            reason: reason.clone(),
+                        }),
+                    )?;
+                    ctx.export_events_jsonl()?;
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Paused { reason },
+                        state: derive(&ctx.load_events()?),
+                    });
+                }
             }
             ScheduleStep::Execute(batch) => {
                 // A batch runs to completion together (every member reaches

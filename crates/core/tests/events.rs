@@ -138,7 +138,8 @@ fn all_kinds() -> Vec<EventPayload> {
             summary: "Ready to open the PR?".to_string(),
             evidence: "all criteria green".to_string(),
             options: vec![GateOption {
-                option: "approve".to_string(),
+                id: "approve".to_string(),
+                label: "Approve and open the PR".to_string(),
                 tradeoff: "opens the PR now".to_string(),
             }],
         }),

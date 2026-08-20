@@ -43,6 +43,19 @@ pub enum ScheduleStep {
     Pause {
         reason: String,
     },
+    /// A node's re-routes are exhausted (§11.2) — the one pause this
+    /// recorte gives real options for, since "retry the same
+    /// destination once more" and "abort" are both well-defined here
+    /// (unlike a plain failure with no `on_failure` at all, which stays
+    /// `Pause`). The imperative shell builds the actual
+    /// `GateWaitingPayload` from these facts and asks `HumanInteraction`
+    /// (T7.2) — this function stays a pure read of the log, no I/O.
+    GateExhaustedReroutes {
+        node: NodeId,
+        goto: NodeId,
+        max_reroutes: u32,
+        cause: String,
+    },
     Finish,
     Broken {
         diagnostic: String,
@@ -171,11 +184,11 @@ pub fn next_step(
                             cause: outcome.clone(),
                         };
                     }
-                    return ScheduleStep::Pause {
-                        reason: format!(
-                            "node `{}` failed and its {} re-route(s) to `{}` are exhausted: {outcome}",
-                            node.id, on_failure.max_reroutes, on_failure.goto
-                        ),
+                    return ScheduleStep::GateExhaustedReroutes {
+                        node: node.id.clone(),
+                        goto: on_failure.goto.clone(),
+                        max_reroutes: on_failure.max_reroutes,
+                        cause: outcome.clone(),
                     };
                 }
                 return ScheduleStep::Pause {

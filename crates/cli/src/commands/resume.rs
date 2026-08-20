@@ -78,6 +78,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
         &storage,
         &SystemClock,
         DEFAULT_MAX_RETRIES,
+        &crate::human_interaction::ConsoleInteraction,
     )
     .await;
 

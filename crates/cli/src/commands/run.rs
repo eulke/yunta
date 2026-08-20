@@ -259,6 +259,7 @@ pub async fn run(
         &storage,
         &clock,
         DEFAULT_MAX_RETRIES,
+        &crate::human_interaction::ConsoleInteraction,
     )
     .await;
 

@@ -6,6 +6,7 @@
 
 mod commands;
 mod graph;
+mod human_interaction;
 mod project;
 
 use std::path::{Path, PathBuf};

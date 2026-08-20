@@ -19,7 +19,9 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, McpServerConfig, RunId, Workflow};
-use yunta_engine::{build_manifest, create_run, execute_run, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{
+    build_manifest, create_run, execute_run, NoInteraction, RunTerminal, DEFAULT_MAX_RETRIES,
+};
 use yunta_storage::Storage;
 
 struct FixedClock;
@@ -163,6 +165,7 @@ async fn run_with_config(
         &storage,
         &FixedClock,
         DEFAULT_MAX_RETRIES,
+        &NoInteraction,
     )
     .await
     .unwrap();

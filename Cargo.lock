@@ -2404,6 +2404,7 @@ dependencies = [
 name = "yunta"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "clap",
  "serde",
@@ -2451,6 +2452,7 @@ dependencies = [
 name = "yunta-engine"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "chrono",
  "futures",

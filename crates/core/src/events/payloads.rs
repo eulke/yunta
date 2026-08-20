@@ -87,9 +87,15 @@ pub enum HookPhase {
     After,
 }
 
+/// One choice in a gate's escalation (§5.3): `id` is what
+/// `GateResolvedPayload.chosen_option` names back, `label` is the
+/// human-facing text, `tradeoff` is mandatory — "las que amplían trabajo
+/// lo declaran" (§5.3's own text; there is no variant of this type that
+/// can omit it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateOption {
-    pub option: String,
+    pub id: String,
+    pub label: String,
     pub tradeoff: String,
 }
 

@@ -5,10 +5,15 @@
 //! `yunta resume` alike. It tracks what M-0's schema can actually produce
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
 //! and task status (`task_registered`/`task_status_changed`) — plus the
-//! running token total. Budgets beyond token counting and gates are not
-//! derived yet: nothing emits a `gate_waiting`/`gate_resolved` pair until
-//! `kind: gate` exists (M5/T7.2), and presupuesto enforcement beyond
-//! tokens is T3.3. Extend this the day those events actually appear.
+//! running token total. Budgets beyond token counting aren't derived yet
+//! (presupuesto enforcement beyond tokens is T3.3). `gate_waiting`/
+//! `gate_resolved` do have an emitter since T7.2 (the one real gate
+//! this recorte has, exhausted re-routes, §11.2) but still nothing to
+//! derive: both events are emitted together, synchronously, inside the
+//! same `execute_run` call that resolved them — there is no "waiting on
+//! a gate" state that outlives one invocation for `RunState` to expose.
+//! That changes once a gate can be resolved from a separate invocation
+//! (M8's `resolve_gate`) — extend this the day that's true.
 //!
 //! A log that is insufficient or inconsistent — e.g. `node_finished` for a
 //! node that was never `node_started` — marks the result `broken` with a
@@ -168,11 +173,12 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
         // agent_session_opened, agent_message,
         // context_assembled, criteria_checked, scope_checked, scope
         // expansion, hook_executed, node_rerouted, promotion_signaled,
-        // capability_degraded, run_paused/resumed/finished), or belongs to
-        // schema M-0 doesn't have yet (gate_waiting/resolved, loop_iteration
-        // beyond what tasks already cover, questions_answered,
-        // child_run_*). Nothing to derive from them until their own task
-        // adds the state they'd feed.
+        // capability_degraded, run_paused/resumed/finished), has an emitter
+        // but nothing yet to derive from it (gate_waiting/resolved — see
+        // this module's own doc comment on why), or belongs to schema M-0
+        // doesn't have yet (loop_iteration beyond what tasks already cover,
+        // questions_answered, child_run_*). Nothing to derive from any of
+        // them until their own task adds the state they'd feed.
         _ => Ok(()),
     }
 }

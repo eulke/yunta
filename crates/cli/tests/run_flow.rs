@@ -903,6 +903,49 @@ nodes:
 }
 
 #[test]
+fn a_gate_with_stdin_not_a_tty_pauses_instead_of_hanging() {
+    // T7.2/§4.1: "sin TTY... nunca cuelga" — a `yunta run` whose stdin
+    // isn't a terminal (exactly `cargo test`'s own usual case, made
+    // explicit here with `Stdio::null()` so this doesn't depend on
+    // whatever stdin the test binary itself happened to inherit) must
+    // degrade to pausing at a gate, never sit waiting for a keystroke
+    // nobody can send it.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: hopeless
+nodes:
+  - id: lint
+    kind: bash
+    run: "test -f never-created.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+  - id: fix-lint
+    kind: bash
+    depends_on: []
+    run: "true"
+"#,
+    );
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("failed to run the yunta binary");
+
+    assert!(!output.status.success());
+    let text = stdout(&output);
+    assert!(text.contains("paused"), "got: {text}");
+}
+
+#[test]
 fn run_follow_prints_progress_while_the_run_is_still_in_progress() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");

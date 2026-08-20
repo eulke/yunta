@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (parcial: T7.1–T7.2 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -1990,6 +1990,88 @@ que aparece.
         resumen normativo; `run --follow` imprimiendo al menos una línea
         en curso antes de la línea final).
 
+- [x] **T7.2 — Gates: trait `HumanInteraction` + render en consola del
+      objeto de escalación (§5.3).** `GateWaitingPayload`/`GateOption`/
+      `GateResolvedPayload` ya existían como tipos de evento desde T2.2,
+      sin emisor ni consumidor (`docs/m0-status.md`'s propia entrada de
+      T2.3 lo nombraba explícito) — T7.2 es ese primer emisor/consumidor,
+      no un tipo nuevo.
+      - **`GateOption` corregido a `{id, label, tradeoff}`.** La versión
+        de T2.2 (`{option, tradeoff}`) conflaba identidad y texto — §5.3
+        los separa (`id: add-store` vs. `label: "Add an in-memory
+        session store"`) porque `chosen_option` necesita nombrar algo
+        estable, no el texto que un futuro cambio de copy podría romper.
+        Sin uso real hasta ahora (T2.2 lo dejó explícito: "nada los
+        emite todavía"), así que corregirlo no rompe nada existente —
+        exactamente el momento correcto para arreglarlo, antes de que
+        algo dependa de la forma vieja.
+      - **`HumanInteraction` en `yunta-engine`, la implementación de
+        consola en `yunta-cli` (A1).** Un trait, un método
+        (`resolve(&self, &GateWaitingPayload) -> Option<GateResolvedPayload>`),
+        dyn-safe vía `async-trait` — mismo patrón ya justificado para
+        `Adapter`/`AgentSession`. Los mismos tipos de evento son el
+        objeto que se renderiza: no hay una versión "de runtime" y otra
+        "de log" que puedan divergir — es lo que hace cierto "el mismo
+        objeto se renderiza en toda superficie" sin escribirlo dos
+        veces. `NoInteraction` (siempre `None`) es la implementación por
+        defecto — `yunta test`, los tests del engine y cualquier run
+        headless nunca tienen a quién preguntarle.
+      - **`None` no es un error — es "no hay superficie viva ahora".**
+        `ConsoleInteraction::resolve` chequea `stdin().is_terminal()`
+        antes de imprimir nada; sin TTY, `None` inmediato. El llamador
+        (`execute_run`) degrada exactamente al comportamiento pre-T7.2:
+        pausa citando la escalación, para que `yunta resume` (o, cuando
+        exista, un cliente MCP) la resuelva después. Mismo principio que
+        `kind: questions` (§4.1) ya aplicaba — "sin TTY... nunca
+        cuelga" — aplicado acá por primera vez a una escalación real en
+        vez de solo documentado como ausente.
+      - **Único gate real de este recorte: re-rutas agotadas (§11.2).**
+        Es la única pausa existente con dos desenlaces genuinamente bien
+        definidos — reintentar el mismo `goto` una vez más (autorizado
+        por el humano, más allá del `max_reroutes` declarado) o abortar
+        — a diferencia de una falla plana sin `on_failure` (sigue siendo
+        `ScheduleStep::Pause` liso, sin opciones que inventar). La
+        función de `schedule.rs` sigue siendo pura: devuelve los hechos
+        (`GateExhaustedReroutes { node, goto, max_reroutes, cause }`), y
+        es `run/mod.rs` — la cáscara imperativa — quien arma el
+        `GateWaitingPayload` y llama a `human_interaction.resolve`.
+      - **"retry" reutiliza el mismo mecanismo de re-ruta automática**:
+        emite un `node_rerouted` más (attempt = max_reroutes + 1) hacia
+        el mismo `goto` — nada nuevo que el scheduler tenga que aprender
+        a interpretar. Si el nodo corrector vuelve a fallar, el mismo
+        gate se dispara de nuevo (correcto: la autorización es "una vez
+        más", no "levantar el techo para siempre"). "abort" pausa el
+        run citando la decisión y el `free_text`, si lo hay.
+      - **Consola: dos preguntas, nunca una que mezcle ambas cosas.**
+        Primero un id de opción válido (repregunta ante cualquier otro
+        valor, nunca asume), después una línea de texto libre opcional
+        — separado así porque §5.3 dice que `free_text` "siempre
+        existe" además del menú, no en su lugar; mezclarlas hubiera
+        hecho ambiguo qué significa una respuesta que no calza con
+        ningún id.
+      - **`kind: questions` sigue sin superficie interactiva — deuda ya
+        nombrada, no nueva.** El propio comentario de T5.14 en
+        `node_exec.rs` decía "T7.1/T7.2/T8.x, none built yet"; T7.2 solo
+        construyó el trait para el caso de gates. Retrofitear
+        `questions` a `HumanInteraction` es un cambio real (su propio
+        ciclo cierra sesión antes de renderizar nada, §5.14) que
+        CLAUDE.md pide no colar de paso — queda con el mismo gatillo que
+        ya tenía.
+      - **MCP (`resolve_gate`, M8) no se construyó** — el diseño (un
+        trait, un objeto) es lo que garantiza que, cuando M8 lo agregue,
+        no haya lógica de gate duplicada que reconciliar; construirlo
+        ahora sería adelantar M8 sin que exista el servidor MCP por-run
+        (T8.1) que lo expondría.
+      - Tests: 3 end-to-end en `crates/engine/tests/run.rs` (un
+        `HumanInteraction` de prueba resuelto a "retry" re-rutea al nodo
+        indicado y el run llega a `Finished`, con `gate_waiting` y
+        `gate_resolved` en el log; resuelto a "abort" pausa citando la
+        decisión y el `free_text`; `NoInteraction` reproduce el pausado
+        de antes de T7.2 byte a byte — test de regresión explícito) + 1
+        en `crates/cli/tests/run_flow.rs` (`yunta run` con stdin
+        explícitamente no-TTY, vía `Stdio::null()`, pausa en vez de
+        colgarse).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`
@@ -2087,11 +2169,19 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
 4. **Reglas de `yunta check` diferidas de T1.3**: coherencia de modos, scopes
    disjuntos en `parallel`/`inherit`, templates, profundidad/aciclicidad del grafo
    de workflows, techos de `permissions`, warning de push directo a la rama base.
-5. **Event kinds sin consumidor en replay (T2.3)**: `gate_waiting`/`gate_resolved`,
-   `questions_answered`, `finding_posted`, `child_run_*`, ampliación de scope,
-   `promotion_signaled` — existen como tipos (T2.2) pero `derive()` los ignora
-   porque nada los emite todavía. Sumarlos a `RunState` cuando su schema/ciclo
-   llegue (gates: M5/T7.2; composición: M9; findings: T5.12).
+5. **Event kinds sin consumidor en replay (T2.3)**: `questions_answered`,
+   `finding_posted`, `child_run_*`, ampliación de scope, `promotion_signaled`
+   — existen como tipos (T2.2) pero `derive()` los ignora porque nada los
+   emite todavía. Sumarlos a `RunState` cuando su schema/ciclo llegue
+   (composición: M9; findings: T5.12). **`gate_waiting`/`gate_resolved` —
+   parcial desde T7.2**: ahora tienen emisor (el único gate real de este
+   recorte, re-rutas agotadas — sección M7), pero siguen sin entrar a
+   `RunState`: la resolución es síncrona dentro del mismo `execute_run`
+   (ambos eventos se emiten juntos, nunca uno sin el otro en el log), así
+   que hoy no existe un estado "esperando gate" que sobreviva entre
+   invocaciones para que `derive()` necesite exponer. Eso cambia si M8's
+   `resolve_gate` permite resolver un gate desde una invocación separada
+   — ese es el gatillo real para sumarlo a `RunState`.
 6. **T1.5 — hecho.** Ver la sección M7 más abajo. El gatillo previsto acá
    ("cuando algo necesite inputs reales") terminó siendo `--input` de T7.1,
    no el workflow de bootstrap.

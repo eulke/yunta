@@ -47,6 +47,13 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # workspace validates a user-supplied regex against a string; nothing
 # already in the dependency tree exposes that.
 regex = "1"
+# `HumanInteraction` (T7.2, §5.3) needs a dyn-safe async trait method,
+# same reason `yunta-adapters`'s own `Adapter`/`AgentSession` already use
+# this — not a new idiom to the workspace, just the same one crossing
+# into engine because a gate's resolution surface (console today, MCP at
+# M8) is exactly this kind of boundary (CLAUDE.md's own "traits solo en
+# fronteras reales").
+async-trait = "0.1"
 
 [dev-dependencies]
 chrono = "0.4"

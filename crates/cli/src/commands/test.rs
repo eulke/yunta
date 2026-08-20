@@ -188,6 +188,8 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
 
     yunta_engine::create_run(&run_id, &manifest, &runs_root, &storage, &SystemClock)
         .map_err(|e| e.to_string())?;
+    // A test case's every session comes from a scripted fixture — a
+    // gate here has no human to ask, same as it has no LLM to call.
     let report = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -197,6 +199,7 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
         &storage,
         &SystemClock,
         DEFAULT_MAX_RETRIES,
+        &yunta_engine::NoInteraction,
     )
     .await
     .map_err(|e| e.to_string())?;
