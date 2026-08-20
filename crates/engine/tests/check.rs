@@ -69,6 +69,43 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
     }
 }
 
+fn gate(id: &str, depends_on: &[&str]) -> Node {
+    Node {
+        id: id.into(),
+        kind: NodeKind::Gate {
+            assignee: "reviewer".to_string(),
+            external: yunta_core::ExternalGate {
+                kind: yunta_core::ForgeKind::PullRequest,
+                artifacts: vec!["spec.md".to_string()],
+                branch: "{{run.branch}}".to_string(),
+            },
+        },
+        depends_on: depends_on.iter().map(|&d| d.into()).collect(),
+        scope: Vec::new(),
+        runner: None,
+        artifacts: None,
+        hooks: None,
+        on_failure: None,
+        on_interrupt: None,
+        description: None,
+        permissions: None,
+        network: None,
+        context: Vec::new(),
+    }
+}
+
+fn config_with_forge() -> ConfigLayer {
+    ConfigLayer {
+        forge: Some(yunta_core::ForgeConfig {
+            github: Some(yunta_core::GitHubForgeConfig {
+                repo: "acme/demo".to_string(),
+                token_env: "GITHUB_TOKEN".to_string(),
+            }),
+        }),
+        ..Default::default()
+    }
+}
+
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
@@ -216,6 +253,41 @@ fn runner_declared_with_zero_candidates_is_reported() {
     assert!(errors.contains(&CheckError::RunnerHasNoCandidates {
         node: "plan".into(),
         runner: "planner".to_string(),
+    }));
+}
+
+#[test]
+fn external_gate_without_forge_configured_is_rejected() {
+    let wf = workflow(vec![gate("approve", &[])]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::ExternalGateWithoutForge {
+        node: "approve".into(),
+    }));
+}
+
+#[test]
+fn external_gate_with_forge_configured_is_accepted() {
+    let wf = workflow(vec![gate("approve", &[])]);
+    let errors = check(&wf, &config_with_forge());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::ExternalGateWithoutForge { .. })),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_gate_cannot_be_a_parallel_child() {
+    let wf = workflow(vec![parallel(
+        "group",
+        JoinPolicy::All,
+        vec![gate("approve", &[])],
+    )]);
+    let errors = check(&wf, &config_with_forge());
+    assert!(errors.contains(&CheckError::GateInsideParallel {
+        node: "approve".into(),
+        group: "group".into(),
     }));
 }
 

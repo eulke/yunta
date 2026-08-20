@@ -19,7 +19,7 @@
 //! (T5.10), both separate mechanisms per §5.5/§5.8.
 
 use yunta_core::events::{Event, EventPayload};
-use yunta_core::{Node, NodeId, OnInterrupt, Workflow};
+use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::replay::{derive, NodeState};
 
@@ -56,10 +56,56 @@ pub enum ScheduleStep {
         max_reroutes: u32,
         cause: String,
     },
+    /// A `kind: gate` node is ready and has never been published (§5.6,
+    /// T7.7) — the imperative shell commits its declared artifacts,
+    /// opens the PR (or degrades to console without a forge), and
+    /// pauses. One at a time, same reasoning as `GateExhaustedReroutes`:
+    /// publishing is I/O this pure function only decides is needed.
+    PublishGate {
+        node: NodeId,
+    },
+    /// A `kind: gate` node has already been published and isn't
+    /// resolved yet (or its prior approval needs re-checking against
+    /// the PR's current head, T7.7's SHA-drift case) — the imperative
+    /// shell polls the forge and maps aprobado/cambios/cerrado/pendiente
+    /// (§5.6). `external_ref` is the forge's own handle, carried
+    /// forward from this node's last `gate_waiting` event so the
+    /// imperative shell never needs to re-derive it itself.
+    PollGate {
+        node: NodeId,
+        external_ref: String,
+    },
     Finish,
     Broken {
         diagnostic: String,
     },
+}
+
+/// Whether `node`'s `kind` is `gate` — the one kind whose "ready"/
+/// "orphaned" handling never goes through the generic `Execute` path
+/// (§5.6, T7.7): its resolution is a forge round-trip, not a session.
+fn is_gate(node: &Node) -> bool {
+    matches!(node.kind, NodeKind::Gate { .. })
+}
+
+/// The `external_ref` (forge handle) from this node's last `gate_waiting`
+/// — `None` only if it was never published, which callers only reach
+/// this for after confirming otherwise.
+fn last_external_ref(events: &[Event], node_id: &NodeId) -> Option<String> {
+    events.iter().rev().find_map(|e| match &e.payload {
+        EventPayload::GateWaiting(p) if e.node_id.as_ref() == Some(node_id) => {
+            p.external_ref.clone()
+        }
+        _ => None,
+    })
+}
+
+/// Whether `node_id` has ever been published (§5.6) — a `gate_waiting`
+/// on the log for it, regardless of resolution.
+fn was_published(events: &[Event], node_id: &NodeId) -> bool {
+    events.iter().any(|e| {
+        matches!(&e.payload, EventPayload::GateWaiting(_)) && e.node_id.as_ref() == Some(node_id)
+    })
 }
 
 /// Per-node bookkeeping that plain final state can't answer: how many
@@ -112,6 +158,24 @@ pub fn next_step(
     let history = history; // read-only from here
     let hist = |id: &NodeId| history.get(id).cloned().unwrap_or_default();
 
+    // 0. A `Running` gate node is never a crash orphan (§8.1's
+    //    `on_interrupt` is about session-crash uncertainty, which a gate
+    //    has none of — it isn't a session). It only reaches `Running`
+    //    via T7.7's own SHA-drift recheck (re-opening a stale approval,
+    //    the imperative shell's own doing, before this function ever
+    //    runs) — resolve it the same way as any other unresolved,
+    //    already-published gate: poll again.
+    if let Some(node) = workflow.nodes.iter().find(|node| {
+        is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
+    }) {
+        if let Some(external_ref) = last_external_ref(events, &node.id) {
+            return ScheduleStep::PollGate {
+                node: node.id.clone(),
+                external_ref,
+            };
+        }
+    }
+
     // 1. Every orphaned `running` node (crash/Ctrl-C with no terminal
     //    event) is resolved per its own `on_interrupt` (§8.1, D99): a node
     //    with no override inherits `default_on_interrupt`. Any orphan
@@ -121,10 +185,13 @@ pub fn next_step(
     //    whole, not node by node. Orphans that DO restart go together,
     //    already committed to running concurrently before the crash, so
     //    capacity doesn't retroactively apply to how many come back.
+    //    Gate nodes never reach here (handled in section 0 above).
     let orphaned: Vec<&Node> = workflow
         .nodes
         .iter()
-        .filter(|node| matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. })))
+        .filter(|node| {
+            !is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
+        })
         .collect();
     if !orphaned.is_empty() {
         let resolved = |node: &Node| node.on_interrupt.unwrap_or(default_on_interrupt);
@@ -222,13 +289,47 @@ pub fn next_step(
     }
 
     // 3. Fresh nodes whose dependencies are all finished, up to capacity.
+    //    A ready `kind: gate` is never batched with ordinary nodes — its
+    //    resolution is a forge round-trip, one at a time, same as
+    //    section 0/1's own gate handling (§5.6, T7.7).
+    for node in &workflow.nodes {
+        if !is_gate(node) || state.nodes.contains_key(&node.id) {
+            continue;
+        }
+        let deps_finished = node
+            .depends_on
+            .iter()
+            .all(|dep| matches!(state.nodes.get(dep), Some(NodeState::Finished { .. })));
+        if !deps_finished {
+            continue;
+        }
+        return if was_published(events, &node.id) {
+            match last_external_ref(events, &node.id) {
+                Some(external_ref) => ScheduleStep::PollGate {
+                    node: node.id.clone(),
+                    external_ref,
+                },
+                // Published but the reference wasn't recorded (shouldn't
+                // happen for a log this function itself would have
+                // written) — republish rather than get stuck.
+                None => ScheduleStep::PublishGate {
+                    node: node.id.clone(),
+                },
+            }
+        } else {
+            ScheduleStep::PublishGate {
+                node: node.id.clone(),
+            }
+        };
+    }
+
     let mut batch = Vec::new();
     for node in &workflow.nodes {
         if batch.len() >= capacity {
             break;
         }
-        if state.nodes.contains_key(&node.id) {
-            continue; // finished, or failed-and-handled-above
+        if state.nodes.contains_key(&node.id) || is_gate(node) {
+            continue; // finished, failed-and-handled-above, or a gate (handled above)
         }
         let deps_finished = node
             .depends_on

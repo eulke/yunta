@@ -46,6 +46,29 @@ pub struct McpServerConfig {
     pub auth_env: Option<String>,
 }
 
+/// `forge:` (§5.6, D66, T7.7) — the team's forge, so `check` can tell a
+/// `kind: gate` with `external:` apart from one with nowhere to
+/// actually publish. GitHub only in v1, same "closed enum over an open
+/// abstraction" stance `ForgeKind` takes on the workflow side — a
+/// second forge is a new field here, not a schema break. `token_env`
+/// names an env var, never carries the token itself (I12/O3, same
+/// convention as `McpServerConfig::auth_env`); its absence at *runtime*
+/// (not at `check` time — see [`GitHubForgeConfig`]) is exactly what
+/// makes person B's machine work with no credentials at all (D66):
+/// degrade to console, don't refuse to exist.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ForgeConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<GitHubForgeConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitHubForgeConfig {
+    /// `owner/name`.
+    pub repo: String,
+    pub token_env: String,
+}
+
 /// Adapter-specific settings that have a portable expression (D29): for
 /// now just a binary path override, matching the reference config.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -307,6 +330,8 @@ pub struct ConfigLayer {
     /// its own on what a token costs, and never invents one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pricing: Option<HashMap<String, f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge: Option<ForgeConfig>,
 }
 
 impl ConfigLayer {
@@ -364,6 +389,9 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         // Per-model, same as `mcp_servers`: a repo layer overriding one
         // model's price doesn't discard the rest a user/org layer priced.
         pricing: merge_maps(base.pricing, more_specific.pricing, |_base, more| more),
+        // Whole-group replace, same as `baseline`/`coverage`: one forge
+        // per repo in practice, nothing internal to merge field-by-field.
+        forge: more_specific.forge.or(base.forge),
         storage: merge_fields(base.storage, more_specific.storage, merge_storage_config),
         project: merge_fields(base.project, more_specific.project, merge_project_config),
         paths: merge_fields(base.paths, more_specific.paths, merge_paths_config),

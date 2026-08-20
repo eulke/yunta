@@ -142,11 +142,13 @@ fn all_kinds() -> Vec<EventPayload> {
                 label: "Approve and open the PR".to_string(),
                 tradeoff: "opens the PR now".to_string(),
             }],
+            external_ref: Some("https://github.com/example/repo/pull/1".to_string()),
         }),
         EventPayload::GateResolved(GateResolvedPayload {
             chosen_option: Some("approve".to_string()),
             resolved_by: Some("eulke".to_string()),
             free_text: None,
+            approved_sha: Some("deadbeef".to_string()),
         }),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: "sha256:333".to_string(),

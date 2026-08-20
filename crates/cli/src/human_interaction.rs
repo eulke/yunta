@@ -73,6 +73,7 @@ impl HumanInteraction for ConsoleInteraction {
             chosen_option: Some(chosen_option),
             resolved_by: std::env::var("USER").ok(),
             free_text: (!free_text.is_empty()).then(|| free_text.to_string()),
+            approved_sha: None,
         })
     }
 }

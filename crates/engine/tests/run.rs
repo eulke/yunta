@@ -136,6 +136,7 @@ impl Bench {
             &FixedClock,
             DEFAULT_MAX_RETRIES,
             &NoInteraction,
+            None,
         )
         .await
         .unwrap();
@@ -185,6 +186,7 @@ impl Bench {
             &FixedClock,
             DEFAULT_MAX_RETRIES,
             human_interaction,
+            None,
         )
         .await
         .unwrap();
@@ -437,6 +439,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -757,6 +760,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -779,6 +783,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -860,6 +865,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -916,6 +922,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -986,6 +993,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -1065,6 +1073,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -1319,6 +1328,7 @@ nodes:
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -2469,6 +2479,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();
@@ -3639,6 +3650,7 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
             chosen_option: Some("retry".to_string()),
             resolved_by: Some("eulke".to_string()),
             free_text: None,
+            approved_sha: None,
         },
     };
 
@@ -3689,6 +3701,7 @@ async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
             chosen_option: Some("abort".to_string()),
             resolved_by: Some("eulke".to_string()),
             free_text: Some("not worth chasing today".to_string()),
+            approved_sha: None,
         },
     };
 

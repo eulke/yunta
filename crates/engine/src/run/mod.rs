@@ -26,6 +26,7 @@
 mod check_exec;
 mod context_resolve;
 mod executor_exec;
+mod gate_exec;
 mod loop_exec;
 mod node_exec;
 mod schedule;
@@ -36,7 +37,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::Adapter;
+use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
     Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload, RunCreatedPayload,
     RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
@@ -233,6 +234,7 @@ pub async fn execute_run(
     clock: &dyn Clock,
     max_task_retries: u32,
     human_interaction: &dyn HumanInteraction,
+    forge: Option<&dyn Forge>,
 ) -> Result<RunReport, RunError> {
     let ctx = RunCtx {
         run_id,
@@ -273,6 +275,16 @@ pub async fn execute_run(
             }),
         )?;
     }
+
+    // §5.6/T7.7: "al despertar" means once per invocation, not once per
+    // scheduling iteration — checked here, before the loop, so both the
+    // very first `yunta run` call and every later `yunta resume` do this
+    // exactly once. Placed *after* the "already `run_finished`" early
+    // return above, deliberately: a genuinely finished run is immutable
+    // (I2/§2 — nothing reopens it, ever), so a stale approval only
+    // matters, and is only ever rechecked, while the run still has
+    // unresolved work of its own keeping it open.
+    gate_exec::recheck_approved_gates(&ctx, forge).await?;
 
     loop {
         let events = ctx.load_events()?;
@@ -368,6 +380,7 @@ pub async fn execute_run(
                             tradeoff: "Stops here; nothing further executes".to_string(),
                         },
                     ],
+                    external_ref: None,
                 };
                 let resolution = human_interaction.resolve(&escalation).await;
                 let Some(resolution) = resolution else {
@@ -455,6 +468,59 @@ pub async fn execute_run(
                     result?;
                 }
             }
+            ScheduleStep::PublishGate { node } => {
+                let node = find_node(&manifest.workflow, &node)?;
+                let yunta_core::NodeKind::Gate { assignee, external } = &node.kind else {
+                    return Err(RunError::Broken {
+                        diagnostic: format!(
+                            "scheduler chose node `{}` as a gate to publish, but its kind isn't `gate`",
+                            node.id
+                        ),
+                    });
+                };
+                let step = gate_exec::publish_gate(
+                    &ctx,
+                    node,
+                    assignee,
+                    external,
+                    forge,
+                    human_interaction,
+                )
+                .await?;
+                if let gate_exec::GateStep::StillWaiting { reason } = step {
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Paused { reason },
+                        state: derive(&ctx.load_events()?),
+                    });
+                }
+            }
+            ScheduleStep::PollGate { node, external_ref } => {
+                let node = find_node(&manifest.workflow, &node)?;
+                let step =
+                    gate_exec::poll_gate(&ctx, node, &external_ref, forge, human_interaction)
+                        .await?;
+                if let gate_exec::GateStep::StillWaiting { reason } = step {
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Paused { reason },
+                        state: derive(&ctx.load_events()?),
+                    });
+                }
+            }
         }
     }
+}
+
+fn find_node<'a>(
+    workflow: &'a yunta_core::Workflow,
+    node_id: &NodeId,
+) -> Result<&'a yunta_core::Node, RunError> {
+    workflow
+        .nodes
+        .iter()
+        .find(|n| &n.id == node_id)
+        .ok_or_else(|| RunError::Broken {
+            diagnostic: format!(
+                "scheduler chose node `{node_id}` which the manifest's workflow does not define"
+            ),
+        })
 }

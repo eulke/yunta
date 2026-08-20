@@ -370,6 +370,15 @@ pub struct GateWaitingPayload {
     pub summary: String,
     pub evidence: String,
     pub options: Vec<GateOption>,
+    /// The forge's own handle for this gate (§5.6, T7.7) — a PR URL,
+    /// today — `None` for the internal escalation case (exhausted
+    /// re-routes, T7.2) this payload already covered before external
+    /// gates existed. Round-trips the forge's `PublishedGate` through
+    /// the log so a later `poll` (from a completely different process,
+    /// §5.6's own "consulta al despertar") knows what to poll without
+    /// re-publishing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -380,6 +389,12 @@ pub struct GateResolvedPayload {
     pub resolved_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free_text: Option<String>,
+    /// The commit SHA the forge's approval covered (§5.6, T7.7) —
+    /// `None` for the internal escalation case, which has no SHA to
+    /// speak of. What a later drift check compares against the PR's
+    /// current head to decide whether the approval still holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_sha: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

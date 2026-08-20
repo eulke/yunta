@@ -348,6 +348,48 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u64>,
     },
+    /// A human decision resolved outside this process (§5.6, D66) — v1's
+    /// only shape is `external: {kind: pull_request, ...}`: the engine
+    /// delegates the multi-person substrate (identity, permissions,
+    /// notifications) to the team's forge instead of building `serve`
+    /// early. `external` is required, not optional: a `kind: gate` with
+    /// no forge behind it isn't defined by any task yet, so this schema
+    /// claims only what §5.6 actually specifies — the internal
+    /// escalation object (§5.3, T7.2's `HumanInteraction`) already
+    /// covers the in-process case (exhausted re-routes today) without
+    /// needing this node kind at all.
+    Gate {
+        /// Who the escalation names — mirrors §5.3's own audience
+        /// concept, resolved by a human on the forge rather than read
+        /// back through this process's stdin.
+        assignee: String,
+        external: ExternalGate,
+    },
+}
+
+/// `kind: gate`'s `external:` block (§5.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExternalGate {
+    pub kind: ForgeKind,
+    /// Paths (relative to `run.dir`) committed to `branch` for review —
+    /// §5.6's own example: `[spec.md]`.
+    pub artifacts: Vec<String>,
+    /// Template-rendered branch name the artifacts are pushed to and the
+    /// PR is opened from (`{{run.branch}}`, §5.6's own example, resolves
+    /// to `yunta/<run_id>` — a fresh push target, not necessarily the
+    /// worktree's own local checkout branch, since `isolation: none`
+    /// never creates one).
+    pub branch: String,
+}
+
+/// The only forge integration v1 has — kept as a closed enum (not a
+/// bare string) so a second one lands as a new variant with exhaustive
+/// match-checking everywhere it matters, the same reasoning
+/// `CheckBuiltin`'s own closed list uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeKind {
+    PullRequest,
 }
 
 /// `kind: check`'s closed builtin list (§7.1). No budget builtin —

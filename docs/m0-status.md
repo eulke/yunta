@@ -1802,7 +1802,7 @@ que aparece.
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
 
-## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.6 — T7.3/T7.8/T7.9 ya hechos por M-0)
+## M7 — CLI y UX (parcial: T7.1–T7.2,T7.4–T7.7 — T7.3/T7.8/T7.9 ya hechos por M-0)
 
 - [x] **T1.5 — inputs del workflow (§2.3, D82), resuelto desde M7 porque
       T7.1 es su primer consumidor real.** M1 no tiene sección propia en
@@ -2383,6 +2383,163 @@ que aparece.
         el test estructural de packs/lock, shape desconocido rechazado
         sin escribir archivo, nombre inseguro rechazado, y `new` antes
         de que `init` haya corrido nunca.
+
+- [x] **T7.7 — Gates externos por pull request (§5.6, D66).** La tarea
+      más grande de M7 hasta ahora: introduce `kind: gate` al schema (no
+      existía — T7.2 construyó el mecanismo de escalación §5.3 pero
+      solo lo conectó a re-rutas agotadas, nunca a un node kind propio),
+      un trait `Forge` nuevo en `yunta-adapters` (paralelo a `Adapter`,
+      misma razón: frontera con un sistema externo, real + mock para
+      testear sin red, A8 extendido a forjas), y la parte más delicada
+      del diseño: qué pasa cuando una aprobación deja de cubrir el
+      commit actual del PR.
+      - **Schema**: `NodeKind::Gate { assignee, external: ExternalGate }`
+        — `external` es **obligatorio, no `Option`**: un `kind: gate`
+        sin forja detrás no está definido por ninguna tarea todavía (el
+        caso interno ya lo cubre §5.3/T7.2 sin necesidad de este node
+        kind). `ExternalGate { kind: ForgeKind, artifacts: Vec<String>,
+        branch: String }`, `ForgeKind::PullRequest` como único variante
+        (enum cerrado, no un string suelto — mismo criterio que
+        `CheckBuiltin`). Nueva variable de template `{{run.branch}}`
+        (`yunta/<run_id>`) — deliberadamente NO el branch local del
+        worktree (`isolation: none` nunca crea uno, `worktree.rs`'s
+        propio doc comment), sino un push target fresco.
+      - **`forge:` en `ConfigLayer`** (`{github: {repo, token_env}}`) —
+        no estaba en el recorte de T1.2 ni en ningún schema de
+        referencia citado por D66/§5.6 (que hablan de "la forja" en
+        abstracto); agregado ahora porque T7.7 es su consumidor real,
+        mismo patrón que `pricing:` en T7.5. `token_env` nombra una env
+        var, nunca el token (I12/O3, mismo convenio que
+        `McpServerConfig::auth_env`).
+      - **`check`**: `kind: gate` con `external.kind: pull_request`
+        exige `forge.github` configurado (`CheckError::
+        ExternalGateWithoutForge`) — el ✓ del plan, literal. Un gate
+        **no puede ser hijo de `parallel`** (`CheckError::
+        GateInsideParallel`) — su resolución es un round-trip a la
+        forja, uno a la vez; T7.7 no define qué significaría para el
+        join semantics de `parallel` compartir worktree con eso, así
+        que se rechaza en vez de adivinar.
+      - **`Forge` trait** (`yunta-adapters::forge`): `publish()` (commit
+        de los artifacts declarados + apertura del PR, idempotente —
+        busca un PR existente por branch antes de abrir uno nuevo) y
+        `poll()` (devuelve `PolledGate{head_sha, review}` — el head
+        actual del PR **separado** de `review`'s propio `reviewed_sha`,
+        a propósito: comparar ambos es lo que decide si una aprobación
+        sigue cubriendo el commit actual, y esa comparación vive una
+        sola vez, en el engine, no duplicada entre `GitHubForge` y
+        `MockForge`).
+        - **`GitHubForge`**: REST v3 puro — `git/refs`+`contents` para
+          publicar (sin git local: crea el branch y comitea archivos
+          por HTTP), `pulls`/`pulls/.../reviews`/`pulls/.../comments`
+          para el poll. Última revisión decisiva (`APPROVED`/
+          `CHANGES_REQUESTED`) gana; `COMMENTED`/`DISMISSED` no son
+          decisiones que §5.6 mapee a nada. **Sin smoke test contra la
+          API real — mismo gap documentado que T7.4's `codex`**: sin
+          token ni repo descartable en este sandbox. Los endpoints y
+          shapes de campo son los reales y vigentes de la REST API de
+          GitHub, no una adivinanza — pero eso no reemplaza correrlo.
+        - **`MockForge`**: estado en memoria (`MockForgeState`,
+          clonable/compartible vía `Arc<Mutex<_>>`) con métodos que un
+          test llama DIRECTO, nunca a través del trait `Forge` —
+          `approve`/`request_changes`/`close`/`push_commit` simulan
+          exactamente "lo que pasa en la forja sin que Yunta esté
+          instalado ahí", el punto central de D66.
+      - **Dispatch**: un gate nunca pasa por `execute_node` (agregar un
+        `NodeEnd::Waiting` al contrato compartido con
+        bash/prompt/loop/check/executor habría sido un cambio mucho más
+        invasivo que darle su propio par de `ScheduleStep`s puros —
+        `PublishGate`/`PollGate`, uno a la vez, mismo criterio que
+        `GateExhaustedReroutes` ya usaba). `schedule.rs` intercepta un
+        gate listo en su sección 3 (antes de armar el batch genérico) y
+        un gate `Running` (solo llega ahí por el recheck de abajo) en
+        una sección 0 nueva, antes de la detección de huérfanos —
+        `on_interrupt`'s `fail_if_uncertain`/`restart_node` no tienen
+        sentido para algo que no es una sesión.
+      - **Aprobado/cambios/cerrado (§5.6)** se resuelven reusando
+        exactamente el vocabulario de eventos que cualquier otro nodo ya
+        usa: aprobado → `node_finished` (el DAG sigue); cambios pedidos
+        → cada comentario se postea como `finding_posted` (§4.1) y el
+        nodo falla `retryable: true` — **la re-ruta declarada por
+        `on_failure.goto` de §5.6 no necesitó código nuevo**, es
+        exactamente el mecanismo de re-rutas que T4.4 ya construye;
+        cerrado → falla `retryable: false`. `gate_resolved` ahora
+        carga `approved_sha` (campo nuevo, junto a `resolved_by` que ya
+        existía) — el timestamp ya viene gratis del envelope del evento
+        — cumpliendo el "usuario+timestamp+SHA" del criterio.
+      - **Detección de SHA post-aprobación (§5.6) — la pieza más
+        sutil, con un límite explícito y deliberado.** Un
+        `recheck_approved_gates` corre una vez por invocación de
+        `execute_run` (antes del loop, nunca por iteración — "al
+        despertar" es una vez por wake, no una vez por paso de
+        scheduling), busca gates `Finished` cuyo `approved_sha`
+        grabado ya no coincide con el head actual del PR, y los
+        reabre emitiendo un `node_started` extra (mismo mecanismo que
+        `restart_node` de T4.5 ya usa para huérfanos) para que el
+        dispatch ordinario los vuelva a resolver desde cero.
+        **Descubierto empíricamente, no diseñado de entrada**: el
+        primer intento de este recheck vivía después del chequeo de
+        "run ya `run_finished`" en `execute_run` — que ya existía antes
+        de T7.7 y es correcto en general (un run terminado es
+        inmutable, I2/§2) — así que un gate aprobado como ÚLTIMO nodo
+        del run nunca llegaba a recheck-earse: el run ya había cerrado.
+        Un test end-to-end (`a_commit_after_approval_returns_the_gate_
+        to_waiting`) lo encontró en rojo antes de mover nada de código
+        — exactamente el ciclo test-first que CLAUDE.md pide. La
+        resolución, documentada en el propio código
+        (`recheck_approved_gates`'s doc comment): el recheck **solo
+        importa, y solo corre, mientras el run sigue abierto** — un
+        workflow cuyo gate es su último nodo nunca se re-abre una vez
+        aprobado (el run ya cerró, D66 no promete reabrir recibos
+        emitidos); uno con trabajo pendiente después sí, en cada wake,
+        hasta que ese trabajo también se resuelva. No es una limitación
+        accidental — es la consecuencia directa de que `run_finished`
+        sea de verdad terminal, que es exactamente lo que I2 exige.
+      - **Degradación a consola sin forja/credenciales (D66)**: mismo
+        objeto de escalación §5.3 que `GateExhaustedReroutes` ya usa
+        (dos opciones, aprobar/rechazar), nunca publica nada — y, igual
+        que ese código, no graba `gate_waiting` si `human_interaction`
+        devuelve `None` (sin TTY): así un gate degradado sin resolver
+        vuelve a preguntar en cada wake en vez de recordar una decisión
+        que nunca se tomó de verdad.
+      - **`--adapter`/CLI**: `real_forge(config)` en `commands/mod.rs`
+        (mismo patrón que `real_adapters`) construye `GitHubForge` solo
+        si `forge.github` está configurado Y la env var de
+        `token_env` está seteada en el proceso — ausencia de lo segundo
+        es exactamente el caso legítimo de la máquina de la persona B,
+        no un error. `run`/`resume` pasan el forge del config
+        correspondiente (el del manifest congelado en `resume`, nunca
+        el del proyecto actual — mismo principio de "el run nunca
+        relee config" que `adapters` ya sigue ahí). `yunta test` pasa
+        `None` siempre (A8: sin forja real en fixtures mock).
+      - **Deuda/límites explícitos**:
+        1. Un gate dentro de `parallel` es rechazado, no soportado —
+           semántica de join+worktree compartido con un round-trip a
+           forja queda sin diseñar.
+        2. Un solo forge (`GitHubForge`); `ForgeKind` cerrado a un
+           variante deja el punto de extensión listo pero no hay
+           segundo forge implementado.
+        3. Consenso multi-reviewer no modelado: "última revisión
+           decisiva gana", no una política configurable de cuántas
+           aprobaciones hacen falta — §5.6 no lo pide y GitHub mismo
+           delega eso a branch protection, fuera del alcance del
+           engine.
+        4. Los paths de `artifacts:` se interpretan relativos a
+           `run.dir/artifacts/` y se comitean al mismo path relativo en
+           el branch — convención razonable, no algo que ningún doc
+           fije explícitamente.
+        5. `GitHubForge` sin smoke test en vivo — mismo gatillo que
+           T7.4: retomar cuando haya token+repo descartable
+           disponibles.
+      - Tests: 3 en `crates/engine/tests/check.rs` (gate sin forja
+        rechazado, gate con forja aceptado, gate hijo de `parallel`
+        rechazado) + 5 en `crates/engine/tests/external_gate.rs` contra
+        `MockForge` — el escenario D66 completo (persona B aprueba sin
+        Yunta, persona A lo recoge en un `execute_run` separado),
+        commit posterior a la aprobación devuelve el gate a esperar (el
+        propio test que encontró el bug del `run_finished` inmutable),
+        cambios pedidos postea findings y falla retryable, PR cerrado
+        falla no-retryable, y degradación a consola sin forja nunca
+        publica nada.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

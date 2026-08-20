@@ -100,6 +100,18 @@ pub(super) async fn execute_node(
             )
             .await?
         }
+        // §5.6/T7.7: a gate's resolution is a forge round-trip, not a
+        // session — `schedule::next_step` intercepts a ready/orphaned
+        // gate before it ever becomes an `Execute` step (its own
+        // `ScheduleStep::PublishGate`/`PollGate`, handled in
+        // `run/mod.rs`), and `check::check_no_gate_in_parallel` refuses
+        // the only other way a node reaches this function without going
+        // through the top-level scheduler (`parallel`'s own children).
+        NodeKind::Gate { .. } => {
+            unreachable!(
+                "kind: gate never dispatches through execute_node — see this arm's own comment"
+            )
+        }
     };
     Ok(end)
 }
@@ -251,6 +263,12 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
             "run.worktree".to_string(),
             ctx.worktree.display().to_string(),
         ),
+        // §5.6/T7.7's own example (`external.branch: "{{run.branch}}"`)
+        // — a fresh push target derived from the run id, not
+        // necessarily the worktree's own local checkout branch (which
+        // `isolation: none` never creates one of at all, `worktree.rs`'s
+        // own doc comment).
+        ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
     ]);
     if let Some(role) = &node.runner {
         vars.insert("runner.role".to_string(), role.clone());
@@ -629,7 +647,7 @@ pub(super) fn fail(
 /// engine's own call, right after the `node_finished` that triggers it
 /// (§8.2's literal text names only `node_finished`, not `node_failed`, as
 /// the regeneration point).
-fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+pub(super) fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events()?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
     std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {

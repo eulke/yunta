@@ -18,6 +18,16 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
 thiserror = "2"
+# `GitHubForge` (T7.7, §5.6/D66): the REST calls that publish artifacts,
+# open a PR and poll its review state — same TLS backend `yunta-engine`
+# already selects for its own outbound HTTP (rustls, not native-tls).
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "rustls",
+] }
+# GitHub's Contents API takes file bodies base64-encoded — the one place
+# this crate needs to produce that encoding.
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

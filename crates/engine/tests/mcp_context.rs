@@ -166,6 +166,7 @@ async fn run_with_config(
         &FixedClock,
         DEFAULT_MAX_RETRIES,
         &NoInteraction,
+        None,
     )
     .await
     .unwrap();

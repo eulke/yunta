@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter};
+use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
@@ -75,6 +75,21 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Ada
     }
 
     adapters
+}
+
+/// The forge a real invocation can offer (§5.6, D66, T7.7) — `None`
+/// when either `forge.github` isn't configured, or (D66's own
+/// "degrada a consola") the named `token_env` isn't actually set in
+/// *this* process's environment. `yunta check` already refuses a
+/// workflow with an external gate when the former is missing; the
+/// latter is a legitimate, expected runtime state — person B's machine,
+/// with no credentials at all, still runs `yunta` just fine, it only
+/// ever falls back to the console for a gate it can't reach the forge
+/// for.
+pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
+    let github = config.forge.as_ref()?.github.as_ref()?;
+    let token = std::env::var(&github.token_env).ok()?;
+    Some(Arc::new(GitHubForge::new(github.repo.clone(), token)))
 }
 
 /// Refuses early when `workflow` needs agent sessions no available

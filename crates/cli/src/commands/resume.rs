@@ -69,6 +69,9 @@ pub async fn resume(run_id: &str) -> ExitCode {
         Isolation::None => cwd.clone(),
     };
 
+    // Same rule as `adapters` above: the manifest's own frozen config,
+    // never the project's current one.
+    let forge = super::real_forge(&manifest.config);
     let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -79,6 +82,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
         &SystemClock,
         DEFAULT_MAX_RETRIES,
         &crate::human_interaction::ConsoleInteraction,
+        forge.as_deref(),
     )
     .await;
 

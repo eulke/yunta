@@ -126,6 +126,23 @@ pub enum CheckError {
     /// surfaces at run time, same as it did before T1.5.
     #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
     UndeclaredInput { node: NodeId, name: String },
+
+    /// §5.6/D66/T7.7: a `kind: gate` with `external:` has nowhere to
+    /// actually publish without a forge — refused here rather than at
+    /// runtime (A6), the same "check catches what a run would only
+    /// discover after spending something" reasoning `UnknownRunner`
+    /// already applies. This checks only that a forge is *configured*
+    /// — a specific machine lacking the named credential env var at
+    /// *runtime* is a different, degrade-not-refuse case (D66's own
+    /// "sin credenciales... degrada a consola").
+    #[error("node `{node}`: `kind: gate` with `external: {{kind: pull_request}}` needs `forge.github` configured")]
+    ExternalGateWithoutForge { node: NodeId },
+
+    /// A gate's resolution is a forge round-trip, one at a time — never
+    /// scoped to a `parallel` group's shared worktree/join semantics
+    /// (T7.7 doesn't define what either would mean for a gate).
+    #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
+    GateInsideParallel { node: NodeId, group: NodeId },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -231,7 +248,11 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
                 node: node.id.clone(),
             });
         }
+
+        check_gate(node, config, &mut errors);
     }
+
+    check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
 
     if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
         let path = cycle
@@ -504,6 +525,55 @@ fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
                 });
             }
             check_parallel_scopes(children, errors);
+        }
+    }
+}
+
+/// §5.6/D66/T7.7: a `kind: gate` with `external:` needs `forge.github`
+/// configured — `external.kind` is a closed enum with one variant today
+/// (`pull_request`), so this is a total match, not a partial one that'll
+/// silently miss a second forge kind later.
+fn check_gate(node: &Node, config: &yunta_core::ConfigLayer, errors: &mut Vec<CheckError>) {
+    let NodeKind::Gate { external, .. } = &node.kind else {
+        return;
+    };
+    match external.kind {
+        yunta_core::ForgeKind::PullRequest => {
+            let configured = config
+                .forge
+                .as_ref()
+                .is_some_and(|forge| forge.github.is_some());
+            if !configured {
+                errors.push(CheckError::ExternalGateWithoutForge {
+                    node: node.id.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// §5.8/T4.6 vs. T7.7: a `parallel` group's children share a worktree
+/// and join semantics a forge round-trip has no defined relationship to
+/// — refused outright rather than guessing one.
+fn check_no_gate_in_parallel(
+    nodes: &[Node],
+    parent_group: Option<&Node>,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        if let Some(group) = parent_group {
+            if matches!(node.kind, NodeKind::Gate { .. }) {
+                errors.push(CheckError::GateInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_no_gate_in_parallel(children, Some(node), errors);
         }
     }
 }

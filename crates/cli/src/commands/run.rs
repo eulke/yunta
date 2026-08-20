@@ -258,6 +258,7 @@ pub async fn run(
         )
     });
 
+    let forge = super::real_forge(&manifest.config);
     let outcome = yunta_engine::execute_run(
         &run_id,
         &manifest,
@@ -268,6 +269,7 @@ pub async fn run(
         &clock,
         DEFAULT_MAX_RETRIES,
         &crate::human_interaction::ConsoleInteraction,
+        forge.as_deref(),
     )
     .await;
 
