@@ -58,6 +58,8 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 | DI-22 | Smoke tests en vivo pendientes (codex, GitHubForge) | T7.4/T7.7 | 3 | S |
 | DI-23 | `on_interrupt: resume_session` | T4.5/D99 | 3 | M |
 | DI-24 | `on_finish.distill` — mecanismo completo | T5.8 | 2 | M |
+| DI-25 | Cadena de promoción de un run hijo | T9.3 | 3 | M |
+| DI-26 | Montaje cross-run de artifacts por vínculo (ADR) | T9.3/§12 | 3 | M |
 
 ---
 
