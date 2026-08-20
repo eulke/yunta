@@ -2916,9 +2916,18 @@ que aparece.
         automáticamente vía `create_promotion_successor`, compartido con
         el CLI, y la contabilidad pasó a `child_run_finished.tokens`
         para que cada miembro de cadena cuente exacto una vez) y DI-26
-        (montaje cross-run declarativo de artifacts: la sintaxis no
-        existe en la referencia; el canal real hoy son los `inputs:`
-        del hijo). Los runs hijos no cuentan contra
+        (montaje cross-run declarativo de artifacts — cerrado después
+        con ADR D108: `mounts: [{artifact: {node, name, as?}}]` lo
+        declara el **padre** en su nodo `kind: workflow`, cada mount
+        implica `depends_on`, y la entrega es copia al `artifacts/` del
+        hijo al nacer — el mecanismo de la herencia por promoción
+        generalizado; un hermano `kind: workflow` resuelve vía su último
+        `child_run_finished`, cualquier otro nodo vía el `artifacts/`
+        del propio padre; fuente faltante = `node_failed` antes de que
+        exista el vínculo. El hijo consume con `artifact: {name}` sin
+        `node` en `context:` — sigue sin saber que es hijo — y los
+        `inputs:` quedan como canal de escalares y paths). Los runs
+        hijos no cuentan contra
         `max_concurrent_runs` (ese cap gobierna invocaciones de `yunta
         run`, no el tamaño del árbol).
       - Tests: 7 en `crates/engine/tests/workflow_compose.rs` (run

@@ -332,9 +332,16 @@ pub struct McpQueryParams {
 /// `depends_on`, so `check`/the scheduler need no separate awareness of
 /// `context:` at all — by the time either runs, the edge is already
 /// ordinary `depends_on`).
+///
+/// `node` is optional (D108): `artifact: { name }` means "an artifact of
+/// this run's dir, whoever produced it" — a mounted one included. It
+/// creates no implicit edge (there is no producer to order behind), and
+/// it's what keeps a catalog child parametric: it never has to name a
+/// producer it doesn't have.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactContextRef {
-    pub node: NodeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
     pub name: String,
 }
 
@@ -581,7 +588,40 @@ pub enum NodeKind {
         /// siblings must declare disjoint `scope` (checked).
         #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
         isolation: WorkflowIsolation,
+        /// `mounts:` (§12, D108) — artifacts of the parent's own graph
+        /// copied into the child's `run.dir/artifacts/` at birth: the
+        /// promotion inheritance mechanism generalized ("la promoción es
+        /// un caso particular de este mecanismo general"). The parent
+        /// declares because the parent is who knows its own topology — a
+        /// catalog child naming a sibling would be welded to one
+        /// parent's shape and lose its standalone run. Each mount
+        /// implies `depends_on` on the referenced node, which is what
+        /// guarantees §12's "hermanos terminados".
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mounts: Vec<MountSpec>,
     },
+}
+
+/// One `mounts:` entry — `artifact:` is the only mount source there is,
+/// kept as a named field (not a bare inline struct) so a second source
+/// kind lands as a sibling field with the same untagged-by-field-name
+/// convention `context:`/`on_finish:` already use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MountSpec {
+    pub artifact: MountArtifact,
+}
+
+/// The mounted artifact: `node` names a node of the *parent's own*
+/// graph — a `kind: workflow` sibling resolves through the recorded
+/// link (`child_run_finished`) to that child run's artifacts, any other
+/// node to the parent's own `run.dir/artifacts/`. `as:` renames the
+/// copy in the child (absent keeps `name`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MountArtifact {
+    pub node: NodeId,
+    pub name: String,
+    #[serde(default, rename = "as", skip_serializing_if = "Option::is_none")]
+    pub rename: Option<String>,
 }
 
 fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {

@@ -35,7 +35,9 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{Isolation, Manifest, Node, RunId, Workflow, WorkflowIsolation};
+use yunta_core::{
+    Isolation, Manifest, MountSpec, Node, NodeKind, RunId, Workflow, WorkflowIsolation,
+};
 
 use crate::replay::derive;
 use crate::template::render_template;
@@ -68,12 +70,75 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
         .unwrap_or_else(|| runs.join("worktrees"))
 }
 
+/// D108: resolves every declared mount to bytes, in memory, *before*
+/// the child is linked or born — a missing source fails the parent's
+/// node with nothing dangling. A `kind: workflow` source resolves
+/// through the recorded link (its last `child_run_finished` on this
+/// log) to that child run's `artifacts/`; any other node is the
+/// parent's own `run.dir/artifacts/`. Returns `(dest_name, bytes)`
+/// pairs, or the diagnostic to fail the node with.
+fn resolve_mounts(
+    ctx: &RunCtx<'_>,
+    events: &[yunta_core::events::Event],
+    mounts: &[MountSpec],
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut resolved = Vec::new();
+    for mount in mounts {
+        let m = &mount.artifact;
+        let target = ctx
+            .manifest
+            .workflow
+            .nodes
+            .iter()
+            .find(|candidate| candidate.id == m.node);
+        let source_dir = match target.map(|candidate| &candidate.kind) {
+            Some(NodeKind::Workflow { .. }) => {
+                let child = events.iter().rev().find_map(|e| match &e.payload {
+                    EventPayload::ChildRunFinished(p) if e.node_id.as_ref() == Some(&m.node) => {
+                        Some(p.child_run_id.clone())
+                    }
+                    _ => None,
+                });
+                match child {
+                    Some(child_id) => runs_root(ctx).join(child_id.as_str()).join("artifacts"),
+                    None => {
+                        return Err(format!(
+                            "mount `{}` from node `{}`: no linked child run of `{}` reached a \
+                             terminal state in this run — did this run's mode exclude it?",
+                            m.name, m.node, m.node
+                        ));
+                    }
+                }
+            }
+            _ => ctx.run_dir.join("artifacts"),
+        };
+        let path = source_dir.join(&m.name);
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                resolved.push((m.rename.clone().unwrap_or_else(|| m.name.clone()), bytes));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "mount `{}` from node `{}`: `{}` cannot be read: {e} — the source node \
+                     never produced it",
+                    m.name,
+                    m.node,
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(resolved)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
     use_name: &str,
     inputs: &BTreeMap<String, String>,
     isolation: WorkflowIsolation,
+    mounts: &[MountSpec],
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     // §12's "profundidad máxima configurable", enforced where the depth
@@ -196,6 +261,14 @@ pub(super) async fn execute_workflow(
         }
     }
 
+    // D108: mounts resolve to bytes here, before anything is linked or
+    // born — a missing source is this node's failure, with no dangling
+    // child left behind.
+    let mounted = match resolve_mounts(ctx, &events, mounts) {
+        Ok(mounted) => mounted,
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+    };
+
     // Budgets cascade (§12): the child's frozen cap is what the parent
     // has left — auditable in the child's own manifest, and the child's
     // ordinary budget machinery enforces the parent's ceiling over the
@@ -279,6 +352,32 @@ pub(super) async fn execute_workflow(
             }
         }
     };
+
+    // D108: the copies land before the link — a crash here re-derives
+    // the same ordinal (nothing was linked) and simply rewrites them.
+    // The promotion inheritance mechanism generalized: files into the
+    // child's own `artifacts/`, where its ordinary machinery (context
+    // `artifact: {name}`, `{{run.dir}}` templates) already looks.
+    if !mounted.is_empty() {
+        let child_artifacts = runs.join(child_id.as_str()).join("artifacts");
+        std::fs::create_dir_all(&child_artifacts).map_err(|source| RunError::Io {
+            context: format!("create `{}`", child_artifacts.display()),
+            source,
+        })?;
+        for (dest_name, bytes) in &mounted {
+            let dest = child_artifacts.join(dest_name);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
+                    context: format!("create `{}`", parent.display()),
+                    source,
+                })?;
+            }
+            std::fs::write(&dest, bytes).map_err(|source| RunError::Io {
+                context: format!("write mounted artifact `{}`", dest.display()),
+                source,
+            })?;
+        }
+    }
 
     // Link first, then create: the identity pair (`child_run_id` +
     // `child_workflow_hash`) is on the parent's log before the child

@@ -851,3 +851,189 @@ nodes:
         .join(successor.as_str());
     assert!(successor_tree.join("shipped.txt").exists());
 }
+
+// --- DI-26/D108: cross-run artifact mounts -----------------------------------
+
+#[tokio::test]
+async fn mounts_copy_parent_and_sibling_artifacts_into_the_child_at_birth() {
+    let bench = Bench::new(&[
+        (
+            "producer",
+            r#"
+name: producer
+nodes:
+  - id: work
+    kind: bash
+    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    artifacts: { produces: [report.md] }
+"#,
+        ),
+        (
+            "consumer",
+            r#"
+name: consumer
+nodes:
+  - id: verify
+    kind: bash
+    run: "test -f {{run.dir}}/artifacts/report.md && test -f {{run.dir}}/artifacts/brief.md"
+"#,
+        ),
+    ]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: plan
+    kind: bash
+    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
+    artifacts: { produces: [plan.yaml] }
+  - id: prod
+    kind: workflow
+    use: producer
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: prod, name: report.md }
+      - artifact: { node: plan, name: plan.yaml, as: brief.md }
+"#;
+    let run_id = RunId::from("run-mounts");
+    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new());
+
+    // D108: each mount implies depends_on — visible in the frozen graph.
+    let cons = manifest
+        .workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "cons")
+        .unwrap();
+    assert!(cons.depends_on.contains(&"prod".into()));
+    assert!(cons.depends_on.contains(&"plan".into()));
+
+    let (terminal, state) = bench
+        .execute(&run_id, &manifest, EMPTY_FIXTURE, &NoInteraction)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"cons".into()),
+        Some(NodeState::Finished { .. })
+    ));
+
+    // The copies landed in the child's own run.dir at birth: the
+    // sibling's artifact through the recorded link, the parent's own
+    // under its `as:` rename.
+    let cons_artifacts = bench.runs_root.join("run-mounts-cons").join("artifacts");
+    assert_eq!(
+        std::fs::read_to_string(cons_artifacts.join("report.md"))
+            .unwrap()
+            .trim(),
+        "the-report"
+    );
+    assert_eq!(
+        std::fs::read_to_string(cons_artifacts.join("brief.md"))
+            .unwrap()
+            .trim(),
+        "the-plan"
+    );
+}
+
+#[tokio::test]
+async fn a_mount_whose_source_was_never_produced_fails_the_node_before_the_child_exists() {
+    let bench = Bench::new(&[(
+        "consumer",
+        r#"
+name: consumer
+nodes:
+  - id: verify
+    kind: bash
+    run: "true"
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: plan, name: plan.yaml }
+"#;
+    let run_id = RunId::from("run-mount-missing");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            EMPTY_FIXTURE,
+            &NoInteraction,
+        )
+        .await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    match state.nodes.get(&"cons".into()) {
+        Some(NodeState::Failed { outcome, .. }) => {
+            assert!(
+                outcome.contains("plan.yaml") && outcome.contains("plan"),
+                "the diagnostic must name the artifact and its source node: {outcome}"
+            );
+        }
+        other => panic!("expected cons failed, got {other:?}"),
+    }
+    // The failure happened before the link: no dangling child run.
+    assert!(bench.children_created(&run_id).is_empty());
+}
+
+#[tokio::test]
+async fn a_child_consumes_a_mounted_artifact_through_context_without_naming_a_node() {
+    let bench = Bench::new(&[(
+        "consumer",
+        r#"
+name: consumer
+nodes:
+  - id: talk
+    kind: prompt
+    runner: executor
+    prompt: "Use the brief."
+    context:
+      - artifact: { name: brief.md }
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: plan
+    kind: bash
+    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
+    artifacts: { produces: [plan.yaml] }
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: plan, name: plan.yaml, as: brief.md }
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "read it" }
+"#;
+    let run_id = RunId::from("run-mount-context");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            fixture,
+            &NoInteraction,
+        )
+        .await;
+    // The node-less artifact source resolved against the child's own
+    // run.dir — a missing file would have failed the child's node, so a
+    // clean finish is the proof the mount fed the context.
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"cons".into()),
+        Some(NodeState::Finished { .. })
+    ));
+}

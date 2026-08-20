@@ -277,6 +277,43 @@ pub enum CheckError {
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
+    /// D108: a mount reads a node of the parent's own graph — an
+    /// unknown name is the same broken-reference class as
+    /// `UnknownDependency`, named for the field the author actually
+    /// wrote.
+    #[error(
+        "node `{node}`: `mounts` references node `{target}` which this workflow does not \
+         define — name a node of this same workflow (§12/D108)"
+    )]
+    MountUnknownNode { node: NodeId, target: NodeId },
+
+    /// D108: mounting one's own artifact is a read of an outcome that
+    /// cannot exist yet — the implied `depends_on` would be a self-cycle.
+    #[error(
+        "node `{node}`: `mounts` references the node itself — a mount reads a *finished* \
+         node's artifact, which this node cannot be for its own birth (§12/D108)"
+    )]
+    MountOnSelf { node: NodeId },
+
+    /// D108: same reasoning as `FanOutTarget` — once `runners:` expands
+    /// a node into `<id>@<role>` siblings there is no "the" node to
+    /// mount from.
+    #[error(
+        "node `{node}`: `mounts` references `{target}`, which `runners:` fans out into one \
+         node per role — mount a specific `{target}@<role>` sibling instead (§13.2/D108)"
+    )]
+    MountOnFanOut { node: NodeId, target: NodeId },
+
+    /// D108: parallel children run concurrently — no DAG order exists
+    /// inside the group, so §12's "hermanos terminados" cannot hold
+    /// there and the implied `depends_on` would mean nothing.
+    #[error(
+        "parallel group `{group}`: child `{node}` declares `mounts` — parallel children have \
+         no order to guarantee a finished source; mount on a top-level workflow node instead \
+         (§12/D108)"
+    )]
+    MountInsideParallel { group: NodeId, node: NodeId },
+
     /// DI-23/D99: only `kind: prompt` opens a node-scoped session —
     /// declaring `resume_session` anywhere else names a conversation
     /// that doesn't exist (a loop's per-task sessions re-run from the
@@ -402,6 +439,9 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     // T9.3: workflow-node rules also validate the original shape
     // (`runners:` on one is refused before expansion would multiply it).
     check_workflow_nodes(&workflow.nodes, None, &mut errors);
+    // D108: mount declarations too — expansion below turns each mount
+    // into an ordinary `depends_on` edge, so cycle detection sees them.
+    check_mounts(&workflow, &mut errors);
     crate::manifest::expand_runner_fanout(&mut workflow);
     crate::manifest::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
@@ -1454,6 +1494,48 @@ fn check_workflow_nodes(nodes: &[Node], group: Option<&Node>, errors: &mut Vec<C
     }
 }
 
+/// D108's declaration rules, on the original (pre-expansion) shape:
+/// mounts live on top-level `kind: workflow` nodes, reference an
+/// existing node other than themselves, and never appear inside a
+/// `parallel` group (no order there — §12's "hermanos terminados"
+/// cannot hold). `MountOnFanOut` lives in [`check_runner_fanout`],
+/// next to the other fan-out target rules.
+fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let known: HashSet<&NodeId> = workflow.iter_nodes().map(|node| &node.id).collect();
+    for node in &workflow.nodes {
+        if let NodeKind::Workflow { mounts, .. } = &node.kind {
+            for mount in mounts {
+                let target = &mount.artifact.node;
+                if target == &node.id {
+                    errors.push(CheckError::MountOnSelf {
+                        node: node.id.clone(),
+                    });
+                } else if !known.contains(target) {
+                    errors.push(CheckError::MountUnknownNode {
+                        node: node.id.clone(),
+                        target: target.clone(),
+                    });
+                }
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            for child in children {
+                if let NodeKind::Workflow { mounts, .. } = &child.kind {
+                    if !mounts.is_empty() {
+                        errors.push(CheckError::MountInsideParallel {
+                            group: node.id.clone(),
+                            node: child.id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// T9.3/§12: walks the composition reference graph as the repo's
 /// catalog stands **today** — every `use:` resolves, no cycles, and
 /// nesting stays within `limits.max_workflow_depth`. A separate entry
@@ -1579,10 +1661,22 @@ fn check_runner_fanout(workflow: &Workflow, errors: &mut Vec<CheckError>) {
         }
         for spec in &node.context {
             if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-                if fanout_ids.contains(&artifact.node) {
-                    errors.push(CheckError::FanOutTarget {
+                if let Some(referenced) = &artifact.node {
+                    if fanout_ids.contains(referenced) {
+                        errors.push(CheckError::FanOutTarget {
+                            node: node.id.clone(),
+                            target: referenced.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        if let NodeKind::Workflow { mounts, .. } = &node.kind {
+            for mount in mounts {
+                if fanout_ids.contains(&mount.artifact.node) {
+                    errors.push(CheckError::MountOnFanOut {
                         node: node.id.clone(),
-                        target: artifact.node.clone(),
+                        target: mount.artifact.node.clone(),
                     });
                 }
             }

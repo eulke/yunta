@@ -105,14 +105,16 @@ pub(super) enum ContextResolveError {
         cmd: String,
     },
     #[error(
-        "context `{source_id}` on node `{node}`: node `{referenced}`'s artifact `{name}` was \
-         never produced — declare an implicit dependency isn't enough if the node itself never \
-         wrote it"
+        "context `{source_id}` on node `{node}`: artifact `{name}`{} was never produced — \
+         nothing wrote it into this run's `artifacts/`",
+        .referenced.as_ref().map(|r| format!(" (declared by node `{r}`)")).unwrap_or_default()
     )]
     MissingArtifact {
         node: NodeId,
         source_id: String,
-        referenced: NodeId,
+        /// `None` for the node-less form (D108): the read is against
+        /// this run's own `artifacts/`, producer unnamed on purpose.
+        referenced: Option<NodeId>,
         name: String,
     },
     #[error(
@@ -833,9 +835,10 @@ fn source_id_for(spec: &ContextSpec) -> String {
     match spec {
         ContextSpec::Files { files } => format!("files:{}", files.join(",")),
         ContextSpec::Command { command } => format!("command:{command}"),
-        ContextSpec::Artifact { artifact } => {
-            format!("artifact:{}/{}", artifact.node, artifact.name)
-        }
+        ContextSpec::Artifact { artifact } => match &artifact.node {
+            Some(node) => format!("artifact:{}/{}", node, artifact.name),
+            None => format!("artifact:{}", artifact.name),
+        },
         ContextSpec::RunEvents { run_events } => format!(
             "run-events:{}",
             run_events.filter.as_deref().unwrap_or("all")

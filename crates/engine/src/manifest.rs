@@ -166,11 +166,26 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
             expand_implicit_dependencies_in(child);
         }
     }
+    // §12/D108: a mount is a read of the referenced node's outcome, so
+    // it orders behind it exactly like a context artifact does — and
+    // it's this edge that guarantees "hermanos terminados" at the time
+    // the child is born and the copy happens.
+    let mut implied: Vec<NodeId> = Vec::new();
+    if let NodeKind::Workflow { mounts, .. } = &node.kind {
+        implied.extend(mounts.iter().map(|mount| mount.artifact.node.clone()));
+    }
     for spec in &node.context {
         if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-            if !node.depends_on.contains(&artifact.node) {
-                node.depends_on.push(artifact.node.clone());
+            // A node-less reference (D108) reads this run's own
+            // artifacts dir — no producer to order behind.
+            if let Some(referenced) = &artifact.node {
+                implied.push(referenced.clone());
             }
+        }
+    }
+    for referenced in implied {
+        if !node.depends_on.contains(&referenced) {
+            node.depends_on.push(referenced);
         }
     }
 }

@@ -124,9 +124,12 @@ pub(super) async fn execute_node(
             r#use,
             inputs,
             isolation,
+            mounts,
         } => {
-            super::workflow_exec::execute_workflow(ctx, node, r#use, inputs, *isolation, cancel)
-                .await?
+            super::workflow_exec::execute_workflow(
+                ctx, node, r#use, inputs, *isolation, mounts, cancel,
+            )
+            .await?
         }
         // §5.6/T7.7: a gate's resolution is a forge round-trip, not a
         // session — `schedule::next_step` intercepts a ready/orphaned

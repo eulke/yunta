@@ -673,7 +673,7 @@ context:
     }
     match &node.context[2] {
         ContextSpec::Artifact { artifact } => {
-            assert_eq!(artifact.node.as_str(), "grill");
+            assert_eq!(artifact.node.as_ref().unwrap().as_str(), "grill");
             assert_eq!(artifact.name, "brief.md");
         }
         other => panic!("expected Artifact, got {other:?}"),

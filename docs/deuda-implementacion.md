@@ -1139,7 +1139,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   del nodo solo vería el último miembro; el evento por-miembro cuenta
   exacto, una vez, siempre).
 
-### DI-26 — Montaje cross-run de artifacts por vínculo `[ ]`
+### DI-26 — Montaje cross-run de artifacts por vínculo `[x]`
 
 - **Origen:** T9.3/§12: "un hijo puede montar artifacts del padre o de
   hermanos terminados; nadie monta artifacts de runs ajenos". La regla
@@ -1150,16 +1150,47 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   **declarativa** cross-run no tiene sintaxis en ningún YAML de
   referencia (`artifact: { node, name }` no tiene selector de run) —
   inventarla sería violar "las specs no se mejoran al pasar".
-- **Solución propuesta:** proponer al corpus (ADR) la sintaxis —
-  candidata: `artifact: { run: parent | sibling:<node-id>, node, name }`
-  resuelta contra el grafo de vínculos del log (`child_run_created` del
-  padre para hermanos; el propio parentesco para `parent`), con error
-  accionable si el run referido no es un vínculo declarado (la regla de
-  §12 pasa de "por construcción" a "verificada"). Implementar recién con
-  el ADR aceptado.
-- **✓ Criterios:** ADR registrado; hijo monta `plan.yaml` del padre vía
-  la sintaxis nueva; referencia a un run sin vínculo → error de
-  resolución con evento, jamás lectura silenciosa.
+- **Solución (ADR D108, registrado):** la candidata original (selector
+  `run: parent | sibling:<node-id>` declarado por el **hijo**) se
+  descartó: acopla un workflow del catálogo a la topología de un padre
+  concreto (rompe su corrida standalone) e invierte la dirección de
+  conocimiento de T9.3 (el hijo no sabe que es hijo). La forma final
+  invierte el lado que declara:
+  1. **El padre declara** — `mounts: [{artifact: {node, name, as?}}]`,
+     solo en nodos `kind: workflow`. `node` nombra cualquier nodo del
+     propio padre: nodo workflow → fuente es el `run.dir/artifacts/`
+     del último hijo vinculado terminal de ese nodo
+     (`child_run_finished` del propio log — solo el grafo de vínculos
+     es alcanzable: §12 pasa de "por construcción" a verificada);
+     nodo común → artifact del propio padre.
+  2. **`mounts` implica `depends_on`** sobre el nodo referido (misma
+     expansión implícita que `context: artifact:`) — garantiza
+     "hermanos terminados" y deja ciclos vía mount cubiertos.
+  3. **Entrega = copia al nacer el hijo** a su `run.dir/artifacts/` —
+     el mecanismo de la herencia por promoción generalizado (§12: "la
+     promoción es un caso particular de este mecanismo general"); sin
+     evento nuevo, igual que la promoción (la declaración está
+     congelada en el manifest del padre). Fuente faltante →
+     `node_failed` del nodo workflow con diagnóstico, jamás omisión.
+  4. **Consumo en el hijo** — `artifact: {name}` sin `node` en
+     `context:` ("un artifact de mi run.dir, lo haya producido quien
+     sea"); el hijo queda paramétrico, jamás sabe que es hijo. Los
+     `inputs:` siguen siendo el canal para escalares y paths.
+  5. **check**: mount a nodo inexistente, a sí mismo o a un nodo con
+     `runners:` (fan-out) es error.
+- **✓ Criterios:** ADR registrado (D108); un hijo monta el artifact de
+  un hermano terminado vía vínculo y otro del propio padre, y los
+  consume con `artifact: {name}`; artifact declarado y nunca producido
+  → `node_failed` con diagnóstico accionable, jamás lectura silenciosa.
+- **Nota de cierre:** implementado exactamente como quedó registrado
+  arriba (sin desvíos de la v2). Los mounts se resuelven a bytes **antes**
+  del `child_run_created` (fuente faltante = fallo del nodo sin hijo
+  colgante) y se escriben antes del vínculo (un crash re-deriva el mismo
+  ordinal y los reescribe). Tests: 2 de schema en
+  `core/tests/integration.rs`, 5 de reglas en `engine/tests/check.rs`
+  (desconocido/self/fan-out/parallel/ciclo-vía-mount) y 3 de punta a
+  punta en `engine/tests/workflow_compose.rs` (copia padre+hermano con
+  `as:`, fuente faltante, consumo vía `artifact: {name}` sin `node`).
 
 ---
 

@@ -85,6 +85,7 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
         r#use,
         inputs,
         isolation,
+        ..
     } = &design.kind
     else {
         panic!("`design` must be a workflow node, got {:?}", design.kind);
@@ -142,4 +143,59 @@ nodes:
         panic!("expected a workflow node");
     };
     assert_eq!(*isolation, yunta_core::WorkflowIsolation::Inherit);
+}
+
+// --- DI-26/D108: cross-run artifact mounts -----------------------------------
+
+#[test]
+fn workflow_node_mounts_parse_and_round_trip() {
+    let yaml = r#"
+name: parent
+nodes:
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: prod, name: report.md }
+      - artifact: { node: plan, name: plan.yaml, as: brief.md }
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let yunta_core::NodeKind::Workflow { mounts, .. } = &workflow.nodes[0].kind else {
+        panic!("expected a workflow node");
+    };
+    assert_eq!(mounts.len(), 2);
+    assert_eq!(mounts[0].artifact.node.as_str(), "prod");
+    assert_eq!(mounts[0].artifact.name, "report.md");
+    assert!(mounts[0].artifact.rename.is_none());
+    assert_eq!(mounts[1].artifact.rename.as_deref(), Some("brief.md"));
+
+    let reserialized = serde_yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(workflow, reparsed);
+}
+
+#[test]
+fn context_artifact_without_node_parses_and_round_trips() {
+    // D108: the node-less form — "an artifact of this run's dir, whoever
+    // produced it, a mounted one included" — is what keeps a catalog
+    // child parametric: it never has to name a producer it doesn't have.
+    let yaml = r#"
+name: consumer
+nodes:
+  - id: talk
+    kind: prompt
+    prompt: "Use the brief."
+    context:
+      - artifact: { name: brief.md }
+"#;
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
+    let yunta_core::ContextSpec::Artifact { artifact } = &workflow.nodes[0].context[0] else {
+        panic!("expected an artifact context source");
+    };
+    assert!(artifact.node.is_none());
+    assert_eq!(artifact.name, "brief.md");
+
+    let reserialized = serde_yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(workflow, reparsed);
 }

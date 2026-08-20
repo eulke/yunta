@@ -832,14 +832,14 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     let mut a = prompt("a", "planner", &[]);
     a.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
-            node: "b".into(),
+            node: Some("b".into()),
             name: "b.md".to_string(),
         },
     }];
     let mut b = prompt("b", "planner", &[]);
     b.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
-            node: "a".into(),
+            node: Some("a".into()),
             name: "a.md".to_string(),
         },
     }];
@@ -1583,4 +1583,148 @@ nodes:
     assert!(!check(&wf, &ConfigLayer::default())
         .iter()
         .any(|e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { .. })));
+}
+
+// --- DI-26/D108: mount declaration rules -------------------------------------
+
+fn parsed(yaml: &str) -> Workflow {
+    serde_yaml::from_str(yaml).unwrap()
+}
+
+#[test]
+fn a_mount_naming_an_unknown_node_is_refused() {
+    let wf = parsed(
+        r#"
+name: parent
+nodes:
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: ghost, name: report.md }
+"#,
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MountUnknownNode { node, target }
+                if node.as_str() == "cons" && target.as_str() == "ghost"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_mount_on_the_node_itself_is_refused() {
+    let wf = parsed(
+        r#"
+name: parent
+nodes:
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: cons, name: report.md }
+"#,
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MountOnSelf { node } if node.as_str() == "cons"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_mount_targeting_a_fanned_out_node_is_refused() {
+    // Once `review` is review@a + review@b there is no "the" sibling to
+    // mount from — same reasoning as goto/gate-on onto a fan-out.
+    let wf = parsed(
+        r#"
+name: parent
+nodes:
+  - id: review
+    kind: prompt
+    prompt: "review"
+    runners: [a, b]
+  - id: cons
+    kind: workflow
+    use: consumer
+    mounts:
+      - artifact: { node: review, name: findings.yaml }
+"#,
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MountOnFanOut { node, target }
+                if node.as_str() == "cons" && target.as_str() == "review"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_mount_inside_a_parallel_group_is_refused() {
+    // Parallel children run concurrently — there is no DAG order inside
+    // the group, so "hermanos terminados" (§12) cannot hold there.
+    let wf = parsed(
+        r#"
+name: parent
+nodes:
+  - id: prod
+    kind: bash
+    run: "true"
+  - id: group
+    kind: parallel
+    nodes:
+      - id: cons
+        kind: workflow
+        use: consumer
+        mounts:
+          - artifact: { node: prod, name: report.md }
+"#,
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MountInsideParallel { group, node }
+                if group.as_str() == "group" && node.as_str() == "cons"
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_cycle_formed_only_through_a_mount_is_caught() {
+    // The mount implies depends_on (D108) — check's own expansion must
+    // see the edge, or this deadlocks a real run instead of failing
+    // statically.
+    let wf = parsed(
+        r#"
+name: parent
+nodes:
+  - id: a
+    kind: workflow
+    use: child-a
+    mounts:
+      - artifact: { node: b, name: out.md }
+  - id: b
+    kind: bash
+    run: "true"
+    depends_on: [a]
+"#,
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, CheckError::DependsOnCycle { .. })),
+        "got: {errors:?}"
+    );
 }

@@ -38,9 +38,10 @@ pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question,
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
     ContextSpec, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
-    KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec, Node,
-    NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep,
-    OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion, Workflow, WorkflowIsolation,
+    KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec,
+    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
+    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsParams,
+    ScopeExpansion, Workflow, WorkflowIsolation,
 };
 
 /// The schema major this binary speaks (§2.1, DI-13) — what a
