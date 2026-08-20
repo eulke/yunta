@@ -199,7 +199,7 @@ pub async fn run(
     };
 
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    let manifest = match yunta_engine::build_manifest(
+    let mut manifest = match yunta_engine::build_manifest(
         &workflow,
         &project.config,
         workflow_dir,
@@ -212,6 +212,15 @@ pub async fn run(
             return ExitCode::FAILURE;
         }
     };
+    // DI-07/T2.4: freeze the resolved state roots, absolute, so a later
+    // `paths.*` change can never lose this run — `resume`/`status` read
+    // these from the manifest, not the then-current config.
+    manifest.paths = Some(yunta_core::FrozenPaths {
+        runs_root: std::path::absolute(&project.runs_root)
+            .unwrap_or_else(|_| project.runs_root.clone()),
+        worktrees_root: std::path::absolute(&project.worktrees_root)
+            .unwrap_or_else(|_| project.worktrees_root.clone()),
+    });
 
     // §8.6: informative, never blocking — the history a run's own log
     // will later join once it finishes.

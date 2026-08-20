@@ -14,7 +14,7 @@ use yunta_core::{
 use crate::inputs::{resolve_inputs, InputsError};
 
 /// Version of the manifest's own schema (D07).
-const MANIFEST_SCHEMA_VERSION: u32 = 1;
+const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -76,6 +76,12 @@ pub fn build_manifest(
         base_commit,
         isolation: config.resolved_isolation(),
         max_parallel_nodes: config.resolved_max_parallel_nodes(),
+        // The resolved state roots live in the shell that knows them
+        // (the CLI's project resolution) — it fills this in before
+        // `create_run` freezes the manifest (DI-07). `None` here keeps
+        // library callers (tests) on the fallback-to-current-config
+        // path, which is also the tolerant reading of old manifests.
+        paths: None,
     })
 }
 

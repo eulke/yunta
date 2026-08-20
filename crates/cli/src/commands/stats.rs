@@ -87,9 +87,10 @@ fn stats_run(run_id: &str, json: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let manifest_path = project
-        .runs_root
-        .join(run_id.as_str())
+    // DI-07: search order (current runs root, then the default) — the
+    // run's own frozen paths take over once the manifest is open.
+    let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
+        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
     let manifest: Manifest = match crate::load_yaml(&manifest_path, "run manifest") {
         Ok(manifest) => manifest,

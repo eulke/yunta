@@ -431,7 +431,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 
 ## Nivel 2 — robustez del núcleo
 
-### DI-07 — Paths congelados en el manifest (T2.4) `[ ]`
+### DI-07 — Paths congelados en el manifest (T2.4) `[x]`
 
 - **Origen:** M-0, "Pendiente explícito #8": "`resume` busca run.dir bajo
   el `paths.runs` de la config *actual*".

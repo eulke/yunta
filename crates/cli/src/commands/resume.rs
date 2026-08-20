@@ -2,9 +2,10 @@
 //! manifest from run.dir and drive the run forward with the same
 //! `execute_run` that started it — the log decides what remains.
 //!
-//! M-0 cut: run.dir is looked up under the *current* config's runs root;
-//! freezing resolved paths in the manifest so a later `paths.runs` change
-//! cannot lose the run is T2.4, not built yet.
+//! DI-07/T2.4: run.dir is looked up in search order (current config's
+//! runs root, then the default) — and once the manifest is open, the
+//! worktree comes from its *frozen* paths, so a `paths.*` change between
+//! `run` and `resume` never loses the run.
 
 use std::process::ExitCode;
 
@@ -32,15 +33,14 @@ pub async fn resume(run_id: &str) -> ExitCode {
     };
 
     let run_id = RunId::from(run_id);
-    let run_dir = project.runs_root.join(run_id.as_str());
-    let manifest_path = run_dir.join("manifest.yaml");
-    if !manifest_path.exists() {
+    let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
         eprintln!(
-            "error: no run `{run_id}` under {} — nothing to resume",
+            "error: no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
             project.runs_root.display()
         );
         return ExitCode::FAILURE;
-    }
+    };
+    let manifest_path = run_dir.join("manifest.yaml");
     let manifest: Manifest = match load_yaml(&manifest_path, "run manifest") {
         Ok(manifest) => manifest,
         Err(code) => return code,
@@ -64,8 +64,15 @@ pub async fn resume(run_id: &str) -> ExitCode {
     // The worktree (or the checkout itself, for `none`) was already
     // prepared by the `run` that created this run — resume finds it by
     // the same rule, it never prepares a fresh one (T4.2, §7.3).
+    // DI-07: the frozen roots win; a pre-freeze manifest (no `paths:`)
+    // falls back to the current config, exactly the old behavior.
+    let worktrees_root = manifest
+        .paths
+        .as_ref()
+        .map(|paths| paths.worktrees_root.clone())
+        .unwrap_or_else(|| project.worktrees_root.clone());
     let worktree = match manifest.isolation {
-        Isolation::Worktree => project.worktrees_root.join(run_id.as_str()),
+        Isolation::Worktree => worktrees_root.join(run_id.as_str()),
         Isolation::None => cwd.clone(),
     };
 

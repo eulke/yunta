@@ -87,6 +87,25 @@ pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>,
     Ok(layers)
 }
 
+/// Finds an existing run's directory (DI-07's search order): (a) the
+/// current config's runs root, (b) the built-in default under the user
+/// state root. Once the manifest inside is open, everything else reads
+/// its *frozen* paths — this search only exists because finding the
+/// manifest needs somewhere to look first. A run created under roots
+/// that no longer appear in any layer needs `YUNTA_HOME` pointing there
+/// — a documented limit: a global index would be derived state as a
+/// source of truth (I2).
+pub fn find_run_dir(project: &Project, run_id: &str) -> Option<PathBuf> {
+    let mut candidates = vec![project.runs_root.clone()];
+    if let Ok(user_root) = user_root() {
+        candidates.push(user_root.join("runs"));
+    }
+    candidates
+        .into_iter()
+        .map(|root| root.join(run_id))
+        .find(|run_dir| run_dir.join("manifest.yaml").exists())
+}
+
 /// Resolves the merged config and state paths for a project rooted at
 /// `cwd`. Missing layers are simply absent — an empty config is valid;
 /// a malformed one is an error, never silently skipped.

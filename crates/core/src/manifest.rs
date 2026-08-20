@@ -12,11 +12,23 @@
 //! group is deferred from T1.2). `inputs` itself landed in T1.5.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{ConfigLayer, Isolation, NodeId, Workflow};
+
+/// Absolute, fully-resolved state roots at run creation (T2.4/DI-07) —
+/// post `YUNTA_HOME`, post config layers. Frozen so a later
+/// `paths.runs`/`paths.worktrees` change can never lose a run that
+/// already exists: everything after the manifest is found reads these,
+/// never the current config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FrozenPaths {
+    pub runs_root: PathBuf,
+    pub worktrees_root: PathBuf,
+}
 
 /// Everything a run needs frozen at creation time (Contrato §2.1). The
 /// engine never re-reads workflow, config or prompt files during a run —
@@ -52,6 +64,11 @@ pub struct Manifest {
     pub max_parallel_nodes: u32,
     pub workflow_hash: String,
     pub config_hash: String,
+    /// `None` on manifests written before DI-07 (tolerant reader, D70):
+    /// those fall back to the current config's paths — exactly the
+    /// pre-freeze behavior, so old runs stay resumable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<FrozenPaths>,
 }
 
 impl Manifest {

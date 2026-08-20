@@ -1388,3 +1388,128 @@ nodes:
         stdout(&status)
     );
 }
+
+#[test]
+fn resume_uses_the_worktree_frozen_in_the_manifest_after_a_paths_change() {
+    // The T2.4 acceptance criterion, executed: create a run, change
+    // `paths.worktrees`, and `resume` completes in the worktree the run
+    // was born with — not wherever the config points today.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: frozen-paths
+nodes:
+  - id: gated
+    kind: bash
+    run: "echo x > started.txt; test -f go.txt || sleep 30"
+"#,
+    );
+
+    // Crash the engine mid-node (the node sleeps until go.txt exists).
+    let mut yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let worktree = loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the node never started"
+        );
+        if let Ok(entries) = std::fs::read_dir(home.join("worktrees")) {
+            if let Some(entry) = entries.flatten().next() {
+                if entry.path().join("started.txt").exists() {
+                    break entry.path();
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let run_id = only_run_id(&home);
+    std::process::Command::new("kill")
+        .args(["-KILL", &yunta.id().to_string()])
+        .status()
+        .unwrap();
+    let _ = yunta.wait();
+
+    // The condition the restarted node needs, in the ORIGINAL worktree —
+    // then move the config's worktrees root somewhere else entirely.
+    write(&worktree.join("go.txt"), "go");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "paths:\n  worktrees: elsewhere-worktrees\n",
+    );
+
+    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    assert!(
+        resume.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&resume),
+        String::from_utf8_lossy(&resume.stderr)
+    );
+    assert!(
+        stdout(&resume).contains("finished"),
+        "got: {}",
+        stdout(&resume)
+    );
+}
+
+#[test]
+fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
+    // Tolerant reader (D70): a pre-DI-07 manifest (no `paths:` block)
+    // resumes exactly as before, from the current config's roots.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        "name: legacy\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success());
+    let run_id = run_id_from(&run);
+
+    // Strip the frozen paths block, simulating an old manifest.
+    let manifest_path = home.join("runs").join(&run_id).join("manifest.yaml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    let stripped: String = {
+        let mut out = String::new();
+        let mut in_paths = false;
+        for line in manifest.lines() {
+            if line.starts_with("paths:") {
+                in_paths = true;
+                continue;
+            }
+            if in_paths && line.starts_with(' ') {
+                continue;
+            }
+            in_paths = false;
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    };
+    assert_ne!(manifest, stripped, "the paths block must have been there");
+    std::fs::write(&manifest_path, stripped).unwrap();
+
+    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    assert!(
+        resume.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resume.stderr)
+    );
+    assert!(stdout(&resume).contains("finished"));
+}

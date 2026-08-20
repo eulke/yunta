@@ -82,7 +82,8 @@ pub async fn cancel(run_id: &str) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let run_dir = project.runs_root.join(run_id.as_str());
+    let run_dir = project::find_run_dir(&project, run_id.as_str())
+        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()));
     let Some(registry) = yunta_engine::read_registry(&run_dir) else {
         // Case 3 — no channel. Pre-DI-08 behavior, now the exception
         // rather than the rule.

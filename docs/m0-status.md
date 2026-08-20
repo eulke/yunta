@@ -2930,9 +2930,16 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    run/status/resume, `yunta test`). Ver la lista de alcance arriba. Deudas
    menores que dejó, con su gatillo:
    - **T4.2 (worktrees) — hecho**, ver detalle en la sección "M4" abajo.
-   - **T2.4 (paths congelados)**: `resume` busca run.dir bajo el `paths.runs`
-     de la config *actual* — cambiarlo entre run y resume no está soportado
-     hasta T2.4.
+   - **T2.4 (paths congelados) ✓ (cerrado por DI-07)**: el manifest congela
+     `paths: { runs_root, worktrees_root }` absolutos al crear el run;
+     `resume`/`status`/`stats`/`cancel` buscan el run.dir en orden (paths
+     actuales → default del user root) y de ahí en más todo sale de los
+     paths congelados. Manifest pre-DI-07 (sin `paths:`) sigue resumible
+     con el fallback a la config actual (lector tolerante, D70;
+     `schema_version` del manifest 1 → 2). Límite documentado: un run
+     creado bajo roots que ya no figuran en ninguna capa requiere
+     `YUNTA_HOME` apuntando ahí (un índice global sería estado derivado
+     como fuente de verdad, I2).
    - **Eventos `agent_session_opened`/`agent_message` ✓ (cerrado por
      DI-09)**: `dispatch_session` los emite a medida que llega el stream
      (un `status` concurrente ve la sesión viva) vía el trait

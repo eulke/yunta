@@ -32,7 +32,7 @@ pub use error::{Result, YuntaError};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use inputs::InputSpec;
 pub use ledger::{Ledger, Task};
-pub use manifest::{content_hash, sha256_hex, Manifest};
+pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest};
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, ContextSpec,
