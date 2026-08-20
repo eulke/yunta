@@ -2444,6 +2444,7 @@ name = "yunta-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "indexmap",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2460,6 +2461,7 @@ dependencies = [
  "chrono",
  "futures",
  "globset",
+ "indexmap",
  "regex",
  "reqwest",
  "rmcp",

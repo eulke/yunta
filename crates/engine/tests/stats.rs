@@ -29,12 +29,14 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
+        modes: None,
         description: None,
         inputs: Default::default(),
         node_defaults: None,

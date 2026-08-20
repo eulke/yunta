@@ -63,6 +63,9 @@ chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+# Test fixtures build `modes:` maps directly (§10.1, T9.1) — same
+# ordered-map type `yunta-core` uses in the schema itself.
+indexmap = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
 # Toy MCP server (T6.2's own ✓: "test contra server MCP de juguete") —
 # server-side features only, additive on the same `rmcp` dependency edge;

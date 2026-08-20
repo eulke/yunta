@@ -119,6 +119,7 @@ impl Bench {
             &self.runs_root,
             &self.storage,
             &FixedClock,
+            "default",
         )
         .unwrap();
 
@@ -169,6 +170,7 @@ impl Bench {
             &self.runs_root,
             &self.storage,
             &FixedClock,
+            "default",
         )
         .unwrap();
 
@@ -744,6 +746,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -852,6 +855,7 @@ nodes:
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -909,6 +913,7 @@ nodes:
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -963,6 +968,7 @@ nodes:
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -1045,6 +1051,7 @@ nodes:
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -1274,6 +1281,7 @@ nodes:
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 
@@ -2324,6 +2332,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &bench.runs_root,
         &bench.storage,
         &FixedClock,
+        "default",
     )
     .unwrap();
 

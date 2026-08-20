@@ -18,10 +18,25 @@
 //! parallel`'s named groups (T4.6) or a loop's own task `concurrency:`
 //! (T5.10), both separate mechanisms per §5.5/§5.8.
 
+use std::collections::HashSet;
+
 use yunta_core::events::{Event, EventPayload};
-use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::{ModeInclude, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::replay::{derive, NodeState};
+
+/// The top-level node ids `mode_name` makes schedulable (§10.1/D44), or
+/// `None` when nothing narrows the graph — no `modes:` declared at all,
+/// or the resolved mode's own `include: all`. A name with no matching
+/// entry in `modes:` never reaches this function — `create_run` already
+/// refused it before the run existed.
+pub fn mode_included_nodes(workflow: &Workflow, mode_name: &str) -> Option<HashSet<NodeId>> {
+    let spec = workflow.modes.as_ref()?.get(mode_name)?;
+    match &spec.include {
+        ModeInclude::All => None,
+        ModeInclude::Nodes(ids) => Some(ids.iter().cloned().collect()),
+    }
+}
 
 /// What the run does next. A batch of `Execute` entries is never empty
 /// and is always homogeneous — the scheduler never mixes control actions
@@ -125,11 +140,32 @@ pub fn next_step(
     events: &[Event],
     max_parallel_nodes: u32,
     default_on_interrupt: OnInterrupt,
+    mode_nodes: Option<&HashSet<NodeId>>,
 ) -> ScheduleStep {
     let state = derive(events);
     if let Some(diagnostic) = state.broken {
         return ScheduleStep::Broken { diagnostic };
     }
+
+    // §10.1/D44: a node this run's mode excludes is never scheduled and
+    // never counted toward completion — `check`'s own `check_modes`
+    // already guarantees no *included* node's `depends_on`/
+    // `on_failure.goto` reaches outside the mode, but an excluded node's
+    // dependents (§10.1's own examples: `implement` depends_on the
+    // excluded `approve-plan` in "quick") still need their edge to it
+    // treated as satisfied — a mode cuts deliberation, never blocks on
+    // work it deliberately skipped.
+    let nodes: Vec<&Node> = workflow
+        .nodes
+        .iter()
+        .filter(|n| mode_nodes.is_none_or(|set| set.contains(&n.id)))
+        .collect();
+    let excluded = |id: &NodeId| mode_nodes.is_some_and(|set| !set.contains(id));
+    let deps_satisfied = |node: &Node| {
+        node.depends_on.iter().all(|dep| {
+            excluded(dep) || matches!(state.nodes.get(dep), Some(NodeState::Finished { .. }))
+        })
+    };
 
     // A degenerate 0 would starve every ready node forever, turning a
     // config mistake into a silent-looking stuck run instead of visible
@@ -165,7 +201,7 @@ pub fn next_step(
     //    the imperative shell's own doing, before this function ever
     //    runs) — resolve it the same way as any other unresolved,
     //    already-published gate: poll again.
-    if let Some(node) = workflow.nodes.iter().find(|node| {
+    if let Some(node) = nodes.iter().copied().find(|node| {
         is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
     }) {
         if let Some(external_ref) = last_external_ref(events, &node.id) {
@@ -186,9 +222,9 @@ pub fn next_step(
     //    already committed to running concurrently before the crash, so
     //    capacity doesn't retroactively apply to how many come back.
     //    Gate nodes never reach here (handled in section 0 above).
-    let orphaned: Vec<&Node> = workflow
-        .nodes
+    let orphaned: Vec<&Node> = nodes
         .iter()
+        .copied()
         .filter(|node| {
             !is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
         })
@@ -226,7 +262,7 @@ pub fn next_step(
     //    pause. A failure this iteration leaves unresolved is picked up
     //    again on the next (the reroute/restart it emits changes the log,
     //    so the next call sees a different answer for it).
-    for node in &workflow.nodes {
+    for node in nodes.iter().copied() {
         let Some(NodeState::Failed { outcome, .. }) = state.nodes.get(&node.id) else {
             continue;
         };
@@ -292,15 +328,11 @@ pub fn next_step(
     //    A ready `kind: gate` is never batched with ordinary nodes — its
     //    resolution is a forge round-trip, one at a time, same as
     //    section 0/1's own gate handling (§5.6, T7.7).
-    for node in &workflow.nodes {
+    for node in nodes.iter().copied() {
         if !is_gate(node) || state.nodes.contains_key(&node.id) {
             continue;
         }
-        let deps_finished = node
-            .depends_on
-            .iter()
-            .all(|dep| matches!(state.nodes.get(dep), Some(NodeState::Finished { .. })));
-        if !deps_finished {
+        if !deps_satisfied(node) {
             continue;
         }
         return if was_published(events, &node.id) {
@@ -324,18 +356,14 @@ pub fn next_step(
     }
 
     let mut batch = Vec::new();
-    for node in &workflow.nodes {
+    for node in nodes.iter().copied() {
         if batch.len() >= capacity {
             break;
         }
         if state.nodes.contains_key(&node.id) || is_gate(node) {
             continue; // finished, failed-and-handled-above, or a gate (handled above)
         }
-        let deps_finished = node
-            .depends_on
-            .iter()
-            .all(|dep| matches!(state.nodes.get(dep), Some(NodeState::Finished { .. })));
-        if deps_finished {
+        if deps_satisfied(node) {
             batch.push((node.id.clone(), 1));
         }
     }
@@ -345,8 +373,10 @@ pub fn next_step(
 
     // 4. Nothing runnable: either everything finished, or something is
     //    stuck behind a failure this pass already chose to leave failed.
-    let all_finished = workflow
-        .nodes
+    //    Only nodes this mode actually includes count — an excluded node
+    //    never reaches any terminal state (§10.1: it's never scheduled at
+    //    all), so requiring it here would mean the run could never finish.
+    let all_finished = nodes
         .iter()
         .all(|node| matches!(state.nodes.get(&node.id), Some(NodeState::Finished { .. })));
     if all_finished {

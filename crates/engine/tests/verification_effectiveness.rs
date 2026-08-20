@@ -27,6 +27,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
@@ -52,12 +53,14 @@ fn gate_node(id: &str) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
+        modes: None,
         description: None,
         inputs: Default::default(),
         node_defaults: None,

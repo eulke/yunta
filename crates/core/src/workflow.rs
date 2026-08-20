@@ -12,18 +12,27 @@
 
 use std::collections::BTreeMap;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ids::NodeId;
 use crate::inputs::InputSpec;
 
-/// A workflow definition (Contrato §2, §10 — minus modes, out of scope
-/// for M-0/M7).
+/// A workflow definition (Contrato §2, §10).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// `modes:` (§10.1, D44) — an ordered map, free in name and count:
+    /// quick/standard/full are the reference workflows' own convention,
+    /// never reserved schema words. **Declaration order is the
+    /// promotion ladder** (§10.2) — promotion only ever targets a mode
+    /// later in this map's own iteration order, never an earlier one.
+    /// Absent entirely means the workflow has no modes at all: every
+    /// node always runs, exactly pre-T9.1 behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modes: Option<IndexMap<String, ModeSpec>>,
     /// `inputs:` (T1.5, §2.3, D82) — name is the map key, so the schema's
     /// own format guarantees uniqueness rather than a validation pass
     /// over a `[{name, ...}]` list. A `BTreeMap` rather than the
@@ -40,6 +49,58 @@ pub struct Workflow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_defaults: Option<NodeDefaults>,
     pub nodes: Vec<Node>,
+}
+
+/// One `modes:` entry's own scope (§10.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModeSpec {
+    pub include: ModeInclude,
+}
+
+/// `include: all` or `include: [id, id, ...]` — the bare string literal
+/// and a node-id sequence are the only two shapes §10.1's own example
+/// shows, so this discriminates on the YAML value's shape rather than
+/// adding a `kind:` key neither form has.
+///
+/// Both directions are hand-written, deliberately paired: `derive`'s
+/// default untagged-enum behavior would serialize the unit variant
+/// `All` as `null`, not the string `"all"` the custom `Deserialize`
+/// below expects back — a manifest round-trip (write, then a later
+/// `status`/`resume` reading it back) would otherwise silently break on
+/// its own output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModeInclude {
+    All,
+    Nodes(Vec<NodeId>),
+}
+
+impl Serialize for ModeInclude {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ModeInclude::All => serializer.serialize_str("all"),
+            ModeInclude::Nodes(nodes) => nodes.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ModeInclude {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            All(AllLiteral),
+            Nodes(Vec<NodeId>),
+        }
+        #[derive(Deserialize)]
+        enum AllLiteral {
+            #[serde(rename = "all")]
+            All,
+        }
+        match Raw::deserialize(deserializer)? {
+            Raw::All(AllLiteral::All) => Ok(ModeInclude::All),
+            Raw::Nodes(nodes) => Ok(ModeInclude::Nodes(nodes)),
+        }
+    }
 }
 
 /// `node_defaults:` (§11.1) — M-0/M4 cut: only `hooks`, the one consumer
@@ -112,6 +173,12 @@ pub struct Node {
     /// this deliberately doesn't cover yet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextSpec>,
+    /// `invariant: true` (§10.1, D44) — this node's verification/scope/
+    /// baseline/hygiene role is non-negotiable: every declared mode must
+    /// include it, checked independent of any mode's name or count. A
+    /// mode narrows deliberation, never verification.
+    #[serde(default)]
+    pub invariant: bool,
 }
 
 /// One `context:` entry (§9): a builtin `ContextSource` plus its own

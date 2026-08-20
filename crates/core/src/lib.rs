@@ -37,9 +37,9 @@ pub use questions::{AnswerType, Question, QuestionsFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, ContextSpec,
     ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
-    KnowledgeParams, LedgerParams, McpQueryParams, Node, NodeDefaults, NodeKind, NodeOutputParams,
-    NodePermissions, OnFailure, OnInterrupt, PromptSource, RunEventsParams, ScopeExpansion,
-    Workflow,
+    KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude, ModeSpec, Node, NodeDefaults,
+    NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnInterrupt, PromptSource,
+    RunEventsParams, ScopeExpansion, Workflow,
 };
 
 /// Identifies this crate to integration tests elsewhere in the workspace.

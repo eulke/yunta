@@ -143,6 +143,32 @@ pub enum CheckError {
     /// (T7.7 doesn't define what either would mean for a gate).
     #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
     GateInsideParallel { node: NodeId, group: NodeId },
+
+    /// §10.1/D44: same broken-reference class as `UnknownGotoTarget` —
+    /// catching it here means the run never starts with a mode that
+    /// silently omits work its own author meant to include.
+    #[error("mode `{mode}` includes unknown node `{node}`")]
+    ModeReferencesUnknownNode { mode: String, node: NodeId },
+
+    /// §10.1: "un modo recorta deliberación, jamás verificación" — checked
+    /// independent of the mode's name or count, exactly D44's own text.
+    #[error("node `{node}` is `invariant: true` but mode `{mode}` doesn't include it")]
+    InvariantNodeExcludedFromMode { node: NodeId, mode: String },
+
+    /// §10.1's own coherence rule, and its own reasoning for making it an
+    /// error rather than a warning: the same broken-goto class
+    /// `UnknownGotoTarget` catches, just scoped to one mode's variant of
+    /// the graph instead of the whole file. The message names both ways
+    /// out, per §10.1's own text ("nombra las dos salidas posibles").
+    #[error(
+        "node `{node}` is in mode `{mode}`, but its on_failure.goto target `{goto}` isn't — \
+         include `{goto}` in `{mode}`, or drop the re-route there"
+    )]
+    RerouteTargetExcludedFromMode {
+        mode: String,
+        node: NodeId,
+        goto: NodeId,
+    },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -265,8 +291,68 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 
     check_input_specs(&workflow.inputs, &mut errors);
     check_input_references(workflow, &mut errors);
+    check_modes(workflow, &mut errors);
 
     errors
+}
+
+/// §10.1/D44: `modes:`'s own three invariants — independent of the
+/// mode's name or count, checked once per declared mode. `include: all`
+/// is trivially coherent (everything's in it), so only the explicit
+/// node-list form has anything to check.
+fn check_modes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let Some(modes) = &workflow.modes else {
+        return;
+    };
+
+    // Mode `include:` only ever names *top-level* nodes (§10.1's own
+    // examples never reach into a `parallel` group's children) — a
+    // `parallel` group is included or excluded as a whole, so
+    // "known" here deliberately excludes nested child ids even though
+    // `check`'s other rules track them for global uniqueness.
+    let top_level_ids: HashSet<&NodeId> = workflow.nodes.iter().map(|n| &n.id).collect();
+    let invariant_ids: Vec<&NodeId> = workflow
+        .nodes
+        .iter()
+        .filter(|n| n.invariant)
+        .map(|n| &n.id)
+        .collect();
+
+    for (mode_name, spec) in modes {
+        let yunta_core::ModeInclude::Nodes(included_ids) = &spec.include else {
+            continue; // `all` — every invariant below is vacuously true
+        };
+        for id in included_ids {
+            if !top_level_ids.contains(id) {
+                errors.push(CheckError::ModeReferencesUnknownNode {
+                    mode: mode_name.clone(),
+                    node: id.clone(),
+                });
+            }
+        }
+
+        let included: HashSet<&NodeId> = included_ids.iter().collect();
+        for invariant_id in &invariant_ids {
+            if !included.contains(invariant_id) {
+                errors.push(CheckError::InvariantNodeExcludedFromMode {
+                    node: (*invariant_id).clone(),
+                    mode: mode_name.clone(),
+                });
+            }
+        }
+
+        for node in workflow.nodes.iter().filter(|n| included.contains(&n.id)) {
+            if let Some(on_failure) = &node.on_failure {
+                if !included.contains(&on_failure.goto) {
+                    errors.push(CheckError::RerouteTargetExcludedFromMode {
+                        mode: mode_name.clone(),
+                        node: node.id.clone(),
+                        goto: on_failure.goto.clone(),
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// T1.5/§2.3: each declared input's own fields are internally consistent

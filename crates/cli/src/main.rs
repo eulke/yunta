@@ -44,7 +44,9 @@ enum Command {
         /// own resolution. `mock` is refused here — see `yunta test`.
         #[arg(long)]
         adapter: Option<String>,
-        /// Selects a workflow mode. Not implemented yet (§10, M9).
+        /// Selects a workflow mode (§10.1, D44). Omitted with `modes:`
+        /// declared defaults to the first declared mode; a workflow
+        /// with no `modes:` at all ignores this entirely.
         #[arg(long)]
         mode: Option<String>,
         /// Prints progress (§8.5) as the run advances, polling the event

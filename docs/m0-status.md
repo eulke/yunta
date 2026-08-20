@@ -2608,6 +2608,97 @@ que aparece.
         --workflow`/`--json` sin romper ninguno de los dos; menos de 3
         corridas no muestra nada).
 
+## M9 — Modos, promoción y composición (parcial: T9.1)
+
+- [x] **T9.1 — Modos abiertos (§10.1, D44).** `modes:` no existía en
+      absoluto en el schema hasta ahora — el propio `Workflow` de M-0/M7
+      llevaba una nota explícita ("minus modes, out of scope"). Agrega
+      `modes: Option<IndexMap<String, ModeSpec>>` (mapa **ordenado** —
+      `indexmap` nuevo como dependencia directa de `yunta-core`, ya
+      presente transitivamente en el árbol vía otros crates, así que no
+      crece el grafo real) y `invariant: bool` en `Node`.
+      - **`include: all` vs. `include: [id, ...]`**: `ModeInclude` con
+        `Serialize`/`Deserialize` escritos a mano en los dos sentidos —
+        **encontrado en caliente, no en el diseño**: el primer intento
+        derivaba `Serialize` sobre el enum `#[serde(untagged)]`, que
+        emite la variante unitaria `All` como YAML `null`, no como el
+        string `"all"` que el `Deserialize` (también a mano, porque
+        serde no distingue solo-por-forma un string vs. una secuencia
+        sin ayuda) espera de vuelta. Ningún test lo atrapó — todos
+        construían el `Workflow` una sola vez desde YAML sin volver a
+        escribirlo — hasta un smoke test manual contra el binario real
+        (`yunta run` escribe `manifest.yaml`, `yunta status` lo vuelve a
+        leer): `include: all` rompía ese round-trip. Corregido con un
+        `impl Serialize` manual, y el test que debería haberlo atrapado
+        desde el principio ahora vive en
+        `crates/core/tests/workflow.rs`. Recordatorio concreto de por
+        qué CLAUDE.md insiste en correr las cosas, no solo compilarlas.
+      - **`check`**: tres reglas nuevas, independientes del nombre o
+        cantidad de modos (D44 lo pide explícito) — referencia a un
+        nodo inexistente en `include:`; nodo `invariant: true` ausente
+        de algún modo declarado (`include: all` lo cumple trivialmente,
+        nunca hay nada que chequear ahí); y la coherencia interna del
+        modo (§10.1): un nodo incluido cuyo `on_failure.goto` apunta a
+        un nodo excluido de ese mismo modo es error, con el mensaje
+        nombrando las dos salidas (incluir el destino, o quitar la
+        re-ruta) — literalmente el texto que §10.1 pide.
+      - **Filtrado en el scheduler**: `next_step` (antes tomaba
+        `&Workflow` completo) ahora recibe también el set de ids que el
+        modo resuelto incluye (`None` = sin restricción — sin `modes:`
+        declarado, o el modo resuelto es `include: all`) y filtra las
+        cinco secciones que iteran `workflow.nodes` — incluida la
+        detección de "todo terminado" (T4.1 propio: un nodo excluido
+        nunca llega a ningún estado terminal, así que contarlo ahí
+        habría dejado el run esperando para siempre algo que nunca iba
+        a correr). **Descubierto trazando el propio ejemplo de
+        referencia**, no inventado: el modo "quick" de
+        `build-feature.yaml` incluye `implement`, que depende de
+        `approve-plan` — excluido de "quick" — y `ship`, que depende de
+        `fix-findings` — también excluido. La dependencia de un nodo
+        incluido hacia uno excluido se trata como ya satisfecha
+        (`deps_satisfied` en `schedule.rs`) — un modo recorta
+        deliberación, nunca bloquea sobre lo que decidió saltarse.
+      - **Congelado**: `create_run` ahora exige un `mode: &str` — el
+        sentinel `"default"` nunca valida contra `modes:` y nunca
+        filtra (equivalente a "sin restricción"), y cualquier otro
+        nombre se valida contra los modos declarados del workflow
+        *antes* de escribir nada (`RunError::UnknownMode`). El nombre
+        elegido se graba en `run_created.mode` (campo que ya existía
+        desde T2.2, sin consumidor hasta ahora) y nunca se vuelve a
+        resolver — un resume lo lee del propio log, mismo criterio que
+        la resolución de runners (§13.1) ya sigue.
+      - **CLI**: `yunta run --mode <name>` ahora funciona de verdad (el
+        flag existía desde T7.1, rechazado explícitamente hasta hoy).
+        Omitido con `modes:` declarado por defecto usa el **primer**
+        modo declarado — la promoción (§10.2) solo escala hacia
+        adelante, así que arrancar en el piso es el único default que
+        nunca necesita revertirse. `yunta test` (T7.9) siempre usa
+        `"default"`: un caso de test no declara su propio modo, y
+        ejercitar el grafo completo es más útil que recortar uno de
+        entrada.
+      - **Deuda/límites explícitos**: `include:` de un modo solo nombra
+        nodos de **primer nivel** — nunca hijos de un `parallel` (el
+        propio §10.1 nunca lo ejemplifica); "clasificación por nodo
+        temprano + gate" (la frase literal de §10.1) se interpreta como
+        la composición de T9.1+T9.2 (un modo "quick" cuyo propio nodo
+        inicial escala vía promoción si el trabajo lo excede) y no como
+        un tercer mecanismo nuevo — ninguna tarea del plan pide
+        `message`/`options`/`on` en un `kind: gate` genérico, y el
+        Contrato mismo nunca define esa forma normativamente (solo
+        aparece, sin definición, en los workflows de referencia); T9.2
+        (promoción) es quien realmente completa esa lectura, y queda
+        para la próxima tarea del milestone, en orden.
+      - Tests: 6 en `crates/core/tests/workflow.rs` (round-trip de
+        `include: all` — la regresión que atrapó el bug de serialización
+        —, round-trip de `include: [...]` con orden de declaración
+        preservado, `invariant` por defecto en `false`, workflow sin
+        `modes:` en absoluto) + 7 en `crates/engine/tests/check.rs` (las
+        tres reglas nuevas, cada una con su caso positivo) + 4 en
+        `crates/engine/tests/modes.rs` contra el engine real ("quick"
+        salta el nodo excluido y aun así termina, "full" corre todo,
+        `"default"` ignora los modos por completo, un nombre de modo
+        desconocido se rechaza antes de crear el run).
+
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 
 - **T1.1**: nodos `prompt`/`bash`/`loop`, más `parallel` desde T4.6 y `check`

@@ -130,17 +130,6 @@ pub async fn run(
     mode: Option<&str>,
     follow: bool,
 ) -> ExitCode {
-    // `modes:` (§10) isn't in the schema this recorte parses (M9 owns
-    // it) — refusing the flag up front is honest; silently ignoring it
-    // would look like the mode was applied.
-    if let Some(mode) = mode {
-        eprintln!(
-            "error: `--mode {mode}` — this build doesn't implement `modes:` yet (§10, M9); \
-             every workflow this recorte runs has exactly one path"
-        );
-        return ExitCode::FAILURE;
-    }
-
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -240,14 +229,36 @@ pub async fn run(
 
     let clock = SystemClock;
 
-    let run_dir =
-        match yunta_engine::create_run(&run_id, &manifest, &project.runs_root, &storage, &clock) {
-            Ok(run_dir) => run_dir,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        };
+    // §10.1/D44: an explicit `--mode` is used as given (`create_run`
+    // itself refuses an unknown name); omitted with `modes:` declared
+    // defaults to the *first* declared mode — promotion (§10.2) only
+    // ever escalates forward, so starting at the floor is the one
+    // default that can never need walking back. A workflow with no
+    // `modes:` at all keeps running everything, unaffected.
+    let resolved_mode = mode.map(str::to_string).unwrap_or_else(|| {
+        manifest
+            .workflow
+            .modes
+            .as_ref()
+            .and_then(|modes| modes.keys().next())
+            .cloned()
+            .unwrap_or_else(|| "default".to_string())
+    });
+
+    let run_dir = match yunta_engine::create_run(
+        &run_id,
+        &manifest,
+        &project.runs_root,
+        &storage,
+        &clock,
+        &resolved_mode,
+    ) {
+        Ok(run_dir) => run_dir,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     println!("run {run_id}: created at {}", run_dir.display());
 
     let follower = follow.then(|| {

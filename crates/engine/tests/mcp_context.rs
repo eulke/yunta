@@ -150,7 +150,15 @@ async fn run_with_config(
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
-    let run_dir = create_run(&run_id, &manifest, &runs_root, &storage, &FixedClock).unwrap();
+    let run_dir = create_run(
+        &run_id,
+        &manifest,
+        &runs_root,
+        &storage,
+        &FixedClock,
+        "default",
+    )
+    .unwrap();
 
     let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();

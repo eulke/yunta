@@ -186,8 +186,19 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    yunta_engine::create_run(&run_id, &manifest, &runs_root, &storage, &SystemClock)
-        .map_err(|e| e.to_string())?;
+    // §10.1/D44: `"default"` runs the whole graph unfiltered — a test
+    // case (T7.9/D89) doesn't declare a mode of its own, and exercising
+    // the full workflow is the more useful default for a fixture-driven
+    // test than picking one mode out from under it.
+    yunta_engine::create_run(
+        &run_id,
+        &manifest,
+        &runs_root,
+        &storage,
+        &SystemClock,
+        "default",
+    )
+    .map_err(|e| e.to_string())?;
     // A test case's every session comes from a scripted fixture — a
     // gate here has no human to ask, same as it has no LLM to call.
     let report = yunta_engine::execute_run(

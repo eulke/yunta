@@ -63,6 +63,17 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
+    /// §10.1/D44: `create_run`'s own guard — `check` validates every
+    /// mode's *internal* coherence, but never sees which one a run
+    /// actually asks for, so this is where an unknown `--mode` name is
+    /// caught, before anything is written.
+    #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
+    UnknownMode {
+        workflow: String,
+        mode: String,
+        declared: String,
+    },
+
     #[error("failed to {context}")]
     Io {
         context: String,
@@ -171,13 +182,43 @@ pub struct RunReport {
 /// Creates the run's anatomy (§2): run.dir with `artifacts/` and
 /// `scratch/`, the frozen `manifest.yaml`, and the `run_created` event.
 /// Returns the run directory.
+///
+/// `mode` (§10.1/D44) is frozen into `run_created.mode` right here and
+/// never re-resolved again — a resume reads the same name back off the
+/// log. `"default"` — the caller's choice when nothing else applies,
+/// same sentinel `stats.rs`'s own `mode_of` already falls back to for a
+/// pre-T9.1 log — always passes: a workflow declaring no `modes:` at
+/// all has nothing to validate a name against, and every node stays
+/// schedulable, exactly pre-T9.1 behavior. A workflow that *does*
+/// declare `modes:` rejects any other unrecognized name.
 pub fn create_run(
     run_id: &RunId,
     manifest: &Manifest,
     runs_root: &Path,
     storage: &Storage,
     clock: &dyn Clock,
+    mode: &str,
 ) -> Result<PathBuf, RunError> {
+    if mode != "default" {
+        match &manifest.workflow.modes {
+            Some(modes) if !modes.contains_key(mode) => {
+                return Err(RunError::UnknownMode {
+                    workflow: manifest.workflow.name.clone(),
+                    mode: mode.to_string(),
+                    declared: modes.keys().cloned().collect::<Vec<_>>().join(", "),
+                });
+            }
+            Some(_) => {}
+            None => {
+                return Err(RunError::UnknownMode {
+                    workflow: manifest.workflow.name.clone(),
+                    mode: mode.to_string(),
+                    declared: "(none — this workflow declares no modes:)".to_string(),
+                });
+            }
+        }
+    }
+
     let run_dir = runs_root.join(run_id.as_str());
     for dir in [
         run_dir.clone(),
@@ -208,7 +249,7 @@ pub fn create_run(
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
             inputs: HashMap::new(), // `inputs:` schema is T1.5, out of M-0
-            mode: "default".to_string(), // modes are §10/M9, out of M-0
+            mode: mode.to_string(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: manifest.base_branch.clone(),
@@ -286,6 +327,17 @@ pub async fn execute_run(
     // unresolved work of its own keeping it open.
     gate_exec::recheck_approved_gates(&ctx, forge).await?;
 
+    // §10.1/D44: the mode is frozen once, in `run_created` (`events[0]`
+    // — never absent, checked above), and never re-resolved — a resume
+    // reads the same name back off the log rather than re-deriving it,
+    // same "resolved once, reused forever" discipline runner resolution
+    // already follows (§13.1).
+    let mode_name = match &events[0].payload {
+        EventPayload::RunCreated(p) => p.mode.clone(),
+        _ => "default".to_string(),
+    };
+    let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
+
     loop {
         let events = ctx.load_events()?;
         match schedule::next_step(
@@ -293,6 +345,7 @@ pub async fn execute_run(
             &events,
             manifest.max_parallel_nodes,
             manifest.config.resolved_on_interrupt(),
+            mode_nodes.as_ref(),
         ) {
             ScheduleStep::Broken { diagnostic } => {
                 return Err(RunError::Broken { diagnostic });

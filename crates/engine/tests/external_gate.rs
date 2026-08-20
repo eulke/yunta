@@ -116,7 +116,15 @@ impl Bench {
             &HashMap::new(),
         )
         .unwrap();
-        let run_dir = create_run(&run_id, &manifest, &runs_root, &storage, &FixedClock).unwrap();
+        let run_dir = create_run(
+            &run_id,
+            &manifest,
+            &runs_root,
+            &storage,
+            &FixedClock,
+            "default",
+        )
+        .unwrap();
 
         Bench {
             _root: root,

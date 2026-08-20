@@ -1,9 +1,29 @@
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
 use yunta_core::{
-    ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource, RunnerCandidate, Workflow,
+    ConfigLayer, JoinPolicy, ModeInclude, ModeSpec, Node, NodeKind, OnFailure, PromptSource,
+    RunnerCandidate, Workflow,
 };
 use yunta_engine::{check, check_warnings, CheckError, CheckWarning};
+
+fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<String, ModeSpec> {
+    entries
+        .iter()
+        .map(|(name, include)| {
+            (
+                (*name).to_string(),
+                ModeSpec {
+                    include: include.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn included(ids: &[&str]) -> ModeInclude {
+    ModeInclude::Nodes(ids.iter().map(|&id| id.into()).collect())
+}
 
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
     Node {
@@ -22,6 +42,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
@@ -42,6 +63,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
@@ -66,6 +88,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
@@ -91,6 +114,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         permissions: None,
         network: None,
         context: Vec::new(),
+        invariant: false,
     }
 }
 
@@ -109,6 +133,7 @@ fn config_with_forge() -> ConfigLayer {
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
+        modes: None,
         description: None,
         inputs: Default::default(),
         node_defaults: None,
@@ -122,6 +147,7 @@ fn workflow_with_inputs(
 ) -> Workflow {
     Workflow {
         name: "fixture".to_string(),
+        modes: None,
         description: None,
         inputs,
         node_defaults: None,
@@ -273,6 +299,145 @@ fn external_gate_with_forge_configured_is_accepted() {
         !errors
             .iter()
             .any(|e| matches!(e, CheckError::ExternalGateWithoutForge { .. })),
+        "got: {errors:?}"
+    );
+}
+
+fn workflow_with_modes(nodes: Vec<Node>, modes: IndexMap<String, ModeSpec>) -> Workflow {
+    let mut wf = workflow(nodes);
+    wf.modes = Some(modes);
+    wf
+}
+
+#[test]
+fn a_mode_including_all_nodes_has_no_mode_errors() {
+    let wf = workflow_with_modes(
+        vec![bash("a", "true", &[]), bash("b", "true", &["a"])],
+        modes(&[("full", ModeInclude::All)]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors.iter().any(|e| matches!(
+            e,
+            CheckError::ModeReferencesUnknownNode { .. }
+                | CheckError::InvariantNodeExcludedFromMode { .. }
+                | CheckError::RerouteTargetExcludedFromMode { .. }
+        )),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_mode_referencing_an_unknown_node_is_reported() {
+    let wf = workflow_with_modes(
+        vec![bash("a", "true", &[])],
+        modes(&[("quick", included(&["a", "ghost"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::ModeReferencesUnknownNode {
+        mode: "quick".into(),
+        node: "ghost".into(),
+    }));
+}
+
+#[test]
+fn an_invariant_node_excluded_from_a_mode_is_reported() {
+    let mut lint = bash("lint", "cargo clippy", &[]);
+    lint.invariant = true;
+    let wf = workflow_with_modes(
+        vec![lint, bash("ship", "true", &[])],
+        modes(&[("quick", included(&["ship"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::InvariantNodeExcludedFromMode {
+        node: "lint".into(),
+        mode: "quick".into(),
+    }));
+}
+
+#[test]
+fn an_invariant_node_present_in_every_mode_has_no_error() {
+    let mut lint = bash("lint", "cargo clippy", &[]);
+    lint.invariant = true;
+    let wf = workflow_with_modes(
+        vec![lint, bash("ship", "true", &[])],
+        modes(&[
+            ("quick", included(&["lint", "ship"])),
+            ("full", ModeInclude::All),
+        ]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::InvariantNodeExcludedFromMode { .. })),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_reroute_target_excluded_from_a_mode_is_reported() {
+    // Mirrors §10.1's own example: a node in-mode whose on_failure.goto
+    // lands on a node that mode leaves out.
+    let mut lint = bash("lint", "cargo clippy", &[]);
+    lint.on_failure = Some(OnFailure {
+        goto: "fix-lint".into(),
+        max_reroutes: 2,
+    });
+    let wf = workflow_with_modes(
+        vec![lint, bash("fix-lint", "true", &[])],
+        modes(&[("quick", included(&["lint"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::RerouteTargetExcludedFromMode {
+        mode: "quick".into(),
+        node: "lint".into(),
+        goto: "fix-lint".into(),
+    }));
+}
+
+#[test]
+fn a_reroute_target_included_in_the_same_mode_has_no_error() {
+    let mut lint = bash("lint", "cargo clippy", &[]);
+    lint.on_failure = Some(OnFailure {
+        goto: "fix-lint".into(),
+        max_reroutes: 2,
+    });
+    let wf = workflow_with_modes(
+        vec![lint, bash("fix-lint", "true", &[])],
+        modes(&[("quick", included(&["lint", "fix-lint"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_re_route_from_a_node_excluded_from_the_mode_is_never_checked() {
+    // The failing node itself isn't in "quick" at all — its goto target
+    // being missing from the same mode isn't this mode's problem.
+    let mut lint = bash("lint", "cargo clippy", &[]);
+    lint.on_failure = Some(OnFailure {
+        goto: "fix-lint".into(),
+        max_reroutes: 2,
+    });
+    let wf = workflow_with_modes(
+        vec![
+            lint,
+            bash("fix-lint", "true", &[]),
+            bash("ship", "true", &[]),
+        ],
+        modes(&[("quick", included(&["ship"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
         "got: {errors:?}"
     );
 }

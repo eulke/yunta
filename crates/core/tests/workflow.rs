@@ -58,6 +58,99 @@ fn round_trips_through_serialization() {
 }
 
 #[test]
+fn modes_include_all_round_trips_through_serialization() {
+    // Regression: the untagged enum's derived `Serialize` would emit the
+    // unit variant `All` as YAML `null`, not the string `"all"` the
+    // schema's own `include: all` (§10.1) reads — breaking every
+    // manifest round-trip (`status`/`resume` reading back what `run`
+    // just wrote) for any workflow using it. Caught by hand against the
+    // real binary, not by this suite the first time around — this test
+    // is what should have caught it.
+    let yaml = r#"
+name: fixture
+modes:
+  full: { include: all }
+nodes:
+  - id: a
+    kind: bash
+    run: "true"
+"#;
+    let first: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let re_serialized = serde_yaml::to_string(&first).unwrap();
+    let second: Workflow =
+        serde_yaml::from_str(&re_serialized).expect("include: all must round-trip");
+    assert_eq!(first, second);
+    assert_eq!(
+        first.modes.as_ref().unwrap()["full"].include,
+        yunta_core::ModeInclude::All
+    );
+}
+
+#[test]
+fn modes_include_a_node_list_round_trips_and_declaration_order_survives() {
+    let yaml = r#"
+name: fixture
+modes:
+  hotfix:   { include: [a, c] }
+  standard: { include: [a, b, c] }
+nodes:
+  - id: a
+    kind: bash
+    invariant: true
+    run: "true"
+  - id: b
+    kind: bash
+    run: "true"
+  - id: c
+    kind: bash
+    run: "true"
+"#;
+    let first: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let re_serialized = serde_yaml::to_string(&first).unwrap();
+    let second: Workflow = serde_yaml::from_str(&re_serialized).unwrap();
+    assert_eq!(first, second);
+
+    // §10.1's own promotion-ladder guarantee: declaration order, not
+    // alphabetical or any other reordering.
+    let names: Vec<&str> = first
+        .modes
+        .as_ref()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, vec!["hotfix", "standard"]);
+    assert!(first.nodes[0].invariant);
+    assert!(!first.nodes[1].invariant);
+}
+
+#[test]
+fn invariant_defaults_to_false() {
+    let yaml = r#"
+name: fixture
+nodes:
+  - id: a
+    kind: bash
+    run: "true"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert!(!workflow.nodes[0].invariant);
+}
+
+#[test]
+fn a_workflow_with_no_modes_at_all_parses_with_none() {
+    let yaml = r#"
+name: fixture
+nodes:
+  - id: a
+    kind: bash
+    run: "true"
+"#;
+    let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
+    assert!(workflow.modes.is_none());
+}
+
+#[test]
 fn a_path_looking_scalar_prompt_is_always_literal_text_never_a_file() {
     let yaml = r#"
 id: plan
