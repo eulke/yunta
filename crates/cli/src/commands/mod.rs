@@ -6,6 +6,7 @@ pub mod gc;
 pub mod init;
 pub mod list;
 pub mod new;
+pub(crate) mod promote;
 pub mod resume;
 pub mod run;
 pub mod stats;
@@ -30,6 +31,14 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
         }
         RunTerminal::Paused { reason } => {
             println!("run {run_id}: paused — {reason}");
+            ExitCode::FAILURE
+        }
+        // `run`/`resume` always route a fresh `RunReport` through
+        // `promote::drive_promotions` first — by the time anything
+        // calls `report_outcome`, a `Promoted` terminal has already
+        // been chased to whatever it became next.
+        RunTerminal::Promoted { suggested_mode } => {
+            println!("run {run_id}: promoted to `{suggested_mode}` (unresolved)");
             ExitCode::FAILURE
         }
     }

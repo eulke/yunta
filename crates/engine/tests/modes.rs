@@ -115,6 +115,7 @@ impl Bench {
             &self.storage,
             &FixedClock,
             mode,
+            None,
         )?;
 
         let adapter = MockAdapter::from_yaml(FIXTURE).unwrap();

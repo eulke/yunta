@@ -252,6 +252,7 @@ pub async fn run(
         &storage,
         &clock,
         &resolved_mode,
+        None,
     ) {
         Ok(run_dir) => run_dir,
         Err(e) => {
@@ -291,6 +292,29 @@ pub async fn run(
 
     match outcome {
         Ok(report) => {
+            // §10.2/T9.2: chases every `Promoted` terminal to its actual
+            // end before anything downstream (release, report) looks at
+            // it — see `promote.rs`'s own doc comment for why this can't
+            // happen inside `execute_run` itself.
+            let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
+                &cwd,
+                &project,
+                &storage,
+                &adapters,
+                forge.as_deref(),
+                run_id,
+                manifest,
+                worktree,
+                report,
+            )
+            .await
+            {
+                Ok(chained) => chained,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
             // Only a *finished* run releases isolation `none`'s lock — a
             // paused run expects a future `resume` on the same checkout,
             // which is the same logical run, not a second concurrent one.

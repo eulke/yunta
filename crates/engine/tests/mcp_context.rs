@@ -157,6 +157,7 @@ async fn run_with_config(
         &storage,
         &FixedClock,
         "default",
+        None,
     )
     .unwrap();
 

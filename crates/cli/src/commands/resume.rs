@@ -88,6 +88,25 @@ pub async fn resume(run_id: &str) -> ExitCode {
 
     match outcome {
         Ok(report) => {
+            let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
+                &cwd,
+                &project,
+                &storage,
+                &adapters,
+                forge.as_deref(),
+                run_id,
+                manifest,
+                worktree,
+                report,
+            )
+            .await
+            {
+                Ok(chained) => chained,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
             if matches!(report.terminal, RunTerminal::Finished) {
                 if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
                     eprintln!("error: {e}");

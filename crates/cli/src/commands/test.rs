@@ -53,6 +53,11 @@ struct Expect {
 enum FinalState {
     Finished,
     Paused,
+    /// Never actually reachable under `NoInteraction` (§10.2's own
+    /// `promote` option needs a live `HumanInteraction` to be chosen at
+    /// all) — kept for schema completeness rather than making
+    /// `RunTerminal`'s mapping here partial.
+    Promoted,
 }
 
 pub async fn test() -> ExitCode {
@@ -197,6 +202,7 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
         &storage,
         &SystemClock,
         "default",
+        None,
     )
     .map_err(|e| e.to_string())?;
     // A test case's every session comes from a scripted fixture — a
@@ -221,6 +227,7 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
     let got_state = match &report.terminal {
         RunTerminal::Finished => FinalState::Finished,
         RunTerminal::Paused { .. } => FinalState::Paused,
+        RunTerminal::Promoted { .. } => FinalState::Promoted,
     };
     if got_state != case.expect.final_state {
         problems.push(format!(

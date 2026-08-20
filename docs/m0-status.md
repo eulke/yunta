@@ -2608,7 +2608,7 @@ que aparece.
         --workflow`/`--json` sin romper ninguno de los dos; menos de 3
         corridas no muestra nada).
 
-## M9 — Modos, promoción y composición (parcial: T9.1)
+## M9 — Modos, promoción y composición (parcial: T9.1–T9.2)
 
 - [x] **T9.1 — Modos abiertos (§10.1, D44).** `modes:` no existía en
       absoluto en el schema hasta ahora — el propio `Workflow` de M-0/M7
@@ -2698,6 +2698,83 @@ que aparece.
         salta el nodo excluido y aun así termina, "full" corre todo,
         `"default"` ignora los modos por completo, un nombre de modo
         desconocido se rechaza antes de crear el run).
+
+- [x] **T9.2 — Promoción = run sucesor (§10.2, D22).** El único ✓ de la
+      tarea es "cadena auditada en ambos logs" — el resto (disparador
+      exacto, herencia de contexto) queda deliberadamente subespecificado
+      en el propio Contrato, así que cada pieza se decidió con el
+      criterio más chico y mejor evidenciado disponible, documentado acá
+      en vez de adivinado en silencio.
+      - **Disparador**: la tabla de eventos del Contrato dice
+        `promotion_signaled` | emisor **engine** — nunca un nodo con una
+        tool propia (esa vía no existe hasta M8/MCP). La única escalación
+        hoy conectada a un `HumanInteraction` real es la de re-rutas
+        agotadas (§5.3/T7.2) — extendida con una tercera opción,
+        `promote`, ofrecida **solo** cuando `modes:` declara un modo
+        posterior al actual (§10.1's declaration-order ladder,
+        `next_mode_after` en `schedule.rs`); sin eso, la escalación sigue
+        siendo exactamente `retry`/`abort`, sin cambio de comportamiento
+        para todo workflow sin modos. La escalación equivalente de T5.11
+        (`scope_expansion` agotado, `Decision::Escalate`) **sigue sin
+        conectarse a un gate real** — deuda ya documentada en su propia
+        entrada de T5.11, deliberadamente no tocada acá para no ensanchar
+        el corte de esta tarea.
+      - **Mecánica**: elegir `promote` emite `promotion_signaled`
+        (`reason`, `evidence`, `suggested_mode`) y cierra el run con
+        `run_finished{terminal_state: Promoted}` — nuevo variant, cierre
+        definitivo, igual de inmutable que cualquier otro `run_finished`
+        (I3). `execute_run` devuelve `RunTerminal::Promoted{suggested_mode}`
+        y **no crea el sucesor por sí mismo** — necesitaría el checkout
+        original (`cwd`) para preparar un worktree nuevo, algo que nunca
+        recibe (solo un worktree ya preparado, §7.3). Crear y arrancar el
+        sucesor es trabajo de la capa imperativa: `commands/promote.rs`
+        (`drive_promotions`), llamado desde `run`/`resume` justo después
+        de su propio `execute_run`, en un loop — acotado automáticamente,
+        porque `modes:` es una escalera finita y estrictamente hacia
+        adelante (como mucho `len(modes) - 1` promociones antes de
+        quedarse sin modo siguiente).
+      - **Identidad del sucesor, determinista, sin inyectar entropía en
+        el engine**: `{run_id}-promoted` — derivado enteramente del
+        propio id del padre (que ya viene de afuera), nunca de reloj ni
+        de un generador nuevo. Su `base_commit` es el HEAD actual del
+        worktree del padre en el momento de promover (no el
+        `base_commit` original) — el trabajo ya avanzado se hereda, no
+        se descarta.
+      - **`create_run` gana `promoted_from: Option<&RunId>`** (mismo
+        patrón de extensión posicional que ya usó `mode`, T9.1) —
+        graba en `run_created.promoted_from`, campo scaffolded desde
+        T2.2 y sin consumidor hasta ahora.
+      - **Herencia de contexto — simplificada a propósito, no la
+        general de §12.** §10.2 pide que el sucesor incluya "artifacts,
+        ledger y findings del antecesor automáticamente". Un ledger
+        (`kind: task-ledger`) y cualquier `kind: findings` son archivos
+        bajo `artifacts/`, así que copiar el directorio completo del
+        padre al del sucesor los cubre a los tres sin inventar un
+        `ContextSource` nuevo. **Deliberadamente más angosto que el
+        mecanismo general de "runs vinculados" que el propio §12
+        describe** (referencia explícita por id a un run enlazado
+        específico) — esa infraestructura es compartida con T9.3
+        (`kind: workflow`, que la necesita igual), así que construirla
+        genérica recién cuando T9.3 llegue evita una versión tirada que
+        habría que rehacer. Un finding emitido por el engine (motivo:
+        `finding_posted` sin artifact — p. ej. una ampliación de scope
+        denegada) no sobrevive a esta copia: vive solo en el event log
+        del padre, no en un archivo. Documentado, no resuelto.
+      - **`isolation: none` bajo promoción**: nunca vuelve a pedir el
+        lock de `cwd` (que el padre todavía tiene, sin liberar — solo se
+        libera al terminar de verdad, `RunTerminal::Finished`) — el
+        sucesor simplemente reutiliza el mismo checkout sin re-preparar
+        nada.
+      - Tests: 3 en `crates/engine/tests/promotion.rs` (la mitad del
+        engine — `promote` ofrecido y cierra con `promotion_signaled` +
+        `run_finished: promoted`; nunca ofrecido sin modo posterior;
+        sin `HumanInteraction` real nunca promueve por su cuenta) + 1
+        en `crates/cli/src/commands/promote.rs` (`#[cfg(test)]`, la
+        única forma de ejercitar código `pub(crate)` de un crate sin
+        `lib.rs` — la mitad de CLI: `drive_promotions` de punta a
+        punta contra git real, sucesor creado y corrido, artifact real
+        heredado, cadena auditada en el `run_created.promoted_from` del
+        sucesor y el `promotion_signaled` del padre).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

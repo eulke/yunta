@@ -123,6 +123,7 @@ impl Bench {
             &storage,
             &FixedClock,
             "default",
+            None,
         )
         .unwrap();
 

@@ -144,6 +144,10 @@ pub enum TerminalState {
     Done,
     Failed,
     Cancelled,
+    /// §10.2/D22: the run closed because its own gate accepted promotion
+    /// to a later-declared mode — never because the work itself failed
+    /// or was cancelled.
+    Promoted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

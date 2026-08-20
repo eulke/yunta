@@ -38,6 +38,21 @@ pub fn mode_included_nodes(workflow: &Workflow, mode_name: &str) -> Option<HashS
     }
 }
 
+/// The mode immediately after `mode_name` in `modes:`'s own declaration
+/// order (§10.1/§10.2/D44) — the *only* direction promotion ever moves
+/// ("retroceder a un modo anterior en la declaración no existe"), and
+/// the smallest possible escalation past the current one, rather than
+/// jumping straight to whichever mode a human might name off-hand.
+/// `None` when the workflow declares no modes, the current mode name
+/// isn't one of them (the `"default"` sentinel, or a stale/renamed
+/// mode), or it's already the last one declared — nothing to promote
+/// to, so promotion is never offered.
+pub fn next_mode_after(workflow: &Workflow, mode_name: &str) -> Option<String> {
+    let modes = workflow.modes.as_ref()?;
+    let index = modes.get_index_of(mode_name)?;
+    modes.get_index(index + 1).map(|(name, _)| name.clone())
+}
+
 /// What the run does next. A batch of `Execute` entries is never empty
 /// and is always homogeneous — the scheduler never mixes control actions
 /// (`Reroute`/`Pause`/`Finish`/`Broken`) into the same step as node

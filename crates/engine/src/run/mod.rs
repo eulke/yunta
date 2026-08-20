@@ -39,8 +39,9 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload, RunCreatedPayload,
-    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
+    Event, EventPayload, GateOption, GateWaitingPayload, NodeReroutedPayload,
+    PromotionSignaledPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
+    RunResumedPayload, TerminalState,
 };
 use yunta_core::{Clock, Manifest, NodeId, RunId, YuntaError};
 use yunta_storage::{Storage, StorageError};
@@ -166,11 +167,25 @@ impl RunCtx<'_> {
     }
 }
 
-/// How `execute_run` came back: everything done, or waiting on a human.
+/// How `execute_run` came back: everything done, waiting on a human, or
+/// promoted onward.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunTerminal {
     Finished,
-    Paused { reason: String },
+    Paused {
+        reason: String,
+    },
+    /// §10.2/D22: this run's own gate accepted promotion — `run_finished`
+    /// (`terminal_state: Promoted`) is already on *this* log, closing it
+    /// for good (I3: nothing reopens a finished run, same guarantee
+    /// T7.7's own SHA-drift recheck leans on). Creating and starting the
+    /// successor — a fresh run, its own `run_id`, in `suggested_mode`,
+    /// `promoted_from` this one — is the caller's job: it needs the
+    /// original repo checkout (`cwd`) to prepare a worktree, which
+    /// `execute_run` was never given (only ever an *existing* worktree).
+    Promoted {
+        suggested_mode: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +213,7 @@ pub fn create_run(
     storage: &Storage,
     clock: &dyn Clock,
     mode: &str,
+    promoted_from: Option<&RunId>,
 ) -> Result<PathBuf, RunError> {
     if mode != "default" {
         match &manifest.workflow.modes {
@@ -250,7 +266,7 @@ pub fn create_run(
             manifest_hash: manifest.manifest_hash(),
             inputs: HashMap::new(), // `inputs:` schema is T1.5, out of M-0
             mode: mode.to_string(),
-            promoted_from: None,
+            promoted_from: promoted_from.cloned(),
             yunta_schema: None,
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
@@ -407,32 +423,46 @@ pub async fn execute_run(
                 // T7.2/§5.3: the engine assembles the escalation (summary
                 // + mechanical evidence from the log) — never the node
                 // that failed, which has no further say once it's
-                // failed. `retry`/`abort` are exactly the two well-
-                // defined outcomes at this pause: try the same
-                // corrective node once more (human-authorized, since the
-                // declared cap is spent), or stop here.
+                // failed. `retry`/`abort` are the two outcomes any
+                // exhausted re-route offers; §10.2's own "esto excede el
+                // modo" adds a third, `promote`, exactly when there's
+                // somewhere later in `modes:`'s own declaration order to
+                // promote *to* — never invented when there isn't.
+                let suggested_mode = schedule::next_mode_after(&manifest.workflow, &mode_name);
+                let mut options = vec![
+                    GateOption {
+                        id: "retry".to_string(),
+                        label: format!("Re-route to `{goto}` once more"),
+                        tradeoff: format!(
+                            "Uses one extra correction attempt beyond the declared \
+                             max_reroutes ({max_reroutes}); escalates again if `{goto}` \
+                             doesn't fix it"
+                        ),
+                    },
+                    GateOption {
+                        id: "abort".to_string(),
+                        label: "Abort the run".to_string(),
+                        tradeoff: "Stops here; nothing further executes".to_string(),
+                    },
+                ];
+                if let Some(next_mode) = &suggested_mode {
+                    options.push(GateOption {
+                        id: "promote".to_string(),
+                        label: format!("Promote to mode `{next_mode}`"),
+                        tradeoff: format!(
+                            "Closes this run (`run_finished: promoted`) and starts a \
+                             successor in `{next_mode}`, inheriting this run's artifacts; \
+                             §10.2 — there's no mechanism to demote back to `{mode_name}`"
+                        ),
+                    });
+                }
                 let escalation = GateWaitingPayload {
                     summary: format!(
                         "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` \
                          are exhausted: {cause}"
                     ),
                     evidence: cause.clone(),
-                    options: vec![
-                        GateOption {
-                            id: "retry".to_string(),
-                            label: format!("Re-route to `{goto}` once more"),
-                            tradeoff: format!(
-                                "Uses one extra correction attempt beyond the declared \
-                                 max_reroutes ({max_reroutes}); escalates again if `{goto}` \
-                                 doesn't fix it"
-                            ),
-                        },
-                        GateOption {
-                            id: "abort".to_string(),
-                            label: "Abort the run".to_string(),
-                            tradeoff: "Stops here; nothing further executes".to_string(),
-                        },
-                    ],
+                    options,
                     external_ref: None,
                 };
                 let resolution = human_interaction.resolve(&escalation).await;
@@ -467,6 +497,38 @@ pub async fn execute_run(
                             max_reroutes,
                         }),
                     )?;
+                } else if resolution.chosen_option.as_deref() == Some("promote") {
+                    // `suggested_mode` must be `Some` here — `"promote"`
+                    // only ever appeared as an option when it was.
+                    let next_mode = suggested_mode.expect("promote option implies a next mode");
+                    ctx.emit(
+                        None,
+                        EventPayload::PromotionSignaled(PromotionSignaledPayload {
+                            reason: format!(
+                                "node `{node}` exhausted its re-routes to `{goto}`: {cause}"
+                            ),
+                            evidence: cause,
+                            suggested_mode: next_mode.clone(),
+                        }),
+                    )?;
+                    let state = derive(&ctx.load_events()?);
+                    ctx.emit(
+                        None,
+                        EventPayload::RunFinished(RunFinishedPayload {
+                            terminal_state: TerminalState::Promoted,
+                            metrics: RunMetrics {
+                                cptv: cptv(&state),
+                                tokens: state.total_tokens,
+                            },
+                        }),
+                    )?;
+                    ctx.export_events_jsonl()?;
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Promoted {
+                            suggested_mode: next_mode,
+                        },
+                        state: derive(&ctx.load_events()?),
+                    });
                 } else {
                     let reason = format!(
                         "node `{node}`'s gate was resolved to abort{}",
