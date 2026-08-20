@@ -175,9 +175,17 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "got {terminal:?}"
     );
+    // DI-03/§3.2: a published, unresolved gate derives `waiting` —
+    // never "absent" (the pre-DI-03 reading) and never running/failed.
     assert!(
-        !state.nodes.contains_key(&"approve".into()),
-        "an unpublished-then-published-but-unresolved gate never reaches node_started"
+        matches!(
+            state.nodes.get(&"approve".into()),
+            Some(NodeState::Waiting {
+                external_ref: Some(_)
+            })
+        ),
+        "a published unresolved gate must derive Waiting with its PR ref, got {:?}",
+        state.nodes.get(&"approve".into())
     );
     assert!(
         forge_state.pr_number(bench.run_id.as_str()).is_some(),

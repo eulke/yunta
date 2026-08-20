@@ -240,6 +240,7 @@ async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
             Some(NodeState::Finished { .. }) => "finished",
             Some(NodeState::Failed { .. }) => "failed",
             Some(NodeState::Running { .. }) => "running",
+            Some(NodeState::Waiting { .. }) => "waiting",
             None => "never ran",
         };
         if got != expected {

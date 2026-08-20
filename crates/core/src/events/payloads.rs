@@ -259,6 +259,16 @@ pub struct AgentMessagePayload {
 pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
     pub content_hash: String,
+    /// The artifact's declared `kind:` when it has one (DI-03) — what
+    /// lets `derive()` recognize a `questions` artifact without reading
+    /// any file (I2: state from events alone). `None` for opaque
+    /// artifacts and for logs written before the field existed (D70's
+    /// tolerant reader). Named `artifact_kind`, not `kind`: the event
+    /// envelope's own internally-tagged discriminant already claims
+    /// `kind` in the serialized JSON (T2.2), and a colliding field name
+    /// silently corrupts the payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_kind: Option<crate::workflow::ArtifactKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -174,7 +174,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   gate — son dos formas distintas del Contrato (§4.1 vs §5.3) y
   aplastarlas en un solo método genera el vicio de payloads ambiguos.
 
-### DI-03 — `NodeState::Waiting` para gates en replay/status `[ ]`
+### DI-03 — `NodeState::Waiting` para gates en replay/status `[x]`
 
 - **Origen:** T7.7 + "Pendiente explícito #5". El gatillo original decía
   "cuando un gate pueda resolverse desde otra invocación" — T7.7 creó

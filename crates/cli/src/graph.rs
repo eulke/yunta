@@ -90,6 +90,12 @@ fn node_state_label(node: &NodeState) -> String {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
         NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
         NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+        // §8.5/D75: a run paused on a gate shows its waiting node
+        // distinctly — with the forge handle when there is one.
+        NodeState::Waiting { external_ref } => match external_ref {
+            Some(external_ref) => format!("waiting — {external_ref}"),
+            None => "waiting".to_string(),
+        },
     }
 }
 

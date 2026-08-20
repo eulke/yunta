@@ -2889,15 +2889,21 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    `finding_posted`, `child_run_*`, ampliación de scope, `promotion_signaled`
    — existen como tipos (T2.2) pero `derive()` los ignora porque nada los
    emite todavía. Sumarlos a `RunState` cuando su schema/ciclo llegue
-   (composición: M9; findings: T5.12). **`gate_waiting`/`gate_resolved` —
-   parcial desde T7.2**: ahora tienen emisor (el único gate real de este
-   recorte, re-rutas agotadas — sección M7), pero siguen sin entrar a
-   `RunState`: la resolución es síncrona dentro del mismo `execute_run`
-   (ambos eventos se emiten juntos, nunca uno sin el otro en el log), así
-   que hoy no existe un estado "esperando gate" que sobreviva entre
-   invocaciones para que `derive()` necesite exponer. Eso cambia si M8's
-   `resolve_gate` permite resolver un gate desde una invocación separada
-   — ese es el gatillo real para sumarlo a `RunState`.
+   (composición: M9; findings: T5.12). **`gate_waiting`/`gate_resolved` y
+   `questions_answered` — resuelto por DI-03**: `derive()` deriva
+   `NodeState::Waiting{external_ref}` (§3.2) para un gate publicado sin
+   resolución y para un nodo cuyo artifact `kind: questions` no tiene
+   `questions_answered` posterior (el evento `artifact_written` ganó
+   `artifact_kind`, aditivo D70 — nombrado así y no `kind` porque el
+   envelope internally-tagged ya reclama esa clave en el JSON, colisión
+   encontrada por un test e2e, no adivinada); el par interno de T7.2
+   (waiting+resolved juntos) restaura el estado previo por construcción.
+   El scheduler dejó de escanear eventos crudos (`was_published` borrado)
+   y decide sobre el estado derivado; `status` muestra `waiting`
+   distinguido y los nodos excluidos por modo como `skipped` (§8.5/D45,
+   denominador visible y atribuible). El re-ask de questions en resume
+   vive en `ScheduleStep::AskQuestions` (`questions_exec.rs`) — el ÚNICO
+   sitio de ask, primera corrida y resume por el mismo camino.
 6. **T1.5 — hecho.** Ver la sección M7 más abajo. El gatillo previsto acá
    ("cuando algo necesite inputs reales") terminó siendo `--input` de T7.1,
    no el workflow de bootstrap.

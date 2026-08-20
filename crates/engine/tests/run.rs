@@ -909,6 +909,96 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 }
 
 #[tokio::test]
+async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() {
+    // DI-03: the waiting state is derived from the log, so a *separate*
+    // invocation (yunta resume with a TTY) re-asks and continues — no
+    // conversational state, no new agent session.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "default",
+        None,
+    )
+    .unwrap();
+
+    // First invocation: headless — asks, pauses.
+    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
+    let first = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &first_adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(first.terminal, RunTerminal::Paused { .. }));
+    // §3.2: the paused node derives `waiting`, never "absent" or failed.
+    assert!(
+        matches!(
+            first.state.nodes.get(&"ask".into()),
+            Some(yunta_engine::NodeState::Waiting { .. })
+        ),
+        "got {:?}",
+        first.state.nodes.get(&"ask".into())
+    );
+
+    // Second invocation: a live surface, an empty fixture — answering
+    // needs no new session, only the log and the artifact on disk.
+    let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
+    let mut resume_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    resume_adapters.insert("mock".to_string(), Arc::new(empty_adapter));
+    let interaction = ScriptedAnswers {
+        answers: vec![answer("q1", "production")],
+    };
+    let resumed = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &resume_adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &interaction,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(resumed.terminal, RunTerminal::Finished);
+    assert!(matches!(
+        resumed.state.nodes.get(&"ask".into()),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+    let raw = std::fs::read_to_string(artifacts_dir.join("questions.yaml.answers.yaml")).unwrap();
+    let parsed: yunta_core::AnswersFile = serde_yaml::from_str(&raw).unwrap();
+    assert_eq!(parsed.answers, vec![answer("q1", "production")]);
+}
+
+#[tokio::test]
 async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
@@ -2517,6 +2607,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 yunta_core::events::ArtifactWrittenPayload {
                     path: "artifacts/plan.yaml".into(),
                     content_hash: "irrelevant".to_string(),
+                    artifact_kind: None,
                 },
             ),
         },

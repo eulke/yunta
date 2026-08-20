@@ -29,6 +29,7 @@ mod executor_exec;
 mod gate_exec;
 mod loop_exec;
 mod node_exec;
+mod questions_exec;
 mod schedule;
 
 use std::collections::HashMap;
@@ -51,6 +52,7 @@ use crate::replay::{derive, RunState};
 use crate::scope::ScopeCheckError;
 use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
+pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
 
 #[derive(Debug, Error)]
@@ -625,6 +627,25 @@ pub async fn execute_run(
                         terminal: RunTerminal::Paused { reason },
                         state: derive(&ctx.load_events()?),
                     });
+                }
+            }
+            ScheduleStep::AskQuestions { node } => {
+                let node = find_node(&manifest.workflow, &node)?;
+                match questions_exec::execute_ask(&ctx, node).await? {
+                    questions_exec::AskOutcome::Answered => {}
+                    questions_exec::AskOutcome::Pause { reason } => {
+                        ctx.emit(
+                            None,
+                            EventPayload::RunPaused(RunPausedPayload {
+                                reason: reason.clone(),
+                            }),
+                        )?;
+                        ctx.export_events_jsonl()?;
+                        return Ok(RunReport {
+                            terminal: RunTerminal::Paused { reason },
+                            state: derive(&ctx.load_events()?),
+                        });
+                    }
                 }
             }
         }

@@ -7,9 +7,10 @@
 //! is what makes `yunta run` and `yunta resume` the same code path: both
 //! just keep asking "what's next" until the answer is terminal.
 //!
-//! M-0/M4 cut: node states are `pending→ready→running→done|failed` only —
-//! `skipped`/`waiting` wait for modes (M9) and gates (M5/T7.2), neither of
-//! which exists yet. `on_interrupt: restart_node | fail_if_uncertain`
+//! Node states cover §3.2 in full since DI-03: `waiting` is derived (a
+//! published gate, or unanswered questions — sections 0/0b below) and
+//! `skipped` is the render-side reading of a mode-excluded node (T9.1's
+//! filter here + `status`'s own display). `on_interrupt: restart_node | fail_if_uncertain`
 //! (T4.5, D99) — `resume_session` is real per the Contrato but has no
 //! consumer (nothing resumes a session on crash recovery yet), so it
 //! isn't in the schema at all rather than being accepted and ignored.
@@ -105,6 +106,15 @@ pub enum ScheduleStep {
         node: NodeId,
         external_ref: String,
     },
+    /// A non-gate node the log derives as waiting-on-questions
+    /// (§3.2/§4.1, DI-03): its `kind: questions` artifact has no
+    /// `questions_answered` yet. The imperative shell re-reads the
+    /// questions from the artifact and puts them to `HumanInteraction`
+    /// (`questions_exec`) — the ONE ask site for first run and resume
+    /// alike. One at a time, same reasoning as the gate steps.
+    AskQuestions {
+        node: NodeId,
+    },
     Finish,
     Broken {
         diagnostic: String,
@@ -118,6 +128,23 @@ fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
 }
 
+/// Whether `node` declares a `kind: questions` artifact — what routes a
+/// `Waiting` non-gate node to `AskQuestions` (DI-03) instead of an
+/// orphan-style restart.
+fn declares_questions(node: &Node) -> bool {
+    node.artifacts.as_ref().is_some_and(|artifacts| {
+        artifacts.produces.iter().any(|spec| {
+            matches!(
+                spec,
+                yunta_core::ArtifactSpec::Typed {
+                    kind: yunta_core::ArtifactKind::Questions,
+                    ..
+                }
+            )
+        })
+    })
+}
+
 /// The `external_ref` (forge handle) from this node's last `gate_waiting`
 /// — `None` only if it was never published, which callers only reach
 /// this for after confirming otherwise.
@@ -127,14 +154,6 @@ fn last_external_ref(events: &[Event], node_id: &NodeId) -> Option<String> {
             p.external_ref.clone()
         }
         _ => None,
-    })
-}
-
-/// Whether `node_id` has ever been published (§5.6) — a `gate_waiting`
-/// on the log for it, regardless of resolution.
-fn was_published(events: &[Event], node_id: &NodeId) -> bool {
-    events.iter().any(|e| {
-        matches!(&e.payload, EventPayload::GateWaiting(_)) && e.node_id.as_ref() == Some(node_id)
     })
 }
 
@@ -225,6 +244,37 @@ pub fn next_step(
                 external_ref,
             };
         }
+    }
+
+    // 0b. Nodes the log derives as `waiting` (§3.2, DI-03) — a human's
+    //     move next, one at a time: a published gate polls its forge, a
+    //     node with declared questions asks them, and anything else
+    //     Waiting (only reachable through a crash inside the tiny
+    //     window between a paired waiting/resolved emission) restarts
+    //     like any orphan would.
+    for node in nodes.iter().copied() {
+        let Some(NodeState::Waiting { external_ref }) = state.nodes.get(&node.id) else {
+            continue;
+        };
+        if is_gate(node) {
+            return match external_ref {
+                Some(external_ref) => ScheduleStep::PollGate {
+                    node: node.id.clone(),
+                    external_ref: external_ref.clone(),
+                },
+                // Waiting with no recorded forge handle — republish
+                // rather than get stuck.
+                None => ScheduleStep::PublishGate {
+                    node: node.id.clone(),
+                },
+            };
+        }
+        if declares_questions(node) {
+            return ScheduleStep::AskQuestions {
+                node: node.id.clone(),
+            };
+        }
+        return ScheduleStep::Execute(vec![(node.id.clone(), hist(&node.id).starts + 1)]);
     }
 
     // 1. Every orphaned `running` node (crash/Ctrl-C with no terminal
@@ -350,23 +400,11 @@ pub fn next_step(
         if !deps_satisfied(node) {
             continue;
         }
-        return if was_published(events, &node.id) {
-            match last_external_ref(events, &node.id) {
-                Some(external_ref) => ScheduleStep::PollGate {
-                    node: node.id.clone(),
-                    external_ref,
-                },
-                // Published but the reference wasn't recorded (shouldn't
-                // happen for a log this function itself would have
-                // written) — republish rather than get stuck.
-                None => ScheduleStep::PublishGate {
-                    node: node.id.clone(),
-                },
-            }
-        } else {
-            ScheduleStep::PublishGate {
-                node: node.id.clone(),
-            }
+        // A published gate carries `Waiting` state (DI-03) and is
+        // handled in section 0b — a stateless ready gate here is
+        // always unpublished.
+        return ScheduleStep::PublishGate {
+            node: node.id.clone(),
         };
     }
 

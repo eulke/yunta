@@ -93,6 +93,9 @@ pub struct VerifiedArtifact {
     /// Relative to the run directory (`artifacts/<name>`).
     pub path: PathBuf,
     pub content_hash: String,
+    /// The declared `kind:`, if any — carried onto `artifact_written`
+    /// (DI-03) so replay can recognize interpreted artifacts by type.
+    pub kind: Option<ArtifactKind>,
     pub ledger: Option<Ledger>,
     pub findings: Option<Vec<Finding>>,
     pub questions: Option<Vec<Question>>,
@@ -180,6 +183,7 @@ pub fn close_artifacts(
             name: name.clone(),
             path: relative,
             content_hash: sha256_hex(&bytes),
+            kind: kind.cloned(),
             ledger,
             findings,
             questions,

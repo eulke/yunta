@@ -19,6 +19,16 @@ use crate::project;
 /// included — the fixed denominator §8.5's flow counter measures
 /// against. Mirrors `yunta_engine::check`'s own id collection (never
 /// exported, so duplicated here rather than widened just for this).
+/// The ids the run's mode includes (`None` = no narrowing) — the same
+/// derivation the scheduler itself uses (`yunta_engine::mode_included_nodes`),
+/// so status can never disagree with what actually ran.
+fn mode_included_ids(
+    workflow: &yunta_core::Workflow,
+    mode: &str,
+) -> Option<std::collections::HashSet<NodeId>> {
+    yunta_engine::mode_included_nodes(workflow, mode)
+}
+
 fn all_node_ids(nodes: &[Node], out: &mut Vec<NodeId>) {
     for node in nodes {
         out.push(node.id.clone());
@@ -73,7 +83,38 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
         .values()
         .filter(|n| matches!(n, NodeState::Finished { .. } | NodeState::Failed { .. }))
         .count();
-    let mut summary = format!("{nodes_terminated}/{} nodes", declared_nodes.len());
+    let waiting = state
+        .nodes
+        .values()
+        .filter(|n| matches!(n, NodeState::Waiting { .. }))
+        .count();
+    // §10.1/§3.2 (DI-03): the run's mode narrows the denominator — a
+    // change D45 requires to be visible and attributable, never silent.
+    // The mode comes from `run_created` (frozen there by T9.1); the
+    // excluded nodes render as `skipped`, not omitted.
+    let mode = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::RunCreated(p) => Some(p.mode.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "default".to_string());
+    let included = mode_included_ids(&manifest.workflow, &mode);
+    let skipped = match &included {
+        Some(included) => declared_nodes
+            .iter()
+            .filter(|id| !included.contains(*id))
+            .count(),
+        None => 0,
+    };
+    let denominator = declared_nodes.len() - skipped;
+    let mut summary = format!("{nodes_terminated}/{denominator} nodes");
+    if skipped > 0 {
+        summary.push_str(&format!(" · {skipped} skipped (mode: {mode})"));
+    }
+    if waiting > 0 {
+        summary.push_str(&format!(" · {waiting} waiting"));
+    }
     if !state.tasks.is_empty() {
         let tasks_done = state
             .tasks
@@ -146,6 +187,10 @@ pub fn status(run_id: &str) -> ExitCode {
                 NodeState::Running { attempt } => format!("running (attempt {attempt})"),
                 NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
                 NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+                NodeState::Waiting { external_ref } => match external_ref {
+                    Some(external_ref) => format!("waiting — {external_ref}"),
+                    None => "waiting".to_string(),
+                },
             };
             println!("  {id}: {line}");
         }

@@ -42,7 +42,7 @@ pub use permissions::command_violation;
 pub use progress::render_progress;
 pub use questions::{register as register_questions, QuestionsError};
 pub use replay::{dedup_findings, derive, NodeState, RunState};
-pub use run::{create_run, execute_run, RunError, RunReport, RunTerminal};
+pub use run::{create_run, execute_run, mode_included_nodes, RunError, RunReport, RunTerminal};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{

@@ -552,6 +552,7 @@ pub(super) async fn close_node(
                     EventPayload::ArtifactWritten(yunta_core::events::ArtifactWrittenPayload {
                         path: artifact.path.clone(),
                         content_hash: artifact.content_hash.clone(),
+                        artifact_kind: artifact.kind.clone(),
                     }),
                 )?;
                 if let Some(ledger) = &artifact.ledger {
@@ -593,77 +594,28 @@ pub(super) async fn close_node(
                     }
                 }
             }
-            let mut unanswered: Vec<String> = Vec::new();
-            for artifact in &verified {
-                let Some(questions) = &artifact.questions else {
-                    continue;
-                };
-                let file = yunta_core::QuestionsFile {
-                    questions: questions.clone(),
-                };
-                let Some(reply) = ctx.human_interaction.ask(&file).await else {
-                    // No surface (headless, `yunta test`) — the pre-DI-02
-                    // path, unchanged: cite every unanswered id.
-                    unanswered.extend(file.questions.iter().map(|q| q.id.clone()));
-                    continue;
-                };
-                let violations = yunta_core::validate_answers(&file, &reply.answers);
-                if !violations.is_empty() {
-                    // The surface answered but the reply doesn't satisfy
-                    // the questions' own declared rules — the engine is
-                    // the verdict-giver, so an invalid reply is refused
-                    // with the exact violations, never half-recorded.
-                    unanswered.extend(violations);
-                    continue;
-                }
-                // Engine-written artifact (I20), next to the questions it
-                // answers, then the event with hash + channel + responder
-                // (§4.1's own "hash, canal, respondiente").
-                // `artifact.path` is run.dir-relative (the event log's
-                // own convention) — the write goes to the absolute
-                // location, the event keeps the relative one.
-                let answers_path =
-                    std::path::PathBuf::from(format!("{}.answers.yaml", artifact.path.display()));
-                let answers_abs = ctx.run_dir.join(&answers_path);
-                let answers_file = yunta_core::AnswersFile {
-                    answers: reply.answers,
-                };
-                let bytes = serde_yaml::to_string(&answers_file)
-                    .map_err(|e| RunError::ManifestWrite {
-                        path: answers_abs.clone(),
-                        detail: e.to_string(),
-                    })?
-                    .into_bytes();
-                std::fs::write(&answers_abs, &bytes).map_err(|source| RunError::Io {
-                    context: format!("write `{}`", answers_abs.display()),
-                    source,
-                })?;
-                let answers_hash = yunta_core::sha256_hex(&bytes);
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::ArtifactWritten(yunta_core::events::ArtifactWrittenPayload {
-                        path: answers_path,
-                        content_hash: answers_hash.clone(),
-                    }),
-                )?;
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
-                        answers_hash,
-                        channel: reply.channel,
-                        responder: reply.responder,
-                    }),
-                )?;
-            }
-            if !unanswered.is_empty() {
+            // DI-02/DI-03: unanswered questions close the node as
+            // waiting-shaped (`node_failed` here, derived `Waiting` by
+            // replay via the typed `kind: questions` on the artifact
+            // event above) — the actual asking happens in ONE place, the
+            // scheduler's own `AskQuestions` step (`questions_exec`),
+            // which serves the first invocation and every resume through
+            // the identical path.
+            let pending: Vec<String> = verified
+                .iter()
+                .filter_map(|artifact| artifact.questions.as_deref())
+                .flatten()
+                .map(|q| q.id.clone())
+                .collect();
+            if !pending.is_empty() {
                 return fail_with_tokens(
                     ctx,
                     node,
                     format!(
                         "node `{}` asked {} question(s) awaiting an answer: {}",
                         node.id,
-                        unanswered.len(),
-                        unanswered.join(", ")
+                        pending.len(),
+                        pending.join(", ")
                     ),
                     false,
                     tokens,

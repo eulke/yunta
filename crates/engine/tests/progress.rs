@@ -95,6 +95,7 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
             EventPayload::ArtifactWritten(ArtifactWrittenPayload {
                 path: "artifacts/ledger.yaml".into(),
                 content_hash: "deadbeef".to_string(),
+                artifact_kind: None,
             }),
         ),
         event(

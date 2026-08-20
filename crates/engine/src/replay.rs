@@ -6,14 +6,12 @@
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
 //! and task status (`task_registered`/`task_status_changed`) — plus the
 //! running token total. Budgets beyond token counting aren't derived yet
-//! (presupuesto enforcement beyond tokens is T3.3). `gate_waiting`/
-//! `gate_resolved` do have an emitter since T7.2 (the one real gate
-//! this recorte has, exhausted re-routes, §11.2) but still nothing to
-//! derive: both events are emitted together, synchronously, inside the
-//! same `execute_run` call that resolved them — there is no "waiting on
-//! a gate" state that outlives one invocation for `RunState` to expose.
-//! That changes once a gate can be resolved from a separate invocation
-//! (M8's `resolve_gate`) — extend this the day that's true.
+//! (presupuesto enforcement beyond tokens is T3.3). Since DI-03, §3.2's
+//! `waiting` is derived too: a published gate without its resolution
+//! (T7.7 — the state that outlives an invocation), and a node whose
+//! `kind: questions` artifact has no `questions_answered` yet (§4.1).
+//! T7.2's internal pair (waiting+resolved emitted together) round-trips
+//! back to the node's prior state by construction.
 //!
 //! A log that is insufficient or inconsistent — e.g. `node_finished` for a
 //! node that was never `node_started` — marks the result `broken` with a
@@ -43,6 +41,14 @@ pub enum NodeState {
         tokens: TokenUsage,
         retryable: bool,
     },
+    /// §3.2/DI-03: waiting on a human — a published, unresolved gate
+    /// (`gate_waiting` with no `gate_resolved` after it), or a node
+    /// whose `kind: questions` artifact has no `questions_answered`
+    /// after it. `external_ref` is the forge's handle (a PR URL) for
+    /// external gates, `None` for everything else.
+    Waiting {
+        external_ref: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -66,14 +72,27 @@ pub struct RunState {
     pub broken: Option<String>,
 }
 
+/// Bookkeeping `derive` needs across events without exposing it on
+/// [`RunState`] (DI-03): what a `Waiting` node was before its gate
+/// opened (so `gate_resolved` can restore it — the internal T7.2 pair
+/// leaves a `Failed` node `Failed`), and which nodes have a `questions`
+/// artifact still unanswered (so their `node_failed` derives `Waiting`,
+/// §3.2's own "nodos cuyas preguntas pendientes esperan respuesta").
+#[derive(Default)]
+struct Aux {
+    pre_gate: HashMap<NodeId, Option<NodeState>>,
+    pending_questions: std::collections::HashSet<NodeId>,
+}
+
 /// Derives run state from its event log, in `seq` order. Pure: same
 /// input, same output, always (T2.3's property test relies on exactly
 /// this).
 pub fn derive(events: &[Event]) -> RunState {
     let mut state = RunState::default();
+    let mut aux = Aux::default();
 
     for event in events {
-        if let Err(diagnostic) = apply(&mut state, event) {
+        if let Err(diagnostic) = apply(&mut state, &mut aux, event) {
             state.broken = Some(diagnostic);
             break;
         }
@@ -82,7 +101,7 @@ pub fn derive(events: &[Event]) -> RunState {
     state
 }
 
-fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
+fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), String> {
     match &event.payload {
         EventPayload::NodeStarted(p) => {
             let node_id = require_node_id(event)?;
@@ -122,14 +141,21 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
                     state.total_tokens = sum_tokens(state.total_tokens, p.tokens_used);
-                    state.nodes.insert(
-                        node_id,
+                    // §3.2/DI-03: a node that failed *because its
+                    // questions are unanswered* is `waiting`, not
+                    // `failed` — the questions artifact preceding it
+                    // (with no `questions_answered` since) is the typed
+                    // signal, never the diagnostic string.
+                    let next = if aux.pending_questions.contains(&node_id) {
+                        NodeState::Waiting { external_ref: None }
+                    } else {
                         NodeState::Failed {
                             outcome: p.outcome.clone(),
                             tokens: p.tokens_used,
                             retryable: p.retryable,
-                        },
-                    );
+                        }
+                    };
+                    state.nodes.insert(node_id, next);
                     Ok(())
                 }
                 _ => Err(format!(
@@ -137,6 +163,49 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
                     event.seq
                 )),
             }
+        }
+        EventPayload::GateWaiting(p) => {
+            let node_id = require_node_id(event)?;
+            // A published (or console-rendered-and-resolved-next, T7.2)
+            // gate: the node is waiting on a human from this point until
+            // `gate_resolved`. What it was before is remembered so the
+            // synchronous internal pair restores it exactly.
+            aux.pre_gate
+                .insert(node_id.clone(), state.nodes.get(&node_id).cloned());
+            state.nodes.insert(
+                node_id,
+                NodeState::Waiting {
+                    external_ref: p.external_ref.clone(),
+                },
+            );
+            Ok(())
+        }
+        EventPayload::GateResolved(_) => {
+            let node_id = require_node_id(event)?;
+            // Only restores while still `Waiting`: an external gate's
+            // poll resolution emits `node_started` *before*
+            // `gate_resolved`, so by the time this arrives the node is
+            // already `Running` and the outcome events own its state.
+            if matches!(state.nodes.get(&node_id), Some(NodeState::Waiting { .. })) {
+                match aux.pre_gate.remove(&node_id).flatten() {
+                    Some(prior) => {
+                        state.nodes.insert(node_id, prior);
+                    }
+                    None => {
+                        state.nodes.remove(&node_id);
+                    }
+                }
+            }
+            Ok(())
+        }
+        EventPayload::QuestionsAnswered(_) => {
+            let node_id = require_node_id(event)?;
+            aux.pending_questions.remove(&node_id);
+            // If the node was already derived `Waiting` on those
+            // questions (a resume answering them), the answer alone
+            // doesn't finish it — the caller emits `node_started` +
+            // `node_finished` around it, which own the state transition.
+            Ok(())
         }
         EventPayload::TaskRegistered(p) => {
             state
@@ -161,6 +230,9 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
         }
         EventPayload::ArtifactWritten(p) => {
             let node_id = require_node_id(event)?;
+            if p.artifact_kind == Some(yunta_core::ArtifactKind::Questions) {
+                aux.pending_questions.insert(node_id.clone());
+            }
             state
                 .artifacts
                 .entry(node_id)
@@ -173,11 +245,9 @@ fn apply(state: &mut RunState, event: &Event) -> Result<(), String> {
         // agent_session_opened, agent_message,
         // context_assembled, criteria_checked, scope_checked, scope
         // expansion, hook_executed, node_rerouted, promotion_signaled,
-        // capability_degraded, run_paused/resumed/finished), has an emitter
-        // but nothing yet to derive from it (gate_waiting/resolved — see
-        // this module's own doc comment on why), or belongs to schema M-0
-        // doesn't have yet (loop_iteration beyond what tasks already cover,
-        // questions_answered, child_run_*). Nothing to derive from any of
+        // capability_degraded, run_paused/resumed/finished), or belongs to
+        // schema this codebase doesn't have yet (loop_iteration beyond what
+        // tasks already cover, child_run_*). Nothing to derive from any of
         // them until their own task adds the state they'd feed.
         _ => Ok(()),
     }

@@ -50,6 +50,7 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::ArtifactWritten(ArtifactWrittenPayload {
             path: "artifacts/ledger.yaml".into(),
             content_hash: "sha256:111".to_string(),
+            artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
             sources: vec![ContextSourceRef {
