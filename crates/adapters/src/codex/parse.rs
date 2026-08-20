@@ -2,25 +2,39 @@
 //! total, same stance as `claude_code::parse`: an unrecognized line
 //! shape yields no events rather than an error.
 //!
-//! **Protocol shape, confirmed from real `codex exec --json` runs**
-//! (openai/codex — a gist of 81 empirically-tested flag/feature
-//! invocations, plus corroborating GitHub issues where a field's
-//! presence was in question):
-//! - `{"type":"thread.started","thread_id":"..."}` — first event always,
-//!   no `model` field (open gap in the CLI, openai/codex#14736) — see
-//!   this module's own caller for how the request's own model fills in.
-//! - `{"type":"turn.started"}` — carries nothing this adapter needs.
-//! - `{"type":"item.completed","item":{"id":...,"type":"agent_message","text":...}}`
-//!   — the turn's own text; `"type":"command_execution"` items carry
-//!   `command`/`aggregated_output`/`exit_code`/`status` instead.
-//!   `"reasoning"` items exist but, like claude_code's `thinking`
-//!   blocks, are internal reasoning rather than an operator-facing
-//!   status update — not surfaced.
-//! - `{"type":"turn.completed","usage":{"input_tokens":...,"cached_input_tokens":...,"output_tokens":...}}`
-//!   — carries no text of its own; the outcome summary comes from the
-//!   last `agent_message` item this same turn produced, tracked by the
-//!   caller (`mod.rs`) across lines and passed in here.
-//! - `{"type":"turn.failed","error":{"message":"..."}}`.
+//! **Protocol shape — confirmed from the CLI's own source, not
+//! guessed.** `codex-rs/exec/src/exec_events.rs` (openai/codex, `main`
+//! at the time this was written) defines the wire format directly:
+//! `ThreadEvent` is `#[serde(tag = "type")]` over `ThreadStartedEvent`
+//! (`thread_id: String` — no `model` field; a confirmed, open gap in
+//! the CLI, openai/codex#14736, not an oversight here — see this
+//! module's caller for how the request's own model fills in),
+//! `TurnStartedEvent` (empty), `TurnCompletedEvent` (`usage: Usage` —
+//! `input_tokens`/`cached_input_tokens`/`output_tokens` plus two fields
+//! this adapter doesn't need), `TurnFailedEvent` (`error:
+//! ThreadErrorEvent { message: String }`), `ItemStartedEvent`/
+//! `ItemUpdatedEvent`/`ItemCompletedEvent` (each wraps a `ThreadItem {
+//! id: String, #[serde(flatten)] details: ThreadItemDetails }`), and
+//! `ThreadErrorEvent` again for the top-level `error` event.
+//! `ThreadItemDetails` is `#[serde(tag = "type", rename_all =
+//! "snake_case")]` over one variant per item kind — `AgentMessageItem
+//! { text }`, `ReasoningItem { text }`, `CommandExecutionItem {
+//! command, aggregated_output, exit_code, status }`, `FileChangeItem {
+//! changes: Vec<FileUpdateChange { path, kind }>, status }`,
+//! `McpToolCallItem { server, tool, arguments, result, error, status }`,
+//! `WebSearchItem { id, query, action }`, `TodoListItem { items }`,
+//! `ErrorItem { message }` (a non-fatal, mid-turn error — distinct from
+//! `TurnFailedEvent`).
+//!
+//! Every item type that reads as "the agent used a tool" maps to
+//! `ToolUse`, mirroring how `claude_code::parse` treats its own single
+//! `tool_use` content block as the general case — `command_execution`,
+//! `file_change`, `mcp_tool_call` and `web_search` all qualify.
+//! `reasoning` doesn't (internal, not operator-facing — same treatment
+//! as claude_code's own `thinking` blocks); `todo_list` and the
+//! mid-turn `error` item aren't tool calls at all and aren't surfaced
+//! either, for lack of a clear precedent either way — narrower than it
+//! could be, not wider than what's confirmed.
 
 use serde_json::Value;
 use yunta_core::{sha256_hex, SessionId};
@@ -38,7 +52,9 @@ pub(super) fn parse_line(line: &str, requested_model: &str, last_message: &str) 
         Some("item.completed") => item_completed(&value).into_iter().collect(),
         Some("turn.completed") => turn_completed(&value, last_message),
         Some("turn.failed") => vec![turn_failed(&value)],
-        // "turn.started" and anything future: nothing this adapter needs.
+        // "turn.started", "item.started"/"item.updated" (this adapter
+        // only acts once an item is done) and anything future: nothing
+        // this adapter needs.
         _ => Vec::new(),
     }
 }
@@ -59,17 +75,54 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
         }),
         "command_execution" => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
-            target_digest: command_digest(item),
+            target_digest: field_or_hash(item, "command"),
         }),
-        // "reasoning" and anything future: internal, not operator-facing.
+        "file_change" => Some(AgentEvent::ToolUse {
+            name: "file_change".to_string(),
+            target_digest: file_change_digest(item),
+        }),
+        "mcp_tool_call" => Some(AgentEvent::ToolUse {
+            name: "mcp_tool_call".to_string(),
+            target_digest: mcp_tool_call_digest(item),
+        }),
+        "web_search" => Some(AgentEvent::ToolUse {
+            name: "web_search".to_string(),
+            target_digest: field_or_hash(item, "query"),
+        }),
+        // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
+        // operator-facing tool activity — see this module's own doc.
         _ => None,
     }
 }
 
-fn command_digest(item: &Value) -> String {
-    match item.get("command").and_then(Value::as_str) {
-        Some(command) => command.to_string(),
+fn field_or_hash(item: &Value, key: &str) -> String {
+    match item.get(key).and_then(Value::as_str) {
+        Some(s) => s.to_string(),
         None => sha256_hex(item.to_string().as_bytes()),
+    }
+}
+
+/// `changes` is a list (a single `file_change` item can touch several
+/// paths at once) — the first path is the representative digest, same
+/// "pick one meaningful field" convention `claude_code::parse` uses for
+/// its own multi-field tool inputs.
+fn file_change_digest(item: &Value) -> String {
+    item.get("changes")
+        .and_then(Value::as_array)
+        .and_then(|changes| changes.first())
+        .and_then(|change| change.get("path"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| sha256_hex(item.to_string().as_bytes()))
+}
+
+fn mcp_tool_call_digest(item: &Value) -> String {
+    match (
+        item.get("server").and_then(Value::as_str),
+        item.get("tool").and_then(Value::as_str),
+    ) {
+        (Some(server), Some(tool)) => format!("{server}:{tool}"),
+        _ => sha256_hex(item.to_string().as_bytes()),
     }
 }
 
@@ -79,6 +132,11 @@ fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {
         events.push(AgentEvent::Usage {
             input_tokens: field_u64(usage, "input_tokens"),
             output_tokens: field_u64(usage, "output_tokens"),
+            // The real `Usage` struct always sends this field (no
+            // `#[serde(default)]` on it, unlike `cache_write_input_tokens`)
+            // — `Option` here is yunta's own `Usage` type accommodating
+            // adapters that never report it at all, not uncertainty
+            // about whether codex will.
             cached_input_tokens: usage.get("cached_input_tokens").and_then(Value::as_u64),
         });
     }
@@ -100,8 +158,8 @@ fn turn_failed(value: &Value) -> AgentEvent {
                 .unwrap_or("turn failed with no error message")
                 .to_string(),
         },
-        // [inferido]: `turn.failed` doesn't document a retryable/fatal
-        // distinction anywhere seen — same default claude_code's own
+        // [inferido]: `TurnFailedEvent` carries only a message, no
+        // retryable/fatal distinction — same default claude_code's own
         // parser uses for its own undocumented case, for the same
         // reason: yunta's own max_retries still caps the cost (§5.2).
         retryable: true,

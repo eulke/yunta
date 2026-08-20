@@ -2081,17 +2081,25 @@ que aparece.
       - **Sin binario `codex` ni credenciales de OpenAI en este
         sandbox** (`which codex` no encuentra nada) — a diferencia de
         T7.3, que tuvo `claude` instalado y autenticado para probar en
-        vivo, acá no hubo forma de correr el CLI real. Toda la
-        implementación sale de documentación oficial y ejemplos de
-        corridas reales confirmados (citados en `codex/mod.rs`/`parse.rs`
-        directamente): un gist de 81 invocaciones empíricas de
-        `codex exec` con sus salidas crudas, más issues de
-        `github.com/openai/codex` donde hacía falta confirmar la
-        presencia o ausencia de un campo. **El criterio de aceptación
-        "✓ smoke test manual documentado" queda explícitamente sin
-        cumplir por esta razón — no es que se haya omitido, es que no
-        hay manera de correrlo desde acá.** Retomar en cuanto haya un
-        entorno con el binario y credenciales disponibles.
+        vivo, acá no hubo forma de correr el CLI real. La mayoría de los
+        dominios de documentación oficial (`developers.openai.com`,
+        `cookbook.openai.com`) están bloqueados por el proxy de egress de
+        este sandbox — pero el código fuente del propio CLI en
+        `github.com/openai/codex` no lo está, y es la fuente más
+        autoritativa posible sin correr el binario en vivo: el formato de
+        wire completo sale directamente de
+        `codex-rs/exec/src/exec_events.rs` (los structs `ThreadEvent`,
+        `ThreadItem`, `ThreadItemDetails` con sus variantes, citados campo
+        por campo en `parse.rs`) y `codex-rs/exec/src/cli.rs` (flags de
+        `codex exec`), no de una lectura indirecta. El gist de 81
+        invocaciones empíricas y los issues de `github.com/openai/codex`
+        siguen citados donde agregan algo que el código fuente por sí
+        solo no resuelve (p. ej. confirmar que `thread.started` nunca
+        lleva `model` en la práctica, no solo en el tipo). **El criterio
+        de aceptación "✓ smoke test manual documentado" queda
+        explícitamente sin cumplir por esta razón — no es que se haya
+        omitido, es que no hay manera de correrlo desde acá.** Retomar en
+        cuanto haya un entorno con el binario y credenciales disponibles.
       - **`probe()`**: `codex --version`, igual que `claude-code`.
       - **`spawn()`/`resume()`**: `codex exec --json [resume <thread_id>]
         [--model] <sandbox-args> <prompt>`. Confirmado (no `[inferido]`):
@@ -2105,16 +2113,23 @@ que aparece.
       - **Parser (`parse.rs`) puro**, mismo criterio "línea no
         reconocida → sin eventos, nunca error" que `claude_code`:
         `thread.started` → `SessionOpened` (el `thread_id` es el
-        `session_id`); `item.completed` con `item.type: agent_message` →
-        `Note`, con `item.type: command_execution` → `ToolUse` (digest =
-        el comando, o el hash del item si no hay comando); `reasoning`
-        deliberadamente no se expone, mismo trato que `thinking` en
-        Claude. `turn.completed` → `Usage` (`input_tokens`/
-        `output_tokens`/`cached_input_tokens`, nombre de campo literal,
-        sin el "cache_read_..." de Claude) + `Completed`. `turn.failed` →
-        `Failed { retryable: true }` (`[inferido]`, mismo default que
-        `claude_code` usa para su propio caso no documentado — el
-        `max_retries` de yunta ya acota el costo de una mala apuesta).
+        `session_id`); `item.completed` mapea cuatro variantes de
+        `ThreadItemDetails` a `ToolUse` — `command_execution` (digest =
+        el comando), `file_change` (digest = el primer `path` de
+        `changes`, un item puede tocar varios), `mcp_tool_call` (digest =
+        `"{server}:{tool}"`), `web_search` (digest = la query) — todas
+        con fallback al hash del item si el campo esperado falta; `type:
+        agent_message` → `Note`. `reasoning` deliberadamente no se
+        expone (mismo trato que `thinking` en Claude); `todo_list` y el
+        `error` de mid-turn (distinto de `turn.failed`) tampoco, por
+        falta de precedente en cualquier sentido — más angosto de lo que
+        podría ser, nunca más ancho que lo confirmado. `turn.completed` →
+        `Usage` (`input_tokens`/`output_tokens`/`cached_input_tokens`,
+        nombre de campo literal, sin el "cache_read_..." de Claude) +
+        `Completed`. `turn.failed` → `Failed { retryable: true }`
+        (`[inferido]`, mismo default que `claude_code` usa para su
+        propio caso no documentado — el `max_retries` de yunta ya acota
+        el costo de una mala apuesta).
       - **`SessionOpened.model` no sale del stream — es un gap
         confirmado del CLI, no una decisión de este adapter**:
         `thread.started` no lleva `model` (issue abierto
@@ -2153,16 +2168,20 @@ que aparece.
         alternativo real: con dos adapters reales construidos, nombrar
         uno explícito empieza a tener un segundo caso genuino que
         distinguir, no solo el primero.
-      - Tests: 11 en `crates/adapters/tests/codex.rs` contra un binario
+      - Tests: 15 en `crates/adapters/tests/codex.rs` contra un binario
         `codex` simulado por script (`fixtures/codex_stub.sh`, mismo
         diseño que el stub de Claude) — sesión exitosa con `Usage` y
         `Completed`, turno fallido con `retryable`, mapeo de
         `command_execution` a `ToolUse`, sesión sin evento terminal,
         fallback del modelo a `"default"` cuando no se pidió ninguno,
         los tres modos de sandbox, `--model` como flag propio, `resume`
-        con el `thread_id`, y exterminio real del árbol de procesos
-        (mismo test de nieto que `claude_code`). Sin smoke test manual —
-        ver arriba.
+        con el `thread_id`, exterminio real del árbol de procesos (mismo
+        test de nieto que `claude_code`), y las cuatro incorporadas junto
+        con el mapeo ampliado: `file_change` → `ToolUse` con el primer
+        `path` como digest, `mcp_tool_call` → `ToolUse` con
+        `"{server}:{tool}"` como digest, `web_search` → `ToolUse` con la
+        query como digest, y confirmación de que `reasoning` nunca se
+        expone. Sin smoke test manual — ver arriba.
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

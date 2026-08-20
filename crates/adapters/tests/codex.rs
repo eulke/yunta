@@ -183,6 +183,114 @@ async fn a_command_execution_item_maps_to_tool_use_with_the_command_as_digest() 
 }
 
 #[tokio::test]
+async fn a_file_change_item_maps_to_tool_use_with_the_first_path_as_digest() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"file_change","changes":[{"path":"src/lib.rs","kind":"update"},{"path":"src/main.rs","kind":"update"}],"status":"completed"}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::ToolUse { name, target_digest }
+            if name == "file_change" && target_digest == "src/lib.rs"
+    )));
+}
+
+#[tokio::test]
+async fn an_mcp_tool_call_item_maps_to_tool_use_with_server_and_tool_as_digest() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"yunta","tool":"query","status":"completed"}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::ToolUse { name, target_digest }
+            if name == "mcp_tool_call" && target_digest == "yunta:query"
+    )));
+}
+
+#[tokio::test]
+async fn a_web_search_item_maps_to_tool_use_with_the_query_as_digest() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"web_search","query":"codex exec json schema","action":"search"}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::ToolUse { name, target_digest }
+            if name == "web_search" && target_digest == "codex exec json schema"
+    )));
+}
+
+#[tokio::test]
+async fn a_reasoning_item_is_never_surfaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking it through"}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert_eq!(
+        events.len(),
+        1,
+        "only SessionOpened, nothing from reasoning: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);

@@ -10,12 +10,15 @@
 //! which is installed and authenticated in that sandbox. No `codex`
 //! binary exists here (`which codex` finds nothing) and no OpenAI
 //! credentials are configured — there is no way to run one from this
-//! environment. Everything below is built from `codex exec --json`'s
-//! own documented behavior and confirmed real-run examples (cited
-//! inline where a shape mattered) — the same rigor T7.3 used for the
-//! CLI-specific mapping, but without T7.3's live confirmation step. See
-//! `docs/m0-status.md`'s T7.4 entry for the exact citations and what
-//! this means for the acceptance criterion.
+//! environment. What the wire protocol looks like isn't a guess, though:
+//! `parse.rs`'s own doc comment cites the CLI's own source
+//! (`codex-rs/exec/src/exec_events.rs`, openai/codex) for every event
+//! and field shape this adapter reads, the same rigor T7.3 used for
+//! *its* CLI-specific mapping — the piece that's missing is only the
+//! live confirmation step T7.3 had (does the installed binary actually
+//! behave the way its own source says it should). See
+//! `docs/m0-status.md`'s T7.4 entry for what that means for the
+//! acceptance criterion.
 //!
 //! **`resume_session` is a fixed `true`, not literally "calculated in
 //! the constructor from `probe()`"** the way the Spec Adapter's own
