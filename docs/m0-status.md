@@ -2699,7 +2699,16 @@ que aparece.
         Contrato mismo nunca define esa forma normativamente (solo
         aparece, sin definición, en los workflows de referencia); T9.2
         (promoción) es quien realmente completa esa lectura, y queda
-        para la próxima tarea del milestone, en orden.
+        para la próxima tarea del milestone, en orden. **[Resuelto
+        después por DI-04]**: el gate interno existe — `external` pasó a
+        `Option`, `message`/`options`/`on` en el schema (round-trip del
+        fragmento `approve-plan` de referencia), `on:` re-rutea con la
+        semántica §11.2 completa (el gate re-pregunta al volver, sin
+        `max_reroutes`: cada vuelta la conduce un humano), opción no
+        mapeada finaliza el gate con esa elección como outcome, `abort`
+        lo agrega el engine (convención T7.2), y `check` valida `on` ⊆
+        `options`, targets existentes y la coherencia de modos que T1.3
+        pedía textualmente para "opción de gate".
       - Tests: 6 en `crates/core/tests/workflow.rs` (round-trip de
         `include: all` — la regresión que atrapó el bug de serialización
         —, round-trip de `include: [...]` con orden de declaración

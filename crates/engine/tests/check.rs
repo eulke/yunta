@@ -97,11 +97,14 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         id: id.into(),
         kind: NodeKind::Gate {
             assignee: "reviewer".to_string(),
-            external: yunta_core::ExternalGate {
+            message: None,
+            options: Vec::new(),
+            on: Default::default(),
+            external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: vec!["spec.md".to_string()],
                 branch: "{{run.branch}}".to_string(),
-            },
+            }),
         },
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         scope: Vec::new(),
@@ -440,6 +443,86 @@ fn a_re_route_from_a_node_excluded_from_the_mode_is_never_checked() {
             .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
         "got: {errors:?}"
     );
+}
+
+fn internal_gate(id: &str, options: &[&str], on: &[(&str, &str)]) -> Node {
+    let mut node = gate(id, &[]);
+    let NodeKind::Gate {
+        options: node_options,
+        on: node_on,
+        external,
+        ..
+    } = &mut node.kind
+    else {
+        unreachable!()
+    };
+    *external = None;
+    *node_options = options.iter().map(|o| o.to_string()).collect();
+    *node_on = on
+        .iter()
+        .map(|(option, target)| (option.to_string(), (*target).into()))
+        .collect();
+    node
+}
+
+#[test]
+fn an_internal_gate_never_requires_a_forge() {
+    let wf = workflow(vec![internal_gate("approve", &["aprobar"], &[])]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::ExternalGateWithoutForge { .. })),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_gate_on_mapping_an_undeclared_option_is_reported() {
+    let wf = workflow(vec![
+        bash("plan", "true", &[]),
+        internal_gate("approve", &["aprobar"], &[("ajustar", "plan")]),
+    ]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::GateOnUndeclaredOption {
+        node: "approve".into(),
+        option: "ajustar".to_string(),
+    }));
+}
+
+#[test]
+fn a_gate_on_targeting_an_unknown_node_is_reported() {
+    let wf = workflow(vec![internal_gate(
+        "approve",
+        &["ajustar"],
+        &[("ajustar", "ghost")],
+    )]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::UnknownGateOptionTarget {
+        node: "approve".into(),
+        option: "ajustar".to_string(),
+        target: "ghost".into(),
+    }));
+}
+
+#[test]
+fn a_mode_excluding_a_gate_option_target_is_reported() {
+    // T1.3's own full wording: "un modo que incluye un nodo cuyo `goto`
+    // u opción de gate apunta a un nodo excluido" — now checkable since
+    // gate options exist in the schema (DI-04).
+    let wf = workflow_with_modes(
+        vec![
+            bash("plan", "true", &[]),
+            internal_gate("approve", &["ajustar"], &[("ajustar", "plan")]),
+        ],
+        modes(&[("quick", included(&["approve"]))]),
+    );
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(errors.contains(&CheckError::RerouteTargetExcludedFromMode {
+        mode: "quick".into(),
+        node: "approve".into(),
+        goto: "plan".into(),
+    }));
 }
 
 #[test]

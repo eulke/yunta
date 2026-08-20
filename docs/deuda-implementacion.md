@@ -223,7 +223,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **No hacer:** no emitir eventos nuevos para esto (D45: derivación
   pura, cero eventos).
 
-### DI-04 — Gate interno genérico: `message`/`options`/`on` `[ ]`
+### DI-04 — Gate interno genérico: `message`/`options`/`on` `[x]`
 
 - **Origen:** T7.2 construyó el mecanismo pero solo lo conectó a re-rutas
   agotadas; T7.7 agregó `kind: gate` pero con `external:` obligatorio;

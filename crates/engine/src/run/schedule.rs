@@ -106,6 +106,14 @@ pub enum ScheduleStep {
         node: NodeId,
         external_ref: String,
     },
+    /// An internal gate (`external: None`, DI-04) is ready (or came
+    /// back after its chosen option's re-route completed): the
+    /// imperative shell builds the §5.3 object from `message`/`options`/
+    /// `on` and asks `HumanInteraction`. One at a time, same reasoning
+    /// as the other gate steps.
+    ResolveInternalGate {
+        node: NodeId,
+    },
     /// A non-gate node the log derives as waiting-on-questions
     /// (§3.2/§4.1, DI-03): its `kind: questions` artifact has no
     /// `questions_answered` yet. The imperative shell re-reads the
@@ -126,6 +134,18 @@ pub enum ScheduleStep {
 /// (§5.6, T7.7): its resolution is a forge round-trip, not a session.
 fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
+}
+
+/// Whether a gate node has an `external:` block (forge-published, T7.7)
+/// — decides which of the gate steps serves it (DI-04).
+fn is_external_gate(node: &Node) -> bool {
+    matches!(
+        &node.kind,
+        NodeKind::Gate {
+            external: Some(_),
+            ..
+        }
+    )
 }
 
 /// Whether `node` declares a `kind: questions` artifact — what routes a
@@ -257,14 +277,19 @@ pub fn next_step(
             continue;
         };
         if is_gate(node) {
-            return match external_ref {
-                Some(external_ref) => ScheduleStep::PollGate {
+            return match (external_ref, is_external_gate(node)) {
+                (Some(external_ref), _) => ScheduleStep::PollGate {
                     node: node.id.clone(),
                     external_ref: external_ref.clone(),
                 },
-                // Waiting with no recorded forge handle — republish
-                // rather than get stuck.
-                None => ScheduleStep::PublishGate {
+                // External, waiting with no recorded forge handle —
+                // republish rather than get stuck.
+                (None, true) => ScheduleStep::PublishGate {
+                    node: node.id.clone(),
+                },
+                // Internal (only reachable through a crash between its
+                // synchronous waiting/resolved pair) — ask again.
+                (None, false) => ScheduleStep::ResolveInternalGate {
                     node: node.id.clone(),
                 },
             };
@@ -374,7 +399,26 @@ pub fn next_step(
 
                 if corrective_finished_since {
                     // §11.2: destination completed — the failed node
-                    // returns to ready and re-runs.
+                    // returns to ready and re-runs. A gate never goes
+                    // through Execute (DI-04): it re-asks (internal) or
+                    // re-polls/republishes (external).
+                    if is_gate(node) {
+                        return if !is_external_gate(node) {
+                            ScheduleStep::ResolveInternalGate {
+                                node: node.id.clone(),
+                            }
+                        } else {
+                            match last_external_ref(events, &node.id) {
+                                Some(external_ref) => ScheduleStep::PollGate {
+                                    node: node.id.clone(),
+                                    external_ref,
+                                },
+                                None => ScheduleStep::PublishGate {
+                                    node: node.id.clone(),
+                                },
+                            }
+                        };
+                    }
                     return ScheduleStep::Execute(vec![(node.id.clone(), h.starts + 1)]);
                 }
                 if corrective_failed_since {
@@ -402,9 +446,15 @@ pub fn next_step(
         }
         // A published gate carries `Waiting` state (DI-03) and is
         // handled in section 0b — a stateless ready gate here is
-        // always unpublished.
-        return ScheduleStep::PublishGate {
-            node: node.id.clone(),
+        // always unpublished (external) or never-asked (internal).
+        return if is_external_gate(node) {
+            ScheduleStep::PublishGate {
+                node: node.id.clone(),
+            }
+        } else {
+            ScheduleStep::ResolveInternalGate {
+                node: node.id.clone(),
+            }
         };
     }
 

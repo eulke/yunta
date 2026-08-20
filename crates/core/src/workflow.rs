@@ -419,18 +419,39 @@ pub enum NodeKind {
     /// only shape is `external: {kind: pull_request, ...}`: the engine
     /// delegates the multi-person substrate (identity, permissions,
     /// notifications) to the team's forge instead of building `serve`
-    /// early. `external` is required, not optional: a `kind: gate` with
-    /// no forge behind it isn't defined by any task yet, so this schema
-    /// claims only what §5.6 actually specifies — the internal
-    /// escalation object (§5.3, T7.2's `HumanInteraction`) already
-    /// covers the in-process case (exhausted re-routes today) without
-    /// needing this node kind at all.
+    /// early. With `external: None` this is an **internal gate**
+    /// (DI-04) — the shape the reference workflows' own `approve-plan`/
+    /// `ship` use and T1.3's mode-coherence rule ("opción de gate")
+    /// requires: resolved through `HumanInteraction` (console today,
+    /// M8's `resolve_gate` later) with the declared `options`, and
+    /// `on:` mapping an option to a §11.2-style re-route.
     Gate {
         /// Who the escalation names — mirrors §5.3's own audience
-        /// concept, resolved by a human on the forge rather than read
-        /// back through this process's stdin.
+        /// concept: a human on the forge (external), or whoever holds
+        /// the interactive surface (internal).
         assignee: String,
-        external: ExternalGate,
+        /// The question the internal gate asks — becomes the §5.3
+        /// object's `summary`. Absent, a default derived from the node
+        /// id is used.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        /// Declared choices, free ids (reference: `[aprobar, ajustar,
+        /// abortar]`). Empty means the single default option `approve`;
+        /// the engine always appends its own `abort` (§5.3: aborting is
+        /// always a valid exit, same convention T7.2's escalation uses).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<String>,
+        /// Option → re-route target (`on: { ajustar: plan }`): choosing
+        /// a mapped option re-routes exactly like `on_failure.goto`
+        /// (§11.2) — the target and its subgraph complete, then the
+        /// gate returns to ready and asks again. Unbounded on purpose:
+        /// each lap is human-driven, not an automatic cycle
+        /// `max_reroutes` exists to cap. An unmapped option resolves
+        /// the gate and the DAG continues.
+        #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+        on: IndexMap<String, NodeId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        external: Option<ExternalGate>,
     },
 }
 

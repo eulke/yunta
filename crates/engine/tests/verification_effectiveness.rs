@@ -36,11 +36,14 @@ fn gate_node(id: &str) -> Node {
         id: id.into(),
         kind: NodeKind::Gate {
             assignee: "reviewer".to_string(),
-            external: yunta_core::ExternalGate {
+            message: None,
+            options: Vec::new(),
+            on: Default::default(),
+            external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: Vec::new(),
                 branch: "{{run.branch}}".to_string(),
-            },
+            }),
         },
         depends_on: Vec::new(),
         scope: Vec::new(),

@@ -125,6 +125,47 @@ nodes:
 }
 
 #[test]
+fn an_internal_gate_parses_the_reference_approve_plan_shape_round_trip() {
+    // DI-04 — the exact fragment `build-feature.yaml` (Config y
+    // workflows de referencia) declares; T1.1's own ✓ makes the
+    // reference YAML the parse fixture.
+    let yaml = r#"
+name: fixture
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+  - id: approve-plan
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Plan registrado. Do you approve?"
+    options: [aprobar, ajustar, abortar]
+    on: { ajustar: plan }
+"#;
+    let first: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let NodeKind::Gate {
+        assignee,
+        message,
+        options,
+        on,
+        external,
+    } = &first.nodes[1].kind
+    else {
+        panic!("expected a gate");
+    };
+    assert_eq!(assignee, "lead");
+    assert_eq!(message.as_deref(), Some("Plan registrado. Do you approve?"));
+    assert_eq!(options, &["aprobar", "ajustar", "abortar"]);
+    assert_eq!(on.get("ajustar").map(|t| t.as_str()), Some("plan"));
+    assert!(external.is_none(), "an internal gate has no external block");
+
+    let re_serialized = serde_yaml::to_string(&first).unwrap();
+    let second: Workflow = serde_yaml::from_str(&re_serialized).unwrap();
+    assert_eq!(first, second);
+}
+
+#[test]
 fn invariant_defaults_to_false() {
     let yaml = r#"
 name: fixture

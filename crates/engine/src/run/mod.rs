@@ -593,10 +593,15 @@ pub async fn execute_run(
             }
             ScheduleStep::PublishGate { node } => {
                 let node = find_node(&manifest.workflow, &node)?;
-                let yunta_core::NodeKind::Gate { assignee, external } = &node.kind else {
+                let yunta_core::NodeKind::Gate {
+                    assignee,
+                    external: Some(external),
+                    ..
+                } = &node.kind
+                else {
                     return Err(RunError::Broken {
                         diagnostic: format!(
-                            "scheduler chose node `{}` as a gate to publish, but its kind isn't `gate`",
+                            "scheduler chose node `{}` as an external gate to publish, but it isn't one",
                             node.id
                         ),
                     });
@@ -623,6 +628,46 @@ pub async fn execute_run(
                     gate_exec::poll_gate(&ctx, node, &external_ref, forge, human_interaction)
                         .await?;
                 if let gate_exec::GateStep::StillWaiting { reason } = step {
+                    return Ok(RunReport {
+                        terminal: RunTerminal::Paused { reason },
+                        state: derive(&ctx.load_events()?),
+                    });
+                }
+            }
+            ScheduleStep::ResolveInternalGate { node } => {
+                let node = find_node(&manifest.workflow, &node)?;
+                let yunta_core::NodeKind::Gate {
+                    assignee,
+                    message,
+                    options,
+                    on,
+                    external: None,
+                } = &node.kind
+                else {
+                    return Err(RunError::Broken {
+                        diagnostic: format!(
+                            "scheduler chose node `{}` as an internal gate, but it isn't one",
+                            node.id
+                        ),
+                    });
+                };
+                let step = gate_exec::resolve_internal_gate(
+                    &ctx,
+                    node,
+                    assignee,
+                    message.as_deref(),
+                    options,
+                    on,
+                )
+                .await?;
+                if let gate_exec::GateStep::StillWaiting { reason } = step {
+                    ctx.emit(
+                        None,
+                        EventPayload::RunPaused(RunPausedPayload {
+                            reason: reason.clone(),
+                        }),
+                    )?;
+                    ctx.export_events_jsonl()?;
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused { reason },
                         state: derive(&ctx.load_events()?),

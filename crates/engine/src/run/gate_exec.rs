@@ -339,6 +339,136 @@ fn last_external_ref(
     })
 }
 
+/// Resolves an internal gate (DI-04, `external: None`): builds the §5.3
+/// object from the node's own `message`/`options`/`on` and puts it to
+/// `HumanInteraction`. Semantics: an option mapped in `on` re-routes
+/// exactly like `on_failure.goto` (§11.2 — the gate fails retryable,
+/// control transfers, and once the target's subgraph completes the gate
+/// asks again); an unmapped option finishes the gate with that choice
+/// as its outcome; the engine-appended `abort` pauses the run (same
+/// convention as T7.2's escalation). No surface → `StillWaiting`, with
+/// nothing recorded, so a resume re-asks (T7.2's own rule for
+/// unresolved questions).
+pub(super) async fn resolve_internal_gate(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    assignee: &str,
+    message: Option<&str>,
+    options: &[String],
+    on: &indexmap::IndexMap<String, yunta_core::NodeId>,
+) -> Result<GateStep, RunError> {
+    // Declared options (default: a single `approve`), each with a
+    // tradeoff derived from its own mapping; plus the engine's `abort`
+    // unless the author already claimed that id for themselves.
+    let declared: Vec<String> = if options.is_empty() {
+        vec!["approve".to_string()]
+    } else {
+        options.to_vec()
+    };
+    let mut gate_options: Vec<GateOption> = declared
+        .iter()
+        .map(|id| GateOption {
+            id: id.clone(),
+            label: id.clone(),
+            tradeoff: match on.get(id) {
+                Some(target) => format!("re-routes to `{target}` and asks again once it completes"),
+                None => "resolves this gate; the flow continues".to_string(),
+            },
+        })
+        .collect();
+    let engine_abort = !declared.iter().any(|id| id == "abort");
+    if engine_abort {
+        gate_options.push(GateOption {
+            id: "abort".to_string(),
+            label: "Abort the run".to_string(),
+            tradeoff: "Pauses here; nothing further executes".to_string(),
+        });
+    }
+
+    let escalation = GateWaitingPayload {
+        summary: message
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("gate `{}` needs a decision", node.id)),
+        evidence: format!("assignee: {assignee}"),
+        options: gate_options,
+        external_ref: None,
+    };
+    let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
+        return Ok(GateStep::StillWaiting {
+            reason: format!(
+                "gate `{}` (assignee: {assignee}) awaits a decision",
+                node.id
+            ),
+        });
+    };
+
+    let chosen = resolution.chosen_option.clone().unwrap_or_default();
+    if engine_abort && chosen == "abort" {
+        // T7.2's convention exactly: record the interaction, pause the
+        // run, leave the node stateless so a resume re-asks if the
+        // human changes their mind.
+        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::GateResolved(resolution.clone()),
+        )?;
+        return Ok(GateStep::StillWaiting {
+            reason: format!(
+                "gate `{}` was resolved to abort{}",
+                node.id,
+                resolution
+                    .free_text
+                    .as_deref()
+                    .map(|text| format!(": {text}"))
+                    .unwrap_or_default()
+            ),
+        });
+    }
+
+    emit_started(ctx, node)?;
+    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::GateResolved(resolution.clone()),
+    )?;
+    match on.get(&chosen) {
+        Some(target) => {
+            // §11.2 shape: the gate fails (retryable — a human chose a
+            // correction lap, not a dead end) and control re-routes; the
+            // scheduler's ordinary reroute machinery brings it back to
+            // ask again when `target`'s subgraph completes.
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::NodeFailed(NodeFailedPayload {
+                    outcome: format!("gate chose `{chosen}` — re-routing to `{target}`"),
+                    tokens_used: TokenUsage::default(),
+                    retryable: true,
+                }),
+            )?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
+                    to_node: target.clone(),
+                    cause: format!("gate `{}` chose `{chosen}`", node.id),
+                    attempt: 1,
+                    max_reroutes: 0,
+                }),
+            )?;
+        }
+        None => {
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::NodeFinished(NodeFinishedPayload {
+                    outcome: chosen,
+                    tokens_used: TokenUsage::default(),
+                }),
+            )?;
+            write_progress(ctx)?;
+        }
+    }
+    Ok(GateStep::Resolved)
+}
+
 fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     let events = ctx.load_events()?;
     let attempt = events

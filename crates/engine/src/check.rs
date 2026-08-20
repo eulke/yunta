@@ -144,6 +144,20 @@ pub enum CheckError {
     #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
+    /// DI-04: `on:` may only map options the gate itself declares —
+    /// mapping an undeclared one is a choice no human can ever make.
+    #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
+    GateOnUndeclaredOption { node: NodeId, option: String },
+
+    /// DI-04: same broken-reference class as `UnknownGotoTarget`, for a
+    /// gate option's re-route target.
+    #[error("gate `{node}`: `on.{option}` targets unknown node `{target}`")]
+    UnknownGateOptionTarget {
+        node: NodeId,
+        option: String,
+        target: NodeId,
+    },
+
     /// §10.1/D44: same broken-reference class as `UnknownGotoTarget` —
     /// catching it here means the run never starts with a mode that
     /// silently omits work its own author meant to include.
@@ -275,7 +289,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
             });
         }
 
-        check_gate(node, config, &mut errors);
+        check_gate(node, &known_ids, config, &mut errors);
     }
 
     check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
@@ -349,6 +363,20 @@ fn check_modes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
                         node: node.id.clone(),
                         goto: on_failure.goto.clone(),
                     });
+                }
+            }
+            // T1.3's own full wording: "...cuyo `goto` u **opción de
+            // gate** apunta a un nodo excluido" — a gate's `on:` target
+            // is the same broken-reference class as a re-route's.
+            if let NodeKind::Gate { on, .. } = &node.kind {
+                for target in on.values() {
+                    if !included.contains(target) {
+                        errors.push(CheckError::RerouteTargetExcludedFromMode {
+                            mode: mode_name.clone(),
+                            node: node.id.clone(),
+                            goto: target.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -615,25 +643,54 @@ fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
     }
 }
 
-/// §5.6/D66/T7.7: a `kind: gate` with `external:` needs `forge.github`
-/// configured — `external.kind` is a closed enum with one variant today
-/// (`pull_request`), so this is a total match, not a partial one that'll
-/// silently miss a second forge kind later.
-fn check_gate(node: &Node, config: &yunta_core::ConfigLayer, errors: &mut Vec<CheckError>) {
-    let NodeKind::Gate { external, .. } = &node.kind else {
+/// §5.6/D66/T7.7 + DI-04: a `kind: gate` with `external:` needs
+/// `forge.github` configured (`external.kind` is a closed enum with one
+/// variant today, so this is a total match); an internal gate's own
+/// `on:` mapping must reference declared options and existing targets —
+/// the same broken-reference class `UnknownGotoTarget` already catches.
+fn check_gate(
+    node: &Node,
+    known_ids: &HashSet<NodeId>,
+    config: &yunta_core::ConfigLayer,
+    errors: &mut Vec<CheckError>,
+) {
+    let NodeKind::Gate {
+        options,
+        on,
+        external,
+        ..
+    } = &node.kind
+    else {
         return;
     };
-    match external.kind {
-        yunta_core::ForgeKind::PullRequest => {
-            let configured = config
-                .forge
-                .as_ref()
-                .is_some_and(|forge| forge.github.is_some());
-            if !configured {
-                errors.push(CheckError::ExternalGateWithoutForge {
-                    node: node.id.clone(),
-                });
+    if let Some(external) = external {
+        match external.kind {
+            yunta_core::ForgeKind::PullRequest => {
+                let configured = config
+                    .forge
+                    .as_ref()
+                    .is_some_and(|forge| forge.github.is_some());
+                if !configured {
+                    errors.push(CheckError::ExternalGateWithoutForge {
+                        node: node.id.clone(),
+                    });
+                }
             }
+        }
+    }
+    for (option, target) in on {
+        if !options.iter().any(|declared| declared == option) {
+            errors.push(CheckError::GateOnUndeclaredOption {
+                node: node.id.clone(),
+                option: option.clone(),
+            });
+        }
+        if !known_ids.contains(target) {
+            errors.push(CheckError::UnknownGateOptionTarget {
+                node: node.id.clone(),
+                option: option.clone(),
+                target: target.clone(),
+            });
         }
     }
 }

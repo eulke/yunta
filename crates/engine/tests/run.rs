@@ -4183,3 +4183,201 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before_t
         other => panic!("expected Paused, got {other:?}"),
     }
 }
+
+// --- DI-04: gate interno genérico (message/options/on, §5.3 + §11.2) --------
+
+/// Resolves gates from a scripted sequence, one per call — `None` once
+/// the script runs out (so an unexpected extra ask degrades to pause
+/// instead of hanging a test).
+struct SequencedInteraction {
+    resolutions:
+        std::sync::Mutex<std::collections::VecDeque<yunta_core::events::GateResolvedPayload>>,
+}
+
+impl SequencedInteraction {
+    fn choosing(options: &[&str]) -> Self {
+        Self {
+            resolutions: std::sync::Mutex::new(
+                options
+                    .iter()
+                    .map(|option| yunta_core::events::GateResolvedPayload {
+                        chosen_option: Some(option.to_string()),
+                        resolved_by: Some("lead".to_string()),
+                        free_text: None,
+                        approved_sha: None,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl yunta_engine::HumanInteraction for SequencedInteraction {
+    async fn resolve(
+        &self,
+        _escalation: &yunta_core::events::GateWaitingPayload,
+    ) -> Option<yunta_core::events::GateResolvedPayload> {
+        self.resolutions.lock().unwrap().pop_front()
+    }
+}
+
+const INTERNAL_GATE_WORKFLOW: &str = r#"
+name: internal-gate
+nodes:
+  - id: plan
+    kind: bash
+    run: "sh -c 'echo run >> plan-runs.txt'"
+  - id: approve
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Approve the plan?"
+    options: [aprobar, ajustar]
+    on: { ajustar: plan }
+  - id: ship
+    kind: bash
+    depends_on: [approve]
+    run: "true"
+"#;
+
+fn plan_run_count(worktree: &std::path::Path) -> usize {
+    std::fs::read_to_string(worktree.join("plan-runs.txt"))
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let (terminal, state) = bench
+        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    match state.nodes.get(&"approve".into()) {
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+            assert_eq!(outcome, "aprobar")
+        }
+        other => panic!("expected the gate finished with the chosen option, got {other:?}"),
+    }
+    assert_eq!(plan_run_count(&bench.worktree), 1);
+
+    // The recorded escalation carries the declared options plus the
+    // engine-appended abort, each with a tradeoff (§5.3).
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let waiting = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::GateWaiting(p) => Some(p),
+            _ => None,
+        })
+        .expect("the resolved interaction must be on the log");
+    let ids: Vec<&str> = waiting.options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
+    assert!(waiting.options.iter().all(|o| !o.tradeoff.is_empty()));
+    assert_eq!(waiting.summary, "Approve the plan?");
+}
+
+#[tokio::test]
+async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
+    // §11.2 semantics through a human choice: `ajustar` re-routes to
+    // `plan`, plan re-runs, and the gate asks AGAIN — the second answer
+    // (`aprobar`) lets the DAG continue.
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let (terminal, state) = bench
+        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get(&"approve".into()),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+    assert_eq!(
+        plan_run_count(&bench.worktree),
+        2,
+        "`ajustar` must re-run plan before the gate asks again"
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        &e.payload,
+        yunta_core::events::EventPayload::NodeRerouted(p)
+            if p.to_node.as_str() == "plan" && e.node_id.as_ref().map(|n| n.as_str()) == Some("approve")
+    )));
+}
+
+#[tokio::test]
+async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let _ = artifacts_dir; // same Bench shape as every other e2e here
+    let workflow: yunta_core::Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "default",
+        None,
+    )
+    .unwrap();
+
+    let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::from([(
+        "mock".to_string(),
+        Arc::new(MockAdapter::from_yaml("sessions: []").unwrap()) as Arc<dyn Adapter>,
+    )]);
+    let first = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+    )
+    .await
+    .unwrap();
+    match &first.terminal {
+        RunTerminal::Paused { reason } => assert!(reason.contains("approve"), "got: {reason}"),
+        other => panic!("headless internal gate must pause, got {other:?}"),
+    }
+    // Unresolved: nothing recorded (re-asks on resume, T7.2 convention).
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(!events
+        .iter()
+        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+
+    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let resumed = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &interaction,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resumed.terminal, RunTerminal::Finished);
+}
