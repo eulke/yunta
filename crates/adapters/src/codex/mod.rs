@@ -179,6 +179,10 @@ impl Adapter for CodexAdapter {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
+            // `codex exec` has no skills mechanism to mount into (A6:
+            // never claim what isn't built) — the engine degrades with
+            // `capability_degraded` when a node declares skills here.
+            skills: false,
             // No live edit-hook blocking wired (A6: never claim what
             // isn't built) — same honest gap as claude_code, same reason:
             // the engine's own post-hoc scope check (T5.3) is the real

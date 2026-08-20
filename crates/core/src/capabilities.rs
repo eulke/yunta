@@ -23,6 +23,12 @@ pub struct Capabilities {
     pub custom_agents: bool,
     /// Emits trustworthy token usage in the stream.
     pub usage_reporting: bool,
+    /// Can mount skill directories (`SessionRequest.skills`) by the
+    /// CLI's native mechanism (DI-13). A skill is added instruction,
+    /// never correctness: absence degrades with `capability_degraded`,
+    /// never a fatal error (A6).
+    #[serde(default)]
+    pub skills: bool,
     /// Can connect to Yunta's per-run MCP server as a client.
     pub run_tools: bool,
 }

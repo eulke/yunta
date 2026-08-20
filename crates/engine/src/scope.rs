@@ -68,6 +68,10 @@ pub async fn scope_check(
 
     let violations = diff
         .iter()
+        // `.claude/skills/` is engine/adapter-staged session
+        // infrastructure (DI-13's skill mount), never agent work — the
+        // one fixed path scope never charges to a task.
+        .filter(|path| !path.starts_with(".claude/skills"))
         .filter(|path| !set.is_match(path))
         .cloned()
         .collect();

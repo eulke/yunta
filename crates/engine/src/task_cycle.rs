@@ -9,7 +9,7 @@
 //! still leaves the task not-done.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -579,6 +579,7 @@ pub async fn run_task(
     already_granted_paths: &[String],
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     cancel: &CancellationToken,
+    skills: &[PathBuf],
 ) -> Result<TaskCycleReport, TaskCycleError> {
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
@@ -632,6 +633,7 @@ pub async fn run_task(
             edit_constraints: Some(task.scope.clone()),
             budget,
             adapter_settings: Default::default(),
+            skills: skills.to_vec(),
         };
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit)
             .await

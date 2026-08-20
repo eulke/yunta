@@ -1,8 +1,9 @@
 //! The `Adapter`/`AgentSession` traits (Spec Adapter v0.2, T3.1).
 //!
-//! **M-0 cut**: `SessionRequest` drops `context: ResolvedContext` and
-//! `skills: Vec<PathBuf>` (no `ContextSource`/`skills:` yet — M6) and
-//! `run_tools_endpoint: Option<Endpoint>` (MCP is M8). Everything else in
+//! **M-0 cut**: `SessionRequest` drops `context: ResolvedContext` (the
+//! engine inlines/references context in the prompt, T6.1) and
+//! `run_tools_endpoint: Option<Endpoint>` (MCP is M8). `skills` came
+//! back with DI-13. Everything else in
 //! the spec's `SessionRequest` is here, even where nothing populates a
 //! field yet (`env`, `budget`, `adapter_settings`) — those are simple
 //! struct fields, not machinery to build, so there is no reason to defer
@@ -60,6 +61,12 @@ pub struct SessionRequest {
     /// agent and permissions are typed fields above precisely so this
     /// stays for what genuinely has nowhere else to go.
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
+    /// Skill directories to expose to the agent (Spec Adapter v0.2,
+    /// DI-13) — absolute paths the engine already resolved; the adapter
+    /// mounts them by its native mechanism, and only when it declared
+    /// `capabilities().skills` (the engine never populates this
+    /// otherwise, A2/A6).
+    pub skills: Vec<std::path::PathBuf>,
 }
 
 /// Health check result (`probe()` — binary present, version compatible,

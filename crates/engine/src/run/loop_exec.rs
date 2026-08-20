@@ -53,6 +53,34 @@ pub(super) async fn execute_loop(
     };
     let adapter = &ctx.adapters[&chosen.adapter];
 
+    // DI-13: one resolution for the whole loop — every task session
+    // mounts the same skills, and a missing name fails the node before
+    // any token is spent.
+    let skills = match crate::skills::resolve_skills(
+        &ctx.manifest.config,
+        &ctx.manifest.workflow,
+        node,
+        ctx.worktree,
+    ) {
+        Ok(skills) => skills,
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+    };
+    let skills = if !skills.is_empty() && !adapter.capabilities().skills {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
+                capability: "skills".to_string(),
+                adapter: chosen.adapter.clone(),
+                policy_applied: "skills not mounted — the adapter declares no native \
+                                 mechanism; task sessions run without them"
+                    .to_string(),
+            }),
+        )?;
+        Vec::new()
+    } else {
+        skills
+    };
+
     let Some(ledger) = load_registered_ledger(ctx)? else {
         return fail(
             ctx,
@@ -166,6 +194,7 @@ pub(super) async fn execute_loop(
                 adapter.as_ref(),
                 scope_expansion,
                 cancel,
+                &skills,
             )
         }))
         .await;
@@ -614,6 +643,7 @@ async fn dispatch_task_in_isolation<'a>(
     adapter: &dyn yunta_adapters::Adapter,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     cancel: &tokio_util::sync::CancellationToken,
+    skills: &[PathBuf],
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
@@ -661,6 +691,7 @@ async fn dispatch_task_in_isolation<'a>(
         &granted_paths_for(events, &task.id),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
+        skills,
     )
     .await?;
 

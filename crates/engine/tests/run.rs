@@ -4986,3 +4986,166 @@ nodes:
         other => panic!("the losing check must be recorded interrupted, got {other:?}"),
     }
 }
+
+// --- DI-13: skills chain (resolution → SessionRequest → degradation) ---------
+
+const SKILLS_CONFIG: &str = r#"
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+skills:
+  paths: [.yunta/skills]
+  always: [conventions]
+"#;
+
+const SKILLS_WORKFLOW: &str = r#"
+name: skilled
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    skills: [grill]
+    prompt: "Do the thing."
+"#;
+
+fn install_skill(worktree: &std::path::Path, name: &str) {
+    let dir = worktree.join(".yunta/skills").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), format!("# {name}\n")).unwrap();
+}
+
+/// Runs one workflow with a hand-held mock so the test can ask it what
+/// skills each spawn carried.
+async fn run_with_recording_mock(
+    bench: &Bench,
+    workflow_yaml: &str,
+    fixture_yaml: &str,
+    config_yaml: &str,
+) -> (RunTerminal, yunta_engine::RunState, Arc<MockAdapter>) {
+    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        &bench.run_id,
+        &manifest,
+        &bench.runs_root,
+        &bench.storage,
+        &FixedClock,
+        "default",
+        None,
+    )
+    .unwrap();
+    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), adapter.clone());
+    let report = execute_run(
+        &bench.run_id,
+        &manifest,
+        &run_dir,
+        &bench.worktree,
+        &adapters,
+        &bench.storage,
+        &FixedClock,
+        DEFAULT_MAX_RETRIES,
+        &NoInteraction,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    (report.terminal, report.state, adapter)
+}
+
+#[tokio::test]
+async fn resolved_skills_reach_the_session_request_always_first() {
+    let bench = Bench::new();
+    install_skill(&bench.worktree, "conventions");
+    install_skill(&bench.worktree, "grill");
+    let fixture = r#"
+capabilities: { skills: true }
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _, adapter) =
+        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let seen = adapter.skills_seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0],
+        vec![
+            bench.worktree.join(".yunta/skills/conventions"),
+            bench.worktree.join(".yunta/skills/grill"),
+        ],
+        "skills.always mounts first, then the node's own list"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_skill_name_fails_the_node_with_where_it_looked() {
+    let bench = Bench::new();
+    install_skill(&bench.worktree, "conventions");
+    // `grill` is never installed.
+    let fixture = r#"
+capabilities: { skills: true }
+sessions:
+  - outcome: { type: completed, summary: "never reached" }
+"#;
+    let (terminal, state, adapter) =
+        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    match &terminal {
+        RunTerminal::Paused { reason } => {
+            assert!(reason.contains("grill"), "got: {reason}");
+            assert!(reason.contains("skills.paths"), "got: {reason}");
+        }
+        other => panic!("a missing skill must fail the node, got {other:?}"),
+    }
+    assert!(matches!(
+        state.nodes.get(&"work".into()),
+        Some(NodeState::Failed { .. })
+    ));
+    assert!(adapter.skills_seen().is_empty(), "no session was spawned");
+}
+
+#[tokio::test]
+async fn an_adapter_without_the_skills_capability_degrades_with_an_event() {
+    let bench = Bench::new();
+    install_skill(&bench.worktree, "conventions");
+    install_skill(&bench.worktree, "grill");
+    // Default capabilities: `skills: false`.
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _, adapter) =
+        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "a skill is not correctness"
+    );
+
+    assert_eq!(
+        adapter.skills_seen(),
+        vec![Vec::<std::path::PathBuf>::new()],
+        "the engine never populates skills an adapter didn't declare (A2)"
+    );
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let degraded = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            yunta_core::events::EventPayload::CapabilityDegraded(p) => Some(p),
+            _ => None,
+        })
+        .expect("the degradation must be an event, never silence (A6)");
+    assert_eq!(degraded.capability, "skills");
+    assert_eq!(degraded.adapter, "mock");
+}

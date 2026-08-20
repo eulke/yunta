@@ -34,12 +34,28 @@ pub struct MockAdapter {
     /// index" stops meaning "the right script" — see
     /// `SessionScript::match_prompt_contains`).
     consumed: Mutex<Vec<bool>>,
+    /// Every `spawn()`'s `req.skills`, in claim order (DI-13/A8): the
+    /// mock's "native mount" is recording what it was asked to mount,
+    /// so engine tests assert the whole resolution chain without a CLI.
+    skills_seen: Mutex<Vec<Vec<std::path::PathBuf>>>,
 }
 
 impl MockAdapter {
     pub fn new(fixture: MockFixture) -> Self {
         let consumed = Mutex::new(vec![false; fixture.sessions.len()]);
-        Self { fixture, consumed }
+        Self {
+            fixture,
+            consumed,
+            skills_seen: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The `skills` of every session spawned so far, in claim order.
+    pub fn skills_seen(&self) -> Vec<Vec<std::path::PathBuf>> {
+        self.skills_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn from_yaml(yaml: &str) -> std::result::Result<Self, serde_yaml::Error> {
@@ -93,6 +109,10 @@ impl Adapter for MockAdapter {
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
+        self.skills_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req.skills.clone());
         let index = {
             let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
             let claim = self

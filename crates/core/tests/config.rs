@@ -457,6 +457,8 @@ fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
                 kind: ExecutorKind::Binary,
                 path: PathBuf::from("org-tool"),
             }],
+            paths: Vec::new(),
+            always: Vec::new(),
         }),
         ..Default::default()
     };
@@ -467,6 +469,8 @@ fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
                 kind: ExecutorKind::Binary,
                 path: PathBuf::from("repo-tool"),
             }],
+            paths: Vec::new(),
+            always: Vec::new(),
         }),
         ..Default::default()
     };

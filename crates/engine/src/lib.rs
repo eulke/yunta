@@ -25,6 +25,7 @@ mod run;
 mod runner;
 mod scope;
 pub mod scope_expansion;
+mod skills;
 mod stats;
 mod task_cycle;
 mod template;

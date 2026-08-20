@@ -925,6 +925,33 @@ async fn execute_prompt(
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
+    // DI-13: names resolved by the engine; mounting is the adapter's —
+    // and an adapter without the capability degrades with an event,
+    // never a fatal error (a skill is instruction, not correctness).
+    let skills = match crate::skills::resolve_skills(
+        &ctx.manifest.config,
+        &ctx.manifest.workflow,
+        node,
+        ctx.worktree,
+    ) {
+        Ok(skills) => skills,
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+    };
+    let skills = if !skills.is_empty() && !adapter.capabilities().skills {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
+                capability: "skills".to_string(),
+                adapter: chosen.adapter.clone(),
+                policy_applied: "skills not mounted — the adapter declares no native \
+                                 mechanism; the session runs without them"
+                    .to_string(),
+            }),
+        )?;
+        Vec::new()
+    } else {
+        skills
+    };
     let request = SessionRequest {
         prompt: rendered,
         cwd: ctx.worktree.to_path_buf(),
@@ -935,6 +962,7 @@ async fn execute_prompt(
         edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
         budget: ctx.session_budget()?,
         adapter_settings: Default::default(),
+        skills,
     };
 
     let (outcome, tokens) = dispatch_session(

@@ -64,6 +64,7 @@ impl ClaudeCodeAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
+        stage_skills(&req)?;
         let args = self.build_args(&req, resume);
 
         let mut std_cmd = std::process::Command::new(&self.binary);
@@ -164,6 +165,9 @@ impl Adapter for ClaudeCodeAdapter {
             usage_reporting: true,
             // MCP per-run tools are M8.
             run_tools: false,
+            // DI-13: mounted by staging into the session cwd's own
+            // `.claude/skills/` — the CLI's native discovery location.
+            skills: true,
         }
     }
 
@@ -235,6 +239,40 @@ impl AgentSession for ClaudeCodeSession {
         // process-group id.
         Some(self.pid)
     }
+}
+
+/// DI-13: the CLI's native skills discovery is `.claude/skills/` under
+/// its working directory — mounting is staging a symlink per resolved
+/// skill directory there, named after the directory itself. Re-staging
+/// (a retry, a resume) replaces the link; the engine's scope check
+/// ignores this engine-staged path, so it never reads as agent work.
+fn stage_skills(req: &SessionRequest) -> Result<()> {
+    if req.skills.is_empty() {
+        return Ok(());
+    }
+    let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
+        adapter: "claude-code".to_string(),
+        action,
+        source,
+    };
+    let skills_root = req.cwd.join(".claude").join("skills");
+    std::fs::create_dir_all(&skills_root)
+        .map_err(|e| io_err(format!("create {}", skills_root.display()), e))?;
+    for skill in &req.skills {
+        let Some(name) = skill.file_name() else {
+            continue;
+        };
+        let dest = skills_root.join(name);
+        match std::fs::remove_file(&dest) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io_err(format!("replace {}", dest.display()), e)),
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(skill, &dest)
+            .map_err(|e| io_err(format!("stage skill at {}", dest.display()), e))?;
+    }
+    Ok(())
 }
 
 /// Sends `signal` to the whole process group (A4) — a negative pid

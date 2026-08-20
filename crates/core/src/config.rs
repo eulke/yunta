@@ -230,6 +230,16 @@ pub struct CoverageConfig {
 pub struct SkillsConfig {
     #[serde(default)]
     pub executors: Vec<ExecutorRegistration>,
+    /// Directories skill names resolve against, in order — repo first,
+    /// per the reference config (DI-13). Absent means the convention
+    /// default, `.yunta/skills` (where `yunta init` installs the
+    /// mechanism skill, D74).
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    /// Skill names mounted on every session, before any node's own
+    /// list (DI-13).
+    #[serde(default)]
+    pub always: Vec<String>,
 }
 
 /// One `skills.executors:` entry — `name` is what a `kind: executor`
