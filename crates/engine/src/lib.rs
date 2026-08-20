@@ -53,7 +53,7 @@ pub use run::{
     resolve_gate, session_token_budget, CreateRunParams, PromotionSuccessor, ResolveGateError,
     RunError, RunReport, RunTerminal,
 };
-pub use run_tools::{open_session_listener, RunToolsHost, RunToolsSession};
+pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{

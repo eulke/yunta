@@ -99,8 +99,34 @@ pub(super) async fn execute_node(
         NodeKind::Loop { until, prompt, .. } => {
             super::loop_exec::execute_loop(ctx, node, until, prompt, cancel).await?
         }
-        NodeKind::Parallel { join, nodes, .. } => {
-            execute_parallel(ctx, node, *join, nodes, cancel).await?
+        NodeKind::Parallel {
+            join,
+            coordination,
+            nodes,
+        } => {
+            let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
+            // D98: the blackboard's consolidation happens exactly once,
+            // at the group's own terminal close (success or failure —
+            // the posts are findings either way), as the group's
+            // node-output: sorted by content, never by arrival order,
+            // consumable by a node AFTER the parallel and never between
+            // siblings hot. An interrupted/paused group stays open, so
+            // nothing is consolidated yet.
+            if *coordination == yunta_core::Coordination::Blackboard
+                && matches!(end, NodeEnd::Finished | NodeEnd::Failed)
+            {
+                let members: Vec<yunta_core::NodeId> =
+                    nodes.iter().map(|child| child.id.clone()).collect();
+                let consolidated =
+                    crate::run_tools::consolidate_blackboard(&ctx.load_events()?, &members);
+                super::context_resolve::write_node_output(
+                    ctx.run_dir,
+                    &node.id,
+                    consolidated.as_bytes(),
+                    &[],
+                )?;
+            }
+            end
         }
         NodeKind::Check { builtin } => {
             super::check_exec::execute_check(ctx, node, builtin, cancel).await?
@@ -1035,6 +1061,81 @@ pub(super) fn resolve_node_runner(
     }
 }
 
+/// T8.2: opens this session attempt's per-run MCP listener, or decides
+/// it must not exist. `Ok(None)` — no `run_tools` capability outside a
+/// blackboard group, or the host degraded at run start — is §6.5's
+/// resting state. `Err(diagnostic)` is the A6 case: the node's group
+/// declared `coordination: blackboard` and this session cannot carry
+/// it (capability missing, host down, or the listener failed to bind)
+/// — the caller fails the node with it, never emulates.
+pub(super) async fn open_run_tools(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    adapter: &dyn yunta_adapters::Adapter,
+    adapter_id: &str,
+    task: Option<&yunta_core::TaskId>,
+) -> Result<Option<crate::run_tools::RunToolsSession>, String> {
+    let needs_blackboard = ctx
+        .run_tools_host
+        .as_ref()
+        .is_some_and(|host| host.is_blackboard_member(&node.id))
+        || (ctx.run_tools_host.is_none() && node_declared_blackboard(ctx, &node.id));
+    if !adapter.capabilities().run_tools {
+        if needs_blackboard {
+            return Err(format!(
+                "node `{}` is in a `coordination: blackboard` group but adapter                  `{adapter_id}` declares no `run_tools` capability — the blackboard                  cannot be mounted; pick a runner on an adapter that can be a client                  of the per-run MCP endpoint (§6.4/D49)",
+                node.id
+            ));
+        }
+        return Ok(None);
+    }
+    let Some(host) = &ctx.run_tools_host else {
+        if needs_blackboard {
+            return Err(format!(
+                "node `{}` is in a `coordination: blackboard` group but this run's                  per-run MCP host is unavailable (storage reopen failed at run start) —                  the blackboard cannot be mounted",
+                node.id
+            ));
+        }
+        return Ok(None);
+    };
+    match crate::run_tools::open_session_listener(
+        host.clone(),
+        node.id.clone(),
+        task.cloned(),
+        ctx.worktree.to_path_buf(),
+    )
+    .await
+    {
+        Ok(session) => Ok(Some(session)),
+        Err(e) => {
+            if needs_blackboard {
+                return Err(format!(
+                    "node `{}` is in a `coordination: blackboard` group but its per-run                      MCP listener failed to start: {e}",
+                    node.id
+                ));
+            }
+            tracing::warn!(node_id = %node.id, error = %e, "per-run MCP listener failed to                  start — the session runs without run tools");
+            Ok(None)
+        }
+    }
+}
+
+/// Whether the frozen workflow puts `node_id` inside a
+/// `coordination: blackboard` group — the fallback membership check for
+/// when the run-tools host itself never came up.
+fn node_declared_blackboard(ctx: &RunCtx<'_>, node_id: &yunta_core::NodeId) -> bool {
+    ctx.manifest.workflow.nodes.iter().any(|candidate| {
+        matches!(
+            &candidate.kind,
+            yunta_core::NodeKind::Parallel {
+                coordination: yunta_core::Coordination::Blackboard,
+                nodes: children,
+                ..
+            } if children.iter().any(|child| &child.id == node_id)
+        )
+    })
+}
+
 async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -1086,6 +1187,15 @@ async fn execute_prompt(
     } else {
         skills
     };
+    // T8.2/§6.5: a fresh listener + credential for THIS session attempt
+    // when the adapter can be a client of it; `None` without the
+    // capability is the resting state, not degradation — unless the
+    // node sits in a `coordination: blackboard` group, whose declared
+    // semantics the engine never emulates (A6): that's a node failure.
+    let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
+        Ok(run_tools) => run_tools,
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+    };
     let request = SessionRequest {
         prompt: rendered,
         cwd: ctx.worktree.to_path_buf(),
@@ -1097,10 +1207,7 @@ async fn execute_prompt(
         budget: ctx.session_budget()?,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
-        // T8.2c opens the per-session listener and fills this in; until
-        // then no session gets an endpoint — exactly the "sin la
-        // capacidad, ningún endpoint" resting state (§6.5).
-        run_tools_endpoint: None,
+        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
     };
 
     // DI-23/§8.1/D99: an orphaned node under `resume_session` picks its

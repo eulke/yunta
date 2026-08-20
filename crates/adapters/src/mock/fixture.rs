@@ -121,6 +121,18 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// T8.2/A8: perform a REAL MCP `tools/call` against the session's
+    /// own `run_tools_endpoint` — the mock as a genuine client of the
+    /// engine's per-run listener, over the wire. A fixture using this
+    /// on a session the engine gave no endpoint is an authoring error
+    /// and fails the session loudly, never silently skips.
+    RunTool {
+        tool: String,
+        #[serde(default)]
+        arguments: serde_json::Map<String, serde_json::Value>,
+        #[serde(default)]
+        after_ms: u64,
+    },
 }
 
 impl MockStep {
@@ -128,7 +140,8 @@ impl MockStep {
         match self {
             MockStep::ToolUse { after_ms, .. }
             | MockStep::Usage { after_ms, .. }
-            | MockStep::Note { after_ms, .. } => *after_ms,
+            | MockStep::Note { after_ms, .. }
+            | MockStep::RunTool { after_ms, .. } => *after_ms,
         }
     }
 }

@@ -80,10 +80,36 @@ pub(super) async fn execute_loop(
     } else {
         skills
     };
+    // T8.2: same gating as a prompt session — the capability decides,
+    // and a blackboard-group loop on a capability-less adapter fails
+    // rather than silently dropping its declared coordination (A6).
+    let run_tools = if adapter.capabilities().run_tools {
+        ctx.run_tools_host
+            .as_ref()
+            .map(|host| (host.clone(), node.id.clone()))
+    } else {
+        let in_blackboard = ctx
+            .run_tools_host
+            .as_ref()
+            .is_some_and(|host| host.is_blackboard_member(&node.id));
+        if in_blackboard {
+            return fail(
+                ctx,
+                node,
+                format!(
+                    "node `{}` is in a `coordination: blackboard` group but adapter                      `{}` declares no `run_tools` capability — the blackboard cannot                      be mounted (§6.4/D49)",
+                    node.id, chosen.adapter
+                ),
+                false,
+            );
+        }
+        None
+    };
     let setup = crate::task_cycle::SessionSetup {
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
+        run_tools,
     };
 
     let Some(ledger) = load_registered_ledger(ctx)? else {

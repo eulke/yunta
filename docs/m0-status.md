@@ -2963,7 +2963,7 @@ que aparece.
       reviewer-alt]` literal de la doc — su último delta marcado quedó
       cerrado.
 
-## M8 — MCP (en curso: T8.1 completo, T8.2 pendiente)
+## M8 — MCP (completo: T8.1–T8.2; wiring de adapters reales pendiente vía DI-22)
 
 - [x] **T8.1 — `yunta mcp`: superficie de control por stdio (§6.4).**
       `rmcp` ya era dependencia (T6.2, cliente saliente para `context:
@@ -3055,19 +3055,75 @@ que aparece.
         registrado como DI-28 y **cerrado**: toda mutación `git worktree`
         pasa ahora por `yunta-worktree.lock` en el common git dir
         (patrón DI-08, robo por borrado+`create_new` atómico).
-- [ ] **T8.2 — MCP por-run (§6.4/§6.5, D49/D98/D103/D104).** No
-      arrancada. Requiere: `coordination: independent | blackboard` en
-      `NodeKind::Parallel` (no existe hoy); `SessionRequest.
-      run_tools_endpoint: Option<Endpoint>` de vuelta en `yunta-adapters`
-      (diferido explícitamente "MCP es M8"); listener HTTP loopback
-      efímero por sesión de nodo con token bearer de un solo uso
-      (D103) — nace antes de `Adapter::spawn()`, muere con la sesión,
-      un `resume` nunca reutiliza credencial; los 4 tools
-      (`yunta_post_finding`/`yunta_get_blackboard`/`yunta_task_status`/
-      `yunta_request_scope_expansion`) sin schema de wire documentado
-      más allá de la prosa del Contrato para los dos últimos; wiring de
-      al menos `claude-code` para traducir el endpoint a su mecanismo
-      nativo de MCP externo.
+- [x] **T8.2 — MCP por-run (§6.4/§6.5, D49/D98/D103/D104).** En tres
+      cortes (a/b/c), completo salvo el wiring del adapter real (abajo).
+      - **Schema (a)**: `coordination: independent | blackboard` en
+        `NodeKind::Parallel` (D49, default `independent` — los grupos
+        evaluativos jamás se ven entre sí salvo opt-in);
+        `SessionRequest.run_tools_endpoint: Option<RunToolsEndpoint
+        {url, token}>` en `yunta-adapters`; el mock registra
+        `endpoints_seen` (mismo principio que `skills_seen`).
+      - **Listener (b)**: `run_tools.rs` — un servidor MCP HTTP
+        loopback **por sesión de nodo** (D103): puerto efímero, token
+        bearer de un solo uso (2×uuid v4, jamás al log — I12), muere
+        con su `RunToolsSession` (Drop cancela+aborta; un resume emite
+        credencial nueva siempre). Scoping por construcción (I27): el
+        listener sostiene su `(run_id, node_id, task)` y ninguna tool
+        toma run_id del llamador. Los datos viven en storage
+        (`Storage::reopen()` nuevo + `busy_timeout` 5s), nunca en el
+        listener. Los 4 tools: `yunta_post_finding` (schema §4.1, el
+        mismo tipo `Finding` de la vía artifact — D80; reporte
+        incompleto = error visible nombrando el campo, no-op en el
+        log), `yunta_task_status` (vista read-only derivada del log),
+        `yunta_request_scope_expansion` (solo sesiones de tarea —
+        §6.2 es task-keyed; valida el objeto idéntico y escribe el
+        MISMO request file que la evaluación post-attempt existente
+        consume: un mecanismo, dos superficies de entrada — round-trip
+        probado contra el `load_request` real), `yunta_get_blackboard`
+        (montada SOLO en grupos blackboard — D49 — y sirve
+        exclusivamente los posts PROPIOS mientras el grupo corre —
+        §5.9/D98).
+      - **Wiring (c)**: `RunCtx.run_tools_host` (host por invocación;
+        reopen fallido degrada con warn); sesiones prompt y tareas de
+        loop abren listener fresco por intento cuando el adapter
+        declara `run_tools` (`SessionSetup.run_tools` para el ciclo de
+        tareas); capacidad ausente = endpoint `None`, el estado de
+        reposo de §6.5 — NUNCA un evento de degradación... salvo que
+        el nodo esté en un grupo `blackboard`, cuya coordinación
+        declarada el engine jamás emula (A6): fallo de nodo con
+        diagnóstico nombrando capacidad y coordinación. Consolidación
+        D98 al cierre terminal del grupo (éxito o fallo):
+        `consolidate_blackboard` (pura, ordena por contenido — jamás
+        por orden de llegada) escrita como node-output del grupo,
+        consumible por un nodo posterior
+        (`context: [{node-output: {node: <grupo>}}]`), jamás entre
+        hermanos en caliente. El mock ganó el paso de fixture
+        `run_tool`: actúa como cliente MCP REAL contra el listener por
+        streamable-HTTP (A8 — todo el camino en CI sin LLM; un
+        `run_tool` sin endpoint o con error de tool falla la sesión
+        ruidosamente).
+      - ✓ cubiertos: dos sesiones concurrentes postean 16 findings sin
+        pérdida ni mala atribución; nodo de grupo `independent` no ve
+        las tools (ni listadas ni llamables); pre-join solo posts
+        propios (con hermano y nodo ajeno ya posteados); consolidado
+        byte-idéntico con órdenes de llegada invertidos (E2E con
+        `after_ms` cruzados + test puro con shuffle); auth: token
+        equivocado rechazado antes de cualquier tool; endpoint muere
+        con la sesión. Tests: 9 en `tests/run_tools.rs` (cliente rmcp
+        real), 7 en `tests/blackboard.rs` (E2E con mock posteando por
+        el wire), 1 en storage (`reopen` intercalado).
+      - **Fuera de este corte, explícito**: el wiring de `claude-code`/
+        `codex` para traducir el endpoint al mecanismo nativo de MCP
+        externo de cada CLI — ambos declaran `run_tools: false` hoy,
+        y la degradación es exactamente la de §6.5 (sin capacidad, sin
+        endpoint). Ese wiring pertenece a la familia de superficies
+        construidas-contra-doc que la smoke-checklist (DI-22) ya
+        cubre: cuando se cablee, entra con su paso en vivo propio.
+        `timestamp` de eventos de tool y el token usan wall-clock/
+        entropía directamente en `run_tools.rs` — decisión de borde
+        documentada en el módulo (es la orilla más externa de la
+        cáscara imperativa; nada puro los consume: replay lee
+        timestamps almacenados).
 
 ## Decisiones de recorte explícitas (qué quedó afuera y por qué)
 

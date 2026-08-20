@@ -163,6 +163,12 @@ pub(crate) struct RunCtx<'a> {
     /// root invocation) — compared against
     /// `limits.max_workflow_depth` before a child is born.
     pub depth: u32,
+    /// T8.2: the per-run MCP host every session listener of this run
+    /// shares (its own reopened storage handle — listeners outlive any
+    /// borrow of ours). `None` when the reopen failed at run start:
+    /// sessions run without an endpoint, degraded loudly where a node
+    /// actually needed one.
+    pub run_tools_host: Option<Arc<crate::run_tools::RunToolsHost>>,
 }
 
 impl RunCtx<'_> {
@@ -511,6 +517,26 @@ pub(crate) async fn execute_run_at_depth(
         root_cancel: root_cancel_for_ctx,
         forge,
         depth,
+        // T8.2: one host per execute_run invocation; every session
+        // listener reopens nothing — they share this handle's clone of
+        // the storage connection path. A failed reopen degrades here,
+        // once, loudly; nodes that *need* the endpoint (a blackboard
+        // group) fail individually with their own diagnostic.
+        run_tools_host: match storage.reopen() {
+            Ok(own) => Some(Arc::new(crate::run_tools::RunToolsHost::new(
+                own,
+                run_id.clone(),
+                &manifest.workflow,
+            ))),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "cannot reopen storage for the per-run MCP host — sessions run without \
+                     run tools"
+                );
+                None
+            }
+        },
     };
 
     let events = ctx.load_events()?;

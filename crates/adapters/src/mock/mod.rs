@@ -252,6 +252,7 @@ impl MockAdapter {
         let model = script.model.clone();
         let steps = script.steps.clone();
         let outcome = script.outcome.clone();
+        let run_tools_endpoint = req.run_tools_endpoint.clone();
 
         tokio::spawn(async move {
             // O1: SessionOpened is always the first event, unconditionally.
@@ -300,6 +301,27 @@ impl MockAdapter {
                         cached_input_tokens,
                     },
                     fixture::MockStep::Note { text, .. } => AgentEvent::Note { text },
+                    fixture::MockStep::RunTool {
+                        tool, arguments, ..
+                    } => {
+                        // A real MCP call over the wire (T8.2/A8) — a
+                        // tool error fails the whole session loudly:
+                        // fixtures script intent, and an intent the
+                        // engine refuses is a test outcome, not noise.
+                        match call_run_tool(run_tools_endpoint.as_ref(), &tool, arguments).await {
+                            Ok(digest) => AgentEvent::ToolUse {
+                                name: tool,
+                                target_digest: digest,
+                            },
+                            Err(message) => {
+                                let _ = tx.send(AgentEvent::Failed {
+                                    error: AgentError { message },
+                                    retryable: false,
+                                });
+                                return;
+                            }
+                        }
+                    }
                 };
                 if tx.send(event).is_err() {
                     return;
@@ -362,4 +384,57 @@ impl AgentSession for MockSession {
         self.notify.notify_one();
         Ok(())
     }
+}
+
+/// The mock's own MCP client leg (T8.2/A8): one `tools/call` against
+/// the session's per-run endpoint, exactly as a real CLI would place
+/// it. Returns a short digest of the response for the audit stream
+/// (`ToolUse.target_digest` — never full content, I12/O3), or the
+/// error text that fails the session.
+async fn call_run_tool(
+    endpoint: Option<&crate::RunToolsEndpoint>,
+    tool: &str,
+    arguments: serde_json::Map<String, serde_json::Value>,
+) -> std::result::Result<String, String> {
+    use rmcp::ServiceExt;
+
+    let Some(endpoint) = endpoint else {
+        return Err(format!(
+            "fixture step run_tool `{tool}` but this session has no run_tools_endpoint — \
+             the engine never offered one (missing `run_tools` capability, or the \
+             listener wasn't opened)"
+        ));
+    };
+    let config =
+        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+            endpoint.url.clone(),
+        )
+        .auth_header(endpoint.token.clone());
+    let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
+        reqwest::Client::default(),
+        config,
+    );
+    let client = ()
+        .serve(transport)
+        .await
+        .map_err(|e| format!("run_tool `{tool}`: cannot reach the per-run endpoint: {e}"))?;
+    let mut params = rmcp::model::CallToolRequestParams::new(tool.to_string());
+    if !arguments.is_empty() {
+        params = params.with_arguments(arguments);
+    }
+    let result = client.call_tool(params).await;
+    let _ = client.cancel().await;
+    let result = result.map_err(|e| format!("run_tool `{tool}` failed: {e}"))?;
+    let text: String = result
+        .content
+        .iter()
+        .filter_map(|block| block.as_text())
+        .map(|t| t.text.clone())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if result.is_error.unwrap_or(false) {
+        return Err(format!("run_tool `{tool}` returned an error: {text}"));
+    }
+    let hash = yunta_core::sha256_hex(text.as_bytes());
+    Ok(format!("{tool}:{}", &hash[..12]))
 }

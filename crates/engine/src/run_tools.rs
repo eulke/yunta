@@ -83,6 +83,52 @@ impl RunToolsHost {
             blackboard_members,
         }
     }
+
+    /// Whether `node` sits inside a `coordination: blackboard` group
+    /// (D49) — the mount rule for `yunta_get_blackboard`, and the
+    /// capability gate the engine checks before a session that would
+    /// need it (a declared coordination the adapter can't carry is a
+    /// node failure, never silent emulation — A6).
+    pub fn is_blackboard_member(&self, node: &NodeId) -> bool {
+        self.blackboard_members.contains_key(node)
+    }
+}
+
+/// D98's post-join consolidation, pure over the log: every
+/// `finding_posted` authored by a member of the group, sorted by
+/// `(node, finding id, title)` — **never by arrival order**, which is
+/// exactly what makes two runs whose posts raced differently produce
+/// byte-identical output. Written as the group's own node-output at
+/// its close, consumable by a node after the `parallel`
+/// (`context: [{node-output: {node: <group_id>}}]`) — never between
+/// siblings hot.
+pub fn consolidate_blackboard(events: &[Event], members: &[NodeId]) -> String {
+    let mut entries: Vec<(String, Finding)> = events
+        .iter()
+        .filter_map(|event| {
+            let node = event.node_id.as_ref()?;
+            if !members.contains(node) {
+                return None;
+            }
+            match &event.payload {
+                EventPayload::FindingPosted(p) => Some((node.to_string(), p.finding.clone())),
+                _ => None,
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| (&a.0, &a.1.id, &a.1.title).cmp(&(&b.0, &b.1.id, &b.1.title)));
+    let rendered: Vec<Value> = entries
+        .into_iter()
+        .map(|(node, finding)| {
+            let mut object = serde_json::to_value(&finding)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            object.insert("node".to_string(), Value::String(node));
+            Value::Object(object)
+        })
+        .collect();
+    serde_yaml::to_string(&rendered).unwrap_or_default()
 }
 
 /// One live listener, tied to one session attempt. Dropping it tears

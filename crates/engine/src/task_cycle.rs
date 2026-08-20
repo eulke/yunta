@@ -381,11 +381,20 @@ pub async fn post_check(
 /// skills, the adapter's opaque settings, and the env — which is ONLY
 /// the declared secret names present in the engine's own environment
 /// (I12: values never touch the log, nothing undeclared leaks).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct SessionSetup {
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, String>,
+    /// T8.2: the per-run MCP host plus the loop node's own id, present
+    /// ONLY when the resolved adapter declared `run_tools` (the caller
+    /// gates on the capability — this module never re-checks it). Each
+    /// task attempt opens its own fresh listener+credential from it
+    /// (§6.5: per session, never reused).
+    pub run_tools: Option<(
+        std::sync::Arc<crate::run_tools::RunToolsHost>,
+        yunta_core::NodeId,
+    )>,
 }
 
 impl SessionSetup {
@@ -703,6 +712,26 @@ pub async fn run_task(
 
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
+        // T8.2/§6.5: a fresh listener + credential per attempt — held
+        // across the dispatch, dead with it. A bind failure degrades
+        // (the session runs without run tools) rather than sinking the
+        // attempt: the tools are an offer, the task's own criteria are
+        // the contract.
+        let run_tools = match &setup.run_tools {
+            Some((host, node_id)) => crate::run_tools::open_session_listener(
+                host.clone(),
+                node_id.clone(),
+                Some(task.id.clone()),
+                cwd.to_path_buf(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::warn!(task_id = %task.id, error = %e, "per-run MCP listener failed                      to start — the attempt runs without run tools");
+                e
+            })
+            .ok(),
+            None => None,
+        };
         // §5.2 step 3: minimal brief — the node's instruction plus which
         // task is this session's, never the plan as prose. Every attempt
         // is a fresh session with the same request.
@@ -720,10 +749,7 @@ pub async fn run_task(
             budget,
             adapter_settings: setup.adapter_settings.clone(),
             skills: setup.skills.clone(),
-            // T8.2c opens the per-session listener and fills this in;
-            // until then no session gets an endpoint — exactly the
-            // "sin la capacidad, ningún endpoint" resting state (§6.5).
-            run_tools_endpoint: None,
+            run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
         };
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
             .await

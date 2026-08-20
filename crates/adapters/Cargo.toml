@@ -28,6 +28,17 @@ reqwest = { version = "0.13", default-features = false, features = [
 # GitHub's Contents API takes file bodies base64-encoded — the one place
 # this crate needs to produce that encoding.
 base64 = "0.22"
+# The mock's `run_tool` fixture step (T8.2/A8): the mock acts as a real
+# MCP client against the engine's per-run listener, over the same
+# streamable-HTTP transport a real CLI would use — the whole per-run
+# tool path stays exercisable in CI without an LLM. Same features (and
+# the same already-in-tree crates) as `yunta-engine`'s own outbound
+# MCP client.
+rmcp = { version = "3", default-features = false, features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
 
 [dev-dependencies]
 tempfile = "3"
