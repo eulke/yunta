@@ -2,15 +2,17 @@
 //! command layer — argument handling and printing — over
 //! `crate::pack`'s git/filesystem mechanics.
 //!
-//! **Deliberate cut, not silently skipped**: §6's audit-on-`add` (T11.4)
-//! and the executor-confirmation gate (T11.5) aren't wired in here yet
-//! — both land as their own tasks. `add` today installs whatever the
-//! source contains; T11.4/T11.5 tighten that, they don't replace it.
+//! **Deliberate cut, not silently skipped**: the executor-confirmation
+//! gate (T11.5) isn't wired in here yet — `add` today installs whatever
+//! the source contains once its audit has been shown; T11.5 tightens
+//! that further, it doesn't replace it.
 
 use std::process::ExitCode;
 
 use yunta_core::PackLockEntry;
+use yunta_engine::audit_pack;
 
+use super::pack_audit::{print_report, run_pack_tests};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, vendor_dir, vendor_tree,
@@ -60,6 +62,21 @@ pub async fn add(source: &str) -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
+
+    // §6: "corre el audit... nada ejecuta hasta que el humano vio el
+    // inventario" — shown before anything is vendored, let alone run.
+    let audit = audit_pack(clone_dir.path(), manifest.clone());
+    print_report(&audit);
+    let tests = run_pack_tests(clone_dir.path()).await;
+    if !tests.has_tests {
+        println!("\ntests: none shipped");
+    } else {
+        println!("\ntests: {} case(s), {} failed", tests.total, tests.failed);
+        for line in &tests.failures {
+            println!("  {line}");
+        }
+    }
+    println!();
 
     let commit = match head_commit(clone_dir.path()).await {
         Ok(commit) => commit,

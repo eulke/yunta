@@ -3621,3 +3621,59 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     resuelven `publisher/name` contra un pack instalado de verdad,
     `yunta list` muestra ambas capas, y un workflow de repo con el mismo
     nombre namespaced shadowea al del pack también en `list`.
+- [x] **T11.4 — `yunta pack audit`.** Split en dos capas siguiendo el
+      patrón ya establecido por T11.3 (lógica pura sobre tipos de
+      dominio en `yunta-engine`, IO/orquestación en la CLI):
+      `crates/engine/src/pack_audit.rs` — `audit_pack(pack_dir,
+      manifest) -> PackAudit` — recorre cada entrada de
+      `contents.workflows` con `Workflow::iter_nodes()` (la misma
+      caminata que replay/progress/stats/check ya comparten, DI-19,
+      incluidos hijos de `parallel`) y arma, por nodo: el comando de
+      `bash`/`until` de `loop`, los hooks efectivos antes/después
+      (`node_defaults.hooks` reimplementado en forma pura — la versión
+      de runtime toma un `RunCtx` vivo que un audit no tiene motivo para
+      construir), una línea legible por cada fuente de `context:` (qué
+      apunta a dónde), permisos del nodo, `agent:`, los `mcp_servers`
+      que sus `context: - mcp:` alcanzan, y el nombre del `executor`
+      cuando el nodo es código. **El prompt se resuelve igual que en
+      manifest.rs's `freeze_prompt`** — inline se copia tal cual,
+      `{file: ...}` se lee del disco relativo al directorio del propio
+      workflow — y viaja completo, nunca truncado ni resumido (D71): un
+      `{file:}` que no se puede leer queda como `Err` en el reporte, no
+      como texto faltante silencioso. Un workflow que el manifest
+      declara pero que no está o no parsea también queda en el reporte
+      (`WorkflowAudit.error`) — inventario significa mostrar lo que
+      falta, no omitirlo.
+  - **`crates/cli/src/commands/pack_audit.rs`**: `audit(publisher_name)`
+    (bajo demanda) lee el manifest del pack ya vendoreado, corre
+    `audit_pack` e imprime el reporte completo. `run_pack_tests(pack_dir)`
+    (D89) reutiliza el mismo formato de caso que `yunta test` — para
+    eso `discover_case_paths`/`run_case` en `commands/test.rs` pasaron
+    de privados a `pub(crate)`, sin cambiar su comportamiento (los 2
+    tests existentes de `run_flow.rs` sobre `yunta test` siguen en
+    verde tal cual) — apuntado a la raíz del pack en vez de al `cwd`
+    del proyecto: un pack que quiere tests propios los declara bajo su
+    propio `.yunta/tests/`, exactamente la misma convención que un
+    repo, sin un campo nuevo en `contents`. `has_tests: false` cubre
+    tanto "no hay `.yunta/tests/`" como "está pero vacío" — en ambos
+    casos no hay nada que reportar como aprobado/fallado.
+  - **`add` corre el audit automáticamente antes de vendorear** (§6:
+    "corre el audit... nada ejecuta hasta que el humano vio el
+    inventario") — se imprime el reporte completo más el resumen de
+    tests entre el chequeo de "ya instalado" y el cómputo del commit a
+    lockear, así que un `add` que se corta ahí (Ctrl-C, o un futuro
+    prompt de confirmación de T11.5) nunca llegó a tocar el disco.
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/pack_audit.rs` (4
+    tests) — inventario exhaustivo contra un pack fixture que ejercita
+    cada superficie auditada a la vez (bash, loop+`until`, hooks
+    antes/después, prompt inline, prompt `{file:}`, cada variante de
+    `context:` incluida `mcp`, permisos, `agent:`, nodo `executor`);
+    prompt de archivo resuelto a texto completo sin recortar
+    (comparación exacta contra el fixture, no un `contains`); prompt
+    `{file:}` inexistente queda como error explícito, no se pierde
+    silenciosamente; workflow declarado pero ausente queda en el
+    reporte. `crates/cli/tests/pack_audit_cmd.rs` (3 tests E2E contra
+    el binario real) — `add` muestra el inventario completo (incluido
+    un prompt multilínea sin resumir) antes de vendorear; `audit` bajo
+    demanda contra un pack ya instalado da el mismo inventario;
+    auditar un pack no instalado se rechaza citando dónde se buscó.

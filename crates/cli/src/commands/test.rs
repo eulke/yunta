@@ -70,23 +70,10 @@ pub async fn test() -> ExitCode {
     };
 
     let tests_dir = cwd.join(".yunta/tests");
-    let mut case_paths: Vec<PathBuf> = match std::fs::read_dir(&tests_dir) {
-        Ok(entries) => entries
-            .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|ext| ext == "yaml" || ext == "yml")
-            })
-            .collect(),
-        Err(e) => {
-            eprintln!(
-                "error: cannot read test cases from {}: {e}",
-                tests_dir.display()
-            );
-            return ExitCode::FAILURE;
-        }
+    let Some(case_paths) = discover_case_paths(&cwd) else {
+        eprintln!("error: cannot read test cases from {}", tests_dir.display());
+        return ExitCode::FAILURE;
     };
-    case_paths.sort();
     if case_paths.is_empty() {
         eprintln!("error: no test cases found under {}", tests_dir.display());
         return ExitCode::FAILURE;
@@ -123,9 +110,30 @@ pub async fn test() -> ExitCode {
     }
 }
 
+/// Every `.yaml`/`.yml` case file directly under `<root>/.yunta/tests/`,
+/// sorted for reproducible ordering — `None` when that directory itself
+/// doesn't exist (as opposed to existing and being empty, which is a
+/// separate case each caller decides how to treat). Shared by `yunta
+/// test` (root = the project's own `cwd`) and `yunta pack audit`
+/// (T11.4, root = a pack directory) — same case format, same discovery
+/// rule, so a pack's own tests are authored exactly like a repo's.
+pub(crate) fn discover_case_paths(root: &Path) -> Option<Vec<PathBuf>> {
+    let tests_dir = root.join(".yunta/tests");
+    let mut case_paths: Vec<PathBuf> = std::fs::read_dir(&tests_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+        })
+        .collect();
+    case_paths.sort();
+    Some(case_paths)
+}
+
 /// Runs one case; `Ok` carries assertion failures (empty = pass), `Err`
 /// carries setup/execution errors.
-async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
+pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
     let case: TestCase = load_yaml(case_path, "test case")
         .map_err(|_| format!("could not load test case `{}`", case_path.display()))?;
 

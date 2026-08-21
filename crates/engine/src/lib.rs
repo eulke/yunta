@@ -17,6 +17,7 @@ mod human_interaction;
 mod inputs;
 mod ledger;
 mod manifest;
+mod pack_audit;
 mod permissions;
 mod process_registry;
 mod progress;
@@ -47,6 +48,7 @@ pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
+pub use pack_audit::{audit_pack, NodeAudit, PackAudit, PromptText, WorkflowAudit};
 pub use permissions::command_violation;
 pub use process_registry::{
     process_alive, read_registry, registry_path, EngineProcessFile, ProcessRegistry,

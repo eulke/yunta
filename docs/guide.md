@@ -257,9 +257,21 @@ pack may freely `use:` another workflow from the *same* pack, but reaching
 into a different pack, or back out to the repo, is rejected by `check` —
 cross-pack composition is out of scope for v1 (§8).
 
+A pack is code from someone else, and it can be audited by reading it: `yunta
+pack audit acme/review-pack` prints a full static inventory of every workflow
+it ships — every `bash`/hook/loop command, every context source and exactly
+what it points at, permissions and required agent per node, `mcp` servers
+reached, executors flagged as code, and each workflow's **complete, untrimmed
+prompt text**. It's inventory, never a verdict (§6): nothing here flags
+content as "suspicious" — that would be trivially evadible and would only
+give false confidence. It also reports whether the pack ships its own tests
+under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
+`add` runs the same audit automatically, before anything is vendored —
+nothing lands in your repo unseen.
+
 **Not wired up yet**: the permissions ceiling actually being enforced by
-`check` (T11.5), validating a pack's declared `requires:` against the local
-config (T11.6), and `yunta pack audit`'s full inventory (T11.4).
+`check` (T11.5), and validating a pack's declared `requires:` against the
+local config (T11.6).
 
 ## Where the rest lives
 

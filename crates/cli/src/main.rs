@@ -218,6 +218,16 @@ enum PackAction {
     /// Lists every locked pack, verifying its vendored content against
     /// the lock.
     List,
+    /// Full static inventory of an installed pack (T11.4): every
+    /// command, context source, per-node permission, required agent,
+    /// mcp server, executor, and each workflow's full prompt text —
+    /// plus whether the pack ships tests and whether they pass.
+    /// `add` runs this automatically before vendoring; this is the
+    /// on-demand form.
+    Audit {
+        /// `publisher/name`.
+        publisher_name: String,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -292,6 +302,9 @@ async fn main() -> ExitCode {
             } => commands::pack::update(&publisher_name, &r#ref).await,
             PackAction::Remove { publisher_name } => commands::pack::remove(&publisher_name),
             PackAction::List => commands::pack::list(),
+            PackAction::Audit { publisher_name } => {
+                commands::pack_audit::audit(&publisher_name).await
+            }
         },
         Some(Command::Stats {
             run_id,

@@ -1,0 +1,213 @@
+//! `yunta pack audit` (RFC-0002 §6, D71, T11.4): prints the full static
+//! inventory `yunta_engine::audit_pack` builds for an installed pack —
+//! every command, context source, per-node permission, required agent,
+//! `mcp` server, executor, and each workflow's full, untrimmed prompt —
+//! then reports whether the pack ships tests of its own and whether
+//! they pass (D89). Inventory, never verdict: nothing here flags
+//! content as suspicious, it only shows all of it. Runs on demand
+//! (`yunta pack audit <publisher>/<name>`) and automatically inside
+//! `add`, before vendoring — "nada ejecuta hasta que el humano vio el
+//! inventario" (§6).
+
+use std::path::Path;
+use std::process::ExitCode;
+
+use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
+
+use super::test::{discover_case_paths, run_case};
+use crate::pack::{packs_root, read_manifest, vendor_dir};
+
+pub async fn audit(publisher_name: &str) -> ExitCode {
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(e) => {
+            eprintln!("error: cannot determine the current directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let Some((publisher, name)) = publisher_name.split_once('/') else {
+        eprintln!("error: `{publisher_name}` isn't `publisher/name`");
+        return ExitCode::FAILURE;
+    };
+    let pack_dir = vendor_dir(&cwd, publisher, name);
+    if !pack_dir.is_dir() {
+        eprintln!(
+            "error: `{publisher_name}` isn't installed under {}",
+            packs_root(&cwd).display()
+        );
+        return ExitCode::FAILURE;
+    }
+    let manifest = match read_manifest(&pack_dir) {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let report = audit_pack(&pack_dir, manifest);
+    print_report(&report);
+    let tests = run_pack_tests(&pack_dir).await;
+    print_test_summary(&tests);
+    ExitCode::SUCCESS
+}
+
+/// Prints the full inventory — called both by `audit` (on demand) and by
+/// `pack add` (automatically, before vendoring).
+pub fn print_report(report: &PackAudit) {
+    let m = &report.manifest;
+    println!("pack: {}/{} @ {}", m.publisher, m.name, m.version);
+    println!(
+        "declares: permissions={:?} network={} executors={}",
+        m.declares.permissions,
+        m.declares.network,
+        if m.declares.executors.is_empty() {
+            "none".to_string()
+        } else {
+            m.declares.executors.join(", ")
+        }
+    );
+    if !m.requires.roles.is_empty() {
+        let roles: Vec<String> = m
+            .requires
+            .roles
+            .iter()
+            .map(|r| match &r.permissions {
+                Some(p) => format!("{}({:?})", r.name, p),
+                None => r.name.clone(),
+            })
+            .collect();
+        println!("requires roles: {}", roles.join(", "));
+    }
+    if !m.requires.mcp_servers.is_empty() {
+        println!(
+            "requires mcp_servers: {}",
+            m.requires.mcp_servers.join(", ")
+        );
+    }
+    if !m.requires.commands.is_empty() {
+        println!("requires commands: {}", m.requires.commands.join(", "));
+    }
+
+    for workflow in &report.workflows {
+        print_workflow(workflow);
+    }
+}
+
+fn print_workflow(workflow: &WorkflowAudit) {
+    println!("\nworkflow: {}", workflow.declared_path);
+    if let Some(error) = &workflow.error {
+        println!("  ERROR: {error}");
+        return;
+    }
+    for node in &workflow.nodes {
+        print_node(node);
+    }
+}
+
+fn print_node(node: &NodeAudit) {
+    println!("  node `{}` (kind: {})", node.id, node.kind);
+    if let Some(command) = &node.command {
+        println!("    command: {command}");
+    }
+    for step in &node.hooks_before {
+        println!("    hook before: {step}");
+    }
+    for step in &node.hooks_after {
+        println!("    hook after: {step}");
+    }
+    if let Some(permissions) = node.permissions {
+        println!("    permissions: {permissions}");
+    }
+    if let Some(agent) = &node.agent {
+        println!("    agent: {agent}");
+    }
+    for server in &node.mcp_servers {
+        println!("    mcp_server: {server}");
+    }
+    if let Some(executor) = &node.executor {
+        println!("    executor (code): {executor}");
+    }
+    for entry in &node.context {
+        println!("    context: {entry}");
+    }
+    match &node.prompt {
+        None => {}
+        Some(Ok(text)) => {
+            println!("    prompt:");
+            for line in text.lines() {
+                println!("      {line}");
+            }
+        }
+        Some(Err(error)) => println!("    prompt: UNREADABLE — {error}"),
+    }
+}
+
+/// Whether the pack ships tests under its own `.yunta/tests/` (same case
+/// format `yunta test` uses, authored the same way a repo's own tests
+/// are) and, if so, how many pass — D89. `has_tests: false` covers both
+/// "no `.yunta/tests/` directory" and "directory present but empty";
+/// either way there's nothing to report a pass/fail count for.
+pub struct PackTestSummary {
+    pub has_tests: bool,
+    pub total: usize,
+    pub failed: usize,
+    pub failures: Vec<String>,
+}
+
+pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
+    let empty = PackTestSummary {
+        has_tests: false,
+        total: 0,
+        failed: 0,
+        failures: Vec::new(),
+    };
+    let Some(case_paths) = discover_case_paths(pack_dir) else {
+        return empty;
+    };
+    if case_paths.is_empty() {
+        return empty;
+    }
+
+    let mut failed = 0;
+    let mut failures = Vec::new();
+    for case_path in &case_paths {
+        let name = case_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| case_path.display().to_string());
+        match run_case(pack_dir, case_path).await {
+            Ok(problems) if problems.is_empty() => {}
+            Ok(problems) => {
+                failed += 1;
+                for problem in problems {
+                    failures.push(format!("{name}: {problem}"));
+                }
+            }
+            Err(error) => {
+                failed += 1;
+                failures.push(format!("{name}: {error}"));
+            }
+        }
+    }
+    PackTestSummary {
+        has_tests: true,
+        total: case_paths.len(),
+        failed,
+        failures,
+    }
+}
+
+fn print_test_summary(summary: &PackTestSummary) {
+    if !summary.has_tests {
+        println!("\ntests: none shipped");
+        return;
+    }
+    println!(
+        "\ntests: {} case(s), {} failed",
+        summary.total, summary.failed
+    );
+    for line in &summary.failures {
+        println!("  {line}");
+    }
+}
