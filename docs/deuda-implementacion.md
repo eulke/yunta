@@ -1065,10 +1065,16 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   cerradas; cualquier corrección hecha con test de regresión.
 - **Estado:** la checklist existe — `docs/smoke-checklist.md`, con
   protocolo de corrección (cada divergencia = tarea propia + test de
-  regresión) y registro de resultados en `m0-status.md`. El ítem queda
-  abierto hasta que ambas corridas ocurran: requieren binario `codex`
-  autenticado y token+repo descartable de GitHub, que este entorno no
-  tiene — es trabajo de la primera sesión con credenciales, no de esta.
+  regresión) y registro de resultados en `m0-status.md`. Revisada por
+  staleness al cerrar M8–M11: además de las secciones originales A
+  (codex) y B (forge) y los deltas de claude-code (C), se agregó la
+  sección D con las tres superficies live-only que aterrizaron después
+  de escribirla — `yunta mcp` montado en Claude Code real (T8.1), el
+  MCP por-run con un agente real (T8.2), y `pack add` contra un host
+  remoto real (T11.2). El ítem queda abierto hasta que las corridas
+  ocurran: requieren binario `codex`/`claude` autenticado y token+repo
+  descartable de GitHub, que este entorno no tiene — es trabajo de la
+  primera sesión con credenciales, no de esta.
 
 ### DI-23 — `on_interrupt: resume_session` `[x]`
 

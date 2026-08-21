@@ -113,3 +113,32 @@ autenticada.
    clave que el CLI honre → verificar que llega (comportamiento
    observable o flag en el spawn), y que una clave desconocida no
    rompe el spawn.
+
+## D. Superficies live-only posteriores (M8/M11)
+
+Agregadas al cerrar M8–M11 (todo construido y testeado con mock/repos
+locales; estas tres partes son las únicas que ninguna corrida sin
+credenciales puede ejercitar).
+
+1. **`yunta mcp` montado en Claude Code real (T8.1)**: agregar la
+   config JSON de referencia (`mcpServers: { yunta: { command: yunta,
+   args: [mcp] } }`) a una sesión real de Claude Code → pedirle al
+   agente que liste workflows (`list_workflows` refleja el catálogo
+   vivo, packs incluidos), dispare `run_workflow` (retorna `run_id` en
+   milisegundos, el run corre desacoplado), consulte `workflow_status`
+   y resuelva un gate con `resolve_gate`. Matar la sesión MCP a mitad
+   de run → el run sigue (I25); `workflow_status` desde una sesión
+   nueva lo confirma.
+2. **MCP por-run con agente real (T8.2)**: un nodo `prompt` con
+   claude-code real dentro de un grupo `coordination: blackboard`,
+   pidiéndole al agente en el prompt que reporte un hallazgo con
+   `yunta_post_finding` → verificar que el endpoint por-sesión llega
+   montado al CLI real (la traducción adapter-specific se construyó
+   contra documentación), que el `finding_posted` queda en el log
+   atribuido al nodo, y que `yunta_get_blackboard` antes del join
+   devuelve solo lo propio (D98).
+3. **`pack add` contra un host remoto real (T11.2)**: `yunta pack add
+   github.com/<owner>/<repo>@<tag>` con un repo público real → el
+   shorthand `host/path` expande a `https://`, el clone-por-ref y el
+   vendoring funcionan igual que con los repos locales de los tests;
+   `yunta pack list` reporta `ok` contra el lock recién escrito.
