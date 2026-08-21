@@ -128,6 +128,48 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
 }
 
 #[test]
+fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
+    // T10.5/D56: "candidatos desde los knowledge/ de los repos → gate
+    // con assignee curador → nueva versión del pack" — a plain
+    // workflow, no engine mechanism of its own.
+    let yaml = include_str!("fixtures/promote-knowledge.yaml");
+    let workflow: yunta_core::Workflow =
+        serde_yaml::from_str(yaml).expect("promote-knowledge.yaml must parse whole");
+
+    assert_eq!(workflow.nodes.len(), 3);
+    assert!(workflow.inputs.contains_key("candidates"));
+    assert!(workflow.inputs.contains_key("new_version"));
+
+    let gate = workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "approve-promotion")
+        .unwrap();
+    let yunta_core::NodeKind::Gate {
+        assignee, options, ..
+    } = &gate.kind
+    else {
+        panic!("`approve-promotion` must be a gate, got {:?}", gate.kind);
+    };
+    assert_eq!(assignee, "curator");
+    assert_eq!(options, &vec!["approve".to_string()]);
+
+    let publish = workflow
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "publish")
+        .unwrap();
+    assert_eq!(
+        publish.depends_on,
+        vec![yunta_core::NodeId::from("approve-promotion")]
+    );
+
+    let reserialized = serde_yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = serde_yaml::from_str(&reserialized).unwrap();
+    assert_eq!(workflow, reparsed);
+}
+
+#[test]
 fn workflow_node_isolation_inherit_parses() {
     let yaml = r#"
 name: phased

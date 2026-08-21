@@ -1408,6 +1408,56 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   sospechar de `consolidate_blackboard`.
 - **Nota de cierre:** _pendiente._
 
+### DI-31 — `knowledge: { layers: [org] }` sigue sin resolver pese a que M11 (packs) ya cerró
+
+- **Origen:** M10/T10.5 (workflow de referencia `promote-knowledge`),
+  escribiendo un `context: - knowledge: { layers: [org] }` en
+  `review-candidates` — falló en runtime con
+  `UnsupportedKnowledgeLayer`, cuyo propio mensaje de error dice
+  textualmente "packs land in M11". T6.5 (M6) cerró la fuente
+  `knowledge` con `repo`/`user` resolviendo con precedencia real, pero
+  dejó `org` como error tipado explícito **a propósito**, documentado
+  en el propio doc comment de `KnowledgeLayer::Org`
+  (`crates/core/src/workflow.rs`) y de
+  `context_resolve.rs::resolve_knowledge` como "packs land in M11, so
+  requesting it is a typed error, never a silent empty result" — la
+  decisión correcta en su momento (A6: nunca emular una capacidad
+  ausente). M11 ya cerró completo (T11.1–T11.7, este mismo documento)
+  con `packs_for_publisher`/`installed_publishers` disponibles en
+  `yunta-engine::catalog`, pero nadie volvió a `context_resolve.rs`
+  para cablear `KnowledgeLayer::Org` contra ese mecanismo ahora
+  existente — quedó exactamente donde T6.5 lo dejó.
+- **Qué falta, concretamente:** `resolve_knowledge_dir` (o el
+  equivalente que reemplace su `match layer { ... Org => None }`)
+  necesita, para `Org`: iterar `installed_publishers` +
+  `packs_for_publisher`, filtrar los packs cuyo `contents.knowledge` no
+  esté vacío, y mergear sus directorios de conocimiento con la misma
+  regla de precedencia por nombre de archivo que ya usan `repo`/`user`
+  (§9.2: "precedencia local, lo del repo pisa a lo general"). A
+  diferencia de `repo`/`user` (un solo directorio cada uno), `org`
+  puede tener **múltiples packs de conocimiento instalados a la vez**
+  (`permissions.packs.publishers.allow` ya gobierna cuáles) — hay que
+  decidir el orden de precedencia entre ellos si dos declaran el mismo
+  nombre de archivo (¿alfabético por `publisher/name`? ¿error de
+  ambigüedad, como T11.3 hace con workflows del mismo publisher?)
+  — **ítem para ADR, no para inventar en el fix.**
+- **Impacto de no arreglarlo:** ningún workflow puede usar
+  `knowledge: {}` (todas las capas, el default) ni
+  `knowledge: { layers: [org] }` explícitamente si hay un knowledge
+  pack instalado — falla el nodo entero con `UnsupportedKnowledgeLayer`
+  en vez de simplemente no encontrar nada en esa capa. El reference
+  `promote-knowledge.yaml` de T10.5 evita el problema quitando esa
+  línea de contexto (documentado en el propio `docs/m0-status.md`, no
+  silencioso) — pero cualquier equipo real con un knowledge pack org
+  instalado hoy no puede leerlo desde `context:` en absoluto.
+- **Nivel 2** (bloquea una feature ya diseñada y parcialmente
+  documentada como funcionando, D56/T6.5, aunque no bloquea trabajo
+  diario del engine en sí — nadie tiene todavía un knowledge pack real
+  instalado).
+- **Nota de cierre:** _pendiente — decisión de precedencia multi-pack
+  vía ADR antes de codearse (regla del propio CLAUDE.md: la deuda
+  consciente no se resuelve implícitamente)._
+
 ---
 
 ## Posturas cerradas (decisión registrada — no son deuda)

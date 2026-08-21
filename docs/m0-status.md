@@ -3339,7 +3339,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
 
-## M10 — Empaquetado y docs (completo: T10.1, T10.2, T10.3, T10.4; T10.5 pendiente)
+## M10 — Empaquetado y docs (cerrado: T10.1–T10.5)
 
 - [x] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
       escribe un workflow de tres nodos a mano antes de mencionar packs,
@@ -3531,19 +3531,64 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     `modes.rs` and `promotion.rs`. Fixed alongside this task since a red
     `--all-targets` clippy blocks CI for this commit either way; no
     behavior change, mechanical only.
-- [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — diferida a
-      post-M11, misma razón que T10.2: D56 dice explícitamente que el
-      paso final es "nueva versión del pack org" (RFC-0002 íntegro:
-      vendoring, lockfile, congelado por run) — sin el mecanismo de
-      packs (M11) ese paso no existe todavía de verdad. Construirlo
-      ahora contra un stand-in (p. ej. distill al `knowledge/` del
-      propio repo) implicaría reescribirlo cuando M11 aterrice; mejor
-      un solo workflow real después que dos versiones. Candidatos →
-      gate curador ya son 100% expresables hoy con lo que existe
-      (`kind: check`/`prompt` + `kind: gate` con `assignee`); lo que
-      falta es únicamente el destino final de la promoción.
+- [x] **T10.5 — Workflow de referencia `promote-knowledge`** (D56,
+      RFC-0003 §4). Diferida hasta que M11 cerrara — el paso final del
+      workflow ("nueva versión del pack org") necesitaba un pack de
+      verdad para significar algo, no un stand-in. `crates/core/tests/
+      fixtures/promote-knowledge.yaml`, mismo lugar y misma convención
+      que `build-feature.yaml`/`release-cycle.yaml` (T1.1) — fixture de
+      parseo, no un pack instalable propio (a diferencia de T10.2:
+      esto es un *workflow* de referencia, no un producto distribuible;
+      D56 dice textualmente "es un workflow de Yunta como cualquier
+      otro", no "es un pack"). Corre **dentro del propio repo del pack
+      de knowledge org** (el `pack.yaml` que el nodo `publish` versiona
+      y tagea) — juntar candidatos *de los otros repos hacia acá* es
+      trabajo de un curador o de un script aparte, no algo que un run
+      en un solo worktree pueda alcanzar a través de repos ajenos (el
+      propio D56 lo dice: "no es automática y no la hace el engine").
+      Tres nodos: `review-candidates` (`prompt`, lee el archivo de
+      candidatos vía `context: files:`, copia lo que corresponde a
+      `knowledge/` tal cual — mismo espíritu "inventario, jamás
+      veredicto" que `pack audit`, D71 — y deja notas propias),
+      `approve-promotion` (`gate`, `assignee: curator`, una sola opción
+      declarada `approve` — el `abort` que el engine agrega solo, §5.3,
+      es la salida real si el curador no aprueba) y `publish` (`bash`:
+      bump de versión en `pack.yaml`, commit, `git tag`).
+  - **Recorte real encontrado y registrado, no escondido**: la versión
+    inicial de este workflow declaraba `context: - knowledge: {layers:
+    [org]}` en `review-candidates` — y falló en runtime citando
+    textualmente "packs land in M11" en su propio mensaje de error.
+    Investigado: T6.5 (M6) cerró `knowledge:` con `repo`/`user`
+    resolviendo de verdad, pero dejó `org` como error tipado a
+    propósito (A6, nunca emular una capacidad ausente) **antes** de que
+    M11 existiera — y nadie volvió después de M11 a cablear
+    `KnowledgeLayer::Org` contra `packs_for_publisher`/
+    `installed_publishers`, que ya existen. No es parte de esta tarea
+    arreglarlo (T10.5 es sobre el workflow de referencia, no sobre
+    completar T6.5) ni corresponde decidirlo de facto — el fixture usa
+    `files:` sobre el archivo de candidatos en su lugar, y el hallazgo
+    queda registrado como **DI-31** (`docs/deuda-implementacion.md`),
+    con la pregunta de diseño explícita que necesita ADR (orden de
+    precedencia entre múltiples knowledge packs org instalados a la
+    vez) para que no se resuelva implícitamente el día que alguien la
+    encare.
+  - ✓ **Criterios cubiertos**: `crates/core/tests/integration.rs`
+    (round-trip de parseo, mismo patrón que los otros dos workflows de
+    referencia). `crates/engine/tests/promote_knowledge.rs` (3 tests)
+    — `check()` limpio sobre el fixture; **"corre end-to-end con
+    mock"** — `build_manifest`+`create_run`+`execute_run` reales, gate
+    aprobado (`ApproveEverything`) hasta `Finished`, con `publish`
+    corriendo de verdad contra un repo git real (bump de versión en
+    `pack.yaml`, commit, tag `vX.Y.Z`, todo verificado leyendo el
+    árbol/git log después); **"ninguna promoción ocurre sin gate
+    resuelto"** — mismo escenario con `NoInteraction` (nadie puede
+    responder el gate): el run queda `Paused`, `publish` nunca corre
+    (`state.nodes` ni siquiera tiene la entrada), `pack.yaml` sigue en
+    `1.0.0` y no existe ningún tag — la garantía viene gratis de que
+    `publish` depende de un nodo que jamás se resuelve, no de lógica
+    nueva.
 
-## M11 — Packs (RFC-0002, en progreso: T11.1)
+## M11 — Packs (RFC-0002, cerrado: T11.1–T11.7)
 
 - [x] **T11.1 — Schema y parseo de `pack.yaml`.** `yunta_core::pack`:
       `PackManifest` (`name`/`publisher`/`version`/`description?`/
