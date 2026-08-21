@@ -1,0 +1,26 @@
+# The canonical reference pack manifest (RFC-0002 §3) as a parse
+# fixture — T11.1's round-trip criterion.
+name: review-pack
+publisher: acme
+version: 1.2.0
+description: "Review multi-runner con consolidación de hallazgos"
+license: MIT
+yunta_schema: ">=1 <2"
+
+requires:
+  roles:
+    - { name: reviewer, permissions: read-only }
+    - { name: mechanical }
+  mcp_servers: [internal-docs]
+  commands: ["gh", "cargo"]
+
+declares:
+  permissions: read-only
+  network: false
+  executors: []
+
+contents:
+  workflows: [review.yaml, review-docs.yaml]
+  skills: [review-rubric/]
+  knowledge: []
+  docs: [README.md]

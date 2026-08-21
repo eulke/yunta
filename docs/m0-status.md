@@ -3463,3 +3463,37 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
       gate curador ya son 100% expresables hoy con lo que existe
       (`kind: check`/`prompt` + `kind: gate` con `assignee`); lo que
       falta es únicamente el destino final de la promoción.
+
+## M11 — Packs (RFC-0002, en progreso: T11.1)
+
+- [x] **T11.1 — Schema y parseo de `pack.yaml`.** `yunta_core::pack`:
+      `PackManifest` (`name`/`publisher`/`version`/`description?`/
+      `license?`/`yunta_schema?`/`requires`/`declares`/`contents`),
+      `PackRequires{roles, mcp_servers, commands}`, `RequiredRole{name,
+      permissions?}` (reutiliza `NodePermissions`, no un enum nuevo),
+      `PackDeclares{permissions, network, executors}` (el techo — `check`
+      lo hace cumplir recién en T11.5, acá solo se parsea),
+      `PackContents{workflows, skills, knowledge, docs}`. `declares` es
+      obligatorio (sin default) — un pack sin techo declarado falla al
+      parsear, nunca hereda uno implícito. `version`/`yunta_schema`
+      quedan como `String` sin dependencia `semver`: nada en v1 compara
+      versiones (`update` siempre nombra un ref exacto, §4), y el propio
+      `yunta_schema` de un workflow ya usa un parser de rangos a mano
+      (`check_yunta_schema`/`yunta_schema_satisfied`,
+      `engine/src/check.rs`) que T11.6 reutilizará tal cual para la
+      compatibilidad del pack en vez de duplicar lógica — agregar la
+      dependencia el día que algo compare versiones de verdad, no antes
+      (CLAUDE.md: dependencias con justificación real, no anticipadas).
+  - ✓ **Criterios cubiertos**: el manifest de referencia de RFC-0002 §3
+    parsea entero y hace round-trip byte-idéntico a nivel del árbol
+    serde (`crates/core/tests/pack.rs`,
+    `the_reference_pack_parses_and_round_trips`); además un pack
+    solo-knowledge (`contents.knowledge` sin `workflows`/`skills`,
+    Contrato §9.2/D56) parsea como legítimo, no degenerado;
+    `requires`/`contents` faltantes toman default vacío;
+    `declares` faltante falla el parseo (test explícito, no implícito).
+  - **Gobernanza ya existente, sin tocar**: `PackPermissions`/
+    `PackExecutorPolicy`/`PublisherPermissions` (§6.1, `permissions.packs`
+    en la config del instalador) ya estaban en `core::config` desde antes
+    de M11 — este ítem no los duplica ni los mueve, solo agrega el tipo
+    del manifest que esas políticas terminarán gobernando en T11.5/T11.6.
