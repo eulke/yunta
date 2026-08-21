@@ -3339,7 +3339,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
 
-## M10 — Empaquetado y docs (completo: T10.1, T10.3, T10.4; próximo: T10.2 (post-M11)/T10.5)
+## M10 — Empaquetado y docs (completo: T10.1, T10.3, T10.4; T10.2/T10.5 diferidas a post-M11)
 
 - [x] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
       escribe un workflow de tres nodos a mano antes de mencionar packs,
@@ -3452,4 +3452,14 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     `modes.rs` and `promotion.rs`. Fixed alongside this task since a red
     `--all-targets` clippy blocks CI for this commit either way; no
     behavior change, mechanical only.
-- [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — pendiente.
+- [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — diferida a
+      post-M11, misma razón que T10.2: D56 dice explícitamente que el
+      paso final es "nueva versión del pack org" (RFC-0002 íntegro:
+      vendoring, lockfile, congelado por run) — sin el mecanismo de
+      packs (M11) ese paso no existe todavía de verdad. Construirlo
+      ahora contra un stand-in (p. ej. distill al `knowledge/` del
+      propio repo) implicaría reescribirlo cuando M11 aterrice; mejor
+      un solo workflow real después que dos versiones. Candidatos →
+      gate curador ya son 100% expresables hoy con lo que existe
+      (`kind: check`/`prompt` + `kind: gate` con `assignee`); lo que
+      falta es únicamente el destino final de la promoción.
