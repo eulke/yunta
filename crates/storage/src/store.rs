@@ -316,8 +316,10 @@ impl Storage {
         }
 
         let mut prev_hash: Option<String> = None;
-        let mut expected_seq: i64 = 1;
-        for (seq, ts, node_id, kind, payload_json, schema_version, stored_hash) in &rows {
+        for (index, (seq, ts, node_id, kind, payload_json, schema_version, stored_hash)) in
+            rows.iter().enumerate()
+        {
+            let expected_seq = index as i64 + 1;
             if *seq != expected_seq {
                 return Ok(ChainVerification::Broken {
                     seq: *seq as u64,
@@ -383,7 +385,6 @@ impl Storage {
                 });
             }
             prev_hash = Some(stored_hash.clone());
-            expected_seq += 1;
         }
 
         Ok(ChainVerification::Intact { events: rows.len() })
