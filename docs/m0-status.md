@@ -3549,3 +3549,75 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     revendorea con el nuevo contenido y conserva el `source` sin
     pedirlo de nuevo; `update` sobre algo no instalado se rechaza;
     `remove` borra árbol + entrada del lock.
+- [x] **T11.3 — namespacing en la resolución.** `crates/engine/src/
+      catalog.rs`: `resolve_workflow(repo_root, name)` — un nombre sin
+      `/` nunca cae a packs (no hay publisher que buscar); un nombre
+      `publisher/workflow` primero prueba el repo por el path literal
+      (`.yunta/workflows/publisher/workflow.yaml` — así un pack puede
+      tener `acme/review` y el repo shadowearlo con su propio archivo
+      anidado `acme/review.yaml`) y solo si no existe cae a los packs
+      vendoreados bajo `.yunta/packs/<publisher>/`. Dentro de un
+      publisher, el segmento después de la `/` direcciona el **basename
+      del archivo de workflow** declarado en `contents.workflows` de
+      algún pack — no el campo `name` del propio `pack.yaml` (eso es
+      metadata de empaquetado/versión, `review-pack`/`1.2.0`, distinto
+      de los archivos que ese pack ships). Los packs instalados de un
+      mismo publisher comparten un namespace plano: dos packs del mismo
+      publisher declarando el mismo basename es `Ambiguous`, nunca se
+      resuelve por orden de instalación. §5: "un workflow local con el
+      mismo nombre pisa al del pack" — el repo es la capa de arriba,
+      siempre.
+  - **Composición cross-pack rechazada (§8)**: `check_workflow_refs`
+    ahora recibe un `WorkflowOrigin` explícito (`Repo` o
+    `Pack{publisher, pack_name}`) para el workflow de tope que está
+    chequeando — necesario porque la función solo ve un `Workflow` ya
+    parseado, sin memoria de qué archivo lo originó. Cada call site
+    (`yunta check`, `yunta run`, y el propio `check_or_refuse`) calcula
+    ese origen con `origin_of(repo_root, workflow_path)` a partir del
+    path que ya tiene. Composición intra-pack (`use:` a otro workflow
+    del mismo pack) se permite; una referencia que cruza de pack a pack,
+    o de pack de vuelta al repo, se rechaza con
+    `CheckError::CrossPackWorkflowRef` — v1 no tiene dependencias
+    transitivas entre packs.
+  - **`workflow_exec.rs`** (ejecución de nodos `kind: workflow`): el
+    catalog_path hardcodeado a `.yunta/workflows/<use_name>.yaml` se
+    reemplazó por `catalog::resolve_workflow`; de paso corrige un bug
+    real — el `workflows_dir` usado para resolver `prompt: {file:}` de
+    un hijo siempre asumía `.yunta/workflows`, lo cual rompía un hijo
+    servido desde un pack; ahora se deriva del propio
+    `resolved.path.parent()`.
+  - **`skills.rs`**: `resolve_pack_skill(worktree, name)` extiende la
+    búsqueda existente de skills por nombre — separa `publisher/skill`,
+    busca en `contents.skills` de los packs de ese publisher por
+    basename, `None` en caso de ambigüedad entre packs (mismo criterio
+    que workflows).
+  - **`yunta list`**: dos capas — `repo_catalog_entries` (ahora recorre
+    `.yunta/workflows/` recursivamente, no solo un nivel: un override de
+    repo como `.yunta/workflows/acme/review.yaml` vive anidado, y un
+    `read_dir` de un solo nivel nunca lo encontraba, dejando el shadow
+    sin efecto en `list` aunque `check`/`run` ya lo resolvían bien) y
+    `pack_catalog_entries` (`publisher/basename` por cada pack
+    instalado). Se concatenan con el repo filtrando cualquier entrada de
+    pack cuyo `display_name` ya exista en el repo — mismo shadow que
+    `resolve_workflow`, ahora también en la vista de catálogo.
+  - **Dos bugs reales encontrados por los tests propios antes de
+    commitear** (test-first cumplido en la práctica, no solo en la
+    letra): (1) el origen del workflow de tope en `check_workflow_refs`
+    estaba hardcodeado a `Repo`, así que la regla cross-pack nunca
+    disparaba en el caso real — se corrigió agregando el parámetro
+    `workflow_origin` explícito; (2) `origin_of` no manejaba paths
+    relativos (los que llegan desde argumentos de CLI o fixtures de
+    test) — comparaba contra `.yunta/packs` absoluto y siempre reportaba
+    `Repo` aunque el path relativo cayera dentro de un pack; se corrigió
+    uniendo con `repo_root` antes de comparar.
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/catalog.rs` (7
+    tests) — shadow de repo sobre pack, bare name nunca cae a packs,
+    namespaced resuelve al pack cuando el repo no tiene nada con ese
+    nombre, dos packs del mismo publisher con el mismo basename es
+    ambiguo, composición intra-pack permitida, composición cross-pack
+    rechazada, y un workflow de pack referenciando de vuelta al repo
+    también rechazado. `crates/cli/tests/pack_resolution_cmd.rs` (4
+    tests E2E contra el binario real) — `yunta run`/`yunta check`
+    resuelven `publisher/name` contra un pack instalado de verdad,
+    `yunta list` muestra ambas capas, y un workflow de repo con el mismo
+    nombre namespaced shadowea al del pack también en `list`.

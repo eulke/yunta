@@ -8,9 +8,11 @@
 //!
 //! Mechanics this module fixes (documented in `docs/m0-status.md`'s
 //! T9.3 entry):
-//! - `use: <name>` resolves to `.yunta/workflows/<name>.yaml` **in the
-//!   parent run's own working tree** — the repo's versioned catalog,
-//!   the same one `list_workflows` reads.
+//! - `use: <name>` resolves via `crate::catalog::resolve_workflow`
+//!   **in the parent run's own working tree**: the repo's versioned
+//!   `.yunta/workflows/<name>.yaml` catalog first, a publisher's
+//!   vendored packs second (RFC-0002 §5, T11.3) — the same resolver
+//!   `list_workflows` and `check_workflow_refs` share.
 //! - The child run id is `<parent>-<node>` (with a `-N` ordinal when a
 //!   re-route runs the node again), derived from the parent's log —
 //!   deterministic, no entropy in the engine.
@@ -189,21 +191,28 @@ pub(super) async fn execute_workflow(
 
     // Fresh birth: resolve the CURRENT catalog file from the parent's
     // own tree (§12: "cada hijo resuelve y congela su propio workflow
-    // al nacer").
-    let catalog_path = ctx
-        .worktree
-        .join(".yunta/workflows")
-        .join(format!("{use_name}.yaml"));
-    let text = match std::fs::read_to_string(&catalog_path) {
+    // al nacer") — repo catalog first, a publisher's vendored packs
+    // second (RFC-0002 §5, T11.3).
+    let resolved = match crate::catalog::resolve_workflow(ctx.worktree, use_name) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            return fail(
+                ctx,
+                node,
+                format!("child workflow `use: {use_name}` cannot be resolved: {e}"),
+                false,
+            );
+        }
+    };
+    let text = match std::fs::read_to_string(&resolved.path) {
         Ok(text) => text,
         Err(e) => {
             return fail(
                 ctx,
                 node,
                 format!(
-                    "child workflow `use: {use_name}` cannot be read from the repo catalog \
-                     `{}`: {e} — add the workflow file there (versioned) or fix the name",
-                    catalog_path.display()
+                    "child workflow `{}` cannot be read: {e}",
+                    resolved.path.display()
                 ),
                 false,
             );
@@ -217,7 +226,7 @@ pub(super) async fn execute_workflow(
                 node,
                 format!(
                     "child workflow `{}` does not parse: {e}",
-                    catalog_path.display()
+                    resolved.path.display()
                 ),
                 false,
             );
@@ -285,7 +294,14 @@ pub(super) async fn execute_workflow(
         }
     }
 
-    let workflows_dir = ctx.worktree.join(".yunta/workflows");
+    // A pack-sourced child's own `prompt: {file: ...}` resolves relative
+    // to the pack's own directory, not the repo's `.yunta/workflows/` —
+    // whichever directory `resolved.path` actually came from.
+    let workflows_dir = resolved
+        .path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.worktree.join(".yunta/workflows"));
     let mut child_manifest = match crate::manifest::build_manifest(
         &child_workflow,
         &child_config,

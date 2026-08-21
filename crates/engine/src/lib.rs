@@ -9,6 +9,7 @@
 //! (core ← storage/adapters ← engine ← cli, T0.1) compiles and is testable.
 
 mod artifacts;
+mod catalog;
 mod check;
 mod events_export;
 mod findings;
@@ -35,6 +36,10 @@ mod verification_effectiveness;
 mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
+pub use catalog::{
+    installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
+    ResolvedWorkflow, WorkflowOrigin,
+};
 pub use check::{check, check_warnings, check_workflow_refs, CheckError, CheckWarning};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{inherited_findings, register as register_findings, FindingsError};

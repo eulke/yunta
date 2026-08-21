@@ -170,11 +170,29 @@ pub async fn run(
         }
     };
 
+    // A bare catalog name (no `.yaml`/`.yml` extension — every real
+    // workflow file in this codebase's own convention has one) resolves
+    // through the repo catalog, then a publisher's vendored packs
+    // (RFC-0002 §5, T11.3: `yunta run acme/review`); anything with an
+    // extension stays a literal path, today's behavior unchanged.
+    let workflow_path: std::path::PathBuf = if workflow_path.extension().is_none() {
+        match yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy()) {
+            Ok(resolved) => resolved.path,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        workflow_path.to_path_buf()
+    };
+    let workflow_path = workflow_path.as_path();
+
     let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
         Ok(w) => w,
         Err(code) => return code,
     };
-    if let Err(code) = super::check_or_refuse(&workflow, &project.config) {
+    if let Err(code) = super::check_or_refuse(&workflow, &project.config, workflow_path) {
         return code;
     }
     let adapters = super::real_adapters(&project.config);

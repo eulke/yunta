@@ -325,6 +325,33 @@ pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
 }
 
 fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
+    // A bare catalog name (no `.yaml`/`.yml` extension) resolves through
+    // the repo catalog, then a publisher's vendored packs (RFC-0002 §5,
+    // T11.3) — same rule `yunta run` follows; anything with an
+    // extension stays a literal path.
+    let resolved_path: std::path::PathBuf;
+    let workflow_path: &Path = if workflow_path.extension().is_none() {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                eprintln!("error: cannot determine the current directory: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        match yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy()) {
+            Ok(resolved) => {
+                resolved_path = resolved.path;
+                &resolved_path
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        workflow_path
+    };
+
     let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
         Ok(w) => w,
         Err(code) => return code,
@@ -371,9 +398,13 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
 
     let mut errors = yunta_engine::check(&workflow, &config);
     // T9.3: composition references resolve against the repo catalog
-    // under the current directory (`.yunta/workflows/`).
+    // under the current directory (`.yunta/workflows/`), then packs
+    // (RFC-0002 §5, T11.3).
     if let Ok(cwd) = std::env::current_dir() {
-        errors.extend(yunta_engine::check_workflow_refs(&workflow, &config, &cwd));
+        let origin = yunta_engine::origin_of(&cwd, workflow_path);
+        errors.extend(yunta_engine::check_workflow_refs(
+            &workflow, &config, &cwd, &origin,
+        ));
     }
     let warnings = yunta_engine::check_warnings(&workflow, &config);
     for warning in &warnings {

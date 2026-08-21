@@ -67,13 +67,20 @@ pub fn resolve_skills(
         let found = search_roots
             .iter()
             .map(|root| root.join(name))
-            .find(|candidate| candidate.is_dir());
+            .find(|candidate| candidate.is_dir())
+            // RFC-0002 §5, T11.3: repo/configured paths never find a
+            // namespaced name as a literal subdirectory in practice, so
+            // this only ever fires for `publisher/skill` — a publisher's
+            // vendored packs are the fallback layer, never the first one
+            // (a repo directory that happens to occupy that path still
+            // wins, same shadowing rule `use:` follows).
+            .or_else(|| resolve_pack_skill(worktree, name));
         match found {
             Some(dir) => resolved.push(dir),
             None => {
                 return Err(format!(
-                    "skill `{name}` not found under {} — add the directory or fix \
-                     `skills.paths` in the config",
+                    "skill `{name}` not found under {} — add the directory, fix \
+                     `skills.paths` in the config, or install the pack that declares it",
                     search_roots
                         .iter()
                         .map(|root| format!("`{}`", root.display()))
@@ -84,6 +91,31 @@ pub fn resolve_skills(
         }
     }
     Ok(resolved)
+}
+
+/// `publisher/skill` (§5) — a publisher's installed packs share one
+/// flat skill namespace, same rule [`crate::catalog::resolve_workflow`]
+/// applies to workflows: a directory basename match against some pack's
+/// declared `contents.skills`, ambiguity between two packs left
+/// unresolved (reported as "not found" here — a workflow-level
+/// `Ambiguous` error doesn't apply to a mount-time lookup with no
+/// `check`-time diagnostic surface of its own).
+fn resolve_pack_skill(worktree: &Path, name: &str) -> Option<PathBuf> {
+    let (publisher, skill) = name.split_once('/')?;
+    let mut found: Option<PathBuf> = None;
+    for (pack_dir, manifest) in crate::catalog::packs_for_publisher(worktree, publisher) {
+        for declared in &manifest.contents.skills {
+            let trimmed = declared.trim_end_matches('/');
+            let stem = Path::new(trimmed).file_name().and_then(|s| s.to_str());
+            if stem == Some(skill) {
+                if found.is_some() {
+                    return None; // ambiguous across packs — no silent first-match
+                }
+                found = Some(pack_dir.join(trimmed));
+            }
+        }
+    }
+    found
 }
 
 fn expand(path: &Path, worktree: &Path) -> PathBuf {

@@ -39,7 +39,7 @@ pub fn graph(workflow_path: &Path, run_id: Option<&str>) -> ExitCode {
         Err(code) => return code,
     };
 
-    if let Err(code) = check_or_refuse(&workflow, &project.config) {
+    if let Err(code) = check_or_refuse(&workflow, &project.config, workflow_path) {
         return code;
     }
 

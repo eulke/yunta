@@ -235,11 +235,31 @@ target ref. `list` re-hashes what's actually vendored on disk against the lock a
 says so if they've drifted — an offline, no-network way to confirm the vendoring
 hasn't been tampered with or gone stale.
 
-**Not wired up yet**: referencing a pack's own workflows by name (`yunta run
-acme/review`, `use: acme/qa-review`), namespaced skills, the permissions ceiling
-actually being enforced by `check`, and `yunta pack audit`'s full inventory. Installed
-packs sit vendored on disk today; resolving and running their content by
-`publisher/name` is the next slice of this same milestone.
+Once installed, a pack's workflows and skills are addressable by
+`publisher/name` — the name after the slash is the workflow or skill's own file
+basename (as declared in `pack.yaml`'s `contents:`), not the pack's own `name`
+field, so a publisher's installed packs share one flat namespace:
+
+```bash
+yunta run acme/review
+yunta check acme/review
+```
+
+and the same form works inside a workflow (`use: acme/qa-review`) and a node's
+`skills:` list (`skills: [acme/review-rubric]`). Resolution always tries the
+repo's own `.yunta/workflows/` first — a repo file at the same
+`publisher/name` path always wins over the pack, matching §5's "un workflow
+local con el mismo nombre pisa al del pack." `yunta list` reflects the same
+two-layer view and the same shadowing.
+
+Composition is scoped to a pack's own contents: a workflow shipped inside a
+pack may freely `use:` another workflow from the *same* pack, but reaching
+into a different pack, or back out to the repo, is rejected by `check` —
+cross-pack composition is out of scope for v1 (§8).
+
+**Not wired up yet**: the permissions ceiling actually being enforced by
+`check` (T11.5), validating a pack's declared `requires:` against the local
+config (T11.6), and `yunta pack audit`'s full inventory (T11.4).
 
 ## Where the rest lives
 

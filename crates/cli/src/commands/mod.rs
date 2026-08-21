@@ -220,8 +220,15 @@ pub(crate) async fn probe_or_refuse(
 }
 
 /// `yunta check` before running anything — a workflow that fails static
-/// validation never creates a run.
-pub(crate) fn check_or_refuse(workflow: &Workflow, config: &ConfigLayer) -> Result<(), ExitCode> {
+/// validation never creates a run. `workflow_path` is where `workflow`
+/// itself was loaded from — needed to tell `check_workflow_refs`
+/// whether this workflow already lives inside a pack (T11.3: the
+/// cross-pack composition rule only applies once you're inside one).
+pub(crate) fn check_or_refuse(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    workflow_path: &std::path::Path,
+) -> Result<(), ExitCode> {
     // Warnings (D100: a `parallel` group that can't verify its children
     // won't collide) are visible but never block — only `check()`'s
     // errors do.
@@ -234,7 +241,10 @@ pub(crate) fn check_or_refuse(workflow: &Workflow, config: &ConfigLayer) -> Resu
     // directory — the same `.yunta/workflows/` a run's children resolve
     // against at birth.
     if let Ok(cwd) = std::env::current_dir() {
-        errors.extend(yunta_engine::check_workflow_refs(workflow, config, &cwd));
+        let origin = yunta_engine::origin_of(&cwd, workflow_path);
+        errors.extend(yunta_engine::check_workflow_refs(
+            workflow, config, &cwd, &origin,
+        ));
     }
     if errors.is_empty() {
         return Ok(());

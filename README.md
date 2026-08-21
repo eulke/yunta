@@ -157,7 +157,7 @@ writing one.
 | `yunta verify <run_id>` | Recomputes and checks a run's event hash chain end to end. |
 | `yunta receipt <run_id> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory. |
 | `yunta doctor` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid. |
-| `yunta pack add <source>[@ref]` / `update <publisher>/<name> <ref>` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed. Using a pack's own workflows/skills by name isn't wired up yet — see the [workflow guide](docs/guide.md#packs). |
+| `yunta pack add <source>[@ref]` / `update <publisher>/<name> <ref>` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see the [workflow guide](docs/guide.md#packs). |
 | `yunta mcp` | Runs the MCP control plane over stdio: `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |
 

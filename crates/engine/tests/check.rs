@@ -1318,7 +1318,12 @@ fn uses(name: &str, child: &str) -> String {
 fn a_missing_composition_reference_is_a_check_error() {
     let root = catalog_root(&[]);
     let wf: Workflow = serde_yaml::from_str(&uses("parent", "ghost")).unwrap();
-    let errors = yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path());
+    let errors = yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo,
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1336,7 +1341,12 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
         ("b", uses("b", "a").as_str()),
     ]);
     let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
-    let errors = yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path());
+    let errors = yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo,
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1355,7 +1365,12 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
     ]);
     let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
     let config: ConfigLayer = serde_yaml::from_str("limits: { max_workflow_depth: 2 }").unwrap();
-    let errors = yunta_engine::check_workflow_refs(&wf, &config, root.path());
+    let errors = yunta_engine::check_workflow_refs(
+        &wf,
+        &config,
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo,
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1369,18 +1384,26 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
     );
 
     // The same graph passes under the reference default (4).
-    assert!(
-        yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path()).is_empty()
-    );
+    assert!(yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo
+    )
+    .is_empty());
 }
 
 #[test]
 fn a_healthy_composition_graph_passes_check_workflow_refs() {
     let root = catalog_root(&[("a", uses("a", "b").as_str()), ("b", LEAF)]);
     let wf: Workflow = serde_yaml::from_str(&uses("parent", "a")).unwrap();
-    assert!(
-        yunta_engine::check_workflow_refs(&wf, &ConfigLayer::default(), root.path()).is_empty()
-    );
+    assert!(yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo
+    )
+    .is_empty());
 }
 
 // --- DI-17: `context:` allowed on loops --------------------------------------

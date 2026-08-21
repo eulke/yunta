@@ -353,14 +353,35 @@ pub enum CheckError {
     /// files. Advisory about the *current* catalog by design: the child
     /// freezes its own file at birth, so a run only ever meets the file
     /// as it is then.
-    #[error(
-        "node `{node}`: `use: {name}` cannot be read from the repo catalog `{path}` — add \
-         the workflow file (versioned) or fix the name"
-    )]
+    #[error("node `{node}`: `use: {name}` cannot be resolved — {detail}")]
     WorkflowRefMissing {
         node: NodeId,
         name: String,
-        path: std::path::PathBuf,
+        detail: String,
+    },
+
+    /// §5: two packs installed under the same publisher each declare a
+    /// workflow with the same file basename — the flat
+    /// `publisher/workflow` namespace can't tell them apart.
+    #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
+    AmbiguousWorkflowRef {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    /// §5: "las referencias cross-pack quedan fuera de v1" — a workflow
+    /// that lives inside a pack may only `use:` other workflows from
+    /// that same pack, never the repo's own catalog or a different
+    /// pack (no transitive pack dependencies, §8).
+    #[error(
+        "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
+         packs isn't supported (RFC-0002 §5/§8); copy what you need into your own pack instead"
+    )]
+    CrossPackWorkflowRef {
+        node: NodeId,
+        name: String,
+        from_pack: String,
     },
 
     #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
@@ -1546,12 +1567,19 @@ pub fn check_workflow_refs(
     workflow: &Workflow,
     config: &ConfigLayer,
     repo_root: &std::path::Path,
+    workflow_origin: &crate::catalog::WorkflowOrigin,
 ) -> Vec<CheckError> {
     let mut errors = Vec::new();
-    let catalog = repo_root.join(".yunta/workflows");
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
-    walk_workflow_refs(workflow, &catalog, max_depth, &mut path, &mut errors);
+    walk_workflow_refs(
+        workflow,
+        repo_root,
+        workflow_origin,
+        max_depth,
+        &mut path,
+        &mut errors,
+    );
     errors
 }
 
@@ -1568,11 +1596,14 @@ fn workflow_uses(workflow: &Workflow) -> Vec<(NodeId, String)> {
 
 fn walk_workflow_refs(
     workflow: &Workflow,
-    catalog: &std::path::Path,
+    repo_root: &std::path::Path,
+    current_origin: &crate::catalog::WorkflowOrigin,
     max_depth: u32,
     path: &mut Vec<String>,
     errors: &mut Vec<CheckError>,
 ) {
+    use crate::catalog::{resolve_workflow, CatalogError, WorkflowOrigin};
+
     for (node, name) in workflow_uses(workflow) {
         if path.contains(&name) {
             let chain = path
@@ -1599,14 +1630,57 @@ fn walk_workflow_refs(
             });
             continue;
         }
-        let file = catalog.join(format!("{name}.yaml"));
-        let text = match std::fs::read_to_string(&file) {
+        let resolved = match resolve_workflow(repo_root, &name) {
+            Ok(resolved) => resolved,
+            Err(e @ CatalogError::Ambiguous { .. }) => {
+                errors.push(CheckError::AmbiguousWorkflowRef {
+                    node,
+                    name,
+                    detail: e.to_string(),
+                });
+                continue;
+            }
+            Err(e) => {
+                errors.push(CheckError::WorkflowRefMissing {
+                    node,
+                    name,
+                    detail: e.to_string(),
+                });
+                continue;
+            }
+        };
+
+        // §5/§8: composing from inside a pack may only reach other
+        // workflows in that *same* pack — never back out to the repo,
+        // never sideways into a different pack (no transitive pack
+        // dependencies).
+        if let WorkflowOrigin::Pack {
+            publisher,
+            pack_name,
+        } = current_origin
+        {
+            let same_pack = matches!(
+                &resolved.origin,
+                WorkflowOrigin::Pack { publisher: p2, pack_name: n2 }
+                    if p2 == publisher && n2 == pack_name
+            );
+            if !same_pack {
+                errors.push(CheckError::CrossPackWorkflowRef {
+                    node,
+                    name,
+                    from_pack: format!("{publisher}/{pack_name}"),
+                });
+                continue;
+            }
+        }
+
+        let text = match std::fs::read_to_string(&resolved.path) {
             Ok(text) => text,
             Err(_) => {
                 errors.push(CheckError::WorkflowRefMissing {
                     node,
                     name,
-                    path: file,
+                    detail: format!("`{}` doesn't exist", resolved.path.display()),
                 });
                 continue;
             }
@@ -1615,14 +1689,14 @@ fn walk_workflow_refs(
             Ok(child) => child,
             Err(e) => {
                 errors.push(CheckError::WorkflowRefUnparseable {
-                    path: file,
+                    path: resolved.path,
                     detail: e.to_string(),
                 });
                 continue;
             }
         };
         path.push(name);
-        walk_workflow_refs(&child, catalog, max_depth, path, errors);
+        walk_workflow_refs(&child, repo_root, &resolved.origin, max_depth, path, errors);
         path.pop();
     }
 }

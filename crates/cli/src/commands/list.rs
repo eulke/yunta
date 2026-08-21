@@ -3,16 +3,27 @@
 //! and their derived state instead. Both answer the same question
 //! without a server: "what's here, and where does it stand."
 //!
-//! Packs (RFC-0002) would add to the workflow catalog once M11 exists;
-//! this recorte only ever looks under `.yunta/workflows/`, same root
-//! `yunta test` already resolves case workflows from.
+//! The catalog is two layers (RFC-0002 §5, T11.3): the repo's own
+//! `.yunta/workflows/`, then every installed pack's declared
+//! `contents.workflows`, addressed `publisher/name` — a bare repo name
+//! never collides with a pack entry since the two are printed and
+//! looked up under different keys.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use yunta_core::{InputSpec, Manifest, Workflow};
 
 use super::status::progress_summary;
 use crate::project;
+
+/// One catalog entry ready to render — `display_name` already carries
+/// the `publisher/` prefix for a pack entry, nothing else needs to know
+/// where it came from.
+struct CatalogEntry {
+    display_name: String,
+    path: PathBuf,
+}
 
 pub fn list_workflows() -> ExitCode {
     let cwd = match std::env::current_dir() {
@@ -32,33 +43,27 @@ pub fn list_workflows() -> ExitCode {
             .map(|storage| (project, storage))
     });
 
-    let workflows_dir = cwd.join(".yunta/workflows");
-    let entries = match std::fs::read_dir(&workflows_dir) {
-        Ok(entries) => entries,
-        Err(_) => {
-            println!("no workflows under {}", workflows_dir.display());
-            return ExitCode::SUCCESS;
-        }
-    };
+    let mut entries = repo_catalog_entries(&cwd);
+    let shadowed: std::collections::HashSet<String> =
+        entries.iter().map(|e| e.display_name.clone()).collect();
+    entries.extend(
+        pack_catalog_entries(&cwd)
+            .into_iter()
+            .filter(|e| !shadowed.contains(&e.display_name)),
+    );
 
-    let mut paths: Vec<_> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|ext| ext == "yaml" || ext == "yml")
-        })
-        .collect();
-    paths.sort();
-
-    if paths.is_empty() {
-        println!("no workflows under {}", workflows_dir.display());
+    if entries.is_empty() {
+        println!(
+            "no workflows under {} or {}",
+            cwd.join(".yunta/workflows").display(),
+            cwd.join(".yunta/packs").display()
+        );
         return ExitCode::SUCCESS;
     }
 
-    for path in paths {
-        let name = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        let name = name.as_deref().unwrap_or("?");
-        let contents = match std::fs::read_to_string(&path) {
+    for entry in entries {
+        let name = &entry.display_name;
+        let contents = match std::fs::read_to_string(&entry.path) {
             Ok(c) => c,
             Err(e) => {
                 println!("{name}: unreadable ({e})");
@@ -104,6 +109,71 @@ pub fn list_workflows() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+fn repo_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
+    let workflows_dir = cwd.join(".yunta/workflows");
+    let mut paths = Vec::new();
+    walk_yaml_files(&workflows_dir, &mut paths);
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let display_name = path
+                .strip_prefix(&workflows_dir)
+                .unwrap_or(&path)
+                .with_extension("")
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            CatalogEntry { display_name, path }
+        })
+        .collect()
+}
+
+/// Recursively collects every `.yaml`/`.yml` file under `dir` — a repo
+/// workflow that shadows a namespaced pack entry (e.g.
+/// `.yunta/workflows/acme/review.yaml`) lives one or more directories
+/// deep, so a single non-recursive `read_dir` would silently miss it and
+/// let the pack's colliding entry go unshadowed.
+fn walk_yaml_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_yaml_files(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "yaml" || ext == "yml")
+        {
+            out.push(path);
+        }
+    }
+}
+
+fn pack_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
+    let mut entries = Vec::new();
+    for publisher in yunta_engine::installed_publishers(cwd) {
+        for (pack_dir, manifest) in yunta_engine::packs_for_publisher(cwd, &publisher) {
+            for declared in &manifest.contents.workflows {
+                let Some(stem) = std::path::Path::new(declared)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                else {
+                    continue;
+                };
+                entries.push(CatalogEntry {
+                    display_name: format!("{publisher}/{stem}"),
+                    path: pack_dir.join(declared),
+                });
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    entries
 }
 
 fn input_type_label(spec: &InputSpec) -> &'static str {
