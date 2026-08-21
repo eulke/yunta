@@ -3497,3 +3497,55 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     en la config del instalador) ya estaban en `core::config` desde antes
     de M11 — este ítem no los duplica ni los mueve, solo agrega el tipo
     del manifest que esas políticas terminarán gobernando en T11.5/T11.6.
+- [x] **T11.2 — `yunta pack add/remove/list/update`.** Mecánica en
+      `crates/cli/src/pack.rs` (git clone + vendoring + hash de árbol +
+      lock, sin IO en `yunta-core` — coherente con que ese crate es solo
+      tipos), comandos en `crates/cli/src/commands/pack.rs`.
+      `add <source>[@ref]`: separa `source`/`ref` del último `@` **solo
+      si aparece después de la última `/`** (para no confundir
+      `git@host:owner/repo.git` con un pin de ref — `github.com/acme/
+      review-pack@v1.2.0` sí se separa, `git@github.com:acme/repo.git`
+      no); expande un shorthand `host/path` sin esquema a `https://`
+      (paths locales/`~`/URLs con esquema/SSH shorthand pasan intactos);
+      clona completo (no shallow — un ref puede ser tag, branch o
+      commit-ish, `--depth 1` solo serviría para branch tips), hace
+      `checkout` del ref si se pidió uno, lee `pack.yaml`, vendorea a
+      `.yunta/packs/<publisher>/<name>/` (sin `.git`) usando la
+      identidad que el propio manifest declara — no la del source URL —
+      y agrega la entrada a `.yunta/yunta.lock`. Rechaza reinstalar
+      sobre un pack ya presente (pide `update`/`remove` primero).
+      `update <publisher>/<name> <ref>`: reclona desde el `source`
+      recordado en el lock (nunca hay que repetirlo, igual que el
+      ejemplo de la RFC `pack update acme/review-pack@v1.3.0`), verifica
+      que el manifest en el nuevo ref siga declarándose como el mismo
+      `publisher/name` (si no, rechaza — nunca "actualiza" un pack hacia
+      otro), revendorea reemplazando el árbol entero. `remove`: borra
+      vendoring + entrada del lock. `list`: no confía en los números del
+      lock, **re-hashea lo vendoreado en disco y lo compara** — reporta
+      `ok`/`MODIFIED`/`MISSING` por pack (el criterio de "instalación
+      offline reproducible... verificando contra el lock" hecho
+      comportamiento real, no solo dato guardado).
+  - **Hash de árbol** (`hash_tree`, sin dependencia nueva): sha256 sobre
+    `"<path relativo>\0<sha256 del contenido>\n"` de cada archivo (orden
+    lexicográfico de paths, `.git` excluido) — determinístico
+    independiente del orden en que el filesystem liste el directorio y
+    de mtimes/permisos, mismo principio que cualquier otro hash de
+    contenido del proyecto.
+  - **Recorte deliberado, documentado en el propio comando** (no
+    silencioso): §6 dice que `add` corre el audit y exige confirmación
+    extra si el pack trae executors — eso es T11.4/T11.5, todavía no
+    escritos. `add` de hoy instala lo que el source traiga sin auditarlo
+    ni bloquear executors; solo imprime una nota si
+    `declares.executors` no está vacío. `check` tampoco hace cumplir el
+    techo de `declares` todavía (T11.5) ni valida `requires` contra la
+    config local (T11.6).
+  - ✓ **Criterios cubiertos**: 8 tests E2E contra el binario real
+    (`crates/cli/tests/pack_cmd.rs`) usando un repo git local como
+    fuente (sin red): vendorea + lockea correctamente (incluida ausencia
+    de `.git` en lo vendoreado); pin explícito de ref se registra tal
+    cual; reinstalar sobre uno ya presente se rechaza; `list` reporta
+    `ok` y detecta `MODIFIED` tras tocar el vendoring a mano por fuera
+    de los comandos; `list` sin nada instalado no es error; `update`
+    revendorea con el nuevo contenido y conserva el `source` sin
+    pedirlo de nuevo; `update` sobre algo no instalado se rechaza;
+    `remove` borra árbol + entrada del lock.

@@ -14,6 +14,8 @@
 //! against local config (T11.6) and enforcing `declares` (T11.5) are
 //! the engine's own, separate jobs.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::workflow::NodePermissions;
@@ -121,4 +123,50 @@ pub struct PackContents {
     pub knowledge: Vec<String>,
     #[serde(default)]
     pub docs: Vec<String>,
+}
+
+/// One `yunta.lock` entry (§4, T11.2): `{pack, ref, commit hash, content
+/// hash}`. Nothing auto-updates — `update` always names an exact target
+/// ref — so this is purely the record of exactly what got vendored, and
+/// what an offline `add`/CI verifies the vendoring on disk against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackLockEntry {
+    pub publisher: String,
+    pub name: String,
+    /// The clone URL `add` was given — remembered so `update
+    /// publisher/name@newref` (§4's own example) never needs the URL
+    /// repeated; only the ref changes.
+    pub source: String,
+    /// The ref `add`/`update` was told to install (a tag, branch or
+    /// commit-ish) — what a human reads to know what was asked for.
+    pub r#ref: String,
+    /// The exact commit the ref resolved to at install time — what was
+    /// actually cloned, independent of whether `ref` later moves (a
+    /// branch does; a tag by convention shouldn't, but nothing here
+    /// trusts that).
+    pub commit: String,
+    /// Content hash of the vendored tree (sha256 over sorted
+    /// relative-path + file-content pairs, `.git` excluded) — what an
+    /// offline `add`/CI verifies the vendoring on disk against,
+    /// independent of git metadata surviving the copy.
+    pub content_hash: String,
+}
+
+/// `yunta.lock` (§4) — every vendored pack, keyed by `"publisher/name"`.
+/// A `BTreeMap` (not a `Vec`) so the file serializes in a stable,
+/// diffable order regardless of install order — the same reasoning a
+/// `Cargo.lock`-style file always wants.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PackLock {
+    #[serde(default)]
+    pub packs: BTreeMap<String, PackLockEntry>,
+}
+
+impl PackLock {
+    /// The `"publisher/name"` key a [`PackLockEntry`] is stored/looked
+    /// up under — one place spelling out the convention so `add`,
+    /// `remove`, `update` and `list` can never disagree on it.
+    pub fn key(publisher: &str, name: &str) -> String {
+        format!("{publisher}/{name}")
+    }
 }

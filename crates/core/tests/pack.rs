@@ -1,6 +1,6 @@
 //! `pack.yaml` (RFC-0002 §3, T11.1) — schema and parsing.
 
-use yunta_core::{NodePermissions, PackManifest};
+use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest};
 
 #[test]
 fn the_reference_pack_parses_and_round_trips() {
@@ -94,4 +94,27 @@ version: 0.1.0
         result.is_err(),
         "a pack with no declared ceiling must fail to parse, not default to some assumed one"
     );
+}
+
+#[test]
+fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
+    let mut lock = PackLock::default();
+    let key = PackLock::key("acme", "review-pack");
+    assert_eq!(key, "acme/review-pack");
+    lock.packs.insert(
+        key.clone(),
+        PackLockEntry {
+            publisher: "acme".to_string(),
+            name: "review-pack".to_string(),
+            source: "https://github.com/acme/review-pack".to_string(),
+            r#ref: "v1.2.0".to_string(),
+            commit: "abc123def456".to_string(),
+            content_hash: "deadbeef".to_string(),
+        },
+    );
+
+    let yaml = serde_yaml::to_string(&lock).unwrap();
+    let reparsed: PackLock = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(lock, reparsed);
+    assert_eq!(reparsed.packs[&key].commit, "abc123def456");
 }

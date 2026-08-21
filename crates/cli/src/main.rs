@@ -7,6 +7,7 @@
 mod commands;
 mod graph;
 mod human_interaction;
+mod pack;
 mod project;
 
 use std::path::{Path, PathBuf};
@@ -150,6 +151,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Installs, updates, removes and lists third-party packs (RFC-0002).
+    Pack {
+        #[command(subcommand)]
+        action: PackAction,
+    },
     /// Shows verification cost stats: one run (`run_id`) or a workflow's
     /// own history (`--workflow`), never both.
     Stats {
@@ -190,6 +196,28 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum PackAction {
+    /// Clones, vendors to `.yunta/packs/<publisher>/<name>/`, and locks a
+    /// pack. `<source>` is a git URL or `host/publisher/name` shorthand,
+    /// optionally suffixed `@<ref>` (tag, branch or commit-ish).
+    Add { source: String },
+    /// Re-clones an installed pack at a new ref and re-vendors it.
+    Update {
+        /// `publisher/name`.
+        publisher_name: String,
+        r#ref: String,
+    },
+    /// Removes a pack's vendored directory and its lock entry.
+    Remove {
+        /// `publisher/name`.
+        publisher_name: String,
+    },
+    /// Lists every locked pack, verifying its vendored content against
+    /// the lock.
+    List,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -256,6 +284,15 @@ async fn main() -> ExitCode {
         Some(Command::Test) => commands::test::test().await,
         Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
         Some(Command::Receipt { run_id, json }) => commands::receipt::receipt(&run_id, json),
+        Some(Command::Pack { action }) => match action {
+            PackAction::Add { source } => commands::pack::add(&source).await,
+            PackAction::Update {
+                publisher_name,
+                r#ref,
+            } => commands::pack::update(&publisher_name, &r#ref).await,
+            PackAction::Remove { publisher_name } => commands::pack::remove(&publisher_name),
+            PackAction::List => commands::pack::list(),
+        },
         Some(Command::Stats {
             run_id,
             workflow,

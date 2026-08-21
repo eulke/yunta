@@ -210,6 +210,37 @@ registry cache, pip's wheel cache) wherever the tool supports pointing at an ext
 location — link it in a `before` hook, and every worktree that follows sees a warm
 cache instead of starting cold.
 
+## Packs
+
+A pack (RFC-0002) is a distributable, versioned bundle of workflows, skills,
+knowledge and docs — never something that extends the engine itself, only content it
+already knows how to run. A pack **declares** the roles it needs (a role name plus a
+permissions ceiling, e.g. `reviewer` at `read-only`) and its own permissions ceiling
+(`declares:` in `pack.yaml`) — never a concrete adapter, model or secret; the
+installing team resolves those roles against its own `runners:`, so the same pack
+runs unedited on a team that's all Claude Code and one that's all Codex.
+
+```bash
+yunta pack add github.com/acme/review-pack@v1.2.0
+yunta pack list
+yunta pack update acme/review-pack v1.3.0
+yunta pack remove acme/review-pack
+```
+
+`add` clones the ref, vendors it to `.yunta/packs/<publisher>/<name>/` (checked into
+the repo alongside the team's own code — a pack's contents are versioned with your
+history, not fetched fresh on every checkout), and records `{ref, commit, content
+hash}` in `.yunta/yunta.lock`. Nothing updates itself: `update` always names an exact
+target ref. `list` re-hashes what's actually vendored on disk against the lock and
+says so if they've drifted — an offline, no-network way to confirm the vendoring
+hasn't been tampered with or gone stale.
+
+**Not wired up yet**: referencing a pack's own workflows by name (`yunta run
+acme/review`, `use: acme/qa-review`), namespaced skills, the permissions ceiling
+actually being enforced by `check`, and `yunta pack audit`'s full inventory. Installed
+packs sit vendored on disk today; resolving and running their content by
+`publisher/name` is the next slice of this same milestone.
+
 ## Where the rest lives
 
 This guide covers what's needed to write and reason about a workflow. The full
