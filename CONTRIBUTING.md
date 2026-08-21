@@ -10,9 +10,7 @@ either. That principle extends to how the project itself is built.
 For anything beyond a small, obviously-scoped fix, open an issue first
 describing the problem and your proposed approach. Design decisions in this
 engine follow from a small set of hard invariants (see
-[`docs/guide.md`](docs/guide.md) and the design notes in
-[`docs/deuda-implementacion.md`](docs/deuda-implementacion.md) for what's
-deliberately unresolved and why) — if your change would touch one of those,
+[`docs/guide.md`](docs/guide.md)) — if your change would touch one of those,
 the issue discussion is where that gets worked out, not the PR.
 
 ## Building and testing

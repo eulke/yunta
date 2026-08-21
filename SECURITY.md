@@ -30,8 +30,7 @@ particularly relevant to that shape:
   or execute outside its `scope`.
 - Anything that leaks a secret into the event log, an adapter event payload,
   or a fixture — those are invariants the engine is supposed to hold
-  unconditionally (see `docs/deuda-implementacion.md` for how seriously
-  that's treated when it slips).
+  unconditionally.
 - Anything that lets a run's own state be forged or replayed into an
   inconsistent result (the event log is the sole source of truth for
   everything `status`/`resume`/`verify` report).

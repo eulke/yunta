@@ -27,7 +27,7 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 3. **El orden de niveles es el orden de ataque.** Dentro de un nivel, el
    orden listado ya considera dependencias entre ítems.
 4. Al cerrar un ítem: marcarlo `[x]` acá, actualizar la entrada
-   correspondiente de `docs/m0-status.md`, y borrar el comentario de
+   correspondiente de `internal/m0-status.md`, y borrar el comentario de
    deuda del código que lo nombraba.
 
 ## Índice por prioridad
@@ -1489,7 +1489,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   pack instalado — falla el nodo entero con `UnsupportedKnowledgeLayer`
   en vez de simplemente no encontrar nada en esa capa. El reference
   `promote-knowledge.yaml` de T10.5 evita el problema quitando esa
-  línea de contexto (documentado en el propio `docs/m0-status.md`, no
+  línea de contexto (documentado en el propio `internal/m0-status.md`, no
   silencioso) — pero cualquier equipo real con un knowledge pack org
   instalado hoy no puede leerlo desde `context:` en absoluto.
 - **Nivel 2** (bloquea una feature ya diseñada y parcialmente
@@ -1629,7 +1629,7 @@ construir algo. Si alguna vez duelen de verdad, reabrirlos requiere ADR.
   migración. Recomendación: primera tarea del plan a retomar tras el
   Nivel 1 de este doc.
 - **T9.3** — `kind: workflow` (composición). **Cerrado** (ver
-  `docs/m0-status.md`, M9): runs hijos completos, `child_run_*`, resume
+  `internal/m0-status.md`, M9): runs hijos completos, `child_run_*`, resume
   recursivo, presupuestos en cascada, `isolation: inherit` con scopes
   disjuntos en check, grafo de referencias acíclico +
   `max_workflow_depth` (consumidor de DI-05 cerrado). Deltas que

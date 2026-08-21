@@ -1932,7 +1932,7 @@ que aparece.
         puedan opinar distinto sobre el mismo error.
       - **`--adapter <nombre>`**: `mock` se rechaza explícito citando
         `yunta test` — un `run` real no tiene fixture que ejecutar
-        (`docs/m0-status.md`'s propia entrada de T6.1 ya fija que el
+        (`internal/m0-status.md`'s propia entrada de T6.1 ya fija que el
         ruteo de fixtures es territorio de T7.9). Cualquier otro nombre
         debe ser uno de los adapters reales que `real_adapters` ya
         construiría — hoy solo `claude-code`; T7.4 (`codex`) agrega el
@@ -2041,7 +2041,7 @@ que aparece.
 - [x] **T7.2 — Gates: trait `HumanInteraction` + render en consola del
       objeto de escalación (§5.3).** `GateWaitingPayload`/`GateOption`/
       `GateResolvedPayload` ya existían como tipos de evento desde T2.2,
-      sin emisor ni consumidor (`docs/m0-status.md`'s propia entrada de
+      sin emisor ni consumidor (`internal/m0-status.md`'s propia entrada de
       T2.3 lo nombraba explícito) — T7.2 es ese primer emisor/consumidor,
       no un tipo nuevo.
       - **`GateOption` corregido a `{id, label, tradeoff}`.** La versión
@@ -3337,7 +3337,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     quedan construidos desde documentación y ejemplos de corridas reales
     confirmados, con la misma rigurosidad que T7.3 usó, pero sin el paso
     de confirmación en vivo. Gatillo: correr el smoke test descrito en
-    `docs/m0-status.md`'s propia entrada de T7.4 (workflow de 3 nodos,
+    `internal/m0-status.md`'s propia entrada de T7.4 (workflow de 3 nodos,
     igual al de T7.3, contra el `codex` real) la próxima vez que exista
     un entorno con el binario y credenciales — y si algo del mapeo de
     sandbox o del parser resulta incorrecto, corregirlo ahí, no
@@ -3579,7 +3579,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     arreglarlo (T10.5 es sobre el workflow de referencia, no sobre
     completar T6.5) ni corresponde decidirlo de facto — el fixture usa
     `files:` sobre el archivo de candidatos en su lugar, y el hallazgo
-    queda registrado como **DI-31** (`docs/deuda-implementacion.md`),
+    queda registrado como **DI-31** (`internal/deuda-implementacion.md`),
     con la pregunta de diseño explícita que necesita ADR (orden de
     precedencia entre múltiples knowledge packs org instalados a la
     vez) para que no se resuelva implícitamente el día que alguien la

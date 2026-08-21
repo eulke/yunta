@@ -1,14 +1,13 @@
-//! Serde types for the workflow schema (T1.1) — **M-0 cut only**.
+//! Serde types for the workflow schema.
 //!
-//! The full T1.1 (M1) covers every node `kind`, `runners:`/`agent:`
+//! The full schema covers every node `kind`, `runners:`/`agent:`
 //! resolution, `context:`, `skills:`, `modes:`, `inputs:`, gates and
-//! composition. M-0's "schema recortado" (Plan, sección M-0) is
-//! deliberately narrower: only `prompt`/`bash`/`loop` nodes, `depends_on`,
+//! composition. What's implemented today is deliberately narrower: only
+//! `prompt`/`bash`/`loop` nodes, `depends_on`,
 //! `scope`, `artifacts`, `hooks: {before, after}` and `on_failure.goto` —
 //! just enough for the implement → compile → correct cycle the bootstrap
 //! needs to validate. Every other workflow field is out of scope here and
-//! will extend these types when its own task lands (T1.1 proper, in true
-//! M1 execution), not before.
+//! will extend these types when its own support lands, not before.
 
 use std::collections::BTreeMap;
 
@@ -18,46 +17,46 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::ids::NodeId;
 use crate::inputs::InputSpec;
 
-/// A workflow definition (Contrato §2, §10).
+/// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// `modes:` (§10.1, D44) — an ordered map, free in name and count:
+    /// `modes:` — an ordered map, free in name and count:
     /// quick/standard/full are the reference workflows' own convention,
     /// never reserved schema words. **Declaration order is the
-    /// promotion ladder** (§10.2) — promotion only ever targets a mode
+    /// promotion ladder** — promotion only ever targets a mode
     /// later in this map's own iteration order, never an earlier one.
     /// Absent entirely means the workflow has no modes at all: every
-    /// node always runs, exactly pre-T9.1 behavior.
+    /// node always runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modes: Option<IndexMap<String, ModeSpec>>,
-    /// `inputs:` (T1.5, §2.3, D82) — name is the map key, so the schema's
+    /// `inputs:` — name is the map key, so the schema's
     /// own format guarantees uniqueness rather than a validation pass
     /// over a `[{name, ...}]` list. A `BTreeMap` rather than the
-    /// declaration order: nothing in §2.3 or D82 gives that order any
+    /// declaration order: nothing about inputs gives that order any
     /// meaning (unlike `modes:`, whose declaration order *is* the
-    /// promotion ladder, D44) — sorted iteration only makes catalog
+    /// promotion ladder) — sorted iteration only makes catalog
     /// output (`list_workflows`, `--help`) and `check` diagnostics
     /// reproducible.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputSpec>,
     /// Workflow-level fallbacks a node inherits when it declares none of
-    /// its own (T4.3, §11.1) — visible in the same file the team reads,
-    /// never injected from a config layer (D81's own prohibition).
+    /// its own — visible in the same file the team reads,
+    /// never injected from a config layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_defaults: Option<NodeDefaults>,
     pub nodes: Vec<Node>,
-    /// `yunta_schema: ">=1 <2"` (§2.1, DI-13) — a version range the
+    /// `yunta_schema: ">=1 <2"` — a version range the
     /// binary's own schema major (`YUNTA_SCHEMA`) is checked against at
     /// `yunta check`, and frozen resolved into `run_created`. Absent
     /// means "whatever this binary speaks" (the reference text's own
     /// rule) — inferred, never an error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yunta_schema: Option<String>,
-    /// `on_finish:` (§8.3/D20, DI-13): close-of-run steps. The engine
-    /// imposes the phase order (distill before any cleanup, §8.3) —
+    /// `on_finish:`: close-of-run steps. The engine
+    /// imposes the phase order (distill before any cleanup) —
     /// declaration order in the YAML carries no meaning.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub on_finish: Vec<OnFinishStep>,
@@ -65,7 +64,7 @@ pub struct Workflow {
 
 impl Workflow {
     /// Every node in declaration (pre-)order, `parallel` children
-    /// included — THE one owner of node traversal (DI-19): replay,
+    /// included — THE one owner of node traversal: replay,
     /// progress, stats and check all derive per-node views from a flat
     /// `NodeId` map, so they all need exactly this walk and must never
     /// disagree about it. Sites that care about *structure* (a group
@@ -102,8 +101,8 @@ pub enum OnFinishStep {
     Cleanup {
         cleanup: CleanupTarget,
     },
-    /// Run artifacts the workflow declares durable (D20): distilled
-    /// deterministically into `.yunta/knowledge/` at close (DI-24).
+    /// Run artifacts the workflow declares durable: distilled
+    /// deterministically into `.yunta/knowledge/` at close.
     Distill {
         distill: Vec<String>,
     },
@@ -115,15 +114,15 @@ pub enum CleanupTarget {
     Worktree,
 }
 
-/// One `modes:` entry's own scope (§10.1).
+/// One `modes:` entry's own scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeSpec {
     pub include: ModeInclude,
 }
 
 /// `include: all` or `include: [id, id, ...]` — the bare string literal
-/// and a node-id sequence are the only two shapes §10.1's own example
-/// shows, so this discriminates on the YAML value's shape rather than
+/// and a node-id sequence are the only two shapes the schema
+/// allows, so this discriminates on the YAML value's shape rather than
 /// adding a `kind:` key neither form has.
 ///
 /// Both directions are hand-written, deliberately paired: `derive`'s
@@ -167,24 +166,24 @@ impl<'de> Deserialize<'de> for ModeInclude {
     }
 }
 
-/// `node_defaults:` (§11.1) — M-0/M4 cut: only `hooks`, the one consumer
-/// T4.3 needs. Extends when another field needs the same "declare once,
+/// `node_defaults:` — currently carries only `hooks`, the one consumer
+/// needs. Extends when another field needs the same "declare once,
 /// nodes inherit" treatment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<Hooks>,
-    /// Skills every node mounts unless it declares its own list (DI-13)
+    /// Skills every node mounts unless it declares its own list
     /// — same replace-wholesale inheritance as `hooks`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
 }
 
-/// A single node. Fields here are the ones the M-0 recorte names
-/// explicitly; `runner` is included because a `prompt`/`loop` node is
+/// A single node. Fields here are the ones currently implemented;
+/// `runner` is included because a `prompt`/`loop` node is
 /// meaningless without picking a runner, even though the resolution
-/// mechanism itself (`runners:` candidates, capability probing, I17) is
-/// config-layer work for a later task.
+/// mechanism itself (`runners:` candidates, capability probing) is
+/// config-layer work handled elsewhere.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -196,12 +195,12 @@ pub struct Node {
     pub scope: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
-    /// `runners: [role, role]` (§13.2, T9.4) — static fan-out: the
+    /// `runners: [role, role]` — static fan-out: the
     /// manifest expands this node into one `<id>@<role>` node per role
     /// before anything runs. Mutually exclusive with `runner:` (check).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runners: Vec<String>,
-    /// `agent:` at node level (§13.3, D37) — overrides the resolved
+    /// `agent:` at node level — overrides the resolved
     /// candidate's own agent for this node. Portable field: each
     /// adapter maps it to its native mechanism, and one without
     /// `custom_agents` fails the node rather than silently ignoring it.
@@ -214,20 +213,19 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<OnFailure>,
     /// How a `running` node with no terminal event is treated on resume
-    /// after a crash (§8.1, D99, T4.5). Absent means the schema's own
+    /// after a crash. Absent means the schema's own
     /// default (`restart_node`) applies, resolved the same way
     /// `defaults.isolation` is (config, then hardcoded default) — this
     /// field is the node's own override of that default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_interrupt: Option<OnInterrupt>,
-    /// One-line summary `progress.md` shows for this node (§8.2, T5.5) —
+    /// One-line summary `progress.md` shows for this node —
     /// a node without one falls back to its own id. Not the same field as
     /// `Workflow.description` (that one's the whole workflow's own
-    /// summary); §8.2 names this per-node without pointing at an existing
-    /// schema key, so this is the schema addition it implies.
+    /// summary).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The node's rung on the permissions ladder (§6.1, I18, T5.7): the
+    /// The node's rung on the permissions ladder: the
     /// session profile requested from the adapter for `prompt`/`loop`
     /// nodes. Absent means the engine's existing default (`edit`). Not
     /// to be confused with the config-level `permissions:` group — this
@@ -235,42 +233,42 @@ pub struct Node {
     /// governs which *commands* run at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<NodePermissions>,
-    /// Declarative ONLY (§6.1, D105, T5.7): `network: false` activates no
+    /// Declarative ONLY: `network: false` activates no
     /// sandboxing — the engine never blocks a network call over it. It
     /// exists for policy and audit (a pack declaring it and then curling
-    /// is a detectable contradiction, M11), and an executor may choose to
+    /// is a detectable contradiction), and an executor may choose to
     /// actually enforce it on its own. Reading it as a sandbox is reading
     /// a guarantee the system never offered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<bool>,
-    /// `context:` (§9, T6.1/DI-17) — data resolved and materialized
+    /// `context:` — data resolved and materialized
     /// *before* a session opens, in declaration order. Consumed by
     /// `kind: prompt` (the node's one session) and `kind: loop` (once
     /// per task brief, volatile sources fresh and stable ones memoized
-    /// per §9.1's classes); `check` rejects it on any kind that opens
+    /// per their stability class); `check` rejects it on any kind that opens
     /// no session (`bash`/`check`/`executor`/`gate`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextSpec>,
-    /// `skills: [names]` (D47, DI-13) — instructions and capabilities
+    /// `skills: [names]` — instructions and capabilities
     /// the adapter mounts by its native mechanism: *how* to work, where
     /// `context:` injects *what* to work on. Resolved against
     /// `skills.paths` (repo first); an adapter with no native mechanism
-    /// degrades with `capability_degraded`, never a fatal error (A6).
+    /// degrades with `capability_degraded`, never a fatal error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
-    /// `interactive: true` (§4.1, DI-02/DI-13) — presentation datum for
+    /// `interactive: true` — presentation datum for
     /// this node's questions: the surface renders them as a live
     /// conversation when it can. With no surface, nothing changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
-    /// `fresh_context:` (§8.2, DI-13) — `true` (and absent) means this
+    /// `fresh_context:` — `true` (and absent) means this
     /// node's session opens fresh, pure rehydration from the log.
-    /// `false` requires session resume (DI-23), which isn't built:
+    /// `false` requires session resume, which isn't built:
     /// `check` refuses it with an actionable error instead of accepting
-    /// it silently (A6).
+    /// it silently.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fresh_context: Option<bool>,
-    /// `invariant: true` (§10.1, D44) — this node's verification/scope/
+    /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A
     /// mode narrows deliberation, never verification.
@@ -278,9 +276,9 @@ pub struct Node {
     pub invariant: bool,
 }
 
-/// One `context:` entry (§9): a builtin `ContextSource` plus its own
+/// One `context:` entry: a builtin `ContextSource` plus its own
 /// parameters. Untagged: each variant's own (unique) field name is the
-/// discriminant, exactly matching the Contrato's own YAML — `- files:
+/// discriminant, exactly matching the schema's own YAML — `- files:
 /// [...]`, `- command: "..."`, `- artifact: { node: ..., name: ... }`,
 /// and so on; there is no separate `kind:` key to introduce.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,11 +312,11 @@ pub enum ContextSpec {
     },
 }
 
-/// `mcp: { server: ..., query: ... }` (§9, T6.2) — `server` names an
+/// `mcp: { server: ..., query: ... }` — `server` names an
 /// entry in the merged config's `mcp_servers:`; `query` is free-form text
-/// (the Contrato's only example passes `{{inputs.idea}}` verbatim) sent
-/// to the server as the resolver's own choice of MCP call (T6.2:
-/// `tools/call` on a tool literally named `query`, since the Contrato
+/// (the reference example passes `{{inputs.idea}}` verbatim) sent
+/// to the server as the resolver's own choice of MCP call (currently
+/// `tools/call` on a tool literally named `query`, since the schema
 /// fixes neither the MCP verb nor a tool name).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpQueryParams {
@@ -326,14 +324,14 @@ pub struct McpQueryParams {
     pub query: String,
 }
 
-/// `artifact: { node: ..., name: ... }` (§9) — the referenced node's own
+/// `artifact: { node: ..., name: ... }` — the referenced node's own
 /// declared artifact. Reading it creates an *implicit* `depends_on` edge
 /// (`build_manifest` expands it into the frozen workflow's own
 /// `depends_on`, so `check`/the scheduler need no separate awareness of
 /// `context:` at all — by the time either runs, the edge is already
 /// ordinary `depends_on`).
 ///
-/// `node` is optional (D108): `artifact: { name }` means "an artifact of
+/// `node` is optional: `artifact: { name }` means "an artifact of
 /// this run's dir, whoever produced it" — a mounted one included. It
 /// creates no implicit edge (there is no producer to order behind), and
 /// it's what keeps a catalog child parametric: it never has to name a
@@ -345,26 +343,26 @@ pub struct ArtifactContextRef {
     pub name: String,
 }
 
-/// `run-events: { filter: ... }` (§9) — a read-only query into the run's
-/// own event log. `filter` stays a free-form string (the Contrato's only
+/// `run-events: { filter: ... }` — a read-only query into the run's
+/// own event log. `filter` stays a free-form string (the only reference
 /// example is `filter: failed`, no closed vocabulary given) — the
-/// resolver's own job (T6.1) to interpret, not the schema's.
+/// resolver's own job to interpret, not the schema's.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RunEventsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
 }
 
-/// `ledger: {}` (§9) — no parameters in this recorte's own resolution
+/// `ledger: {}` — no parameters in the current resolution
 /// (the aggregate ledger/task-status view; see the node's own doc
 /// comment on `context` for the task-scoped variant this doesn't cover
 /// yet).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LedgerParams {}
 
-/// One layer of `knowledge:` (§9.2), most to least local. `Org` resolves
+/// One layer of `knowledge:`, most to least local. `Org` resolves
 /// as the union of every installed knowledge pack's declared contents
-/// (RFC-0002 vendoring; D109/DI-31) — a same-filename collision between
+/// (from pack vendoring) — a same-filename collision between
 /// two packs is a typed error at resolution time, since between packs
 /// there is no precedence to fall back on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,7 +383,7 @@ impl std::fmt::Display for KnowledgeLayer {
     }
 }
 
-/// `knowledge: { layers: [...] }` (§9.2) — empty/absent `layers` means
+/// `knowledge: { layers: [...] }` — empty/absent `layers` means
 /// every layer the resolver can see.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct KnowledgeParams {
@@ -393,17 +391,17 @@ pub struct KnowledgeParams {
     pub layers: Vec<KnowledgeLayer>,
 }
 
-/// `node-output: { node: ... }` (§9, §11.2) — captured stdout/stderr of a
+/// `node-output: { node: ... }` — captured stdout/stderr of a
 /// previously-run node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeOutputParams {
     pub node: NodeId,
 }
 
-/// `permissions: read-only | edit | full` at node level (§6.1's ladder,
-/// T5.7) — maps 1:1 onto the adapter's session profile. The names come
-/// straight from the Contrato's own spelling.
-/// `scope_expansion:` (§6.2, D73, T5.11) — governs how a loop's tasks may
+/// `permissions: read-only | edit | full` at node level — maps 1:1 onto
+/// the adapter's session profile. The names come
+/// straight from the reference schema's own spelling.
+/// `scope_expansion:` — governs how a loop's tasks may
 /// grow past their own declared scope. `within` is a hard ceiling
 /// ("jamás fuera de esto") checked in `rules` mode; `max_per_run` caps
 /// how many expansions this run may grant before exhaustion escalates
@@ -427,32 +425,30 @@ pub enum NodePermissions {
     Full,
 }
 
-/// A node's crash-recovery policy (§8.1, D99) — the full Contrato
-/// triple since DI-23.
+/// A node's crash-recovery policy — the full triple of options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnInterrupt {
     #[default]
     RestartNode,
     FailIfUncertain,
-    /// DI-23/D99: continue the same agent conversation — the
-    /// `session_id` the log recorded (`agent_session_opened`, DI-09) is
+    /// Continue the same agent conversation — the
+    /// `session_id` the log recorded (`agent_session_opened`) is
     /// handed back to the adapter's `resume`. Only `kind: prompt` opens
     /// a node-scoped session, so `check` refuses the explicit
     /// declaration anywhere else; an adapter without the
     /// `resume_session` capability — or a crash before any session
     /// opened — degrades to `restart_node` with an explicit
-    /// `capability_degraded` event (the Contrato's own "degrada con
-    /// warning"), never silently. As a *config default*
+    /// `capability_degraded` event, never silently. As a *config default*
     /// (`defaults.on_interrupt`) it applies where a session exists;
     /// kinds without one (bash/check/…, and a loop's per-task sessions)
     /// restart, which is the only meaning the policy can have there.
     ResumeSession,
 }
 
-/// The node kinds built so far (Plan, milestones M4/M5). `gate` and
-/// `workflow` are the rest of the full T1.1 catalogue and stay out until
-/// their own milestone.
+/// The node kinds built so far. `gate` and
+/// `workflow` are the rest of the full catalogue and stay out until
+/// their own turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
@@ -465,19 +461,19 @@ pub enum NodeKind {
     Loop {
         until: String,
         prompt: PromptSource,
-        /// Simultaneous `ready` tasks per batch (§5.5, D65) — absent
-        /// means the engine's own default, `1` (sequential; "no hay caso
-        /// especial", the batch mechanism handles both the same way).
+        /// Simultaneous `ready` tasks per batch — absent
+        /// means the engine's own default, `1` (sequential; the batch
+        /// mechanism handles both the same way, with no special case).
         /// Declared per-node, deliberately: no config-level default
         /// exists anywhere in the reference schema, since token spend
         /// multiplies with it and nobody should discover that from the
         /// bill instead of the workflow file.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         concurrency: Option<u32>,
-        /// §6.2/D73: the agent never widens its own scope — it requests,
+        /// The agent never widens its own scope — it requests,
         /// the engine (or a person, in `ask`) decides. Absent has the
-        /// same effect as declaring it with no `mode:` — `deny` (§6.2's
-        /// own default): every request becomes a finding, none are
+        /// same effect as declaring it with no `mode:` — `deny` (the
+        /// default): every request becomes a finding, none are
         /// granted. Loop-scoped, not workflow- or config-scoped, because
         /// `scope_expansion_requested`'s own payload is keyed by
         /// `task_id` — this is ledger-task machinery, the same rung
@@ -485,17 +481,17 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope_expansion: Option<ScopeExpansion>,
     },
-    /// Nodes named by the author, run at once (§5.8, T4.6) — distinct
-    /// from a loop's own `concurrency:` (§5.5), whose task count doesn't
+    /// Nodes named by the author, run at once — distinct
+    /// from a loop's own `concurrency:`, whose task count doesn't
     /// exist until the plan runs. Children are ordinary `Node`s (their
     /// own hooks/scope/artifacts/runner apply exactly as at the top
-    /// level, T4.6 dispatches them through the same `execute_node`); they
-    /// share the run's one worktree (T4.2 gives one per *run*, not per
+    /// level, dispatched through the same `execute_node`); they
+    /// share the run's one worktree (one per *run*, not per
     /// node) and aren't visible to the top-level DAG's own `depends_on`.
     Parallel {
         #[serde(default)]
         join: JoinPolicy,
-        /// `coordination:` (§6.4, D49/D98, T8.2) — whether this group's
+        /// `coordination:` — whether this group's
         /// children share a blackboard. `independent` (default): the
         /// blackboard tools are never even mounted — the right shape
         /// for evaluative groups (reviewers), where cross-contamination
@@ -503,68 +499,67 @@ pub enum NodeKind {
         /// `blackboard`: children with `run_tools` get
         /// `yunta_post_finding`/`yunta_get_blackboard` scoped to this
         /// group (never the whole run); reading siblings' posts still
-        /// waits for the `join` (D98).
+        /// waits for the `join`.
         #[serde(default)]
         coordination: Coordination,
         nodes: Vec<Node>,
     },
-    /// Automatic verification against data the engine already has (§7.1,
-    /// D85, T5.4) — never a person (that's `gate`, out of this recorte).
+    /// Automatic verification against data the engine already has —
+    /// never a person (that's `gate`).
     /// The builtin list is closed on purpose: a `check` builtin is by
     /// definition something the engine can already evaluate; anything
-    /// else is a `bash` node (exit code) or an `executor` (T5.6).
+    /// else is a `bash` node (exit code) or an `executor`.
     Check {
         #[serde(flatten)]
         builtin: CheckBuiltin,
     },
     /// The extension point when neither `bash` (exit code only, no
-    /// structured input) nor `check`'s closed builtin list covers it
-    /// (§7.1/D85's own rationale for why this exists) — external code, a
-    /// JSON contract over stdio (D47/D87, T5.6). `executor` names an
+    /// structured input) nor `check`'s closed builtin list covers it —
+    /// external code, a JSON contract over stdio. `executor` names an
     /// entry in `skills.executors:`; `with` is opaque, executor-defined
-    /// input. `D47`/`D87` fix the high-level shape (JSON in, JSON out,
-    /// exit code is the verdict) but stop short of naming fields —
-    /// `docs/m0-status.md`'s T5.6 entry documents the concrete contract
-    /// this recorte adds on top, pending a real ADR revision.
+    /// input. The contract fixes the high-level shape (JSON in, JSON out,
+    /// exit code is the verdict) but stops short of naming fields,
+    /// pending further design.
     Executor {
         executor: String,
         #[serde(default)]
         with: serde_json::Map<String, serde_json::Value>,
         /// Absent means unenforced, same convention as `HookStep`'s own
-        /// `timeout_seconds` — D47 only says "timeout del engine" without
-        /// fixing a default or a field name.
+        /// `timeout_seconds` — the design only calls for an
+        /// engine-enforced timeout, without fixing a default or a field
+        /// name.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u64>,
     },
-    /// A human decision resolved outside this process (§5.6, D66) — v1's
+    /// A human decision resolved outside this process — v1's
     /// only shape is `external: {kind: pull_request, ...}`: the engine
     /// delegates the multi-person substrate (identity, permissions,
-    /// notifications) to the team's forge instead of building `serve`
-    /// early. With `external: None` this is an **internal gate**
-    /// (DI-04) — the shape the reference workflows' own `approve-plan`/
-    /// `ship` use and T1.3's mode-coherence rule ("opción de gate")
-    /// requires: resolved through `HumanInteraction` (console today,
-    /// M8's `resolve_gate` later) with the declared `options`, and
-    /// `on:` mapping an option to a §11.2-style re-route.
+    /// notifications) to the team's forge instead of building a serve
+    /// mode early. With `external: None` this is an **internal gate**
+    /// — the shape the reference workflows' own `approve-plan`/
+    /// `ship` use and the mode-coherence rule requiring every mode to
+    /// include a gate option: resolved through `HumanInteraction`
+    /// (console today, a richer resolution surface later) with the
+    /// declared `options`, and `on:` mapping an option to an
+    /// `on_failure.goto`-style re-route.
     Gate {
-        /// Who the escalation names — mirrors §5.3's own audience
-        /// concept: a human on the forge (external), or whoever holds
-        /// the interactive surface (internal).
+        /// Who the escalation names — a human on the forge (external),
+        /// or whoever holds the interactive surface (internal).
         assignee: String,
-        /// The question the internal gate asks — becomes the §5.3
-        /// object's `summary`. Absent, a default derived from the node
+        /// The question the internal gate asks — becomes the
+        /// escalation's `summary`. Absent, a default derived from the node
         /// id is used.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         /// Declared choices, free ids (reference: `[aprobar, ajustar,
         /// abortar]`). Empty means the single default option `approve`;
-        /// the engine always appends its own `abort` (§5.3: aborting is
-        /// always a valid exit, same convention T7.2's escalation uses).
+        /// the engine always appends its own `abort` (aborting is
+        /// always a valid exit, the same convention every escalation uses).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         options: Vec<String>,
         /// Option → re-route target (`on: { ajustar: plan }`): choosing
         /// a mapped option re-routes exactly like `on_failure.goto`
-        /// (§11.2) — the target and its subgraph complete, then the
+        /// — the target and its subgraph complete, then the
         /// gate returns to ready and asks again. Unbounded on purpose:
         /// each lap is human-driven, not an automatic cycle
         /// `max_reroutes` exists to cap. An unmapped option resolves
@@ -574,7 +569,7 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         external: Option<ExternalGate>,
     },
-    /// `kind: workflow` (§12, T9.3): runs another workflow as a
+    /// `kind: workflow`: runs another workflow as a
     /// sub-run — a **complete run** with its own run_id, manifest, event
     /// log and run.dir, never an inline expansion. The parent freezes
     /// only the child's *name and inputs* (these two fields); the child
@@ -599,15 +594,16 @@ pub enum NodeKind {
         /// siblings must declare disjoint `scope` (checked).
         #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
         isolation: WorkflowIsolation,
-        /// `mounts:` (§12, D108) — artifacts of the parent's own graph
+        /// `mounts:` — artifacts of the parent's own graph
         /// copied into the child's `run.dir/artifacts/` at birth: the
-        /// promotion inheritance mechanism generalized ("la promoción es
-        /// un caso particular de este mecanismo general"). The parent
+        /// promotion inheritance mechanism generalized (promotion is
+        /// just one particular case of this general mechanism). The parent
         /// declares because the parent is who knows its own topology — a
         /// catalog child naming a sibling would be welded to one
         /// parent's shape and lose its standalone run. Each mount
         /// implies `depends_on` on the referenced node, which is what
-        /// guarantees §12's "hermanos terminados".
+        /// guarantees every sibling the child depends on has already
+        /// finished before the child starts.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         mounts: Vec<MountSpec>,
     },
@@ -639,7 +635,7 @@ fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
     *isolation == WorkflowIsolation::default()
 }
 
-/// A `kind: workflow` node's `isolation:` (§12) — deliberately its own
+/// A `kind: workflow` node's `isolation:` — deliberately its own
 /// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
 /// nodes ("`inherit` solo en nodos workflow", the reference config's own
 /// comment), and a run-level `none` is not a per-node choice.
@@ -651,15 +647,15 @@ pub enum WorkflowIsolation {
     Inherit,
 }
 
-/// `kind: gate`'s `external:` block (§5.6).
+/// `kind: gate`'s `external:` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalGate {
     pub kind: ForgeKind,
     /// Paths (relative to `run.dir`) committed to `branch` for review —
-    /// §5.6's own example: `[spec.md]`.
+    /// the reference example: `[spec.md]`.
     pub artifacts: Vec<String>,
     /// Template-rendered branch name the artifacts are pushed to and the
-    /// PR is opened from (`{{run.branch}}`, §5.6's own example, resolves
+    /// PR is opened from (`{{run.branch}}`, the reference example, resolves
     /// to `yunta/<run_id>` — a fresh push target, not necessarily the
     /// worktree's own local checkout branch, since `isolation: none`
     /// never creates one).
@@ -676,9 +672,9 @@ pub enum ForgeKind {
     PullRequest,
 }
 
-/// `kind: check`'s closed builtin list (§7.1). No budget builtin —
-/// `limits:` already pauses the run on its own (§8.3); duplicating that
-/// as a check would be redundant, per the Contrato's own text.
+/// `kind: check`'s closed builtin list. No budget builtin —
+/// `limits:` already pauses the run on its own; duplicating that
+/// as a check would be redundant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "builtin", rename_all = "snake_case")]
 pub enum CheckBuiltin {
@@ -694,7 +690,7 @@ pub enum CheckBuiltin {
     },
 }
 
-/// `parallel.coordination` (§6.4, D49) — see the field's own doc on
+/// `parallel.coordination` — see the field's own doc on
 /// [`NodeKind::Parallel`]. A closed enum, not a bool: a third
 /// coordination shape (if one ever earns an ADR) lands as a variant
 /// with exhaustive match-checking, same reasoning as `JoinPolicy`.
@@ -706,12 +702,12 @@ pub enum Coordination {
     Blackboard,
 }
 
-/// `parallel.join` (§5.8, D97). `all` (default): the group finishes only
+/// `parallel.join`. `all` (default): the group finishes only
 /// once every child does, and one failed child fails the group. `any`:
 /// the group finishes with the first child to *succeed*; the engine
 /// sends the rest `interrupt`, escalating to `kill` if they don't close
 /// in time (same ordered-then-forceful mechanism as an agent session's
-/// own cancellation, Spec del Adapter).
+/// own cancellation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JoinPolicy {
@@ -720,8 +716,8 @@ pub enum JoinPolicy {
     Any,
 }
 
-/// A node's prompt: an inline string, or `{file: ...}` (Contrato §9.3,
-/// D78). The distinction is **structural, never heuristic**: a scalar is
+/// A node's prompt: an inline string, or `{file: ...}`. The distinction
+/// is **structural, never heuristic**: a scalar is
 /// always literal text, even if its contents look like a path — only an
 /// explicit `{file: ...}` mapping reads from disk.
 #[derive(Debug, Clone, PartialEq)]
@@ -767,8 +763,8 @@ impl Serialize for PromptSource {
     }
 }
 
-/// `artifacts.produces` (Contrato §4). `task-ledger`, `findings` and
-/// `questions` are interpreted (T5.1/T5.12/T5.14). A plain string stays
+/// `artifacts.produces`. `task-ledger`, `findings` and
+/// `questions` are interpreted. A plain string stays
 /// opaque.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifacts {
@@ -790,7 +786,7 @@ pub enum ArtifactKind {
     Questions,
 }
 
-/// `hooks: {before, after}` (D81, §11.1).
+/// `hooks: {before, after}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hooks {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -800,8 +796,8 @@ pub struct Hooks {
 }
 
 /// One hook command. `timeout_seconds` is unenforced (no timeout) when
-/// absent — additive over the pre-T4.3 engine, which never had one.
-/// Field name/units aren't pinned by the Contrato's prose ("timeout corto
+/// absent — additive over the earlier engine, which never had one.
+/// Field name/units aren't pinned by the spec's prose ("timeout corto
 /// configurable"); seconds fit hook-scale commands better than the
 /// minutes granularity `defaults.timeout_minutes` uses for whole agent
 /// sessions.
@@ -828,8 +824,8 @@ pub enum HookFailurePolicy {
     Warn,
 }
 
-/// `on_failure: {goto, max_reroutes}` — node-level re-routing (§11.2).
-/// `max_reroutes` is mandatory (D24): a re-route without an explicit cap
+/// `on_failure: {goto, max_reroutes}` — node-level re-routing.
+/// `max_reroutes` is mandatory: a re-route without an explicit cap
 /// is how a correction cycle turns infinite, so the schema refuses it.
 /// Distinct from a hook's own `on_failure: fail|warn`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
