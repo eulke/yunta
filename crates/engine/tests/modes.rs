@@ -113,7 +113,7 @@ impl Bench {
                 run_id: &run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
-                mode: mode,
+                mode,
                 promoted_from: None,
             },
             &self.storage,

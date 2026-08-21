@@ -8,6 +8,7 @@ pub mod list;
 pub mod mcp;
 pub mod new;
 pub(crate) mod promote;
+pub mod receipt;
 pub mod resolve_gate;
 pub mod resume;
 pub mod run;

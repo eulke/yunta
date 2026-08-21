@@ -3339,7 +3339,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
 
-## M10 — Empaquetado y docs (completo: T10.1, T10.3; en progreso: nada — próximo: T10.2/T10.4/T10.5)
+## M10 — Empaquetado y docs (completo: T10.1, T10.3, T10.4; próximo: T10.2 (post-M11)/T10.5)
 
 - [x] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
       escribe un workflow de tres nodos a mano antes de mencionar packs,
@@ -3412,5 +3412,44 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     Docker disponible en este sandbox para un contenedor literal — la
     simulación con `HOME` vacío ejercita la misma superficie: cero
     estado previo, sin sudo, PATH no seteado.)
-- [ ] **T10.4 — Verified Work Receipt** (`yunta receipt`) — pendiente.
+- [x] **T10.4 — Verified Work Receipt** (D54, RFC-0003 §1). `yunta receipt
+      <run_id> [--json]`: `yunta_engine::receipt` derives a `Receipt`
+      struct purely from `manifest` + `events` + a chain-status the CLI
+      already computed via `verify_chain` — criteria (latest post-check
+      per task, deduped so a retried task's superseded attempts don't
+      double-count), baseline (`None` when the workflow never uses
+      `baseline_compare`, never a manufactured "0 regressions"; the
+      run's first `baseline_compare` only captures and isn't counted as
+      a comparison), scope (union of every `ScopeChecked` diff/violation
+      across the run), runners (every `RunnerResolved`, with T9.4
+      fan-out siblings — `<base>@<role>` node ids — grouped into
+      "reviewed by N independent runners" for the markdown), cost
+      (tokens + CPTV straight from `run_finished.metrics`, reroute
+      count), and the event chain's own intact/broken status. Refuses
+      (`ReceiptError::NotFinished`) a run with no `run_finished` event
+      yet — `yunta status <run_id>` is where the error points instead.
+      Both formats are written to `run.dir` (`receipt.md`/`receipt.json`,
+      same top-level convention as `progress.md`) and one is printed to
+      stdout, `--json` picking which.
+  - ✓ **Criterios cubiertos**: golden tests for both formatters
+    (`render_markdown`/`render_json`) over a hand-built `Receipt` —
+    byte-for-byte for markdown, structured field assertions for JSON,
+    plus a broken-chain and a baseline-absent variant; a derivation test
+    running a real workflow end to end with `mock` (ledger criteria,
+    baseline capture+compare, a re-route, and a two-way runner fan-out)
+    asserting every `Receipt` field the run should have produced; a CLI
+    end-to-end test against the real compiled binary confirming
+    `receipt.md`/`receipt.json` land in `run.dir`, `--json` prints
+    exactly what was written, and a non-terminal run is refused with no
+    files written at all. No LLM-generated text anywhere — every string
+    in the receipt traces back to a command, a role, a hash or a count.
+  - **Incidental fix**: `cargo clippy --workspace --all-targets` (what
+    CI actually runs, unlike the workspace-only invocation used earlier
+    ad hoc) turned up 5 pre-existing warnings unrelated to T10.4 —
+    `let mut` that clippy's newer `unused_mut` catches on a
+    `std::process::Child` never reassigned, and four `field: field`
+    redundant struct-init spots — in `run_flow.rs`, `workflow_compose.rs`,
+    `modes.rs` and `promotion.rs`. Fixed alongside this task since a red
+    `--all-targets` clippy blocks CI for this commit either way; no
+    behavior change, mechanical only.
 - [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — pendiente.

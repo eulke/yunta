@@ -140,6 +140,16 @@ enum Command {
         /// The run id to verify.
         run_id: String,
     },
+    /// Generates a Verified Work Receipt for a finished run (D54):
+    /// markdown + JSON derived entirely from the event log, written to
+    /// the run's own directory and printed to stdout.
+    Receipt {
+        /// The run id to generate a receipt for.
+        run_id: String,
+        /// Prints the JSON receipt instead of the markdown one.
+        #[arg(long)]
+        json: bool,
+    },
     /// Shows verification cost stats: one run (`run_id`) or a workflow's
     /// own history (`--workflow`), never both.
     Stats {
@@ -245,6 +255,7 @@ async fn main() -> ExitCode {
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
         Some(Command::Test) => commands::test::test().await,
         Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
+        Some(Command::Receipt { run_id, json }) => commands::receipt::receipt(&run_id, json),
         Some(Command::Stats {
             run_id,
             workflow,

@@ -20,6 +20,7 @@ mod permissions;
 mod process_registry;
 mod progress;
 mod questions;
+mod receipt;
 mod replay;
 mod run;
 mod run_tools;
@@ -47,6 +48,11 @@ pub use process_registry::{
 };
 pub use progress::render_progress;
 pub use questions::{register as register_questions, QuestionsError};
+pub use receipt::{
+    build_receipt, fan_out_groups, render_json as render_receipt_json,
+    render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
+    CriterionEntry, EventChainStatus, Receipt, ReceiptError, RunnerUsage, ScopeSummary,
+};
 pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, mode_included_nodes,

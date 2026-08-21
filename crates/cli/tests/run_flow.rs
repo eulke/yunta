@@ -1157,7 +1157,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let mut yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
         .args(["run", "wf.yaml"])
         .current_dir(&repo)
         .env("YUNTA_HOME", &home)
@@ -1271,7 +1271,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let mut yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
+    let yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
     let run_id = only_run_id(&home);
 
     let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
@@ -1543,7 +1543,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let mut yunta = spawn_run_until(&repo, &home, &repo.join("started.txt"));
+    let yunta = spawn_run_until(&repo, &home, &repo.join("started.txt"));
     let run_id = only_run_id(&home);
 
     std::process::Command::new("kill")

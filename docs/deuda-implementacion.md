@@ -63,6 +63,7 @@ resuelto", y gatillos que ya se cumplieron. **No** cubre:
 | DI-27 | Decisiones pre-sembradas: `resolve_gate` completo | T8.1 | 1 | M |
 | DI-28 | Lock cross-process para mutaciones `git worktree` | T5.10/T4.2 | 1 | S |
 | DI-29 | Nodo destino de `on_failure.goto`/`on` corre sin haber fallado | T4.4/§11.2 | 1 | M |
+| DI-30 | Flake intermitente en el property test de consolidación del blackboard | T8.2c | 3 | S |
 
 ---
 
@@ -1377,6 +1378,35 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   reprodujeron el bug en rojo (con mock, sin gastar un token real) antes
   del fix; `cargo test --workspace` completo queda verde después,
   sin tocar ningún test existente.
+
+### DI-30 — Flake intermitente en el property test de consolidación del blackboard
+
+- **Origen:** M10/T10.4, corriendo `cargo test --workspace` repetidas
+  veces como parte de la verificación de rutina (nada que ver con
+  `receipt`). `consolidation_is_identical_whatever_order_the_posts_arrived_in`
+  (`engine/tests/blackboard.rs`, T8.2c) — el property test que corre el
+  mismo workflow dos veces con `blackboard_fixture(true)`/`(false)`
+  (`after_ms` escalonados para forzar órdenes de llegada distintas) y
+  espera que el consolidado sea idéntico (D98) — falló una vez en
+  ~4 corridas completas del workspace. Aislado
+  (`cargo test -p yunta-engine --test blackboard
+  consolidation_is_identical...`), pasó 5/5. No reproducido todavía en
+  aislamiento — solo bajo la carga de `cargo test --workspace` completo
+  (muchos runtimes tokio y binds de puerto efímero `127.0.0.1:0`
+  concurrentes, T8.2b), lo cual apunta a una carrera sensible a timing
+  más que a un bug de la lógica de `consolidate_blackboard` en sí (esa
+  función es pura — ver DI-27/28 para el patrón de bug real que
+  timing-sensitivity suele esconder).
+- **No investigado a fondo** — fuera de alcance de T10.4, que no tocó
+  `run_tools.rs` ni `blackboard.rs`. Nivel 3 (no bloquea trabajo diario,
+  solo corridas de CI ocasionales) hasta que se demuestre lo contrario.
+- **Próximo paso sugerido:** stress-loop del test aislado (loop de N
+  corridas seguidas, como hizo el stress test de DI-28) para intentar
+  reproducir sin la carga del workspace completo; si no reproduce así,
+  instrumentar el listener HTTP (T8.2b) para descartar una POST
+  perdida/reordenada bajo contención de puerto/thread-pool antes de
+  sospechar de `consolidate_blackboard`.
+- **Nota de cierre:** _pendiente._
 
 ---
 

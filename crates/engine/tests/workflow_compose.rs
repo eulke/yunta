@@ -129,7 +129,7 @@ impl Bench {
             build_manifest(&workflow, &config, &self.worktree, &self.worktree, inputs).unwrap();
         create_run(
             CreateRunParams {
-                run_id: run_id,
+                run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: "default",

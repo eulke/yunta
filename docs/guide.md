@@ -133,6 +133,21 @@ it's waiting on and the exact option ids available, `yunta resolve-gate <run_id>
 decision up on its own next resume. Nothing about answering a gate requires the
 process that hit it to still be alive.
 
+## The Verified Work Receipt
+
+`yunta receipt <run_id>` closes a finished run out as a certificate: markdown for a
+PR, JSON for tooling, both derived entirely from the event log — criteria with exit
+codes, baseline regressions, scope, which runners reviewed (and whether that was a
+fan-out of independent ones), cost and CPTV, re-routes, and the event chain's own
+integrity. Nothing in it is agent-written prose; every line traces back to a specific
+event kind. It refuses a run that hasn't reached a terminal state yet — there's no
+metrics to certify until `run_finished` lands.
+
+Both formats are written to the run's own directory (`receipt.md`, `receipt.json`)
+alongside `manifest.yaml` and `progress.md`, so a later `bash` node can pick them up —
+for example, a closing `pr` node doing `gh pr create --body-file receipt.md` to make
+the receipt the PR description itself, no copy-paste required.
+
 ## MCP
 
 Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:

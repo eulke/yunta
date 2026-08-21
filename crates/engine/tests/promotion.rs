@@ -163,7 +163,7 @@ async fn run_with_mode_and_findings(
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: mode,
+            mode,
             promoted_from: None,
         },
         &storage,

@@ -155,6 +155,7 @@ prerequisite for writing one.
 | `yunta test` | Runs the cases under `.yunta/tests/` with the `mock` adapter — no LLM, no network, deterministic. |
 | `yunta stats [<run_id>] [--workflow] [--json]` | Verification cost: cost-per-verified-task, rework rate, cache rate, wall-clock breakdown — for one run or a workflow's whole history. |
 | `yunta verify <run_id>` | Recomputes and checks a run's event hash chain end to end. |
+| `yunta receipt <run_id> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory. |
 | `yunta doctor` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |

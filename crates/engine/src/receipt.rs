@@ -1,0 +1,379 @@
+//! Verified Work Receipt (D54, RFC-0003 §1, T10.4): a PR-attachable
+//! certificate derived **entirely** from the event log — never a summary
+//! an agent wrote. "El recibo ES la evidencia": every number here traces
+//! back to a specific event kind, the same discipline [`crate::stats`]
+//! and [`crate::progress`] already hold to. No new bookkeeping — this
+//! module only reads what the engine already recorded and formats it.
+
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
+
+use serde::Serialize;
+
+use yunta_core::events::{Event, EventPayload, Phase, TerminalState, TokenUsage};
+use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId};
+
+use crate::replay::{derive, NodeState};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReceiptError {
+    /// A receipt certifies *closed* work (§8.3's own "al cierre de un
+    /// run") — a run still `running`/`waiting`/`paused` has no
+    /// `run_finished` metrics (CPTV, final token total) to report yet.
+    #[error(
+        "run `{0}` hasn't reached a terminal state yet — `yunta status {0}` shows where it is; \
+         a receipt is only generated once a run finishes"
+    )]
+    NotFinished(RunId),
+}
+
+/// One criterion's final (post-check) verdict — the unit "23/23 criteria
+/// green" counts.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CriterionEntry {
+    pub task_id: String,
+    pub cmd: String,
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CriteriaSummary {
+    pub total: usize,
+    pub green: usize,
+    pub entries: Vec<CriterionEntry>,
+}
+
+/// `None` on a [`Receipt`] when the workflow declares no `baseline_compare`
+/// check at all — never a manufactured "0 regressions" for a run that
+/// never looked (§8.4's own "sin pricing declarado, nada se inventa"
+/// principle applies here too).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BaselineSummary {
+    pub suite: String,
+    pub hash: String,
+    /// `baseline_compare` nodes that actually compared against the
+    /// capture (the run's first `baseline_compare` only captures — it
+    /// has nothing yet to regress against).
+    pub compared: usize,
+    pub regressions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ScopeSummary {
+    pub files_touched: usize,
+    pub violations: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunnerUsage {
+    pub node_id: NodeId,
+    pub role: String,
+    pub adapter: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CostSummary {
+    pub tokens: TokenUsage,
+    /// Mirrors [`crate::stats`]'s own CPTV: `None` means no task ever
+    /// reached `done` in this run, not a manufactured `0.0`.
+    pub cptv: Option<f64>,
+    pub reroutes: usize,
+}
+
+/// The receipt's own reading of [`yunta_storage::ChainVerification`] —
+/// redeclared here rather than depended on directly, so this module's
+/// data model stays serializable and storage-agnostic; the CLI command
+/// that calls `verify_chain` maps into this.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum EventChainStatus {
+    Intact { events: usize },
+    Broken { seq: u64, detail: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Receipt {
+    pub run_id: RunId,
+    pub workflow: String,
+    pub mode: String,
+    pub terminal_state: TerminalState,
+    pub criteria: CriteriaSummary,
+    pub baseline: Option<BaselineSummary>,
+    pub scope: ScopeSummary,
+    pub runners: Vec<RunnerUsage>,
+    pub cost: CostSummary,
+    pub event_chain: EventChainStatus,
+}
+
+/// Builds a [`Receipt`] purely from `manifest` + `events` (+ the chain
+/// status the caller already computed via `Storage::verify_chain`, since
+/// that alone needs IO). Pure otherwise — same log, same receipt, always.
+pub fn build_receipt(
+    run_id: &RunId,
+    manifest: &Manifest,
+    events: &[Event],
+    event_chain: EventChainStatus,
+) -> Result<Receipt, ReceiptError> {
+    let Some((terminal_state, metrics)) = events.iter().find_map(|e| match &e.payload {
+        EventPayload::RunFinished(p) => Some((p.terminal_state, p.metrics.clone())),
+        _ => None,
+    }) else {
+        return Err(ReceiptError::NotFinished(run_id.clone()));
+    };
+
+    let criteria = criteria_summary(events);
+    let baseline = baseline_summary(manifest, events);
+    let scope = scope_summary(events);
+    let runners = runner_usage(events);
+    let reroutes = events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::NodeRerouted(_)))
+        .count();
+
+    Ok(Receipt {
+        run_id: run_id.clone(),
+        workflow: manifest.workflow.name.clone(),
+        mode: yunta_core::events::run_mode(events).to_string(),
+        terminal_state,
+        criteria,
+        baseline,
+        scope,
+        runners,
+        cost: CostSummary {
+            tokens: metrics.tokens,
+            cptv: metrics.cptv,
+            reroutes,
+        },
+        event_chain,
+    })
+}
+
+/// The latest post-check `criteria_checked` per task — a retried task's
+/// earlier, superseded attempts don't get counted twice (§5.2: the log
+/// keeps every attempt, but the receipt certifies the final verdict).
+fn criteria_summary(events: &[Event]) -> CriteriaSummary {
+    let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
+        HashMap::new();
+    for event in events {
+        if let EventPayload::CriteriaChecked(p) = &event.payload {
+            if p.phase == Phase::Post {
+                latest_post.insert(p.task_id.to_string(), p);
+            }
+        }
+    }
+    let mut entries: Vec<CriterionEntry> = latest_post
+        .values()
+        .flat_map(|p| {
+            p.results.iter().map(|r| CriterionEntry {
+                task_id: p.task_id.to_string(),
+                cmd: r.cmd.clone(),
+                exit_code: r.exit_code,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| (&a.task_id, &a.cmd).cmp(&(&b.task_id, &b.cmd)));
+    let green = entries.iter().filter(|e| e.exit_code == 0).count();
+    CriteriaSummary {
+        total: entries.len(),
+        green,
+        entries,
+    }
+}
+
+fn baseline_summary(manifest: &Manifest, events: &[Event]) -> Option<BaselineSummary> {
+    let captured = events.iter().find_map(|e| match &e.payload {
+        EventPayload::BaselineCaptured(p) => Some(p),
+        _ => None,
+    })?;
+
+    let state = derive(events);
+    let mut compared = 0usize;
+    let mut regressions = 0usize;
+    for node in manifest.workflow.iter_nodes() {
+        if !matches!(
+            &node.kind,
+            NodeKind::Check {
+                builtin: CheckBuiltin::BaselineCompare
+            }
+        ) {
+            continue;
+        }
+        match state.nodes.get(&node.id) {
+            // The run's very first `baseline_compare` only captures — it
+            // always finishes and has nothing yet to compare against, so
+            // it isn't counted as a comparison.
+            Some(NodeState::Finished { outcome, .. })
+                if outcome.starts_with("baseline captured") => {}
+            Some(NodeState::Finished { .. }) => compared += 1,
+            Some(NodeState::Failed { .. }) => {
+                compared += 1;
+                regressions += 1;
+            }
+            _ => {}
+        }
+    }
+
+    Some(BaselineSummary {
+        suite: captured.command.clone(),
+        hash: captured.hash.clone(),
+        compared,
+        regressions,
+    })
+}
+
+fn scope_summary(events: &[Event]) -> ScopeSummary {
+    let mut files: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
+    for event in events {
+        if let EventPayload::ScopeChecked(p) = &event.payload {
+            files.extend(p.diff.iter().cloned());
+            violations.extend(p.violations.iter().cloned());
+        }
+    }
+    ScopeSummary {
+        files_touched: files.len(),
+        violations: violations.into_iter().collect(),
+    }
+}
+
+fn runner_usage(events: &[Event]) -> Vec<RunnerUsage> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::RunnerResolved(p) => Some(RunnerUsage {
+                node_id: e.node_id.clone().unwrap_or_else(|| NodeId::from("")),
+                role: p.role.clone(),
+                adapter: p.chosen.adapter.clone(),
+                model: p.chosen.model.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Fan-out siblings share a `<base>@<role>` id (T9.4, `manifest.rs`) —
+/// grouped here purely for the markdown's "reviewed by N independent
+/// runners" line; the JSON receipt exposes the flat `runners` list
+/// instead and leaves grouping to whoever consumes it.
+pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(String, Vec<&RunnerUsage>)> {
+    let mut groups: Vec<(String, Vec<&RunnerUsage>)> = Vec::new();
+    for usage in runners {
+        let Some((base, _)) = usage.node_id.as_str().split_once('@') else {
+            continue;
+        };
+        match groups.iter_mut().find(|(b, _)| b == base) {
+            Some((_, members)) => members.push(usage),
+            None => groups.push((base.to_string(), vec![usage])),
+        }
+    }
+    groups.retain(|(_, members)| members.len() > 1);
+    groups
+}
+
+/// Markdown rendering — the PR-facing format (RFC-0003 §1's own example).
+pub fn render_markdown(receipt: &Receipt) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Verified Work Receipt — run {}\n\n",
+        receipt.run_id
+    ));
+    out.push_str(&format!(
+        "workflow: `{}` · mode: `{}` · state: {:?}\n\n",
+        receipt.workflow, receipt.mode, receipt.terminal_state
+    ));
+
+    out.push_str(&format!(
+        "- {} {}/{} criteria green (commands + exit codes below)\n",
+        mark(receipt.criteria.green == receipt.criteria.total && receipt.criteria.total > 0),
+        receipt.criteria.green,
+        receipt.criteria.total
+    ));
+    match &receipt.baseline {
+        Some(b) => out.push_str(&format!(
+            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`)\n",
+            mark(b.regressions == 0),
+            b.regressions,
+            b.compared,
+            b.suite,
+            &b.hash[..b.hash.len().min(12)]
+        )),
+        None => out.push_str("- baseline: not used by this workflow\n"),
+    }
+    out.push_str(&format!(
+        "- {} scope: {} file(s) touched, {} violation(s)\n",
+        mark(receipt.scope.violations.is_empty()),
+        receipt.scope.files_touched,
+        receipt.scope.violations.len()
+    ));
+    let groups = fan_out_groups(&receipt.runners);
+    if groups.is_empty() {
+        out.push_str(&format!(
+            "- {} runner(s) used, no fan-out review\n",
+            receipt.runners.len()
+        ));
+    } else {
+        for (base, members) in &groups {
+            let adapters: Vec<&str> = members.iter().map(|m| m.adapter.as_str()).collect();
+            out.push_str(&format!(
+                "- ✓ Reviewed by {} independent runner(s) via `{base}` ({})\n",
+                members.len(),
+                adapters.join(", ")
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "- cost: {} tokens ({} in / {} out){} · {} reroute(s)\n",
+        receipt.cost.tokens.input + receipt.cost.tokens.output,
+        receipt.cost.tokens.input,
+        receipt.cost.tokens.output,
+        match receipt.cost.cptv {
+            Some(cptv) => format!(" · CPTV: {cptv:.1} tokens/task"),
+            None => String::new(),
+        },
+        receipt.cost.reroutes,
+    ));
+    match &receipt.event_chain {
+        EventChainStatus::Intact { events } => out.push_str(&format!(
+            "- ✓ event chain: {events} event(s), hash-linked, replayable\n"
+        )),
+        EventChainStatus::Broken { seq, detail } => {
+            out.push_str(&format!("- ✗ event chain BROKEN at seq {seq}: {detail}\n"))
+        }
+    }
+
+    if !receipt.criteria.entries.is_empty() {
+        out.push_str("\n## Criteria\n\n");
+        for entry in &receipt.criteria.entries {
+            out.push_str(&format!(
+                "- {} `{}` — `{}` (exit {})\n",
+                mark(entry.exit_code == 0),
+                entry.task_id,
+                entry.cmd,
+                entry.exit_code
+            ));
+        }
+    }
+    if !receipt.scope.violations.is_empty() {
+        out.push_str("\n## Scope violations\n\n");
+        for path in &receipt.scope.violations {
+            out.push_str(&format!("- {}\n", path.display()));
+        }
+    }
+
+    out
+}
+
+fn mark(ok: bool) -> &'static str {
+    if ok {
+        "✓"
+    } else {
+        "✗"
+    }
+}
+
+/// JSON rendering — the machine-consumable format (D54: same data, no
+/// separate derivation).
+pub fn render_json(receipt: &Receipt) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(receipt)
+}
