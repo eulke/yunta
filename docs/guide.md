@@ -282,8 +282,15 @@ further: `pack add` refuses to install a pack that ships executable code
 unless `--yes` confirms it, after the audit above has shown exactly what
 they are — no accidental install of code nobody reviewed.
 
-**Not wired up yet**: validating a pack's declared `requires:` against the
-local config (T11.6).
+`requires:` is the mirror image of `declares:` — a floor the *installing*
+team's own config must clear, not a ceiling the pack promises. `yunta doctor`
+validates every installed pack's `requires:` against the merged config
+alongside its usual adapter health check: a `roles:` entry that `runners:`
+doesn't define (or defines with zero candidates), an `mcp_servers:` name
+nothing declares, and a `commands:` binary that isn't on `PATH` are each
+reported with what to add, naming the pack. Nothing here blocks `pack add` or
+`check` — a pack can be installed and configured for later, same as an
+adapter that isn't set up yet doesn't stop `yunta init`.
 
 ## Where the rest lives
 

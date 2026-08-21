@@ -3721,3 +3721,46 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     executors se rechaza sin vendorear nada; con `--yes` instala
     normalmente; `yunta check acme/review` sobre un pack `read-only`
     con un nodo `permissions: edit` falla citando el pack y el techo.
+- [x] **T11.6 — `requires` validado contra la config local.**
+      `check_pack_requires(manifest, config) -> PackRequiresGap` en
+      `crates/engine/src/pack_requires.rs` — imagen espejo de T11.5:
+      `declares` es un techo que el pack promete no exceder, `requires`
+      es un piso que la config del *instalador* tiene que alcanzar.
+      Función pura, sin IO: por cada `requires.roles`, falta si
+      `runners:` no define ese nombre o lo define con cero candidatos
+      (mismos dos casos que `UnknownRunner`/`RunnerHasNoCandidates` de
+      `check` para el `runner:` de un nodo, reutilizando el criterio,
+      no el código — son estructuras de error distintas); por cada
+      `requires.mcp_servers`, falta si el nombre no está en
+      `mcp_servers:`. `requires.commands` se pasa sin tocar en el
+      reporte — la presencia en `PATH` necesita filesystem real, así
+      que queda deliberadamente afuera de esta función pura.
+  - **`yunta doctor` es el punto de entrada** (el propio criterio de la
+    tarea lo nombra: "comandos presentes (`doctor`)") — no `check` ni
+    `pack add`: un pack puede instalarse y configurarse después, igual
+    que un adapter sin configurar no le impide a `yunta init` terminar.
+    `doctor` ahora recorre `installed_publishers`/`packs_for_publisher`
+    además de sondear adapters, llama `check_pack_requires` por cada
+    pack instalado, y resuelve `requires.commands` contra `PATH` con un
+    scan de directorio simple (`std::env::split_paths` sobre la
+    variable `PATH`, sin subproceso) — el único IO que la función pura
+    del engine deliberadamente no hace. Cada carencia imprime una línea
+    accionable nombrando el pack y qué agregar a la config (ejemplo de
+    `runners:` incluido para el caso de rol faltante), y hace fallar el
+    exit code de `doctor` igual que un adapter no saludable ya lo hacía
+    — sin romper el caso "sin adapters" preexistente (mismo test
+    `doctor_reports_no_adapter_when_runners_names_none_this_build_supports`
+    sigue en verde, ahora como una rama más de una función que ya no
+    retorna temprano).
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/pack_requires.rs`
+    (7 tests) — rol ausente de `runners:` marcado, rol con cero
+    candidatos también marcado, rol con ≥1 candidato resuelve, servidor
+    mcp no definido marcado, servidor mcp definido resuelve, comandos
+    requeridos pasan intactos sin afectar `is_satisfied()`, pack sin
+    nada pendiente reporta todo vacío. `crates/cli/tests/
+    pack_requires_doctor_cmd.rs` (2 tests E2E contra el binario real)
+    — `doctor` sobre un pack instalado cuyo `requires` pide un rol, un
+    mcp_server y un comando que la config/PATH no tienen falla
+    citando los tres con mensajes accionables; `doctor` sobre un pack
+    sin `requires` pendiente no menciona "requires" en absoluto y
+    sigue en verde.
