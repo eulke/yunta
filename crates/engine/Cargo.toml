@@ -7,9 +7,11 @@ repository.workspace = true
 description = "The Yunta workflow engine: scheduler, verification cycle, resumability."
 
 [dependencies]
-yunta-core = { path = "../core" }
-yunta-storage = { path = "../storage" }
-yunta-adapters = { path = "../adapters" }
+# `version` must track [workspace.package].version — crates.io publish
+# (T12.4) rejects a path dependency with no version requirement.
+yunta-core = { path = "../core", version = "0.1.0" }
+yunta-storage = { path = "../storage", version = "0.1.0" }
+yunta-adapters = { path = "../adapters", version = "0.1.0" }
 thiserror = "2"
 futures = "0.3"
 globset = "0.4"

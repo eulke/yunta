@@ -11,10 +11,12 @@ name = "yunta"
 path = "src/main.rs"
 
 [dependencies]
-yunta-core = { path = "../core" }
-yunta-engine = { path = "../engine" }
-yunta-adapters = { path = "../adapters" }
-yunta-storage = { path = "../storage" }
+# `version` must track [workspace.package].version — crates.io publish
+# (T12.4) rejects a path dependency with no version requirement.
+yunta-core = { path = "../core", version = "0.1.0" }
+yunta-engine = { path = "../engine", version = "0.1.0" }
+yunta-adapters = { path = "../adapters", version = "0.1.0" }
+yunta-storage = { path = "../storage", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }

@@ -7,7 +7,9 @@ repository.workspace = true
 description = "Adapter trait and CLI integrations (claude-code, codex, mock) for Yunta."
 
 [dependencies]
-yunta-core = { path = "../core" }
+# `version` must track [workspace.package].version — crates.io publish
+# (T12.4) rejects a path dependency with no version requirement.
+yunta-core = { path = "../core", version = "0.1.0" }
 async-trait = "0.1"
 futures = "0.3"
 tracing = "0.1"

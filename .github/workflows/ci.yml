@@ -23,6 +23,10 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
       - name: build (workspace)
         run: cargo build --workspace --locked
 
