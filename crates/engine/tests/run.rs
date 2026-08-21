@@ -4104,26 +4104,188 @@ fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() 
     });
 }
 
+// --- DI-31/D109: the org layer resolves from installed knowledge packs ------
+
+/// One installed org knowledge pack under the worktree's own
+/// `.yunta/packs/` — the vendored shape `pack add` produces, built
+/// directly on disk (same convention as `catalog.rs`'s fixtures).
+fn write_org_pack(worktree: &Path, publisher: &str, name: &str, files: &[(&str, &str)]) {
+    let pack_dir = worktree.join(".yunta/packs").join(publisher).join(name);
+    std::fs::create_dir_all(pack_dir.join("knowledge")).unwrap();
+    std::fs::write(
+        pack_dir.join("pack.yaml"),
+        format!(
+            "name: {name}\npublisher: {publisher}\nversion: 1.0.0\ndeclares:\n  \
+             permissions: read-only\ncontents:\n  knowledge: [knowledge/]\n"
+        ),
+    )
+    .unwrap();
+    for (file, content) in files {
+        std::fs::write(pack_dir.join("knowledge").join(file), content).unwrap();
+    }
+}
+
 #[tokio::test]
-async fn requesting_the_org_knowledge_layer_fails_the_node_naming_the_layer_not_silently() {
-    // `org` is legitimate vocabulary (a versioned pack, RFC-0002) but has
-    // no resolver until M11 — a workflow asking for it must fail loudly,
-    // never resolve as if the layer were simply empty.
+async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
+    // D109: the org layer is the union of installed knowledge packs —
+    // T6.5's own last criterion ("knowledge pack instalado se resuelve
+    // como capa org sin config extra"), payable since M11 exists.
     let bench = Bench::new();
+    write_org_pack(
+        &bench.worktree,
+        "acme",
+        "org-knowledge",
+        &[("conventions.md", "MARKER-ORG-CONVENTIONS\n")],
+    );
+
+    let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].kind, "knowledge");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
+    // §9.2's unchanged inter-layer precedence (org < user < repo) now
+    // exercised against a real pack — and, since `knowledge: {}` is the
+    // default that includes org, this also proves the default source no
+    // longer errors the moment a knowledge pack is installed (DI-31's
+    // real sting).
+    let bench = Bench::new();
+    write_org_pack(
+        &bench.worktree,
+        "acme",
+        "org-knowledge",
+        &[
+            ("shared.md", "MARKER-FROM-ORG-LOSES\n"),
+            ("org-only.md", "MARKER-ORG-ONLY\n"),
+        ],
+    );
+    std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
+    std::fs::write(
+        bench.worktree.join(".yunta/knowledge/shared.md"),
+        "MARKER-FROM-REPO-WINS\n",
+    )
+    .unwrap();
+
+    let workflow = context_workflow("      - knowledge: {}\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    let path = bench
+        .run_dir()
+        .join("context")
+        .join(&sources[0].content_hash)
+        .join("content");
+    let content = std::fs::read_to_string(path).unwrap();
+    assert!(
+        content.contains("MARKER-FROM-REPO-WINS"),
+        "repo's `shared.md` must win over the org pack's: {content}"
+    );
+    assert!(
+        !content.contains("MARKER-FROM-ORG-LOSES"),
+        "the org pack's overridden `shared.md` must not survive the merge: {content}"
+    );
+    assert!(
+        content.contains("MARKER-ORG-ONLY"),
+        "the org pack's own untouched file must still be present: {content}"
+    );
+}
+
+#[tokio::test]
+async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
+    // D109: between org packs there is no order — same filename from
+    // two installed packs is a typed error naming both and the file,
+    // never resolved alphabetically or by install order.
+    let bench = Bench::new();
+    write_org_pack(
+        &bench.worktree,
+        "acme",
+        "pack-a",
+        &[("conventions.md", "from pack-a\n")],
+    );
+    write_org_pack(
+        &bench.worktree,
+        "globex",
+        "pack-b",
+        &[("conventions.md", "from pack-b\n")],
+    );
+
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
     let fixture = "sessions: []";
 
     let (terminal, state) = bench.run(&workflow, fixture).await;
     match &state.nodes.get(&"ask".into()) {
         Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("org"), "got: {outcome}");
+            assert!(outcome.contains("conventions.md"), "got: {outcome}");
+            assert!(outcome.contains("acme/pack-a"), "got: {outcome}");
+            assert!(outcome.contains("globex/pack-b"), "got: {outcome}");
         }
-        other => panic!("expected `ask` to fail citing the `org` layer, got {other:?}"),
+        other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn layers_repo_only_never_mounts_an_installed_org_pack() {
+    let bench = Bench::new();
+    write_org_pack(
+        &bench.worktree,
+        "acme",
+        "org-knowledge",
+        &[("conventions.md", "MARKER-ORG-MUST-NOT-APPEAR\n")],
+    );
+    std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
+    std::fs::write(
+        bench.worktree.join(".yunta/knowledge/local.md"),
+        "MARKER-REPO-LOCAL\n",
+    )
+    .unwrap();
+
+    let workflow = context_workflow("      - knowledge: { layers: [repo] }\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    let path = bench
+        .run_dir()
+        .join("context")
+        .join(&sources[0].content_hash)
+        .join("content");
+    let content = std::fs::read_to_string(path).unwrap();
+    assert!(
+        !content.contains("MARKER-ORG-MUST-NOT-APPEAR"),
+        "`layers: [repo]` must not mount the org pack: {content}"
+    );
+}
+
+#[tokio::test]
+async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
+    // With a real resolver behind it (D109), an empty org layer is a
+    // true answer — same as `user` with no `~/.yunta/knowledge` — not
+    // the A6 refusal the pre-M11 stub was.
+    let bench = Bench::new();
+    let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
+    let fixture = "sessions:\n  - outcome: { type: completed, summary: ok }\n";
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
 // --- T7.2: HumanInteraction — gates (§5.3) ----------------------------------

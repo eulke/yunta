@@ -15,12 +15,14 @@
 //!   rendering), never a filesystem glob walk — the Contrato's own
 //!   example uses two literal paths, and no ✓ of T6.1 exercises pattern
 //!   expansion; real glob support is debt, not silently approximated.
-//! - `knowledge:` (T6.5) resolves `repo` and `user` with real precedence
-//!   (§9.2): the two layers merge by filename, `repo` overwriting `user`
-//!   on a name collision, regardless of the order `layers:` names them
-//!   in. `org` is a legitimate schema value (a versioned pack,
-//!   RFC-0002) but has no resolver — packs land in M11 — so requesting
-//!   it is a typed error, never a silent empty result.
+//! - `knowledge:` (T6.5, completed by D109/DI-31) resolves all three
+//!   layers of §9.2 with real precedence: the layers merge by filename,
+//!   `repo` overwriting `user` overwriting `org` on a name collision,
+//!   regardless of the order `layers:` names them in. `org` is the
+//!   union of every installed knowledge pack's declared contents
+//!   (RFC-0002 vendoring, via the M11 catalog); two *packs* shipping
+//!   the same filename is a typed error naming both — between packs
+//!   there is no precedence to fall back on (D109).
 //! - `node-output:` only ever has something to read for `kind: bash`
 //!   nodes (`execute_bash` is the only place this module captures output
 //!   from, right after the process exits, success or failure alike —
@@ -132,14 +134,21 @@ pub(super) enum ContextResolveError {
         source_id: String,
         filter: String,
     },
+    /// D109 (DI-31): between org knowledge packs there is no order —
+    /// same filename from two installed packs never resolves by
+    /// alphabetical or install order, it names both and stops.
     #[error(
-        "context `{source_id}` on node `{node}`: knowledge layer `{layer}` has no resolver yet \
-         — the `org` layer is a versioned pack (RFC-0002), and packs land in M11"
+        "context `{source_id}` on node `{node}`: knowledge file `{file}` is shipped by two \
+         installed packs — `{pack_a}` and `{pack_b}` — and the org layer has no precedence \
+         between packs (D109); remove one, or shadow the file with the repo's own \
+         `.yunta/knowledge/{file}`"
     )]
-    UnsupportedKnowledgeLayer {
+    OrgKnowledgeCollision {
         node: NodeId,
         source_id: String,
-        layer: yunta_core::KnowledgeLayer,
+        file: String,
+        pack_a: String,
+        pack_b: String,
     },
     #[error(
         "context `{source_id}` on node `{node}`: mcp server `{server}` is not declared in \
@@ -499,10 +508,12 @@ async fn resolve_ledger(ctx: &RunCtx<'_>) -> Result<Vec<u8>, ContextResolveError
     Ok(lines.join("\n").into_bytes())
 }
 
-/// Fixed precedence order (§9.2): `repo` last, so it overwrites `user` by
-/// filename when both declare the same doc — never the order `layers:`
-/// happens to name them in.
-const KNOWLEDGE_PRECEDENCE: [yunta_core::KnowledgeLayer; 2] = [
+/// Fixed precedence order (§9.2): most general first, so a later layer
+/// overwrites an earlier one by filename — `repo` wins over `user` wins
+/// over `org` when they declare the same doc — never the order
+/// `layers:` happens to name them in.
+const KNOWLEDGE_PRECEDENCE: [yunta_core::KnowledgeLayer; 3] = [
+    yunta_core::KnowledgeLayer::Org,
     yunta_core::KnowledgeLayer::User,
     yunta_core::KnowledgeLayer::Repo,
 ];
@@ -513,8 +524,65 @@ fn knowledge_dir(ctx: &RunCtx<'_>, layer: yunta_core::KnowledgeLayer) -> Option<
         yunta_core::KnowledgeLayer::User => {
             yunta_core::user_state_root().map(|root| root.join("knowledge"))
         }
+        // Org is not one directory — it's the union of every installed
+        // knowledge pack's declared contents (D109); resolved by
+        // `org_knowledge_files`, never through this single-dir path.
         yunta_core::KnowledgeLayer::Org => None,
     }
+}
+
+/// The org layer's files (D109, DI-31): every pack vendored under
+/// `.yunta/packs/` whose `contents.knowledge` is non-empty contributes
+/// each declared entry (a file, or a directory read recursively — the
+/// same rule the other layers use). Returns `(filename, path)` pairs
+/// after checking that no two *packs* ship the same filename — within
+/// one pack the sorted listing's last occurrence wins, exactly the
+/// silent-by-basename merge `repo`/`user` already have; across packs
+/// there is no order to fall back on, so a collision is a typed error
+/// naming both.
+fn org_knowledge_files(
+    ctx: &RunCtx<'_>,
+    node: &NodeId,
+    source_id: &str,
+) -> Result<Vec<(std::ffi::OsString, PathBuf)>, ContextResolveError> {
+    let mut by_name: std::collections::BTreeMap<std::ffi::OsString, (String, PathBuf)> =
+        std::collections::BTreeMap::new();
+    for publisher in crate::catalog::installed_publishers(ctx.worktree) {
+        for (pack_dir, manifest) in crate::catalog::packs_for_publisher(ctx.worktree, &publisher) {
+            let pack_label = format!("{}/{}", manifest.publisher, manifest.name);
+            for declared in &manifest.contents.knowledge {
+                let root = pack_dir.join(declared);
+                let files = if root.is_file() {
+                    vec![root]
+                } else {
+                    list_knowledge_files(&root, node, source_id)?
+                };
+                for path in files {
+                    let Some(name) = path.file_name() else {
+                        continue;
+                    };
+                    match by_name.get(name) {
+                        Some((other_pack, _)) if *other_pack != pack_label => {
+                            return Err(ContextResolveError::OrgKnowledgeCollision {
+                                node: node.clone(),
+                                source_id: source_id.to_string(),
+                                file: name.to_string_lossy().into_owned(),
+                                pack_a: other_pack.clone(),
+                                pack_b: pack_label.clone(),
+                            });
+                        }
+                        _ => {
+                            by_name.insert(name.to_owned(), (pack_label.clone(), path));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(by_name
+        .into_iter()
+        .map(|(name, (_, path))| (name, path))
+        .collect())
 }
 
 fn list_knowledge_files(
@@ -567,25 +635,21 @@ async fn resolve_knowledge(
         params.layers.clone()
     };
 
-    if let Some(layer) = requested
-        .iter()
-        .find(|l| **l == yunta_core::KnowledgeLayer::Org)
-    {
-        return Err(ContextResolveError::UnsupportedKnowledgeLayer {
-            node: node.id.clone(),
-            source_id: source_id.to_string(),
-            layer: *layer,
-        });
-    }
-
     // Precedence (§9.2): "lo del repo pisa a lo general ante conflicto" —
     // a later layer in KNOWLEDGE_PRECEDENCE overwrites an earlier one by
-    // filename, so the same doc name in both layers resolves to exactly
-    // one copy, never two.
+    // filename, so the same doc name in two layers resolves to exactly
+    // one copy, never two. Org (D109) is the union of installed
+    // knowledge packs, collision-checked among themselves first.
     let mut by_name: std::collections::BTreeMap<std::ffi::OsString, PathBuf> =
         std::collections::BTreeMap::new();
     for layer in KNOWLEDGE_PRECEDENCE {
         if !requested.contains(&layer) {
+            continue;
+        }
+        if layer == yunta_core::KnowledgeLayer::Org {
+            for (name, path) in org_knowledge_files(ctx, &node.id, source_id)? {
+                by_name.insert(name, path);
+            }
             continue;
         }
         let Some(dir) = knowledge_dir(ctx, layer) else {

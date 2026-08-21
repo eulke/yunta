@@ -1444,7 +1444,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   queda (un fallo futuro se auto-diagnostica en vez de perder la causa,
   como le pasó a la observación original de T10.4).
 
-### DI-31 — `knowledge: { layers: [org] }` sigue sin resolver pese a que M11 (packs) ya cerró
+### DI-31 — `knowledge: { layers: [org] }` sigue sin resolver pese a que M11 (packs) ya cerró `[x]` (ADR D109)
 
 - **Origen:** M10/T10.5 (workflow de referencia `promote-knowledge`),
   escribiendo un `context: - knowledge: { layers: [org] }` en
@@ -1490,9 +1490,60 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   documentada como funcionando, D56/T6.5, aunque no bloquea trabajo
   diario del engine en sí — nadie tiene todavía un knowledge pack real
   instalado).
-- **Nota de cierre:** _pendiente — decisión de precedencia multi-pack
-  vía ADR antes de codearse (regla del propio CLAUDE.md: la deuda
-  consciente no se resuelve implícitamente)._
+- **Nota de cierre:** cerrado vía **ADR D109** (registrado en Notion
+  antes de codear, como exige la regla) e implementación test-first. La
+  decisión: la capa `org` es la **unión** de todos los packs vendoreados
+  con `contents.knowledge` no vacío, leída con la misma regla recursiva
+  que `repo`/`user`; la precedencia entre capas queda `org < user <
+  repo` (merge por nombre de archivo, lo local pisa); **entre packs org
+  no hay orden** — dos packs instalados shippeando el mismo nombre de
+  archivo es `ContextResolveError::OrgKnowledgeCollision`, nombrando a
+  ambos packs y al archivo, con el remedio en el propio mensaje
+  (shadowear con el `.yunta/knowledge/` del repo, o desinstalar uno).
+  Descartada la precedencia alfabética (enmascara el conflicto — mismo
+  criterio que T11.3 para workflows ambiguos). Una capa org sin packs
+  instalados resuelve vacía y el run sigue — con un resolver real
+  detrás, vacío es una respuesta verdadera, no la emulación que A6
+  prohibía cuando el stub pre-M11 no tenía nada detrás. Implementación:
+  `org_knowledge_files` en `context_resolve.rs` sobre
+  `catalog::installed_publishers`/`packs_for_publisher` (mismo crate);
+  `KNOWLEDGE_PRECEDENCE` pasa de `[User, Repo]` a `[Org, User, Repo]`;
+  el error `UnsupportedKnowledgeLayer` desaparece del enum (nada más
+  podía producirlo). 5 tests nuevos en `engine/tests/run.rs`
+  (reemplazando al que fijaba el comportamiento viejo): pack org
+  instalado resuelve; el repo pisa una colisión de nombre con el pack
+  (y de paso: el default `knowledge: {}` ya no explota con un pack
+  instalado — el aguijón real del ítem); dos packs con el mismo
+  basename fallan nombrando a ambos; `layers: [repo]` no monta nada del
+  pack; capa org sin packs resuelve vacía sin error. Esto también salda
+  el último criterio pendiente de T6.5 ("knowledge pack instalado se
+  resuelve como capa org sin config extra"). Hallazgo colateral al
+  redactar D109, registrado como **DI-32** (abajo): `permissions.packs`
+  parsea y mergea pero no se hace cumplir en `pack add`.
+
+### DI-32 — `permissions.packs` (publishers/executors) parsea y mergea pero no se hace cumplir en `pack add`
+
+- **Origen:** DI-31/D109, verificando si la resolución org debía filtrar
+  por `permissions.packs.publishers.allow` — y descubriendo que esa
+  política hoy no gobierna nada en ninguna parte. `PackPermissions`/
+  `PackExecutorPolicy` (`allow|prompt|deny`)/`PublisherPermissions`
+  existen en `core::config` desde antes de M11, con merge invertido §6.1
+  implementado y testeado (T1.2) — pero ningún comando los consulta:
+  `pack add` instala cualquier publisher aunque `publishers.allow` no lo
+  liste, y el gate de executors de T11.5 es el flag `--yes` fijo, no la
+  política configurable `executors: allow|prompt|deny` (una org que
+  declara `deny` esperaría que `--yes` NO alcance).
+- **Qué falta:** en `pack add`, tras leer el manifest y antes de
+  vendorear: (a) si `permissions.packs.publishers.allow` (config
+  mergeada) es no-vacío y el publisher del manifest no está, rechazar
+  citando la capa que lo restringe; (b) mapear `executors:` de la
+  política a la mecánica existente — `deny` rechaza aunque venga
+  `--yes`, `allow` instala sin exigirlo, `prompt` (el default actual de
+  facto) exige `--yes` como hoy. Test E2E por cada rama.
+- **Nivel 2** — es superficie de gobernanza documentada en la referencia
+  de config (§6.1) que hoy da falsa sensación de control: una org que
+  configura `deny` de executors no está protegida por nada.
+- **Nota de cierre:** _pendiente._
 
 ---
 

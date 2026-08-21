@@ -362,11 +362,11 @@ pub struct RunEventsParams {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LedgerParams {}
 
-/// One layer of `knowledge:` (§9.2), most to least local. `Org` is a
-/// legitimate schema value (the layer is a versioned pack per RFC-0002)
-/// but has no resolver yet — packs land in M11 — so requesting it is a
-/// typed error at resolution time, never a parse error: the value itself
-/// is valid vocabulary, just not implemented.
+/// One layer of `knowledge:` (§9.2), most to least local. `Org` resolves
+/// as the union of every installed knowledge pack's declared contents
+/// (RFC-0002 vendoring; D109/DI-31) — a same-filename collision between
+/// two packs is a typed error at resolution time, since between packs
+/// there is no precedence to fall back on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeLayer {

@@ -1837,6 +1837,18 @@ que aparece.
         `user` sobreviviendo intacto; pedir `layers: [org]` falla el
         nodo citando la capa en el diagnóstico, en vez de resolver
         vacío).
+      - **Cerrado post-M11 (DI-31/ADR D109): la capa `org` resuelve de
+        verdad.** El error tipado de arriba era el recorte correcto
+        mientras los packs no existían; con M11 cerrado, `org` resuelve
+        como la unión de los knowledge packs instalados (colisión entre
+        packs = error nombrando a ambos, jamás precedencia por orden;
+        precedencia entre capas `org < user < repo` sin cambios), y
+        `layers:` vacío ahora sí incluye `org` implícitamente. El test
+        del error viejo fue reemplazado por 5 que fijan el
+        comportamiento nuevo — detalle completo en la entrada DI-31 de
+        `deuda-implementacion.md`. El ✓ del plan "knowledge pack
+        instalado se resuelve como capa org sin config extra" queda
+        cumplido literalmente.
 
 ## M7 — CLI y UX (completo: T7.1–T7.10 — T7.3/T7.8/T7.9 ya hechos por M-0)
 

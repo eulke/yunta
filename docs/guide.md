@@ -94,12 +94,15 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 ### Knowledge layers
 
-`knowledge: { layers: [repo, user] }` resolves with local precedence: a conflict
-between what the repo's own `knowledge/` says and what a user-level layer says
-favors the repo. Omit `layers` to pull every layer the resolver can see. The `org`
-layer (knowledge distributed as a pack) is valid schema today but has no resolver
-until packs land — declaring it is a typed error at resolution time, not a parse
-error, so a workflow that names it fails loudly instead of silently seeing nothing.
+`knowledge: { layers: [repo, user, org] }` resolves with local precedence: on a
+filename conflict, repo beats user beats org. Omit `layers` to pull every layer.
+The `org` layer is knowledge distributed as packs — the union of every installed
+pack whose `pack.yaml` declares `contents.knowledge`, read straight from the
+vendored `.yunta/packs/`. Between org packs there is no precedence: two installed
+packs shipping the same filename is a resolution-time error naming both — shadow
+the file with the repo's own copy, or remove one of the packs. An org layer with
+no knowledge packs installed simply contributes nothing, same as a user layer
+with an empty `~/.yunta/knowledge/`.
 
 ## Hooks
 
