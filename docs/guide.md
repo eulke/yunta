@@ -287,9 +287,16 @@ same. Exceeding it fails `check` with an error naming the node, the pack and
 both the declared and requested level; the same rule follows composition, so
 a child workflow reached through `use:` from inside the pack is checked
 against that pack's ceiling too. Declaring any `executors:` raises the bar
-further: `pack add` refuses to install a pack that ships executable code
-unless `--yes` confirms it, after the audit above has shown exactly what
-they are — no accidental install of code nobody reviewed.
+further, and how far is the installing team's own call:
+`permissions.packs.executors` in the config (an org-ceiling setting — lower
+layers only narrow it, §6.1) decides. `prompt`, the default, refuses to
+install or update a pack that ships executable code unless `--yes` confirms
+it, after the audit has shown exactly what the executors are; `deny` refuses
+outright — no flag overrides a permissions ceiling; `allow` installs without
+asking. `permissions.packs.publishers.allow`, when non-empty, additionally
+restricts which publishers can be installed or updated at all — a refusal
+names the config layer that declares the restriction. `update` enforces both
+the same way `add` does: a new ref is where new executor code first appears.
 
 `requires:` is the mirror image of `declares:` — a floor the *installing*
 team's own config must clear, not a ceiling the pack promises. `yunta doctor`

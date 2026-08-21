@@ -1527,7 +1527,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   redactar D109, registrado como **DI-32** (abajo): `permissions.packs`
   parsea y mergea pero no se hace cumplir en `pack add`.
 
-### DI-32 — `permissions.packs` (publishers/executors) parsea y mergea pero no se hace cumplir en `pack add`
+### DI-32 — `permissions.packs` (publishers/executors) parsea y mergea pero no se hace cumplir en `pack add` `[x]`
 
 - **Origen:** DI-31/D109, verificando si la resolución org debía filtrar
   por `permissions.packs.publishers.allow` — y descubriendo que esa
@@ -1549,7 +1549,41 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **Nivel 2** — es superficie de gobernanza documentada en la referencia
   de config (§6.1) que hoy da falsa sensación de control: una org que
   configura `deny` de executors no está protegida por nada.
-- **Nota de cierre:** _pendiente._
+- **Nota de cierre:** implementado test-first, sin ADR nuevo — D51/D72
+  ya fijaban la semántica completa (`publishers.allow` como allowlist,
+  `executors: allow|prompt|deny` con "prompt pide confirmación caso por
+  caso", techo org que solo se estrecha); esto era puro gap de
+  implementación, no una decisión abierta. `commands/pack.rs` gana
+  `load_pack_policy` (lee las capas nombradas vía
+  `project::load_named_layers` + `merge_layers` — el merge invertido de
+  §6.1 ya existía en `yunta-core` desde T1.2, intersección de
+  allowlists y strictest-wins de executors incluidos — y retiene los
+  *nombres* de las capas que declaran cada restricción, para que el
+  rechazo cite qué archivo de config cambiar), y dos gates:
+  `enforce_publisher_allowed` (allowlist no-vacía sin el publisher →
+  rechazo antes de imprimir el audit — no hay decisión humana que
+  tomar) y `enforce_executor_policy` (`deny` rechaza aunque venga
+  `--yes` — "un flag jamás pisa un techo de permisos, §6.1" —, `prompt`
+  exige `--yes` como el gate fijo de T11.5, `allow` instala sin pedirlo;
+  default sin política declarada = `prompt`, exactamente el
+  comportamiento de facto pre-DI-32, cero cambio para quien no
+  configura nada). **`update` gatea igual que `add`** — un ref nuevo es
+  donde aparece código executor nuevo, y una allowlist estrechada
+  después del install debe frenar el próximo update; gatear solo `add`
+  hubiera sido el teatro de gobernanza que D51 descarta. `update` gana
+  `--yes`, y cuando el manifest nuevo declara executors imprime el
+  inventario del audit antes del gate (§6: la decisión necesita la
+  misma evidencia que en `add`; solo se imprime cuando hay decisión).
+  6 tests E2E (`crates/cli/tests/pack_policy_cmd.rs`), uno por rama:
+  publisher fuera de la allowlist rechazado citando
+  `permissions.packs.publishers.allow` y la capa (y el permitido
+  instala con la misma config); `deny` rechaza aun con `--yes` sin
+  vendorear nada; `allow` instala sin `--yes`; `prompt` explícito exige
+  `--yes`; un `update` a un ref que agrega executors se gatea (rechazo
+  deja la versión vieja vendoreada intacta, `--yes` actualiza); un
+  publisher que salió de la allowlist después del install no puede
+  updatear. Los tests preexistentes de T11.5 (sin política configurada)
+  siguen verdes sin tocarse — la prueba de que el default no cambió.
 
 ---
 

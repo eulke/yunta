@@ -1,13 +1,18 @@
 //! `yunta pack add/remove/list/update` (RFC-0002 §4, T11.2): the
 //! command layer — argument handling and printing — over
-//! `crate::pack`'s git/filesystem mechanics. `add` also gates on
-//! executors (T11.5/§6.3): a pack that declares any is refused unless
-//! `--yes` confirms it, after the audit above has shown exactly what
-//! they are.
+//! `crate::pack`'s git/filesystem mechanics. `add` and `update` also
+//! enforce `permissions.packs` (D51/D72/§6.1, DI-32): the publisher
+//! allow-list refuses a source outside it, and the `executors:
+//! allow|prompt|deny` policy governs the confirmation gate — `prompt`
+//! (the default) requires `--yes` after the audit has shown exactly
+//! what the executors are (T11.5/§6.3), `deny` refuses even with it,
+//! `allow` installs without asking. `update` gates too: a new ref is
+//! where new executor code first appears, so a gate on `add` alone
+//! would be governance theater.
 
 use std::process::ExitCode;
 
-use yunta_core::PackLockEntry;
+use yunta_core::{ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest};
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{print_report, run_pack_tests};
@@ -15,6 +20,146 @@ use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, vendor_dir, vendor_tree,
 };
+
+/// The merged `permissions.packs` verdicts, with the layers that
+/// declare each restriction kept by name — a refusal that can't say
+/// *which* config file to change isn't actionable (§6.1's ceiling means
+/// the answer may be a file the user can't even edit).
+struct PackPolicy {
+    /// Non-empty allow-list, with the declaring layer names — `None`
+    /// when no layer restricts publishers (empty = everyone, §6.1).
+    publishers_allow: Option<(Vec<String>, Vec<&'static str>)>,
+    /// The merged (strictest-wins) executor policy; `Prompt` when no
+    /// layer declares one — exactly the pre-DI-32 de facto behavior.
+    executors: PackExecutorPolicy,
+    /// Layers declaring the policy that ended up winning the merge.
+    executors_declared_by: Vec<&'static str>,
+}
+
+fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, ExitCode> {
+    let layers = match crate::project::load_named_layers(cwd) {
+        Ok(layers) => layers,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Err(ExitCode::FAILURE);
+        }
+    };
+    let merged = ConfigLayer::merge_layers(layers.iter().map(|(_, layer)| layer.clone()));
+    let packs = merged
+        .permissions
+        .as_ref()
+        .and_then(|permissions| permissions.packs.as_ref());
+
+    let allow = packs
+        .and_then(|p| p.publishers.as_ref())
+        .map(|p| p.allow.clone())
+        .filter(|allow| !allow.is_empty());
+    let publishers_allow = allow.map(|allow| {
+        let declared_by = layers
+            .iter()
+            .filter(|(_, layer)| {
+                layer
+                    .permissions
+                    .as_ref()
+                    .and_then(|p| p.packs.as_ref())
+                    .and_then(|p| p.publishers.as_ref())
+                    .is_some_and(|p| !p.allow.is_empty())
+            })
+            .map(|(name, _)| *name)
+            .collect();
+        (allow, declared_by)
+    });
+
+    let executors = packs
+        .and_then(|p| p.executors)
+        .unwrap_or(PackExecutorPolicy::Prompt);
+    let executors_declared_by = layers
+        .iter()
+        .filter(|(_, layer)| {
+            layer
+                .permissions
+                .as_ref()
+                .and_then(|p| p.packs.as_ref())
+                .and_then(|p| p.executors)
+                == Some(executors)
+        })
+        .map(|(name, _)| *name)
+        .collect();
+
+    Ok(PackPolicy {
+        publishers_allow,
+        executors,
+        executors_declared_by,
+    })
+}
+
+/// The publisher allow-list gate (DI-32): a non-empty
+/// `permissions.packs.publishers.allow` in the merged config refuses
+/// any publisher outside it, naming the declaring layer(s).
+fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &str) -> Result<(), ExitCode> {
+    let Some((allow, declared_by)) = &policy.publishers_allow else {
+        return Ok(());
+    };
+    if allow.iter().any(|allowed| allowed == publisher) {
+        return Ok(());
+    }
+    eprintln!(
+        "error: publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
+         (declared by the {} config layer{}) — allowed: {}. Add the publisher there, or \
+         install a pack from an allowed publisher.",
+        declared_by.join("/"),
+        if declared_by.len() == 1 { "" } else { "s" },
+        allow.join(", ")
+    );
+    Err(ExitCode::FAILURE)
+}
+
+/// The executor policy gate (DI-32/D72, generalizing T11.5's fixed
+/// `--yes`): `deny` refuses regardless of confirmation — a ceiling a
+/// flag must never override (§6.1) — `prompt` requires `--yes`, `allow`
+/// passes. Only consulted when the manifest actually declares
+/// executors.
+fn enforce_executor_policy(
+    policy: &PackPolicy,
+    manifest: &PackManifest,
+    confirmed: bool,
+    verb: &str,
+) -> Result<(), ExitCode> {
+    if manifest.declares.executors.is_empty() {
+        return Ok(());
+    }
+    match policy.executors {
+        PackExecutorPolicy::Allow => Ok(()),
+        PackExecutorPolicy::Deny => {
+            eprintln!(
+                "error: this pack declares {} executor(s) and `permissions.packs.executors` \
+                 is `deny` (declared by the {} config layer{}) — `--yes` cannot override a \
+                 permissions ceiling (§6.1). Change the policy there, or {verb} a pack \
+                 without executors.",
+                manifest.declares.executors.len(),
+                policy.executors_declared_by.join("/"),
+                if policy.executors_declared_by.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+            );
+            Err(ExitCode::FAILURE)
+        }
+        PackExecutorPolicy::Prompt => {
+            if confirmed {
+                return Ok(());
+            }
+            eprintln!(
+                "error: this pack declares {} executor(s) — executable code, not just \
+                 declarative YAML. Review the inventory above, then re-run with `--yes` to \
+                 confirm the {verb}.",
+                manifest.declares.executors.len()
+            );
+            Err(ExitCode::FAILURE)
+        }
+    }
+}
 
 pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
@@ -61,6 +206,16 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // DI-32: the publisher gate fires before the audit is even printed —
+    // a policy-refused publisher leaves no decision for a human to make.
+    let policy = match load_pack_policy(&cwd) {
+        Ok(policy) => policy,
+        Err(code) => return code,
+    };
+    if let Err(code) = enforce_publisher_allowed(&policy, &manifest.publisher) {
+        return code;
+    }
+
     // §6: "corre el audit... nada ejecuta hasta que el humano vio el
     // inventario" — shown before anything is vendored, let alone run.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
@@ -76,17 +231,12 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     }
     println!();
 
-    // T11.5/§6.3: executors are code, not declarative YAML — installing
-    // them needs an explicit, separate confirmation on top of the audit
-    // above, not just a note nobody has to acknowledge.
-    if !manifest.declares.executors.is_empty() && !confirmed_executors {
-        eprintln!(
-            "error: this pack declares {} executor(s) — executable code, not just declarative \
-             YAML. Review the inventory above, then re-run with `--yes` to confirm installing \
-             it.",
-            manifest.declares.executors.len()
-        );
-        return ExitCode::FAILURE;
+    // T11.5/§6.3 + DI-32: executors are code, not declarative YAML —
+    // the configurable policy decides whether that needs confirmation
+    // (`prompt`, the default), is refused outright (`deny`), or passes
+    // (`allow`).
+    if let Err(code) = enforce_executor_policy(&policy, &manifest, confirmed_executors, "install") {
+        return code;
     }
 
     let commit = match head_commit(clone_dir.path()).await {
@@ -157,7 +307,7 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-pub async fn update(publisher_name: &str, new_ref: &str) -> ExitCode {
+pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -213,6 +363,27 @@ pub async fn update(publisher_name: &str, new_ref: &str) -> ExitCode {
             entry.source, manifest.publisher, manifest.name
         );
         return ExitCode::FAILURE;
+    }
+
+    // DI-32: the same policy gates as `add` — a new ref is where new
+    // executor code first appears, and an allow-list narrowed since the
+    // install must stop pulling from a publisher it no longer trusts.
+    let policy = match load_pack_policy(&cwd) {
+        Ok(policy) => policy,
+        Err(code) => return code,
+    };
+    if let Err(code) = enforce_publisher_allowed(&policy, publisher) {
+        return code;
+    }
+    if !manifest.declares.executors.is_empty() {
+        // The decision being demanded needs the same evidence `add`
+        // shows (§6: "nada ejecuta hasta que el humano vio el
+        // inventario") — printed only when there's a decision to make.
+        print_report(&audit_pack(clone_dir.path(), manifest.clone()));
+        println!();
+    }
+    if let Err(code) = enforce_executor_policy(&policy, &manifest, confirmed_executors, "update") {
+        return code;
     }
 
     let commit = match head_commit(clone_dir.path()).await {

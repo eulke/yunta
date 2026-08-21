@@ -217,6 +217,12 @@ enum PackAction {
         /// `publisher/name`.
         publisher_name: String,
         r#ref: String,
+        /// Confirms updating to a ref that declares executors — same
+        /// gate as `add` (DI-32): a new ref is where new executable
+        /// code first appears. `permissions.packs.executors: deny`
+        /// refuses regardless; `allow` skips the confirmation.
+        #[arg(long)]
+        yes: bool,
     },
     /// Removes a pack's vendored directory and its lock entry.
     Remove {
@@ -307,7 +313,8 @@ async fn main() -> ExitCode {
             PackAction::Update {
                 publisher_name,
                 r#ref,
-            } => commands::pack::update(&publisher_name, &r#ref).await,
+                yes,
+            } => commands::pack::update(&publisher_name, &r#ref, yes).await,
             PackAction::Remove { publisher_name } => commands::pack::remove(&publisher_name),
             PackAction::List => commands::pack::list(),
             PackAction::Audit { publisher_name } => {
