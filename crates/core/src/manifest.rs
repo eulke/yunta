@@ -30,6 +30,23 @@ pub struct FrozenPaths {
     pub worktrees_root: PathBuf,
 }
 
+/// Which pack (and exactly which version of it) a run's top-level
+/// workflow came from (RFC-0002 §7, T11.7) — frozen the same moment
+/// `workflow` itself is: `update`-ing the pack afterward can't touch a
+/// run already born, since resume only ever re-reads this manifest,
+/// never the vendored pack on disk again. `commit` is `None` when the
+/// pack was vendored without an accompanying `yunta.lock` entry (hand-
+/// placed rather than through `pack add`) — `version` alone still
+/// identifies it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackProvenance {
+    pub publisher: String,
+    pub name: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+}
+
 /// Everything a run needs frozen at creation time (Contrato §2.1). The
 /// engine never re-reads workflow, config or prompt files during a run —
 /// resume interprets the run with exactly what it was born with.
@@ -69,6 +86,10 @@ pub struct Manifest {
     /// pre-freeze behavior, so old runs stay resumable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<FrozenPaths>,
+    /// `None` for a repo-origin workflow, or for a manifest written
+    /// before DI-13's pack support existed (tolerant reader, D70).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<PackProvenance>,
 }
 
 impl Manifest {

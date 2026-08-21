@@ -83,6 +83,47 @@ pub fn build_manifest(
         // library callers (tests) on the fallback-to-current-config
         // path, which is also the tolerant reading of old manifests.
         paths: None,
+        pack: pack_provenance(repo, workflow_dir),
+    })
+}
+
+/// T11.7/RFC-0002 §7: which pack (and exactly which version) the
+/// top-level workflow being frozen came from, if any — best-effort,
+/// since this field is provenance for `yunta status`/`receipt`, never
+/// load-bearing for the run's own correctness (that guarantee comes
+/// from `workflow` itself being embedded whole, and from `workflow_hash`
+/// covering it). `None` for a repo-origin workflow, and also whenever
+/// the pack's own files can't be read back at this exact moment — a
+/// self-inconsistent local state (`.yunta/packs/<publisher>/<name>/`
+/// existing without a readable `pack.yaml`) that this function has no
+/// better answer for than omitting provenance rather than failing the
+/// run.
+fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackProvenance> {
+    let crate::catalog::WorkflowOrigin::Pack {
+        publisher,
+        pack_name,
+    } = crate::catalog::origin_of(repo, workflow_dir)
+    else {
+        return None;
+    };
+    let pack_dir = repo.join(".yunta/packs").join(&publisher).join(&pack_name);
+    let manifest_text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
+    let manifest: yunta_core::PackManifest = serde_yaml::from_str(&manifest_text).ok()?;
+
+    let commit = std::fs::read_to_string(repo.join(".yunta/yunta.lock"))
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<yunta_core::PackLock>(&text).ok())
+        .and_then(|lock| {
+            lock.packs
+                .get(&yunta_core::PackLock::key(&publisher, &pack_name))
+                .map(|entry| entry.commit.clone())
+        });
+
+    Some(yunta_core::PackProvenance {
+        publisher,
+        name: pack_name,
+        version: manifest.version,
+        commit,
     })
 }
 

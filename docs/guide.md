@@ -292,6 +292,14 @@ reported with what to add, naming the pack. Nothing here blocks `pack add` or
 `check` — a pack can be installed and configured for later, same as an
 adapter that isn't set up yet doesn't stop `yunta init`.
 
+Starting a run from a pack's own workflow freezes exactly which pack version
+produced it — publisher, name, the pack's own semver, and the exact commit
+`yunta.lock` recorded, all in the run's manifest from the moment it's
+created. `yunta pack update` afterward changes nothing about a run already
+in flight: `resume` only ever re-reads that manifest, never the vendored
+pack on disk again, the same immutability every other frozen field
+(`workflow`, prompts, config) already has.
+
 ## Where the rest lives
 
 This guide covers what's needed to write and reason about a workflow. The full

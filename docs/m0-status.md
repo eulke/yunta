@@ -3764,3 +3764,74 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     citando los tres con mensajes accionables; `doctor` sobre un pack
     sin `requires` pendiente no menciona "requires" en absoluto y
     sigue en verde.
+- [x] **T11.7 — el manifest del run congela pack+versión usados.**
+      Nueva `yunta_core::PackProvenance{publisher, name, version,
+      commit}` y campo `Manifest.pack: Option<PackProvenance>`
+      (`Option`/`skip_serializing_if`, mismo patrón tolerante que
+      `paths: Option<FrozenPaths>` de DI-07 — un manifest viejo sin el
+      campo sigue leyendo bien, sin bump de `MANIFEST_SCHEMA_VERSION`).
+      `build_manifest` lo llena con una función nueva, puramente
+      best-effort (`pack_provenance`): usa `catalog::origin_of(repo,
+      workflow_dir)` — la misma función de T11.3, que no distingue
+      entre un path de archivo y uno de directorio, así que se
+      reutiliza sin cambios — para saber si el workflow de tope viene
+      de un pack; si es así, lee el `pack.yaml` de ese pack para
+      `version` y el `yunta.lock` del repo para el `commit` fijado
+      (`None` si no hay entrada de lock, p.ej. un pack vendoreado a
+      mano). Cualquier fallo de lectura/parseo devuelve `None` en vez
+      de fallar el `Result` de `build_manifest` — este campo es
+      provenance para `status`/`receipt`, nunca la garantía de
+      inmutabilidad en sí (esa ya la da que `workflow` completo viaja
+      embebido dentro del propio manifest, más `workflow_hash`
+      cubriéndolo).
+  - **`build_manifest` no cambió de firma** — agregar un parámetro
+    nuevo hubiera forzado tocar los ~50 call sites de tests que ya
+    existen en el workspace (una señal exacta de "tarea mal cortada",
+    CLAUDE.md); en cambio `pack_provenance` deriva todo de los dos
+    parámetros que la función ya recibía (`workflow_dir`, `repo`), cero
+    superficie nueva para quien ya la llama.
+  - **La garantía de "runs en curso no ven updates" ya existía
+    estructuralmente** desde T1.4 (M-0): `resume` (`crates/cli/src/
+    commands/resume.rs`) sólo relee `manifest.yaml` del disco y nunca
+    vuelve a resolver el nombre del workflow contra el catálogo — este
+    ítem no tuvo que construir esa propiedad, sólo verificarla
+    explícitamente contra un pack de verdad (nadie lo había ejercitado
+    end-to-end con packs hasta ahora) y sumarle el campo de provenance
+    que la hace visible/auditable en el manifest en vez de sólo
+    implícita en el hecho de que el `Workflow` entero está embebido.
+  - **Fuera de alcance deliberado**: mostrar `manifest.pack` en `yunta
+    status`/`receipt` — el campo ya es legible directamente del
+    `manifest.yaml` de cualquier run, y agregar superficie de
+    presentación nueva no lo pedía el criterio de aceptación; queda
+    para quien lo necesite (probablemente `receipt`, cuando el recibo
+    quiera citar de qué pack salió un workflow).
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/pack_provenance.rs`
+    (4 tests) — workflow de origen repo no congela provenance; workflow
+    de pack congela publisher/name/version correctamente; con una
+    entrada de `yunta.lock` presente también congela el commit exacto;
+    un pack sin `pack.yaml` legible (directorio existe, manifest no)
+    congela `None` en vez de fallar la creación del run.
+    `crates/cli/tests/pack_provenance_cmd.rs` (1 test E2E contra el
+    binario real, el criterio literal de la tarea) — se instala un pack
+    v1, se corre `acme/review` hasta que una re-ruta agotada lo pausa,
+    se verifica que el manifest ya tiene `pack: {publisher, name,
+    version, commit}` congelado; se actualiza el pack a v2 con un
+    `fix-lint` saboteador (`false` en vez de `touch fixed.txt`)
+    mientras el run sigue pausado; se confirma que `manifest.yaml` en
+    disco es byte-a-byte idéntico antes y después del `update`; se
+    resuelve la re-ruta y el run **termina en verde** — si `resume`
+    hubiera vuelto a leer el pack actualizado, el nodo saboteador de v2
+    lo habría hecho fallar.
+
+## M11 cerrado
+
+Los siete ítems de M11 (T11.1–T11.7) están completos: `pack.yaml` parsea,
+`yunta pack add/remove/list/update` vendorea y lockea, la resolución
+namespaced (`publisher/name`) funciona en `run`/`check`/`list` con el shadow
+de repo y el rechazo cross-pack, `yunta pack audit` da inventario exhaustivo
+nunca veredicto, `declares` es un techo real que `check` hace cumplir (con
+gate de confirmación para executors en `add`), `requires` se valida contra
+la config local vía `doctor`, y el manifest del run congela pack+versión de
+forma verificada end-to-end. M11 requería M1+M6 (plan de implementación) —
+ambos ya cerrados de antes; con M11 cerrado, M12 (distribución pública)
+puede arrancar en cuanto se decida iniciarlo.
