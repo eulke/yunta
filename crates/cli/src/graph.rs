@@ -1,9 +1,9 @@
-//! `yunta graph <workflow> [--run <id>]` (T7.8 recorte, D75): pure
-//! derivation of the DAG as Mermaid — `depends_on` edges, `on_failure.goto`
-//! re-route edges visually differentiated (dashed) from them, and, given
-//! `--run`, each node annotated with its derived state (§8.5,
-//! `yunta_engine::derive`). No agent involved in producing the graph
-//! itself, same shape as `status`.
+//! `yunta graph <workflow> [--run <id>]`: pure derivation of the DAG as
+//! Mermaid — `depends_on` edges, `on_failure.goto` re-route edges
+//! visually differentiated (dashed) from them, and, given `--run`,
+//! each node annotated with its derived state (`yunta_engine::derive`).
+//! No agent involved in producing the graph itself, same shape as
+//! `status`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -55,8 +55,8 @@ pub fn graph(workflow_path: &Path, run_id: Option<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Derives run state from the event log (T2.3's `yunta_engine::derive`)
-/// and reduces it to one display label per node — the same source
+/// Derives run state from the event log (`yunta_engine::derive`) and
+/// reduces it to one display label per node — the same source
 /// `status` reads, just formatted for a Mermaid node instead of a list.
 fn derive_labels(project: &project::Project, run_id: &str) -> Result<Labels, ExitCode> {
     let storage = Storage::open(&project.storage_path).map_err(|e| {
@@ -90,8 +90,8 @@ fn node_state_label(node: &NodeState) -> String {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
         NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
         NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
-        // §8.5/D75: a run paused on a gate shows its waiting node
-        // distinctly — with the forge handle when there is one.
+        // A run paused on a gate shows its waiting node distinctly —
+        // with the forge handle when there is one.
         NodeState::Waiting { external_ref } => match external_ref {
             Some(external_ref) => format!("waiting — {external_ref}"),
             None => "waiting".to_string(),
@@ -102,7 +102,7 @@ fn node_state_label(node: &NodeState) -> String {
 /// Renders the workflow's DAG as a Mermaid `graph TD`: one declaration per
 /// node (labeled with its derived state when `labels` is given), then
 /// `depends_on` edges as plain arrows and `on_failure.goto` edges as
-/// dashed arrows — the two must never look alike, per D75.
+/// dashed arrows — the two must never look alike.
 fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
     let mut out = String::from("graph TD\n");
 

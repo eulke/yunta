@@ -1,8 +1,8 @@
-//! Promotion (§10.2, D22, T9.2) at the engine boundary: the escalation
+//! Promotion at the engine boundary: the escalation
 //! at exhausted re-routes offers a `promote` option exactly when a
-//! later mode exists (§10.1's own declaration-order ladder), and
+//! later mode exists (the modes' declaration order forms a ladder), and
 //! choosing it closes *this* run for good — `run_finished` with
-//! `terminal_state: Promoted`, never reopened (I3) — after recording
+//! `terminal_state: Promoted`, never reopened — after recording
 //! `promotion_signaled` on the same log. Actually creating and running
 //! the successor is `yunta-cli`'s own job (`commands/promote.rs`) —
 //! `execute_run` alone only has an *already-prepared* worktree, never
@@ -133,7 +133,7 @@ async fn run_with_mode(
 }
 
 /// Same, but with engine findings planted on the log after creation (the
-/// DI-10 scenario: a D80 denial lives only in the parent's events), and
+/// scenario where a scope-expansion denial lives only in the parent's events), and
 /// the run dir returned so tests can inspect derived artifacts.
 async fn run_with_mode_and_findings(
     workflow_yaml: &str,
@@ -236,8 +236,8 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
         Some(yunta_core::events::TerminalState::Promoted)
     );
 
-    // §10.2: promoting closes the run for good — no further events after
-    // run_finished (mirrors T7.7's own "nothing reopens a finished run").
+    // Promoting closes the run for good — no further events after
+    // run_finished (nothing reopens a finished run).
     let last = events.last().unwrap();
     assert!(matches!(last.payload, EventPayload::RunFinished(_)));
 
@@ -276,7 +276,7 @@ async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
     );
 }
 
-// --- DI-10: findings survive promotion ---------------------------------------
+// --- findings survive promotion ---------------------------------------
 
 fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding {
     yunta_core::events::Finding {
@@ -284,7 +284,7 @@ fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding
         severity: yunta_core::events::FindingSeverity::Major,
         title: title.to_string(),
         location: location.to_string(),
-        detail: "scope expansion denied by a human (D80)".to_string(),
+        detail: "scope expansion denied by a human".to_string(),
         proposed_criterion: None,
     }
 }
@@ -320,7 +320,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
     let file: yunta_core::events::FindingsFile = serde_yaml::from_slice(&bytes).unwrap();
     assert!(
         yunta_engine::register_findings(&file).is_empty(),
-        "the derived file must satisfy the T5.12 parser"
+        "the derived file must satisfy the findings-file parser"
     );
     assert_eq!(file.findings.len(), 2, "duplicates collapse: {file:?}");
     assert_eq!(file.findings[0].id, "scope-expansion-T001-1");

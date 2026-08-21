@@ -1,9 +1,9 @@
-//! The task cycle (T5.2, Contrato §5.2) — the part of the ledger cycle
+//! The task cycle — the part of the ledger cycle
 //! that actually runs a task through pre-check, dispatch, post-check and
-//! scope check. `yunta_engine::register` (T5.1) validates a ledger before
+//! scope check. `yunta_engine::register` validates a ledger before
 //! any of this; this module is what happens once a task is `ready`.
 //!
-//! The engine, never the agent, decides `done` (I5): [`run_task`] always
+//! The engine, never the agent, decides `done`: [`run_task`] always
 //! re-runs every criterion after dispatch, regardless of what the
 //! session reported — an agent that claims success with red criteria
 //! still leaves the task not-done.
@@ -60,16 +60,16 @@ pub struct CriterionRun {
     pub cmd: String,
     pub exit_code: i32,
     pub is_guard: bool,
-    /// Whether this result came from §5.4's memoization cache instead of
+    /// Whether this result came from the memoization cache instead of
     /// an actual execution — `criteria_checked` records it so recibo/replay
     /// show what ran versus what was reused, nothing verified in silence.
     pub reused: bool,
-    /// Wall-clock milliseconds the execution took (DI-15) — what D62's
+    /// Wall-clock milliseconds the execution took — what the
     /// learned ordering feeds on. `None` when `reused` (nothing ran).
     pub duration_ms: Option<u64>,
 }
 
-/// Per-run memoization cache (§5.4): a criterion's result is reused when
+/// Per-run memoization cache: a criterion's result is reused when
 /// its command, the working tree's content, and the resolved config are
 /// all unchanged since the last time it ran *in this run*. Never
 /// cross-run — a fresh `Memo` per `execute_run` call is correct, not a
@@ -77,13 +77,13 @@ pub struct CriterionRun {
 /// once more than strictly necessary, which is safe (over-verifying),
 /// unlike a stale cross-run cache (which would risk under-verifying).
 ///
-/// The full key the Contrato names is `cmd + tree_hash + declared env +
+/// The full key is `cmd + tree_hash + declared env +
 /// resolved config` — `declared env` drops out here because criteria
-/// have no `env:` field in this schema recorte (nothing to declare yet).
+/// have no `env:` field in the schema yet (nothing to declare yet).
 pub struct Memo {
     config_hash: String,
     cache: Mutex<HashMap<String, i32>>,
-    /// DI-15: observed wall-clock durations per criterion command, this
+    /// Observed wall-clock durations per criterion command, this
     /// invocation only — the same lifetime discipline as the result
     /// cache above (a resume starts cold and re-learns, which only
     /// costs one declared-order pass). Keyed by the bare command, not
@@ -136,7 +136,7 @@ impl Memo {
     }
 }
 
-/// A fingerprint of `cwd`'s current content (§5.4): the commit it's on,
+/// A fingerprint of `cwd`'s current content: the commit it's on,
 /// its full diff against that commit (tracked changes), and every
 /// untracked file's own content hash — conservative on purpose. Missing
 /// an untracked file's content from the fingerprint would let two
@@ -183,7 +183,7 @@ async fn tree_hash(cwd: &Path) -> Result<String, TaskCycleError> {
     ))
 }
 
-/// The pre-check's verdict (§5.2 step 2): "esta fase valida al
+/// The pre-check's verdict: "esta fase valida al
 /// validador" — a non-guard criterion that already passes, or a guard
 /// that's already red, means the criteria themselves are wrong, not that
 /// the (not-yet-started) work is wrong.
@@ -203,15 +203,15 @@ pub enum DispatchOutcome {
         message: String,
         retryable: bool,
     },
-    /// No terminal event at all (O2) — the engine synthesizes this, the
+    /// No terminal event at all — the engine synthesizes this, the
     /// adapter never emits it.
     Crashed,
-    /// DI-11: the dispatch's own `CancellationToken` fired — a
+    /// The dispatch's own `CancellationToken` fired — a
     /// `join: any` sibling won, or the user cancelled the run. The
     /// session was cut (interrupt→kill); the *caller* decides what the
     /// cancellation means, because only it knows which token fired.
     Cancelled,
-    /// The engine cut the session via `interrupt` → `kill` (T3.3, O4):
+    /// The engine cut the session via `interrupt` → `kill`:
     /// the token count from `Usage` events or the wall-clock timeout
     /// demanded it, independent of whether the adapter itself honored
     /// `SessionRequest.budget`.
@@ -229,11 +229,11 @@ pub struct AttemptRecord {
     pub post_check: Vec<CriterionRun>,
     pub scope: ScopeCheckResult,
     pub succeeded: bool,
-    /// §6.2/D73/T5.11: the agent's own expansion request this attempt, if
+    /// The agent's own expansion request this attempt, if
     /// it wrote one, and what the engine decided — `None` when no request
     /// file was found, the ordinary case. The caller (`loop_exec.rs`) owns
     /// emitting `scope_expansion_requested`/`granted`/`denied` and the
-    /// D80 finding conversion from this; `run_task` only decides and
+    /// finding conversion from this; `run_task` only decides and
     /// widens `scope` for this attempt's own check when granted.
     pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
 }
@@ -244,7 +244,7 @@ pub enum TaskOutcome {
     Blocked {
         reason: String,
     },
-    /// DI-11: the cycle's cancellation token fired mid-attempt — the
+    /// The cycle's cancellation token fired mid-attempt — the
     /// session was cut (interrupt→kill) and the cycle stopped without a
     /// verdict. What that means for the task's status is the caller's
     /// call, not this cycle's.
@@ -257,19 +257,19 @@ pub struct TaskCycleReport {
     pub pre_check: Vec<CriterionRun>,
     pub attempts: Vec<AttemptRecord>,
     pub outcome: TaskOutcome,
-    /// `true` when any attempt's scope-expansion request escalated (§6.2:
+    /// `true` when any attempt's scope-expansion request escalated (
     /// `ask` mode, or `max_per_run` already exhausted) — neither is a
     /// verdict `run_task` can render alone, so the cycle stops retrying
-    /// and the caller (`loop_exec.rs`, DI-01) puts the decision to
+    /// and the caller (`loop_exec.rs`) puts the decision to
     /// `HumanInteraction` — pausing only when no live surface answers —
     /// rather than burning further sessions while one is owed.
     pub needs_human_decision: bool,
 }
 
-/// Default retry cap (§5.2: "cap configurable, default 2").
+/// Default retry cap ("cap configurable, default 2").
 pub const DEFAULT_MAX_RETRIES: u32 = 2;
 
-/// Runs one criterion command, measuring its wall-clock cost (DI-15) —
+/// Runs one criterion command, measuring its wall-clock cost —
 /// an observed fact about an external process, same standing as its
 /// exit code; the injected `Clock` governs event timestamps and derived
 /// state, neither of which this feeds.
@@ -295,9 +295,9 @@ async fn run_criterion(
 }
 
 /// Tree hash computed once per call and shared across every criterion in
-/// it (§5.4) — criteria are read-only, so the tree can't change between
+/// it — criteria are read-only, so the tree can't change between
 /// them, and one `git` round-trip beats N. `criteria` arrives already in
-/// the order the caller wants executed (declared, or DI-15's learned
+/// the order the caller wants executed (declared, or the learned
 /// order) — this function only runs and records.
 async fn run_all_criteria(
     task_id: &TaskId,
@@ -328,10 +328,10 @@ async fn run_all_criteria(
     Ok(runs)
 }
 
-/// Pre-check in rojo (§5.2 step 2): every non-`guard` criterion must
+/// Pre-check in rojo: every non-`guard` criterion must
 /// fail, every `guard` must pass. Runs every criterion regardless — the
 /// report should show all of them, not stop at the first surprise.
-/// Execution order is D62's learned one (DI-15): ascending historical
+/// Execution order is the learned one: ascending historical
 /// median duration, criteria without history last in declared order —
 /// the fast, likely-to-fail evidence lands first while the verdict
 /// (computed over the complete set) stays order-independent by
@@ -366,7 +366,7 @@ pub async fn pre_check(
     Ok((runs, outcome))
 }
 
-/// Post-check (§5.2 step 4): every criterion, guard or not, must now
+/// Post-check: every criterion, guard or not, must now
 /// pass.
 pub async fn post_check(
     task: &Task,
@@ -376,21 +376,21 @@ pub async fn post_check(
     run_all_criteria(&task.id, &task.criteria, cwd, memo).await
 }
 
-/// Everything about *how* one node's sessions open (DI-13), resolved
+/// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
 /// skills, the adapter's opaque settings, and the env — which is ONLY
 /// the declared secret names present in the engine's own environment
-/// (I12: values never touch the log, nothing undeclared leaks).
+/// (values never touch the log, nothing undeclared leaks).
 #[derive(Clone, Default)]
 pub struct SessionSetup {
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, String>,
-    /// T8.2: the per-run MCP host plus the loop node's own id, present
+    /// The per-run MCP host plus the loop node's own id, present
     /// ONLY when the resolved adapter declared `run_tools` (the caller
     /// gates on the capability — this module never re-checks it). Each
-    /// task attempt opens its own fresh listener+credential from it
-    /// (§6.5: per session, never reused).
+    /// task attempt opens its own fresh listener+credential from it —
+    /// per session, never reused.
     pub run_tools: Option<(
         std::sync::Arc<crate::run_tools::RunToolsHost>,
         yunta_core::NodeId,
@@ -398,7 +398,7 @@ pub struct SessionSetup {
 }
 
 impl SessionSetup {
-    /// The env a session may see (I12): declared names, present values.
+    /// The env a session may see: declared names, present values.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
     ) -> std::collections::HashMap<String, String> {
@@ -410,7 +410,7 @@ impl SessionSetup {
     }
 }
 
-/// What a session dispatch needs from its surrounding run (DI-08/DI-09),
+/// What a session dispatch needs from its surrounding run,
 /// abstracted so `run_task` stays callable without a full run context
 /// (its own integration tests): append the session's audit events, and
 /// expose the process registry for pgid bookkeeping. `RunCtx` is the one
@@ -420,7 +420,7 @@ pub trait SessionObserver: Sync {
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
 }
 
-/// The only shape of a note the log ever carries (I12/O3): its size and
+/// The only shape of a note the log ever carries: its size and
 /// a content-hash prefix — enough to audit a claimed note against,
 /// never enough to reconstruct or leak it.
 fn note_summary(text: &str) -> String {
@@ -436,13 +436,13 @@ const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 
 /// Spawns one session from `request`, drains it to a terminal outcome
 /// and reports the tokens it consumed. Shared by the task cycle and by
-/// prompt-node execution (T4.1): the request differs, the enforcement
+/// prompt-node execution: the request differs, the enforcement
 /// does not.
 ///
-/// O4: the adapter passes `request.budget` along if its CLI supports it,
+/// The adapter passes `request.budget` along if its CLI supports it,
 /// but enforcement is the engine's job either way — this counts `Usage`
 /// and races the wall-clock deadline independent of that, and cuts the
-/// session with `interrupt` → grace → `kill` (A4) when either budget is
+/// session with `interrupt` → grace → `kill` when either budget is
 /// exceeded.
 pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
@@ -453,18 +453,18 @@ pub(crate) async fn dispatch_session(
 ) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
-    // DI-23: `Some` continues an interrupted conversation instead of
+    // `Some` continues an interrupted conversation instead of
     // opening a new one — the caller already verified the capability.
     let mut session = match resume {
         Some(session_id) => adapter.resume(session_id, request).await?,
         None => adapter.spawn(request).await?,
     };
-    // DI-08: on the map for a separate `yunta cancel` while it lives.
+    // On the map for a separate `yunta cancel` while it lives.
     let _pgid_registration = crate::process_registry::register(
         audit.and_then(|(observer, _)| observer.process_registry()),
         session.pgid(),
     );
-    // DI-09: the session's own audit trail (`agent_session_opened` /
+    // The session's own audit trail (`agent_session_opened` /
     // `agent_message`), emitted as the stream arrives so a concurrent
     // `status` sees the live session. A failed append warns instead of
     // aborting the stream — the run's next mandatory event hits the same
@@ -560,7 +560,7 @@ pub(crate) async fn dispatch_session(
                             input_tokens: None,
                             output_tokens: None,
                             cached_input_tokens: None,
-                            // I12/O3: a mechanical size+digest summary,
+                            // A mechanical size+digest summary,
                             // never the content — the log must not be
                             // able to carry a secret the note contained.
                             text: Some(note_summary(&text)),
@@ -618,7 +618,7 @@ pub(crate) async fn dispatch_session(
     } // the stream's borrow of `session` ends here — interrupt/kill need &mut self too.
 
     if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
-        // A4: never leave anything running. Ordered termination first,
+        // Never leave anything running: ordered termination first,
         // then forceful — mock has nothing to distinguish them, but a
         // real adapter's session may still close cleanly on interrupt.
         let _ = session.interrupt().await;
@@ -633,7 +633,7 @@ pub(crate) async fn dispatch_session(
     Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
 }
 
-/// The permission/scope policy a task cycle enforces (§6.1/§6.2):
+/// The permission/scope policy a task cycle enforces:
 /// `permissions` is the merged model every criterion command is checked
 /// against before anything runs — a violating criterion blocks the whole
 /// task citing the rule (a policy outcome in the report, never an engine
@@ -641,12 +641,12 @@ pub(crate) async fn dispatch_session(
 /// standalone [`pre_check`]/[`post_check`] helpers stay pure building
 /// blocks. `profile` is the node's own rung of the same permission
 /// ladder, forwarded to every session this cycle opens. `scope_expansion`
-/// carries the loop node's own §6.2 settings (absent means the schema's
+/// carries the loop node's own settings (absent means the schema's
 /// own default, `deny`); `grants` is the batch's shared
-/// [`crate::scope_expansion::GrantLedger`] (DI-16) — `max_per_run` is
+/// [`crate::scope_expansion::GrantLedger`] — `max_per_run` is
 /// run-scoped, not task-scoped, and the ledger's atomic cap window is
 /// what makes the count exact when several batch members request at
-/// once. `already_granted_paths` (DI-01) are the paths every *prior*
+/// once. `already_granted_paths` are the paths every *prior*
 /// `scope_expansion_granted` on the log authorized for this task — a
 /// human grant lands between attempts, so the retry's effective scope
 /// must include them from the very first diff it evaluates.
@@ -670,11 +670,11 @@ pub struct AttemptEnv<'a> {
     pub memo: &'a Memo,
 }
 
-/// Runs a task through the full cycle (§5.2): pre-check once, then
+/// Runs a task through the full cycle: pre-check once, then
 /// dispatch → post-check → scope-check per attempt, retrying with a
 /// fresh session up to `max_retries` times before `Blocked`.
 ///
-/// Never trusts the session's own outcome (I5): `succeeded` on each
+/// Never trusts the session's own outcome: `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
 /// diff, regardless of whether the session reported `Completed`.
 pub async fn run_task(
@@ -735,7 +735,7 @@ pub async fn run_task(
 
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
-        // T8.2/§6.5: a fresh listener + credential per attempt — held
+        // A fresh listener + credential per attempt — held
         // across the dispatch, dead with it. A bind failure degrades
         // (the session runs without run tools) rather than sinking the
         // attempt: the tools are an offer, the task's own criteria are
@@ -755,7 +755,7 @@ pub async fn run_task(
             .ok(),
             None => None,
         };
-        // §5.2 step 3: minimal brief — the node's instruction plus which
+        // Minimal brief — the node's instruction plus which
         // task is this session's, never the plan as prose. Every attempt
         // is a fresh session with the same request.
         let request = SessionRequest {
@@ -781,7 +781,7 @@ pub async fn run_task(
                 source,
             })?;
 
-        // DI-11: a cancelled dispatch ends the cycle right here — no
+        // A cancelled dispatch ends the cycle right here — no
         // post-check, no verdict, no retry. The attempt is on record;
         // what the cancellation means for the task is the caller's
         // decision, because only it knows which token fired.
@@ -804,7 +804,7 @@ pub async fn run_task(
             });
         }
 
-        // §6.2: the agent never widens its own scope — it may have left a
+        // The agent never widens its own scope — it may have left a
         // request behind, which this attempt's own worktree is the only
         // place to find (a fresh session per attempt, same cwd).
         let expansion_outcome =
@@ -855,7 +855,7 @@ pub async fn run_task(
             .collect();
 
         let post_runs = post_check(task, cwd, memo).await?;
-        // §6.2: "el diff final se evalúa contra scope declarado más
+        // "el diff final se evalúa contra scope declarado más
         // ampliaciones autorizadas" — never against a denied or escalated
         // request's paths.
         let scope = scope_check(cwd, &effective_scope).await?;

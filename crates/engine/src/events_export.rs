@@ -1,4 +1,4 @@
-//! `events.jsonl` export (§8.3, §3.1, T5.8) — at close, the engine writes
+//! `events.jsonl` export — at close, the engine writes
 //! the run's whole event log to `run.dir` as JSON Lines: the archived run
 //! is then self-contained, readable years later independent of
 //! `storage.retention_days` deleting the DB's own copy.
@@ -6,11 +6,10 @@
 //! One JSON object per line, in `seq` order — the exact same [`Event`]
 //! shape the DB stores (`EventPayload`'s own tag carries `kind`; no
 //! separate envelope). This is deliberately the closest thing to "the
-//! bytes as stored": §3.1's schema-evolution rule treats an exported
-//! JSONL as unmigratable once it leaves the system, so read-side
-//! normalization (not a rewritten export) is what has to carry
-//! compatibility for it — this module only ever writes the current
-//! in-memory shape.
+//! bytes as stored": an exported JSONL is treated as unmigratable once
+//! it leaves the system, so read-side normalization (not a rewritten
+//! export) is what has to carry compatibility for it — this module
+//! only ever writes the current in-memory shape.
 
 use yunta_core::events::Event;
 

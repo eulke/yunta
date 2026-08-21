@@ -1,6 +1,6 @@
-//! `yunta run <workflow>` (T7.1): resolve config, check, freeze the
-//! manifest, prepare the run's isolated working tree (T4.2, §7.3),
-//! create the run and execute it there.
+//! `yunta run <workflow>`: resolve config, check, freeze the manifest,
+//! prepare the run's isolated working tree, create the run and execute
+//! it there.
 //!
 //! The run id comes from the wall clock + pid — the shell may use
 //! entropy, the engine never does.
@@ -20,8 +20,8 @@ use crate::project;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
-/// `inputs:` (T1.5, §2.3) — this function only enforces the *syntax* of
-/// the flag (exactly one `=`, non-empty name); everything about whether
+/// `inputs:` — this function only enforces the *syntax* of the flag
+/// (exactly one `=`, non-empty name); everything about whether
 /// a name is declared, required, or well-typed is `resolve_inputs`'s
 /// job, not this one's, so the two error paths never disagree about who
 /// owns which rule.
@@ -41,10 +41,10 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
     Ok(inputs)
 }
 
-/// `--adapter <name>` (T7.1) picks which adapter a run's sessions use.
-/// `mock` is a legitimate adapter id (Spec Adapter §6) but its fixtures
-/// are `yunta test`'s territory (`docs/m0-status.md`'s T6.1 entry): a
-/// real `run` has no `.yunta/tests/` case to script it from, so naming
+/// `--adapter <name>` picks which adapter a run's sessions use. `mock`
+/// is a legitimate adapter id but its fixtures are `yunta test`'s
+/// territory: a real `run` has no `.yunta/tests/` case to script it
+/// from, so naming
 /// it here degrades explicitly instead of spawning a mock with nothing
 /// to simulate. Any other name must be one `real_adapters` would
 /// actually construct — `claude-code` and `codex`, today.
@@ -74,12 +74,11 @@ fn validate_adapter_flag(
     Ok(())
 }
 
-/// `run --follow` (§8.5): a background task that re-reads the run's own
-/// event log every 500ms and prints `progress_summary` whenever it
-/// changes. §8.5's own text says "consumiendo el stream de eventos" —
-/// this recorte polls rather than subscribing to a real push stream,
-/// since `yunta-storage` exposes no such subscription mechanism (D53:
-/// a ~5-method interface, on purpose); the *content* printed is
+/// `run --follow`: a background task that re-reads the run's own event
+/// log every 500ms and prints `progress_summary` whenever it changes.
+/// This polls rather than subscribing to a real push stream, since
+/// `yunta-storage` exposes no such subscription mechanism — a
+/// deliberately narrow, ~5-method interface; the *content* printed is
 /// identical either way, only the delivery latency (bounded by the
 /// poll interval) differs from a true stream. Opens its own `Storage`
 /// handle onto the same SQLite file — WAL mode (already set by
@@ -173,8 +172,8 @@ pub async fn run(
     // A bare catalog name (no `.yaml`/`.yml` extension — every real
     // workflow file in this codebase's own convention has one) resolves
     // through the repo catalog, then a publisher's vendored packs
-    // (RFC-0002 §5, T11.3: `yunta run acme/review`); anything with an
-    // extension stays a literal path, today's behavior unchanged.
+    // (e.g. `yunta run acme/review`); anything with an extension stays
+    // a literal path, today's behavior unchanged.
     let workflow_path: std::path::PathBuf = if workflow_path.extension().is_none() {
         match yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy()) {
             Ok(resolved) => resolved.path,
@@ -231,9 +230,9 @@ pub async fn run(
             return ExitCode::FAILURE;
         }
     };
-    // DI-07/T2.4: freeze the resolved state roots, absolute, so a later
-    // `paths.*` change can never lose this run — `resume`/`status` read
-    // these from the manifest, not the then-current config.
+    // Freeze the resolved state roots, absolute, so a later `paths.*`
+    // change can never lose this run — `resume`/`status` read these
+    // from the manifest, not the then-current config.
     manifest.paths = Some(yunta_core::FrozenPaths {
         runs_root: std::path::absolute(&project.runs_root)
             .unwrap_or_else(|_| project.runs_root.clone()),
@@ -241,14 +240,14 @@ pub async fn run(
             .unwrap_or_else(|_| project.worktrees_root.clone()),
     });
 
-    // §8.6: informative, never blocking — the history a run's own log
-    // will later join once it finishes.
+    // Informative, never blocking — the history a run's own log will
+    // later join once it finishes.
     let history = super::stats::collect_history(&project, &storage, &workflow.name);
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
         println!("{}", super::stats::format_estimation_line(estimation));
     }
-    // §8.6/DI-05: budget-vs-p90, informative and never blocking.
+    // Budget-vs-p90, informative and never blocking.
     if let Some(warning) = yunta_engine::budget_p90_warning(
         manifest
             .config
@@ -260,10 +259,9 @@ pub async fn run(
         println!("{warning}");
     }
 
-    // §8.3/DI-05: a soft budget, not a safety limit — best-effort by
-    // design (two simultaneous `yunta run` invocations can both pass the
-    // count), checked before anything is created so the refusal costs
-    // nothing.
+    // A soft budget, not a safety limit — best-effort by design (two
+    // simultaneous `yunta run` invocations can both pass the count),
+    // checked before anything is created so the refusal costs nothing.
     if let Some(cap) = manifest
         .config
         .limits
@@ -321,11 +319,11 @@ pub async fn run(
 
     let clock = SystemClock;
 
-    // §10.1/D44: an explicit `--mode` is used as given (`create_run`
-    // itself refuses an unknown name); omitted with `modes:` declared
-    // defaults to the *first* declared mode — promotion (§10.2) only
-    // ever escalates forward, so starting at the floor is the one
-    // default that can never need walking back. A workflow with no
+    // An explicit `--mode` is used as given (`create_run` itself
+    // refuses an unknown name); omitted with `modes:` declared
+    // defaults to the *first* declared mode — promotion only ever
+    // escalates forward, so starting at the floor is the one default
+    // that can never need walking back. A workflow with no
     // `modes:` at all keeps running everything, unaffected.
     let resolved_mode = mode.map(str::to_string).unwrap_or_else(|| {
         manifest
@@ -356,8 +354,8 @@ pub async fn run(
     };
     println!("run {run_id}: created at {}", run_dir.display());
 
-    // M8/D101: `run_workflow`'s own async pattern — create synchronously
-    // (fast, no agent I/O yet), then hand off to a fully independent
+    // `run_workflow`'s own async pattern — create synchronously (fast,
+    // no agent I/O yet), then hand off to a fully independent
     // `yunta resume` and return.
     if detach {
         if let Err(e) = super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd) {
@@ -400,10 +398,10 @@ pub async fn run(
 
     match outcome {
         Ok(report) => {
-            // §10.2/T9.2: chases every `Promoted` terminal to its actual
-            // end before anything downstream (release, report) looks at
-            // it — see `promote.rs`'s own doc comment for why this can't
-            // happen inside `execute_run` itself.
+            // Chases every `Promoted` terminal to its actual end before
+            // anything downstream (release, report) looks at it — see
+            // `promote.rs`'s own doc comment for why this can't happen
+            // inside `execute_run` itself.
             let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
                 &super::promote::PromotionEnv {
                     cwd: &cwd,
@@ -429,9 +427,9 @@ pub async fn run(
             // Only a *finished* run releases isolation `none`'s lock — a
             // paused run expects a future `resume` on the same checkout,
             // which is the same logical run, not a second concurrent one.
-            // DI-08: a user cancellation also releases `none`'s lock —
-            // the engine process is exiting, and the register's own
-            // design says a Ctrl-C leaves nothing held.
+            // A user cancellation also releases `none`'s lock — the
+            // engine process is exiting, and a Ctrl-C is designed to
+            // leave nothing held.
             if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
                 if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
                     eprintln!("error: {e}");

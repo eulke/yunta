@@ -3,7 +3,7 @@ fn exposes_crate_identity() {
     assert_eq!(yunta_core::CRATE_NAME, "yunta-core");
 }
 
-// --- DI-13: the reference YAMLs are real fixtures (T1.1/T1.2's ✓) ------------
+// --- The reference YAMLs are real fixtures -----------------------------------
 
 #[test]
 fn the_reference_config_parses_and_round_trips() {
@@ -129,7 +129,7 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
 
 #[test]
 fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
-    // T10.5/D56: "candidatos desde los knowledge/ de los repos → gate
+    // "candidatos desde los knowledge/ de los repos → gate
     // con assignee curador → nueva versión del pack" — a plain
     // workflow, no engine mechanism of its own.
     let yaml = include_str!("fixtures/promote-knowledge.yaml");
@@ -187,7 +187,7 @@ nodes:
     assert_eq!(*isolation, yunta_core::WorkflowIsolation::Inherit);
 }
 
-// --- DI-26/D108: cross-run artifact mounts -----------------------------------
+// --- Cross-run artifact mounts ------------------------------------------------
 
 #[test]
 fn workflow_node_mounts_parse_and_round_trip() {
@@ -218,7 +218,7 @@ nodes:
 
 #[test]
 fn context_artifact_without_node_parses_and_round_trips() {
-    // D108: the node-less form — "an artifact of this run's dir, whoever
+    // The node-less form — "an artifact of this run's dir, whoever
     // produced it, a mounted one included" — is what keeps a catalog
     // child parametric: it never has to name a producer it doesn't have.
     let yaml = r#"
@@ -242,7 +242,7 @@ nodes:
     assert_eq!(workflow, reparsed);
 }
 
-// --- T8.2/D49: `coordination:` on parallel groups ----------------------------
+// --- `coordination:` on parallel groups ---------------------------------------
 
 #[test]
 fn parallel_coordination_parses_defaults_independent_and_round_trips() {
@@ -271,7 +271,7 @@ nodes:
     let yunta_core::NodeKind::Parallel { coordination, .. } = &workflow.nodes[1].kind else {
         panic!("expected a parallel node");
     };
-    // D49: `independent` is the default — evaluative groups (reviewers)
+    // `independent` is the default — evaluative groups (reviewers)
     // must never see each other's findings unless the author opts in.
     assert_eq!(*coordination, yunta_core::Coordination::Independent);
 

@@ -1,4 +1,4 @@
-//! Namespaced resolution (RFC-0002 §5, T11.3): `resolve_workflow` and
+//! Namespaced resolution: `resolve_workflow` and
 //! its integration into `check_workflow_refs` — pure filesystem
 //! fixtures, no live run needed to exercise resolution or the
 //! cross-pack composition rule.
@@ -51,7 +51,7 @@ fn a_repo_workflow_shadows_a_pack_workflow_of_the_same_name() {
         "",
         &[("review.yaml", LEAF)],
     );
-    // The repo names its own "review" too — §5: "un workflow local con
+    // The repo names its own "review" too: "un workflow local con
     // el mismo nombre pisa al del pack."
     write(
         &root.path().join(".yunta/workflows/acme/review.yaml"),

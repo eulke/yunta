@@ -108,9 +108,9 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
     assert_eq!(stored_seqs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
 }
 
-/// DI-30: the production shape a shared-handle test can never exercise
-/// — the per-session run-tools listener (T8.2) appends `finding_posted`
-/// through its own `reopen`ed connection while the engine appends
+/// The production shape a shared-handle test can never exercise — the
+/// per-session run-tools listener appends `finding_posted` through its
+/// own `reopen`ed connection while the engine appends
 /// session/audit events through the original, both into the same run,
 /// at the same time. `append_event`'s transaction reads (`MAX(seq)`)
 /// before writing; under a deferred `BEGIN`, that read→write upgrade
@@ -198,8 +198,8 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
 
     // Reach past the crate's own interface to corrupt the row directly —
     // this simulates disk-level corruption, which is exactly the
-    // scenario `events_for_run` must report as a typed error (Contrato
-    // §8.1's "broken" run), never a panic.
+    // scenario `events_for_run` must report as a typed error, never a
+    // panic.
     let raw = rusqlite::Connection::open(&db_path).unwrap();
     raw.execute(
         "UPDATE events SET payload_json = 'not json' WHERE seq = 1",
@@ -211,7 +211,7 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
     assert!(matches!(result, Err(StorageError::CorruptPayload { .. })));
 }
 
-// --- T2.5: event hash chain (I26, docs/eventos.md §3) ------------------------
+// --- event hash chain ---------------------------------------------------
 
 fn created_event(run_id: &str) -> Event {
     Event {
@@ -265,7 +265,7 @@ fn a_tampered_payload_breaks_the_chain_at_that_exact_seq() {
     drop(storage);
 
     // Tamper behind the store's back — exactly what the chain exists to
-    // catch (I26: integrity, not authenticity).
+    // catch: integrity, not authenticity.
     let conn = rusqlite::Connection::open(&db).unwrap();
     conn.execute(
         "UPDATE events SET payload_json = replace(payload_json, 'honest', 'edited') \
@@ -329,7 +329,7 @@ fn verifying_an_unknown_run_is_an_error_not_a_vacuous_intact() {
     assert!(storage.verify_chain(&RunId::from("run-ghost")).is_err());
 }
 
-// --- DI-14: database-level retention -----------------------------------------
+// --- database-level retention ---------------------------------------------
 
 #[test]
 fn purge_run_removes_every_row_for_exactly_that_run() {
@@ -357,7 +357,7 @@ fn purge_run_removes_every_row_for_exactly_that_run() {
     );
 }
 
-// --- T8.2: a reopened handle interleaves writes safely -----------------------
+// --- a reopened handle interleaves writes safely --------------------------
 
 #[test]
 fn reopened_handle_appends_interleaved_with_the_original_and_seq_stays_monotonic() {

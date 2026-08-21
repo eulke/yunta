@@ -1,13 +1,13 @@
-//! `yunta pack audit` (RFC-0002 §6, D71, T11.4): prints the full static
-//! inventory `yunta_engine::audit_pack` builds for an installed pack —
-//! every command, context source, per-node permission, required agent,
-//! `mcp` server, executor, and each workflow's full, untrimmed prompt —
-//! then reports whether the pack ships tests of its own and whether
-//! they pass (D89). Inventory, never verdict: nothing here flags
-//! content as suspicious, it only shows all of it. Runs on demand
+//! `yunta pack audit`: prints the full static inventory
+//! `yunta_engine::audit_pack` builds for an installed pack — every
+//! command, context source, per-node permission, required agent, `mcp`
+//! server, executor, and each workflow's full, untrimmed prompt — then
+//! reports whether the pack ships tests of its own and whether they
+//! pass. Inventory, never verdict: nothing here flags content as
+//! suspicious, it only shows all of it. Runs on demand
 //! (`yunta pack audit <publisher>/<name>`) and automatically inside
-//! `add`, before vendoring — "nada ejecuta hasta que el humano vio el
-//! inventario" (§6).
+//! `add`, before vendoring — nothing executes until a human has seen
+//! the inventory.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -145,7 +145,7 @@ fn print_node(node: &NodeAudit) {
 
 /// Whether the pack ships tests under its own `.yunta/tests/` (same case
 /// format `yunta test` uses, authored the same way a repo's own tests
-/// are) and, if so, how many pass — D89. `has_tests: false` covers both
+/// are) and, if so, how many pass. `has_tests: false` covers both
 /// "no `.yunta/tests/` directory" and "directory present but empty";
 /// either way there's nothing to report a pass/fail count for.
 pub struct PackTestSummary {

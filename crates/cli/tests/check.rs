@@ -119,7 +119,7 @@ fn malformed_yaml_is_a_clean_error_not_a_panic() {
 
 #[test]
 fn a_repo_re_allowing_an_org_denied_pattern_fails_check_citing_the_layer() {
-    // T5.7 ✓1: the org layer denies `sudo *`; the repo layer tries to
+    // The org layer denies `sudo *`; the repo layer tries to
     // re-allow it. `yunta check` (no --config: the project's real layers)
     // must refuse, naming both layers and the pattern.
     let root = tempfile::tempdir().unwrap();

@@ -1,4 +1,4 @@
-//! `kind: workflow` (§12, T9.3) — composition as **linked runs**: each
+//! `kind: workflow` — composition as **linked runs**: each
 //! sub-workflow is a complete run (own run_id, manifest, event log and
 //! run.dir), never an inline expansion. The parent freezes only the
 //! child's *name and inputs*; the child resolves and freezes its own
@@ -6,13 +6,12 @@
 //! the recorded `child_run_id` — reproducing an old parent never
 //! re-resolves `name@current`.
 //!
-//! Mechanics this module fixes (documented in `docs/m0-status.md`'s
-//! T9.3 entry):
+//! Mechanics this module fixes:
 //! - `use: <name>` resolves via `crate::catalog::resolve_workflow`
 //!   **in the parent run's own working tree**: the repo's versioned
 //!   `.yunta/workflows/<name>.yaml` catalog first, a publisher's
-//!   vendored packs second (RFC-0002 §5, T11.3) — the same resolver
-//!   `list_workflows` and `check_workflow_refs` share.
+//!   vendored packs second — the same resolver `list_workflows` and
+//!   `check_workflow_refs` share.
 //! - The child run id is `<parent>-<node>` (with a `-N` ordinal when a
 //!   re-route runs the node again), derived from the parent's log —
 //!   deterministic, no entropy in the engine.
@@ -59,7 +58,7 @@ fn runs_root(ctx: &RunCtx<'_>) -> PathBuf {
 }
 
 /// The worktrees root for child trees: the parent manifest's frozen
-/// paths (DI-07) when present; otherwise the `runs`-sibling `worktrees`
+/// paths when present; otherwise the `runs`-sibling `worktrees`
 /// directory the project layout uses — library callers (tests) without
 /// frozen paths get a deterministic location next to their runs root.
 fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
@@ -72,7 +71,7 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
         .unwrap_or_else(|| runs.join("worktrees"))
 }
 
-/// D108: resolves every declared mount to bytes, in memory, *before*
+/// Resolves every declared mount to bytes, in memory, *before*
 /// the child is linked or born — a missing source fails the parent's
 /// node with nothing dangling. A `kind: workflow` source resolves
 /// through the recorded link (its last `child_run_finished` on this
@@ -142,7 +141,7 @@ pub(super) async fn execute_workflow(
     mounts: &[MountSpec],
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    // §12's "profundidad máxima configurable", enforced where the depth
+    // The configurable max depth, enforced where the depth
     // actually grows — `check`'s static walk covers the files as they
     // are at check time; this guard covers what the run really loads.
     let max_depth = ctx.manifest.config.resolved_max_workflow_depth();
@@ -160,8 +159,8 @@ pub(super) async fn execute_workflow(
         );
     }
 
-    // Resume before create (§12: "yunta resume del padre retoma hijos
-    // huérfanos recursivamente"): the last child this node created that
+    // Resume before create (a parent's resume recursively resumes
+    // orphaned children): the last child this node created that
     // never reached child_run_finished — and actually exists (a
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
@@ -189,9 +188,8 @@ pub(super) async fn execute_workflow(
     }
 
     // Fresh birth: resolve the CURRENT catalog file from the parent's
-    // own tree (§12: "cada hijo resuelve y congela su propio workflow
-    // al nacer") — repo catalog first, a publisher's vendored packs
-    // second (RFC-0002 §5, T11.3).
+    // own tree (each child resolves and freezes its own workflow at
+    // birth) — repo catalog first, a publisher's vendored packs second.
     let resolved = match crate::catalog::resolve_workflow(ctx.worktree, use_name) {
         Ok(resolved) => resolved,
         Err(e) => {
@@ -269,7 +267,7 @@ pub(super) async fn execute_workflow(
         }
     }
 
-    // D108: mounts resolve to bytes here, before anything is linked or
+    // Mounts resolve to bytes here, before anything is linked or
     // born — a missing source is this node's failure, with no dangling
     // child left behind.
     let mounted = match resolve_mounts(ctx, &events, mounts) {
@@ -277,7 +275,7 @@ pub(super) async fn execute_workflow(
         Err(diagnostic) => return fail(ctx, node, diagnostic, false),
     };
 
-    // Budgets cascade (§12): the child's frozen cap is what the parent
+    // Budgets cascade: the child's frozen cap is what the parent
     // has left — auditable in the child's own manifest, and the child's
     // ordinary budget machinery enforces the parent's ceiling over the
     // whole subtree. A human's `continue` on the parent (budget already
@@ -368,7 +366,7 @@ pub(super) async fn execute_workflow(
         }
     };
 
-    // D108: the copies land before the link — a crash here re-derives
+    // The copies land before the link — a crash here re-derives
     // the same ordinal (nothing was linked) and simply rewrites them.
     // The promotion inheritance mechanism generalized: files into the
     // child's own `artifacts/`, where its ordinary machinery (context
@@ -503,7 +501,7 @@ async fn resume_child(
 }
 
 /// Executes the child run to its next stop and maps that onto this
-/// node — chasing a promotion chain to its end (§10.2/DI-25): a chain
+/// node — chasing a promotion chain to its end: a chain
 /// member that closes `promoted` gets its successor created (fresh
 /// worktree off the parent's tree, artifacts inherited, `promoted_from`
 /// audited) and recorded as a NEW linked child of this same node, then
@@ -571,9 +569,9 @@ async fn drive_child(
             }
             RunTerminal::Promoted { suggested_mode } => {
                 // The chain member's log is closed for good
-                // (`run_finished: promoted`, I3) — the link records it
-                // with its spend, and the successor becomes the node's
-                // next linked child.
+                // (`run_finished: promoted` — nothing reopens it) — the
+                // link records it with its spend, and the successor
+                // becomes the node's next linked child.
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::ChildRunFinished(ChildRunFinishedPayload {
@@ -628,7 +626,7 @@ async fn drive_child(
                 if ctx.root_cancel.is_cancelled() || cancel.is_cancelled() {
                     // The child paused because a cancellation reached
                     // it, not on its own account — the shared epilogue
-                    // decides orphan vs. join:any loss (DI-11).
+                    // decides orphan vs. join:any loss.
                     return cancelled_end(ctx, node);
                 }
                 return Ok(NodeEnd::ChildPaused {

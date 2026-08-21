@@ -1,6 +1,5 @@
 //! Maps yunta's portable `PermissionProfile` to the real `claude` CLI's
-//! flags (T7.3) — the CLI-specific knowledge A1 says belongs here, not
-//! in the engine.
+//! flags — CLI-specific knowledge that belongs here, not in the engine.
 //!
 //! Headless execution has no human to answer a permission prompt, so
 //! every profile must resolve to a mode that neither hangs nor silently
@@ -21,10 +20,9 @@
 //!
 //! `ReadOnly` additionally restricts the tool set to non-mutating tools,
 //! so "accept edits" has nothing mutating to accept. `Edit` and `Full`
-//! are, today, indistinguishable at the CLI level: the real boundary in
-//! M-0 is the engine's own post-hoc scope check (T5.3), not a live CLI
-//! restriction — `capabilities().edit_hooks` says so honestly (`false`,
-//! see mod.rs).
+//! are, today, indistinguishable at the CLI level: the real boundary is
+//! the engine's own post-hoc scope check, not a live CLI restriction —
+//! `capabilities().edit_hooks` says so honestly (`false`, see mod.rs).
 
 use crate::session::PermissionProfile;
 

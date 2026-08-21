@@ -1,6 +1,6 @@
-//! `modes:` (§10.1, D44, T9.1) exercised end-to-end: a node a mode
+//! `modes:` exercised end-to-end: a node a mode
 //! excludes is never scheduled, an in-mode node's dependency on an
-//! excluded node is treated as already satisfied (§10.1's own
+//! excluded node is treated as already satisfied (the
 //! "quick"/"standard"/"full" example does exactly this — `implement`
 //! depends_on the excluded `approve-plan` in "quick"), and the run
 //! finishes once every *included* node is done, never waiting on one
@@ -182,7 +182,7 @@ async fn full_mode_runs_every_node() {
 #[tokio::test]
 async fn the_default_sentinel_ignores_modes_and_runs_everything() {
     // `"default"` never validates against `modes:` and never filters —
-    // `yunta test` (T7.9) relies on exactly this to exercise a moded
+    // `yunta test` relies on exactly this to exercise a moded
     // workflow's full graph without picking one mode out from under it.
     let bench = Bench::new();
     let (terminal, state) = bench.run("run-default", "default").await.unwrap();

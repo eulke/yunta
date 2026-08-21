@@ -31,9 +31,8 @@ Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`:
   session opens; these read state the engine already derived.
 - **`gate`** — a human decision. `assignee:`, `options: [...]`, and `on: {option:
   target}` to re-route on a choice exactly like `on_failure.goto` does. Renders
-  through the console when attended, or as a §5.3-shaped object via `yunta mcp` /
-  `yunta resolve-gate` when it isn't — same object either way, no surface-specific
-  logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
+  through the console when attended, or as the same structured escalation object via
+  `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
   into a forge round-trip instead: the listed paths (relative to `run.dir`) get
   committed to `branch` and opened as a PR for review there — the same relative paths
   the run's own worktree used, so a reviewer sees exactly what the run produced.
@@ -215,7 +214,7 @@ cache instead of starting cold.
 
 ## Packs
 
-A pack (RFC-0002) is a distributable, versioned bundle of workflows, skills,
+A pack is a distributable, versioned bundle of workflows, skills,
 knowledge and docs — never something that extends the engine itself, only content it
 already knows how to run. A pack **declares** the roles it needs (a role name plus a
 permissions ceiling, e.g. `reviewer` at `read-only`) and its own permissions ceiling
@@ -227,7 +226,7 @@ This repo ships two example packs at [`packs/`](../packs/) — `yunta/starter`
 (two minimal workflows: a one-node `fix` and a fan-out `review`) and
 `yunta/fragua` (the full reference pipeline: grill, a verified task ledger,
 lint→fix, a baseline check, multi-runner review, PR). Both install and remove
-like any third-party pack; the engine treats them no differently (D57).
+like any third-party pack; the engine treats them no differently.
 
 ```bash
 yunta pack add github.com/acme/review-pack@v1.2.0
@@ -257,21 +256,21 @@ yunta check acme/review
 and the same form works inside a workflow (`use: acme/qa-review`) and a node's
 `skills:` list (`skills: [acme/review-rubric]`). Resolution always tries the
 repo's own `.yunta/workflows/` first — a repo file at the same
-`publisher/name` path always wins over the pack, matching §5's "un workflow
-local con el mismo nombre pisa al del pack." `yunta list` reflects the same
+`publisher/name` path always wins over the pack: a local workflow with the
+same name shadows the one from the pack. `yunta list` reflects the same
 two-layer view and the same shadowing.
 
 Composition is scoped to a pack's own contents: a workflow shipped inside a
 pack may freely `use:` another workflow from the *same* pack, but reaching
 into a different pack, or back out to the repo, is rejected by `check` —
-cross-pack composition is out of scope for v1 (§8).
+cross-pack composition is out of scope for v1.
 
 A pack is code from someone else, and it can be audited by reading it: `yunta
 pack audit acme/review-pack` prints a full static inventory of every workflow
 it ships — every `bash`/hook/loop command, every context source and exactly
 what it points at, permissions and required agent per node, `mcp` servers
 reached, executors flagged as code, and each workflow's **complete, untrimmed
-prompt text**. It's inventory, never a verdict (§6): nothing here flags
+prompt text**. It's inventory, never a verdict: nothing here flags
 content as "suspicious" — that would be trivially evadible and would only
 give false confidence. It also reports whether the pack ships its own tests
 under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
@@ -289,7 +288,7 @@ a child workflow reached through `use:` from inside the pack is checked
 against that pack's ceiling too. Declaring any `executors:` raises the bar
 further, and how far is the installing team's own call:
 `permissions.packs.executors` in the config (an org-ceiling setting — lower
-layers only narrow it, §6.1) decides. `prompt`, the default, refuses to
+layers only narrow it, never re-widen it) decides. `prompt`, the default, refuses to
 install or update a pack that ships executable code unless `--yes` confirms
 it, after the audit has shown exactly what the executors are; `deny` refuses
 outright — no flag overrides a permissions ceiling; `allow` installs without

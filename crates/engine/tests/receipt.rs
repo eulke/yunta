@@ -1,4 +1,4 @@
-//! Verified Work Receipt (D54, RFC-0003 §1, T10.4).
+//! Verified Work Receipt.
 //!
 //! Two concerns, tested separately: the **formatters**
 //! (`render_markdown`/`render_json`) against a hand-built [`Receipt`] —
@@ -146,8 +146,8 @@ fn renders_the_json_receipt_as_pretty_printed_structured_data() {
     assert_eq!(parsed["event_chain"]["status"], "intact");
     assert_eq!(parsed["event_chain"]["events"], 342);
 
-    // No LLM-authored text anywhere in the receipt (D54's own
-    // non-negotiable) — every string in the JSON traces back to a
+    // No LLM-authored text anywhere in the receipt —
+    // every string in the JSON traces back to a
     // command, a role, a hash or a count, never freeform prose an agent
     // could have written. Structural proxy for that: no field holds
     // more than one sentence of prose — `entries[].cmd` are shell

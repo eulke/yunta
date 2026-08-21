@@ -1,9 +1,9 @@
 #!/bin/sh
 # Polls crates.io's sparse index for a crate/version to actually appear.
 # `cargo publish` returns as soon as the upload is accepted, not once the
-# index (and therefore dependency resolution for the next crate in the
-# publish order) reflects it — RFC-0004 §4.1's dependency-order publish
-# step needs this wait, not a fixed sleep.
+# index (and therefore dependency resolution for the next crate in a
+# dependency-ordered publish sequence) reflects it — publishing in
+# dependency order needs this wait, not a fixed sleep.
 #
 # Usage: wait-for-crate-index.sh <crate-name> <version>
 

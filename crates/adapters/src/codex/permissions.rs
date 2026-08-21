@@ -1,6 +1,6 @@
 //! Maps yunta's portable `PermissionProfile` to `codex exec`'s own
-//! `-s`/`--sandbox` modes (T7.4) — the CLI-specific knowledge A1 says
-//! belongs here, not in the engine.
+//! `-s`/`--sandbox` modes — CLI-specific knowledge that belongs here,
+//! not in the engine.
 //!
 //! The three string values (`read-only`, `workspace-write`,
 //! `danger-full-access`) are triangulated, not read off one source:

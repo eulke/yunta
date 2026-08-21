@@ -1,4 +1,4 @@
-//! `yunta init`/`yunta new` end-to-end (T7.6, D58): both must work
+//! `yunta init`/`yunta new` end-to-end: both must work
 //! without a TTY in a clean container and be idempotent (refuse to
 //! clobber existing state without `--force`); every `new`-generated
 //! workflow must pass `check`; `new` must never reference a pack or

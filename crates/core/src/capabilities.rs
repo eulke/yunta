@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-/// An adapter's declared capabilities (Spec Adapter §2). Constant for the
-/// lifetime of the adapter (A2) — the engine consults this before asking
-/// for anything, and never emulates what is not declared (A6).
+/// An adapter's declared capabilities. Constant for the
+/// lifetime of the adapter — the engine consults this before asking
+/// for anything, and never emulates what is not declared.
 ///
 /// Lives in `yunta-core` rather than `yunta-adapters` because it is also
-/// the shape of `agent_session_opened`'s `capabilities` field
-/// (`docs/eventos.md` §5.5); both the event log and the `Adapter` trait
-/// (T3.1) share this one definition instead of duplicating it.
+/// the shape of `agent_session_opened`'s `capabilities` field;
+/// both the event log and the `Adapter` trait
+/// share this one definition instead of duplicating it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Capabilities {
@@ -24,9 +24,9 @@ pub struct Capabilities {
     /// Emits trustworthy token usage in the stream.
     pub usage_reporting: bool,
     /// Can mount skill directories (`SessionRequest.skills`) by the
-    /// CLI's native mechanism (DI-13). A skill is added instruction,
+    /// CLI's native mechanism. A skill is added instruction,
     /// never correctness: absence degrades with `capability_degraded`,
-    /// never a fatal error (A6).
+    /// never a fatal error.
     #[serde(default)]
     pub skills: bool,
     /// Can connect to Yunta's per-run MCP server as a client.

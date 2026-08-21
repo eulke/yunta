@@ -1,12 +1,11 @@
-//! `yunta stats <run_id>` and `yunta stats --workflow <name>` (T7.5,
-//! Contrato §8.4/§8.6): every number comes from `yunta_engine::stats`'s
-//! pure derivation over the event log — this module only gathers the
-//! right events off disk (the imperative half) and renders them, either
-//! as `--json` or as the terminal visualization D77 asks for (horizontal
-//! bars per node/role, a sparkline of a workflow's historical CPTV, a
-//! comparison table between modes). Every rendered line stays inside 80
-//! columns and never depends on color — see this module's own render
-//! functions for how.
+//! `yunta stats <run_id>` and `yunta stats --workflow <name>`: every
+//! number comes from `yunta_engine::stats`'s pure derivation over the
+//! event log — this module only gathers the right events off disk
+//! (the imperative half) and renders them, either as `--json` or as a
+//! terminal visualization (horizontal bars per node/role, a sparkline
+//! of a workflow's historical CPTV, a comparison table between modes).
+//! Every rendered line stays inside 80 columns and never depends on
+//! color — see this module's own render functions for how.
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -77,8 +76,8 @@ fn stats_run(run_id: &str, json: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // DI-07: search order (current runs root, then the default) — the
-    // run's own frozen paths take over once the manifest is open.
+    // Search order (current runs root, then the default) — the run's
+    // own frozen paths take over once the manifest is open.
     let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
         .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
@@ -119,8 +118,8 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // §8.7/T7.10: needs the raw per-run logs `RunSummary` doesn't keep,
-    // and the workflow shape those runs actually exercised to match
+    // Needs the raw per-run logs `RunSummary` doesn't keep, and the
+    // workflow shape those runs actually exercised to match
     // criteria/re-routes/gates against.
     let (raw_history, workflow) = collect_raw_history(&project, &storage, workflow_name);
     let findings = workflow
@@ -144,7 +143,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
 
 /// Every past run of `workflow_name` this project's storage knows about,
 /// oldest first — the unit `--workflow`'s sparkline, mode table and
-/// §8.6's prior estimation all fold over. Skips a run whose manifest is
+/// prior estimation all fold over. Skips a run whose manifest is
 /// unreadable or belongs to a different workflow, same "degrade past
 /// what a for-display command can't use" stance `list_runs` already
 /// takes for its own unreadable entries.
@@ -189,8 +188,8 @@ pub(crate) fn collect_history(
     dated.into_iter().map(|(_, s)| s).collect()
 }
 
-/// Every past run's own full event log for `workflow_name` (§8.7,
-/// T7.10), plus the most recent run's own frozen workflow definition —
+/// Every past run's own full event log for `workflow_name`, plus the
+/// most recent run's own frozen workflow definition —
 /// [`collect_history`]'s raw-events twin: `RunSummary` throws away
 /// exactly the per-criterion/re-route/gate detail
 /// `analyze_verification_effectiveness` needs, so this keeps the whole
@@ -239,8 +238,8 @@ pub(crate) fn collect_raw_history(
     (logs, latest_workflow.map(|(_, wf)| wf))
 }
 
-// --- Terminal rendering (D77) — colorless by construction, so "degrada
-// sin color" isn't a mode to fall back to, it's the only mode. -----------
+// --- Terminal rendering — colorless by construction: degrading
+// without color isn't a fallback mode, it's the only mode. --------------
 
 const BAR_WIDTH: usize = 20;
 const LABEL_WIDTH: usize = 12;
@@ -284,9 +283,9 @@ fn currency_line(
     tokens: u64,
     pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
 ) -> Option<String> {
-    // §8.4: a currency estimate needs a *model* to price against; with
-    // more than one model priced and no per-node attribution surfaced
-    // here, showing one blended-average line beats showing none — never
+    // A currency estimate needs a *model* to price against; with more
+    // than one model priced and no per-node attribution surfaced here,
+    // showing one blended-average line beats showing none — never
     // silently picking the first entry a HashMap happens to iterate.
     let pricing = pricing?;
     if pricing.is_empty() {
@@ -426,8 +425,9 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
     }
 }
 
-/// §8.7/T7.10's own findings — advisory only, never a reason `stats` or
-/// `check` exits non-zero: these are suggestions for a person to weigh,
+/// Verification-effectiveness findings — advisory only, never a reason
+/// `stats` or `check` exits non-zero: these are suggestions for a
+/// person to weigh,
 /// not errors. Returns the rendered text (empty if there's nothing to
 /// say) so each caller can send it to stdout (`stats`) or stderr
 /// (`check`, alongside its own warnings) without duplicating the
@@ -439,9 +439,7 @@ pub(crate) fn render_verification_findings(
         return String::new();
     }
     let mut out = String::new();
-    out.push_str(
-        "verification performance (§8.7) — advisory, nothing here is acted on automatically:\n",
-    );
+    out.push_str("verification performance — advisory, nothing here is acted on automatically:\n");
     for c in &findings.never_red_criteria {
         out.push_str(&format!(
             "  criterion `{}` was never red in pre-check across {} run(s) — \
@@ -497,8 +495,8 @@ fn sparkline(values: &[f64]) -> String {
         .collect()
 }
 
-/// Median CPTV/tokens per mode — a plain historical comparison (§8.4),
-/// not a prediction, so it doesn't gate on
+/// Median CPTV/tokens per mode — a plain historical comparison, not a
+/// prediction, so it doesn't gate on
 /// [`yunta_engine::MIN_SAMPLES_FOR_ESTIMATION`] the way
 /// [`prior_estimation`] does: a mode with one run still gets a row, just
 /// with that run's own numbers as its "median".
@@ -528,8 +526,7 @@ fn median(sorted: &[f64]) -> Option<f64> {
 }
 
 /// Shared by `yunta stats --workflow` and `yunta run`/`list_workflows`
-/// (§8.6) so the three surfaces never phrase the same numbers
-/// differently.
+/// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation) -> String {
     format!(
         "{} past run(s) · median {:.0} tokens, p90 {:.0} · median wall-clock {}",

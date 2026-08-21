@@ -1,16 +1,16 @@
-//! `progress.md` (Contrato §8.2, T5.5) — one of exactly four things a
-//! node's context is built from at start ("nunca asume historia"): its
-//! rendered prompt, its resolved context sources, this file, and its
-//! skills. The engine writes it, never an agent (I20) — regenerated in
-//! full from the log after each `node_finished`, the same "state is a
-//! pure function of the log" principle [`crate::replay::derive`] follows,
-//! so it never accumulates narrative drift.
+//! `progress.md` — one of exactly four things a node's context is built
+//! from at start ("nunca asume historia"): its rendered prompt, its
+//! resolved context sources, this file, and its skills. The engine
+//! writes it, never an agent — regenerated in full from the log after
+//! each `node_finished`, the same "state is a pure function of the log"
+//! principle [`crate::replay::derive`] follows, so it never accumulates
+//! narrative drift.
 
 use yunta_core::{Node, Workflow};
 
 use crate::replay::{derive, NodeState, RunState};
 
-/// Renders `progress.md`'s content from `events` (§8.2): every finished
+/// Renders `progress.md`'s content from `events`: every finished
 /// node with its one-line description and the artifacts it produced,
 /// every failed node, and everything still ahead. Pure — same workflow,
 /// same log, same markdown, always.

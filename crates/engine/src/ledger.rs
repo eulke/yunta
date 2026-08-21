@@ -1,10 +1,10 @@
-//! Ledger parsing and registration (T5.1, `docs/spec-ledger.md` §3/§4).
+//! Ledger parsing and registration.
 //!
-//! `register` runs the spec's seven validation rules and returns every
-//! violation found, never just the first — "quien escribe a mano corrige
-//! una vez, no siete veces" (§4). What it does **not** validate: whether
+//! `register` runs seven validation rules and returns every
+//! violation found, never just the first — whoever writes this by hand
+//! corrects once, not seven times. What it does **not** validate: whether
 //! the criteria commands themselves exist or are correct — that's the
-//! pre-check in rojo's job (T5.2), which is where a trivial or broken
+//! red pre-check's job, which is where a trivial or broken
 //! criterion actually gets caught by being run.
 
 use std::collections::{HashMap, HashSet};
@@ -54,7 +54,7 @@ pub enum LedgerError {
     ManualReviewWithoutJustification { task: TaskId },
 }
 
-/// Validates a parsed ledger against every rule in spec §3, collecting
+/// Validates a parsed ledger against every rule, collecting
 /// every violation rather than stopping at the first.
 pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
     let mut errors = Vec::new();
@@ -234,9 +234,9 @@ fn transitively_related(tasks: &[Task]) -> HashSet<(TaskId, TaskId)> {
     related
 }
 
-/// Rule 4 (§3): two tasks with no dependency path between them, in
+/// Two tasks with no dependency path between them, in
 /// either direction, must not declare overlapping scopes — it would
-/// make T5.10's parallel batching ambiguous and the diff impossible to
+/// make parallel batching ambiguous and the diff impossible to
 /// attribute.
 ///
 /// Overlap is a deliberately conservative approximation, not full glob
@@ -280,8 +280,8 @@ fn glob_literal_prefix(glob: &str) -> &str {
     &glob[..end]
 }
 
-/// Same conservative approximation as this module's own rule 4 above,
-/// reused by `check`'s `parallel` scope-collision rule (D100, T4.6) —
+/// Same conservative approximation as this module's own rule above,
+/// reused by `check`'s `parallel` scope-collision rule —
 /// one heuristic, not two independently-drifting copies.
 pub(crate) fn globs_might_overlap(a: &str, b: &str) -> bool {
     let (pa, pb) = (glob_literal_prefix(a), glob_literal_prefix(b));

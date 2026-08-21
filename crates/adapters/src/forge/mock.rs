@@ -1,7 +1,7 @@
-//! `MockForge` (T7.7): a fixture-driven `Forge` double the engine's own
-//! tests exercise the full gate state machine against — publish, poll,
+//! `MockForge`: a fixture-driven `Forge` double the engine's own tests
+//! exercise the full gate state machine against — publish, poll,
 //! approve, request changes, close, and push a commit after approval —
-//! all in-memory, no network (A8 extended to forges). Shared via
+//! all in-memory, no network. Shared via
 //! [`MockForgeState`] so a test can hold one handle to drive "what
 //! person B does on the forge" while a completely separate
 //! `execute_run` call (simulating "person A's machine, a later
@@ -41,16 +41,16 @@ struct MockPr {
 #[derive(Default)]
 struct Inner {
     /// Keyed by `run_id` — mirrors how the real `GitHubForge` finds an
-    /// existing PR for a gate it's already published (§5.6: idempotent
-    /// across `resume`).
+    /// existing PR for a gate it's already published: idempotent
+    /// across `resume`.
     prs: HashMap<String, MockPr>,
     next_number: u64,
     next_sha: u64,
 }
 
 /// The state a test drives directly — everything here is "what happens
-/// on the forge", never routed through Yunta (D66's own point: person B
-/// never needs Yunta installed).
+/// on the forge", never routed through Yunta: person B never needs
+/// Yunta installed.
 #[derive(Clone, Default)]
 pub struct MockForgeState(Arc<Mutex<Inner>>);
 
@@ -110,8 +110,8 @@ impl MockForgeState {
     /// submitted review just because the branch moved. Its `reviewed_sha`
     /// now differs from the new `head_sha`; the engine (not this mock,
     /// not `GitHubForge`) is what compares the two and decides the
-    /// approval no longer covers the current code (§5.6: "el engine lo
-    /// detecta por SHA").
+    /// approval no longer covers the current code, detecting the drift
+    /// by SHA.
     pub fn push_commit(&self, run_id: &str) -> String {
         let mut inner = self.0.lock().unwrap();
         let sha = Self::fresh_sha(&mut inner);

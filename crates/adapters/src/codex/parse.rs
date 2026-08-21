@@ -1,6 +1,6 @@
-//! Parses `codex exec --json` lines into `AgentEvent`s (T7.4). Pure and
-//! total, same stance as `claude_code::parse`: an unrecognized line
-//! shape yields no events rather than an error.
+//! Parses `codex exec --json` lines into `AgentEvent`s. Pure and total,
+//! same stance as `claude_code::parse`: an unrecognized line shape
+//! yields no events rather than an error.
 //!
 //! **Protocol shape — confirmed from the CLI's own source, not
 //! guessed.** `codex-rs/exec/src/exec_events.rs` (openai/codex, `main`
@@ -161,7 +161,8 @@ fn turn_failed(value: &Value) -> AgentEvent {
         // [inferido]: `TurnFailedEvent` carries only a message, no
         // retryable/fatal distinction — same default claude_code's own
         // parser uses for its own undocumented case, for the same
-        // reason: yunta's own max_retries still caps the cost (§5.2).
+        // reason: yunta's own max_retries still caps the cost of
+        // guessing wrong.
         retryable: true,
     }
 }

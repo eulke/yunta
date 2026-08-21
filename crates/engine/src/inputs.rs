@@ -1,10 +1,10 @@
-//! Resolving `inputs:` (T1.5, Contrato §2.3, D82): turning what the CLI
+//! Resolving `inputs:`: turning what the CLI
 //! was handed on `--input k=v` plus each declared input's own `default`
 //! into the frozen, per-name string map the manifest carries and
 //! `{{inputs.*}}` templates read from. Everything here runs once, before
-//! the run's worktree or first token exist (D82: "todo se valida antes
-//! del primer token") — a bad input is meant to be the cheapest possible
-//! failure, not the latest.
+//! the run's worktree or first token exist — everything is validated
+//! before the first token — a bad input is meant to be the cheapest
+//! possible failure, not the latest.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -57,7 +57,7 @@ pub enum InputsError {
     PathNotFound { name: String, path: String },
 
     /// Reachable only if a bad `pattern:` slipped past `check` (which
-    /// validates every pattern compiles, §2.3) — resolution still
+    /// validates every pattern compiles) — resolution still
     /// reports it as a typed error rather than panicking on attacker- or
     /// author-supplied regex it never got to see statically.
     #[error("input `{name}`'s pattern `{pattern}` is not a valid regex: {detail}")]
@@ -73,7 +73,7 @@ pub enum InputsError {
 /// (from either source) is validated against its type before it reaches
 /// the manifest. `base_dir` is where a `path`-typed input's existence
 /// check resolves a relative path against — the run's original checkout,
-/// since this runs before any worktree exists (§7.3 isolation is a
+/// since this runs before any worktree exists (isolation is a
 /// property of the run, not of resolving its inputs).
 pub fn resolve_inputs(
     specs: &BTreeMap<String, InputSpec>,

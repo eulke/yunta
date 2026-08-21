@@ -1,12 +1,12 @@
-//! `yunta cancel <run_id>` (T7.1/DI-08, Spec Adapter §2/A4: "interrupt →
-//! kill, extermina el árbol de procesos completo").
+//! `yunta cancel <run_id>`: interrupt, then kill — exterminates the
+//! run's whole process tree rather than leaving anything orphaned.
 //!
-//! The channel is `run.dir/scratch/engine.json` (DI-08): the live
-//! engine's pid plus the process-group ids of everything it spawned.
-//! Three cases, each explicit:
+//! The channel is `run.dir/scratch/engine.json`: the live engine's pid
+//! plus the process-group ids of everything it spawned. Three cases,
+//! each explicit:
 //!
 //! 1. **Engine alive** — SIGINT to the engine pid; its own Ctrl-C path
-//!    (interrupt→kill, T3.3/T4.6) exterminates the tree and records
+//!    (interrupt→kill) exterminates the tree and records
 //!    `run_paused { reason: "cancelled by user" }`. This command waits
 //!    for that terminal in the log, escalating to SIGKILL on the
 //!    registered process groups if it doesn't arrive in time.
@@ -85,8 +85,8 @@ pub async fn cancel(run_id: &str) -> ExitCode {
     let run_dir = project::find_run_dir(&project, run_id.as_str())
         .unwrap_or_else(|| project.runs_root.join(run_id.as_str()));
     let Some(registry) = yunta_engine::read_registry(&run_dir) else {
-        // Case 3 — no channel. Pre-DI-08 behavior, now the exception
-        // rather than the rule.
+        // Case 3 — no channel. Legacy fallback behavior, now the
+        // exception rather than the rule.
         let has_live_node = state
             .nodes
             .values()
@@ -136,7 +136,7 @@ pub async fn cancel(run_id: &str) -> ExitCode {
             if tokio::time::Instant::now() >= deadline {
                 eprintln!(
                     "run {run_id}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
-                     — escalating to SIGKILL on its process groups (A4)"
+                     — escalating to SIGKILL on its process groups"
                 );
                 for pgid in &registry.process_groups {
                     kill_group(*pgid);

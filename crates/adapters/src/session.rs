@@ -1,9 +1,9 @@
-//! The `Adapter`/`AgentSession` traits (Spec Adapter v0.2, T3.1).
+//! The `Adapter`/`AgentSession` traits.
 //!
-//! **M-0 cut**: `SessionRequest` drops `context: ResolvedContext` (the
-//! engine inlines/references context in the prompt, T6.1) and
-//! `run_tools_endpoint: Option<Endpoint>` (MCP is M8). `skills` came
-//! back with DI-13. Everything else in
+//! `SessionRequest` drops `context: ResolvedContext` — the engine
+//! inlines/references context in the prompt — and
+//! `run_tools_endpoint: Option<Endpoint>` isn't wired for MCP yet.
+//! `skills` is present. Everything else in
 //! the spec's `SessionRequest` is here, even where nothing populates a
 //! field yet (`env`, `budget`, `adapter_settings`) — those are simple
 //! struct fields, not machinery to build, so there is no reason to defer
@@ -19,7 +19,7 @@ use thiserror::Error;
 use yunta_core::{Capabilities, Result, SessionId, YuntaError};
 
 /// A node's declared write scope, passed through to an adapter with
-/// `edit_hooks` so it can block edits outside it as they happen (O5).
+/// `edit_hooks` so it can block edits outside it as they happen.
 pub type Glob = String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,8 +36,7 @@ pub struct Budget {
     pub timeout: Option<Duration>,
 }
 
-/// A session request the engine hands to an adapter to open (Spec
-/// Adapter §2).
+/// A session request the engine hands to an adapter to open.
 #[derive(Debug, Clone)]
 pub struct SessionRequest {
     /// Already rendered by the engine — templates resolved.
@@ -50,39 +49,40 @@ pub struct SessionRequest {
     pub agent: Option<String>,
     pub permissions: PermissionProfile,
     /// Secrets arrive here, already resolved from the manifest — never
-    /// any other way (I12).
+    /// any other way.
     pub env: HashMap<String, String>,
     /// Globs the node/task declares, if the adapter has `edit_hooks`. An
     /// adapter without that capability ignores this field rather than
-    /// failing (O5) — the engine already degraded and warned.
+    /// failing — the engine already degraded and warned.
     pub edit_constraints: Option<Vec<Glob>>,
     pub budget: Budget,
     /// Adapter-specific settings with no portable expression — model,
     /// agent and permissions are typed fields above precisely so this
     /// stays for what genuinely has nowhere else to go.
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
-    /// Skill directories to expose to the agent (Spec Adapter v0.2,
-    /// DI-13) — absolute paths the engine already resolved; the adapter
-    /// mounts them by its native mechanism, and only when it declared
-    /// `capabilities().skills` (the engine never populates this
-    /// otherwise, A2/A6).
+    /// Skill directories to expose to the agent — absolute paths the
+    /// engine already resolved; the adapter mounts them by its native
+    /// mechanism, and only when it declared `capabilities().skills`
+    /// (the engine never populates this otherwise, since a capability
+    /// must never claim more than is actually built).
     pub skills: Vec<std::path::PathBuf>,
-    /// The per-run MCP endpoint for THIS session (§6.4/§6.5, D103,
-    /// T8.2): a loopback HTTP listener the engine started just before
-    /// this spawn, dead when the session ends — a resume always carries
-    /// fresh credentials, never a reused pair. The adapter translates
-    /// it to its CLI's native external-MCP mechanism (same pattern as
+    /// The per-run MCP endpoint for THIS session: a loopback HTTP
+    /// listener the engine started just before this spawn, dead when
+    /// the session ends — a resume always carries fresh credentials,
+    /// never a reused pair. The adapter translates it to its CLI's
+    /// native external-MCP mechanism (same pattern as
     /// `agent:`/`edit_hooks`); only populated when it declared
-    /// `capabilities().run_tools` (A2/A6).
+    /// `capabilities().run_tools` (same rule: never claim more than is
+    /// actually built).
     pub run_tools_endpoint: Option<RunToolsEndpoint>,
 }
 
-/// Where a session's per-run MCP server listens (§6.5, D103): a
-/// loopback URL plus the single-use bearer token that scopes every call
-/// to `(run_id, node_id, attempt)` by construction — no tool ever takes
-/// a run id as a caller argument (I27). The token is secret material:
-/// it must never reach the event log (I12) — the engine's own audit
-/// events carry the URL at most, never this pair.
+/// Where a session's per-run MCP server listens: a loopback URL plus
+/// the single-use bearer token that scopes every call to `(run_id,
+/// node_id, attempt)` by construction — no tool ever takes a run id as
+/// a caller argument. The token is secret material: it must never
+/// reach the event log — the engine's own audit events carry the URL
+/// at most, never this pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunToolsEndpoint {
     pub url: String,
@@ -98,8 +98,8 @@ pub struct ProbeReport {
     pub diagnostic: Option<String>,
 }
 
-/// What the agent itself reported it did — telemetry, never a verdict
-/// (Contrato §1; the engine's own criteria run regardless, §5.2).
+/// What the agent itself reported it did — telemetry, never a verdict;
+/// the engine's own criteria run regardless.
 /// `[inferido]`: the spec names this type without detailing its fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentOutcome {
@@ -107,18 +107,18 @@ pub struct AgentOutcome {
 }
 
 /// `[inferido]`: the spec names `AgentError` without detailing its
-/// fields; kept intentionally minimal until a real adapter (T7.3) shows
-/// what richer information is actually available to report.
+/// fields; kept intentionally minimal until a real adapter shows what
+/// richer information is actually available to report.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{message}")]
 pub struct AgentError {
     pub message: String,
 }
 
-/// Events a session's stream carries (Spec Adapter §3).
+/// Events a session's stream carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
-    /// Mandatory first event of every session (O1).
+    /// Mandatory first event of every session.
     SessionOpened {
         session_id: SessionId,
         model: String,
@@ -145,8 +145,8 @@ pub enum AgentEvent {
 }
 
 /// Converts a session request into a stream of typed events — nothing
-/// more (§1). `id()`/`capabilities()` are sync: capabilities are fixed at
-/// construction (A2) and never require I/O to report.
+/// more. `id()`/`capabilities()` are sync: capabilities are fixed at
+/// construction and never require I/O to report.
 #[async_trait]
 pub trait Adapter: Send + Sync {
     fn id(&self) -> &'static str;
@@ -172,23 +172,23 @@ pub trait Adapter: Send + Sync {
 
 #[async_trait]
 pub trait AgentSession: Send {
-    /// Terminates with exactly one `Completed` or `Failed` (A3) — or ends
-    /// without either, which is a crash (O2): the engine, not the
-    /// adapter, synthesizes `Failed { retryable: true }` for that case.
+    /// Terminates with exactly one `Completed` or `Failed` — or ends
+    /// without either, which is a crash: the engine, not the adapter,
+    /// synthesizes `Failed { retryable: true }` for that case.
     fn events(&mut self) -> BoxStream<'_, AgentEvent>;
 
     /// Ordered termination (Esc/SIGINT-equivalent) — the agent may still
     /// close cleanly.
     async fn interrupt(&mut self) -> Result<()>;
 
-    /// Forceful termination of the whole session process tree (A4) —
-    /// never leaves anything running.
+    /// Forceful termination of the whole session process tree — never
+    /// leaves anything running.
     async fn kill(&mut self) -> Result<()>;
 
     /// The OS process-group id of the session's subprocess tree, when
-    /// the adapter runs one (DI-08) — what the engine registers in
+    /// the adapter runs one — what the engine registers in
     /// `run.dir/scratch/engine.json` so a *separate* process (`yunta
-    /// cancel` after a crash) can still exterminate the tree (A4).
+    /// cancel` after a crash) can still exterminate the tree.
     /// `None` for sessions with no subprocess of their own (mock).
     fn pgid(&self) -> Option<u32> {
         None

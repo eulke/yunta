@@ -1,8 +1,8 @@
-//! The per-run MCP server (§6.4/§6.5, D103, T8.2) — one loopback HTTP
+//! The per-run MCP server — one loopback HTTP
 //! listener **per node session**, never per run: it is born just before
 //! the session spawns, dies with it, and a resume always mints a fresh
 //! listener and credential (a credential that survives its session is
-//! reuse surface, §6.5's own words). The engine is the server, the
+//! reuse surface). The engine is the server, the
 //! adapter translates the endpoint to its CLI's native external-MCP
 //! mechanism, the agent is the client.
 //!
@@ -12,18 +12,18 @@
 //! and why nothing here needs recovering after a crash: the listener
 //! dies with the `yunta run` process it lives inside.
 //!
-//! **Scoping by construction (I27).** The bearer token authenticates
+//! **Scoping by construction.** The bearer token authenticates
 //! exactly one session; the listener itself holds that session's
 //! `(run_id, node_id, task)` and no tool takes a run id as a caller
 //! argument — a "read me some other run" call has no surface to exist
-//! on. §5.9/D98's read restriction is structural too:
+//! on. The read restriction on the blackboard is structural too:
 //! `yunta_get_blackboard` only ever serves the calling node's own posts
 //! — a sibling's posts become readable only through the group's
 //! post-join consolidation, never through this listener.
 //!
 //! **Shell edge, deliberately.** This module is the imperative shell's
 //! outermost boundary — a network listener serving a live agent. The
-//! entropy D103 mandates for the token (uuid v4) and the wall-clock
+//! high entropy the token is generated with (uuid v4) and the wall-clock
 //! timestamps on tool-written events both live here and only here:
 //! neither participates in any pure derivation (replay consumes stored
 //! timestamps), and injecting them would thread `Arc`s through every
@@ -53,8 +53,8 @@ use yunta_storage::Storage;
 /// What every listener of one run shares: its own storage handle (a
 /// [`Storage::reopen`]ed one — the listener outlives any borrow of the
 /// engine's), the run identity, and which nodes sit in a
-/// `coordination: blackboard` group (D49: for anyone else, the
-/// blackboard tools are never even mounted).
+/// `coordination: blackboard` group — for anyone else, the
+/// blackboard tools are never even mounted.
 pub struct RunToolsHost {
     storage: Storage,
     run_id: RunId,
@@ -84,17 +84,17 @@ impl RunToolsHost {
         }
     }
 
-    /// Whether `node` sits inside a `coordination: blackboard` group
-    /// (D49) — the mount rule for `yunta_get_blackboard`, and the
+    /// Whether `node` sits inside a `coordination: blackboard` group —
+    /// the mount rule for `yunta_get_blackboard`, and the
     /// capability gate the engine checks before a session that would
     /// need it (a declared coordination the adapter can't carry is a
-    /// node failure, never silent emulation — A6).
+    /// node failure, never silent emulation).
     pub fn is_blackboard_member(&self, node: &NodeId) -> bool {
         self.blackboard_members.contains_key(node)
     }
 }
 
-/// D98's post-join consolidation, pure over the log: every
+/// Post-join consolidation, pure over the log: every
 /// `finding_posted` authored by a member of the group, sorted by
 /// `(node, finding id, title)` — **never by arrival order**, which is
 /// exactly what makes two runs whose posts raced differently produce
@@ -150,8 +150,8 @@ impl Drop for RunToolsSession {
 
 /// Starts the listener for one session attempt: fresh port, fresh
 /// single-use token. `task` is `Some` for ledger-task sessions — the
-/// only ones `yunta_request_scope_expansion` exists for (§6.2 is
-/// task-keyed machinery); `cwd` is where that request file lands (the
+/// only ones `yunta_request_scope_expansion` exists for (scope expansion
+/// is task-keyed machinery); `cwd` is where that request file lands (the
 /// same worktree `scope_expansion::load_request` consumes it from).
 pub async fn open_session_listener(
     host: Arc<RunToolsHost>,
@@ -159,7 +159,7 @@ pub async fn open_session_listener(
     task: Option<TaskId>,
     cwd: PathBuf,
 ) -> std::io::Result<RunToolsSession> {
-    // D103's "alta entropía": 2 × 122 random bits, never logged (I12).
+    // High entropy: 2 × 122 random bits, never logged.
     let token = format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
@@ -215,11 +215,11 @@ pub async fn open_session_listener(
     })
 }
 
-/// The four tools of §6.4, scoped to one session. Which of them are
+/// The four run tools, scoped to one session. Which of them are
 /// even *listed* depends on the session: `yunta_get_blackboard` only
-/// inside a `coordination: blackboard` group (D49 — for `independent`
+/// inside a `coordination: blackboard` group (for `independent`
 /// they aren't mounted at all), `yunta_request_scope_expansion` only
-/// for ledger-task sessions (§6.2 is task-keyed).
+/// for ledger-task sessions (scope expansion is task-keyed).
 #[derive(Clone)]
 struct SessionTools {
     host: Arc<RunToolsHost>,
@@ -241,12 +241,12 @@ impl SessionTools {
     }
 
     fn post_finding(&self, args: serde_json::Map<String, Value>) -> Result<String, String> {
-        // §4.1's one schema, both intake paths (D80): the same `Finding`
+        // One schema, both intake paths: the same `Finding`
         // type the artifact path parses — an incomplete report is a
         // visible error naming the field, never free text nobody can
         // process later.
         let finding: Finding = serde_json::from_value(Value::Object(args))
-            .map_err(|e| format!("invalid finding — §4.1 requires id, severity (blocking|major|minor|note), title, location and detail: {e}"))?;
+            .map_err(|e| format!("invalid finding — requires id, severity (blocking|major|minor|note), title, location and detail: {e}"))?;
         let id = finding.id.clone();
         self.host
             .storage
@@ -265,11 +265,11 @@ impl SessionTools {
         if !self.in_blackboard_group() {
             return Err(
                 "this session's node is not in a `coordination: blackboard` group — the \
-                 blackboard is never mounted outside one (D49)"
+                 blackboard is never mounted outside one"
                     .to_string(),
             );
         }
-        // §5.9/D98: while the group runs, only this node's OWN posts —
+        // While the group runs, only this node's OWN posts —
         // reading a sibling hot would make the outcome depend on
         // arrival order, not content. Siblings' posts arrive through
         // the group's post-join consolidation, never through here.
@@ -284,7 +284,7 @@ impl SessionTools {
             .collect();
         serde_json::to_string_pretty(&json!({
             "note": "your own posts only — siblings' posts become readable after the \
-                     group's join, through its consolidated output (§5.9)",
+                     group's join, through its consolidated output",
             "findings": own,
         }))
         .map_err(|e| e.to_string())
@@ -319,20 +319,21 @@ impl SessionTools {
     ) -> Result<String, String> {
         if self.task.is_none() {
             return Err(
-                "scope expansion is ledger-task machinery (§6.2, keyed by task) — this \
+                "scope expansion is ledger-task machinery, keyed by task — this \
                  session has no task; a prompt node's scope is fixed by its own declaration"
                     .to_string(),
             );
         }
-        // The identical request object of §6.2, validated by the same
-        // type the file-based path parses — then written as that exact
+        // The identical request object the file-based path uses,
+        // validated by the same
+        // type it parses — then written as that exact
         // file, so the engine's existing post-attempt evaluation
         // (rules/ask/deny, cap, findings on denial) consumes it
         // unchanged: one mechanism, two intake surfaces.
         let request: crate::scope_expansion::ScopeExpansionRequest =
             serde_json::from_value(Value::Object(args)).map_err(|e| {
                 format!(
-                    "invalid request — §6.2 requires paths (list) and reason, with an \
+                    "invalid request — requires paths (list) and reason, with an \
                      optional proposed_criterion {{cmd}}: {e}"
                 )
             })?;
@@ -342,14 +343,14 @@ impl SessionTools {
         if path.exists() {
             return Err(
                 "a scope expansion request is already pending for this attempt — one \
-                 request per attempt (§6.2)"
+                 request per attempt"
                     .to_string(),
             );
         }
         let yaml = serde_yaml::to_string(&request).map_err(|e| e.to_string())?;
         std::fs::write(&path, yaml).map_err(|e| e.to_string())?;
         Ok(
-            "request recorded — it is evaluated when this attempt ends (§6.2: the engine \
+            "request recorded — it is evaluated when this attempt ends (the engine \
              or a person decides; a denial becomes a finding); re-attempt the work after"
                 .to_string(),
         )
@@ -370,7 +371,7 @@ impl ServerHandler for SessionTools {
         let mut tools = vec![Tool::new(
             "yunta_post_finding",
             "Report a structured finding the moment you see it — same schema and same \
-             standing as a review artifact's findings (§4.1): it is counted, deduplicated \
+             standing as a review artifact's findings: it is counted, deduplicated \
              and consulted with them, and survives this session.",
             object(json!({
                 "type": "object",
@@ -394,7 +395,7 @@ impl ServerHandler for SessionTools {
         if self.task.is_some() {
             tools.push(Tool::new(
                 "yunta_request_scope_expansion",
-                "Ask the engine to widen this task's scope (§6.2) — you never widen it \
+                "Ask the engine to widen this task's scope — you never widen it \
                  yourself. Provide the paths, the reason, and a verifiable criterion that \
                  is red today; the request is evaluated when this attempt ends, and a \
                  denial becomes a finding rather than silence.",
@@ -413,7 +414,7 @@ impl ServerHandler for SessionTools {
             tools.push(Tool::new(
                 "yunta_get_blackboard",
                 "Read this group's blackboard — your OWN posts only while the group runs \
-                 (§5.9: siblings' posts become readable after the join, through the \
+                 (siblings' posts become readable after the join, through the \
                  group's consolidated output, so results never depend on arrival order).",
                 object(json!({"type": "object", "properties": {}})),
             ));

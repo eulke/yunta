@@ -1,4 +1,4 @@
-//! End-to-end runs with the mock adapter (T4.1 recorte): the bootstrap
+//! End-to-end runs with the mock adapter: the bootstrap
 //! shape — a prompt plan node that produces the ledger, a loop that
 //! implements it task by task, a bash gate — plus re-routes, pauses and
 //! resume, all derived from the event log alone.
@@ -107,7 +107,7 @@ impl Bench {
     }
 
     /// Same as [`Bench::run`] but with a caller-chosen
-    /// [`yunta_engine::HumanInteraction`] — for T7.2 tests that need to
+    /// [`yunta_engine::HumanInteraction`] — for tests that need to
     /// script a gate's resolution instead of always degrading to pause.
     async fn run_with_interaction(
         &self,
@@ -256,7 +256,7 @@ async fn a_failing_bash_node_reroutes_to_its_corrective_node_and_returns() {
     let bench = Bench::new();
 
     // `lint` is red until fixed.txt exists; the corrective prompt node
-    // writes it; lint re-runs and goes green (§11.2's lint → fix-lint →
+    // writes it; lint re-runs and goes green (the canonical lint → fix-lint →
     // lint example, with mock).
     let workflow = r#"
 name: lint-recovery
@@ -296,9 +296,9 @@ async fn a_goto_target_with_no_depends_on_never_runs_when_its_source_never_fails
     let bench = Bench::new();
 
     // `lint` always passes — `on_failure.goto` never fires. `fix-lint`
-    // names no `depends_on` (§11.2's own example: "existe solo para
-    // esto"), so nothing but an actual re-route may ever start it.
-    // DI-29: before the fix, the generic "fresh nodes" batch scheduled
+    // names no `depends_on` (it exists solely as a re-route target),
+    // so nothing but an actual re-route may ever start it.
+    // Before the fix, the generic "fresh nodes" batch scheduled
     // it anyway, purely because an empty `depends_on` reads as
     // trivially satisfied — wasting a session on every green run.
     let workflow = r#"
@@ -445,7 +445,7 @@ nodes:
         - { name: plan.yaml, kind: task-ledger }
 "#;
 
-    // The session claims success but writes nothing — I5: the engine
+    // The session claims success but writes nothing — the engine
     // verifies, and the missing artifact fails the node.
     let fixture = r#"
 sessions:
@@ -713,7 +713,7 @@ sessions:
     assert_eq!(state.findings[0].id, "f1");
 }
 
-// --- T5.14: kind: questions (§4.1, D86) ------------------------------------
+// --- kind: questions ------------------------------------
 
 const QUESTIONS_WORKFLOW: &str = r#"
 name: ask
@@ -741,11 +741,11 @@ sessions:
 
 #[tokio::test]
 async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
-    // ✓ del Plan: "el nodo que pregunta cierra su sesión antes de que se
+    // "el nodo que pregunta cierra su sesión antes de que se
     // renderice nada" (la sesión mock corre y cierra normalmente, y solo
     // *después* de eso el engine actúa sobre las preguntas) y "sin TTY el
     // run queda `waiting`, nunca cuelga ni falla" — en este recorte no
-    // existe ninguna superficie TTY/MCP/PR (T7.1/T7.2/T8.x), así que ese
+    // existe ninguna superficie TTY/MCP/PR todavía, así que ese
     // es el único camino: el run pausa citando las preguntas, no panickea
     // ni queda colgado.
     let bench = Bench::new();
@@ -862,7 +862,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     );
 }
 
-// --- DI-02: kind: questions → superficie interactiva (§4.1, D86) ------------
+// --- kind: questions → superficie interactiva ------------
 
 /// A test surface that answers questions from a script — `resolve`
 /// deliberately returns `None` so these tests prove `ask` alone drives
@@ -901,10 +901,10 @@ fn answer(id: &str, value: &str) -> yunta_core::Answer {
 
 #[tokio::test]
 async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact() {
-    // DI-02: with a live surface, the questions are answered in the same
+    // With a live surface, the questions are answered in the same
     // invocation — the node finishes, the answers land as an artifact a
     // following node can mount, and `questions_answered` records hash,
-    // channel and responder (§4.1's own contract, T5.14's missing 4th ✓).
+    // channel and responder.
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
     let fixture = questions_fixture(&artifacts_dir);
@@ -934,7 +934,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     assert_eq!(answered.responder.as_deref(), Some("eulke"));
     assert!(!answered.answers_hash.is_empty());
 
-    // The answers are a real artifact next to the questions (I3), with
+    // The answers are a real artifact next to the questions, with
     // the given values, consumable by a later node via `artifact:`.
     let answers_path = artifacts_dir.join("questions.yaml.answers.yaml");
     let raw = std::fs::read_to_string(&answers_path).expect("answers artifact must exist");
@@ -973,7 +973,7 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 
 #[tokio::test]
 async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() {
-    // DI-03: the waiting state is derived from the log, so a *separate*
+    // The waiting state is derived from the log, so a *separate*
     // invocation (yunta resume with a TTY) re-asks and continues — no
     // conversational state, no new agent session.
     let bench = Bench::new();
@@ -1021,7 +1021,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     .await
     .unwrap();
     assert!(matches!(first.terminal, RunTerminal::Paused { .. }));
-    // §3.2: the paused node derives `waiting`, never "absent" or failed.
+    // The paused node derives `waiting`, never "absent" or failed.
     assert!(
         matches!(
             first.state.nodes.get(&"ask".into()),
@@ -2088,7 +2088,7 @@ permissions:
 
 #[tokio::test]
 async fn a_template_built_command_that_violates_at_runtime_fails_the_node_citing_the_rule() {
-    // T5.7 ✓2: the YAML text alone never matches the denied pattern — the
+    // The YAML text alone never matches the denied pattern — the
     // violation only exists after {{run.worktree}} renders. The static
     // scan can't see it; the runtime moment must.
     let bench = Bench::new();
@@ -2121,7 +2121,7 @@ nodes:
 async fn a_denied_hook_command_fails_the_node_even_with_on_failure_warn() {
     // Governance is not a hook outcome: `on_failure: warn` downgrades a
     // hook's own failure, never a permission violation — otherwise any
-    // hook could opt out of the model (§6.1).
+    // hook could opt out of the permission model.
     let bench = Bench::new();
 
     let workflow = r#"
@@ -2196,7 +2196,7 @@ sessions:
 
 #[tokio::test]
 async fn a_node_with_network_false_is_never_blocked_by_the_engine() {
-    // T5.7 ✓3 — a test that documents the limit, not a bug (D105):
+    // A test that documents the limit, not a bug:
     // `network: false` is declarative; the engine runs the command anyway.
     let bench = Bench::new();
 
@@ -2308,7 +2308,7 @@ nodes:
     );
 }
 
-// --- T5.10: concurrency: N in loop nodes (§5.5, D65) -----------------------
+// --- concurrency: N in loop nodes -----------------------
 
 const CONCURRENCY_CONFIG: &str = r#"
 runners:
@@ -2319,7 +2319,7 @@ runners:
 "#;
 
 /// An 8-independent-task ledger: no `depends_on` between any of them, each
-/// with its own disjoint scope (`out-N.txt`) so `ledger::register` (T5.1)
+/// with its own disjoint scope (`out-N.txt`) so `ledger::register`
 /// accepts it as a legal batch of fully parallelizable work.
 fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String {
     format!(
@@ -2395,7 +2395,7 @@ fn commit_subjects(worktree: &std::path::Path) -> Vec<String> {
 
 #[tokio::test]
 async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
-    // T5.10 ✓: same final state, same commit sequence, regardless of
+    // Same final state, same commit sequence, regardless of
     // concurrency — the batch mechanism integrates strictly in ledger
     // declaration order no matter how many tasks dispatch at once.
     let sequential = Bench::new();
@@ -2833,7 +2833,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     );
 }
 
-// --- T5.11: scope_expansion (§6.2, D73) ------------------------------------
+// --- scope_expansion ------------------------------------
 
 /// A loop node declaring `scope_expansion:` — `within` is only rendered
 /// when the caller passes something, so `rules`-mode tests can still omit
@@ -2875,7 +2875,7 @@ nodes:
     )
 }
 
-/// The same loop shape with no `scope_expansion:` key at all — §6.2's own
+/// The same loop shape with no `scope_expansion:` key at all — the
 /// default (an absent block behaves exactly like `mode: deny` with no
 /// `within`/`max_per_run`) — proving that default is really live, not
 /// just documented.
@@ -3028,9 +3028,9 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
 
 #[tokio::test]
 async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterion() {
-    // ✓ del Plan: toda denegación —acá, el default `deny` sin ningún
+    // Toda denegación —acá, el default `deny` sin ningún
     // bloque `scope_expansion:` en el workflow— se convierte en un
-    // finding (D80) que lleva el reason y el proposed_criterion del
+    // finding que lleva el reason y el proposed_criterion del
     // propio agente, no una explicación inventada por el engine.
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
@@ -3195,7 +3195,7 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     }
 }
 
-// --- DI-01: escalación de scope expansion → gate real (§6.2 + §5.3) ---------
+// --- escalación de scope expansion → gate real ---------
 
 /// One `ask`-mode attempt that writes a.txt (in scope), b.txt (outside)
 /// and the request file asking for b.txt.
@@ -3210,7 +3210,7 @@ fn requesting_session(task_id: &str) -> String {
 
 #[tokio::test]
 async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_scope() {
-    // DI-01: `mode: ask` with a live HumanInteraction consults instead of
+    // `mode: ask` with a live HumanInteraction consults instead of
     // pausing. Grant → the task returns to ready and its next attempt's
     // diff is evaluated against scope + the granted paths, which the
     // engine derives from the log's own `scope_expansion_granted.paths`.
@@ -3277,7 +3277,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "the grant must name exactly what it authorized — self-contained audit"
     );
     // The interaction itself is on the log, same vocabulary as every
-    // other gate (T7.2): waiting + resolved, together.
+    // other gate: waiting + resolved, together.
     assert!(events.iter().any(
         |e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(p)
             if p.summary.contains("task-h"))
@@ -3349,7 +3349,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         .unwrap_or_default()
         .contains("out of this sprint"));
 
-    // D80: every denial — human ones included — becomes a finding
+    // Every denial — human ones included — becomes a finding
     // carrying the agent's own reason and proposed criterion.
     let findings = findings_posted(&events);
     let finding = findings
@@ -3366,9 +3366,9 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
 
 #[tokio::test]
 async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
-    // DI-01 must not change the headless behavior: NoInteraction (yunta
+    // A live surface must not change the headless behavior: NoInteraction (yunta
     // test, CI) keeps degrading to a pause, with no gate recorded (an
-    // unresolved question re-asks on resume, same convention as T7.2).
+    // unresolved question re-asks on resume, same convention as any gate).
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
 
@@ -3394,7 +3394,7 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     );
 }
 
-// --- T5.13: re-plan (§5.7, D84) ---------------------------------------------
+// --- re-plan ---------------------------------------------
 
 #[tokio::test]
 async fn a_replan_preserves_an_identical_task_and_resets_one_whose_criteria_changed() {
@@ -3538,7 +3538,7 @@ nodes:
     );
 }
 
-// --- T6.1: context: (§9) -----------------------------------------------------
+// --- context: -----------------------------------------------------
 
 /// A single `prompt` node named `ask` declaring `context_yaml` verbatim
 /// under `context:`. `runner: executor` matches `CONFIG`'s own mock
@@ -3813,11 +3813,11 @@ nodes:
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
-// --- T6.3: templates — {{runner.role}}, {{project.*}} ----------------------
+// --- templates — {{runner.role}}, {{project.*}} ----------------------
 
 #[tokio::test]
 async fn a_node_can_reference_its_own_runner_role_by_template() {
-    // ✓ del Plan: render golden — {{runner.role}} es el nombre de rol
+    // render golden — {{runner.role}} es el nombre de rol
     // declarado en `runner:`, conocido estáticamente, nunca el
     // adapter/model que una resolución posterior elige.
     let bench = Bench::new();
@@ -3854,7 +3854,7 @@ nodes:
 
 #[tokio::test]
 async fn an_undefined_inputs_variable_still_fails_the_node_clearly() {
-    // T1.5 owns declaring/validating/supplying `{{inputs.*}}` — absent
+    // Declaring/validating/supplying `{{inputs.*}}` happens elsewhere — absent
     // that, referencing it is exactly the same "undefined variable"
     // failure any other unknown name would get, never silent text.
     let bench = Bench::new();
@@ -3876,7 +3876,7 @@ nodes:
 
 #[tokio::test]
 async fn a_declared_input_s_default_resolves_in_a_node_s_own_template() {
-    // T1.5: `Bench::run` never supplies `--input` values (`&HashMap::new()`
+    // `Bench::run` never supplies `--input` values (`&HashMap::new()`
     // throughout its own harness) — an input with a `default` is exactly
     // the case that still has a value to resolve without one.
     let bench = Bench::new();
@@ -3895,7 +3895,7 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
-// --- T6.4: ensamblado estable-primero (§9.1) --------------------------------
+// --- ensamblado estable-primero --------------------------------
 
 fn stable_first_workflow(volatile_command_output: &str) -> String {
     format!(
@@ -3953,7 +3953,7 @@ async fn run_stable_first(
 #[tokio::test]
 async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_different_volatile_content(
 ) {
-    // ✓ del Plan (D42/§9.1): "comparar hashes entre sesiones es la
+    // "comparar hashes entre sesiones es la
     // verificación mecánica de que el prefijo se mantuvo estable" —
     // `command:` (volatile) cambia entre las dos corridas; `files:`
     // (stable) y `artifact:` (run-stable) no.
@@ -3989,7 +3989,7 @@ async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_di
     );
 }
 
-// --- T6.5: knowledge layering, repo > user > org (§9.2) ---------------------
+// --- knowledge layering, repo > user > org ---------------------
 
 /// `YUNTA_HOME` is process-global state (`yunta_core::user_state_root`
 /// reads it live, same as the CLI's own `project::resolve`), so any test
@@ -4051,7 +4051,7 @@ fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_is_rep
 fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() {
     let user_home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(user_home.path().join("knowledge")).unwrap();
-    // Same filename in both layers: §9.2 says repo must win.
+    // Same filename in both layers: repo must win.
     std::fs::write(
         user_home.path().join("knowledge/shared.md"),
         "MARKER-FROM-USER-LOSES\n",
@@ -4104,7 +4104,7 @@ fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() 
     });
 }
 
-// --- DI-31/D109: the org layer resolves from installed knowledge packs ------
+// --- the org layer resolves from installed knowledge packs ------
 
 /// One installed org knowledge pack under the worktree's own
 /// `.yunta/packs/` — the vendored shape `pack add` produces, built
@@ -4127,9 +4127,9 @@ fn write_org_pack(worktree: &Path, publisher: &str, name: &str, files: &[(&str, 
 
 #[tokio::test]
 async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
-    // D109: the org layer is the union of installed knowledge packs —
-    // T6.5's own last criterion ("knowledge pack instalado se resuelve
-    // como capa org sin config extra"), payable since M11 exists.
+    // The org layer is the union of installed knowledge packs —
+    // "knowledge pack instalado se resuelve
+    // como capa org sin config extra".
     let bench = Bench::new();
     write_org_pack(
         &bench.worktree,
@@ -4152,11 +4152,10 @@ async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
 
 #[tokio::test]
 async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
-    // §9.2's unchanged inter-layer precedence (org < user < repo) now
+    // The unchanged inter-layer precedence (org < user < repo) now
     // exercised against a real pack — and, since `knowledge: {}` is the
     // default that includes org, this also proves the default source no
-    // longer errors the moment a knowledge pack is installed (DI-31's
-    // real sting).
+    // longer errors the moment a knowledge pack is installed.
     let bench = Bench::new();
     write_org_pack(
         &bench.worktree,
@@ -4204,7 +4203,7 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
 
 #[tokio::test]
 async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
-    // D109: between org packs there is no order — same filename from
+    // Between org packs there is no order — same filename from
     // two installed packs is a typed error naming both and the file,
     // never resolved alphabetically or by install order.
     let bench = Bench::new();
@@ -4277,9 +4276,9 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
 
 #[tokio::test]
 async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
-    // With a real resolver behind it (D109), an empty org layer is a
+    // With a real resolver behind it, an empty org layer is a
     // true answer — same as `user` with no `~/.yunta/knowledge` — not
-    // the A6 refusal the pre-M11 stub was.
+    // the degradation-with-error refusal a stub without a resolver would give.
     let bench = Bench::new();
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
     let fixture = "sessions:\n  - outcome: { type: completed, summary: ok }\n";
@@ -4288,7 +4287,7 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
-// --- T7.2: HumanInteraction — gates (§5.3) ----------------------------------
+// --- HumanInteraction — gates ----------------------------------
 
 struct ScriptedInteraction {
     resolution: yunta_core::events::GateResolvedPayload,
@@ -4412,7 +4411,7 @@ async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
 #[tokio::test]
 async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before_t7_2() {
     // Regression: `NoInteraction` (what every other test in this suite
-    // already uses) must reproduce the pre-T7.2 pause behavior byte for
+    // already uses) must reproduce the same pause behavior byte for
     // byte — a gate existing must never change what an unattended run
     // does.
     let bench = Bench::new();
@@ -4431,7 +4430,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before_t
     }
 }
 
-// --- DI-04: gate interno genérico (message/options/on, §5.3 + §11.2) --------
+// --- gate interno genérico (message/options/on) --------
 
 /// Resolves gates from a scripted sequence, one per call — `None` once
 /// the script runs out (so an unexpected extra ask degrades to pause
@@ -4512,7 +4511,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     assert_eq!(plan_run_count(&bench.worktree), 1);
 
     // The recorded escalation carries the declared options plus the
-    // engine-appended abort, each with a tradeoff (§5.3).
+    // engine-appended abort, each with a tradeoff.
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let waiting = events
         .iter()
@@ -4529,7 +4528,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
 
 #[tokio::test]
 async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
-    // §11.2 semantics through a human choice: `ajustar` re-routes to
+    // Re-route semantics through a human choice: `ajustar` re-routes to
     // `plan`, plan re-runs, and the gate asks AGAIN — the second answer
     // (`aprobar`) lets the DAG continue.
     let bench = Bench::new();
@@ -4608,7 +4607,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         RunTerminal::Paused { reason } => assert!(reason.contains("approve"), "got: {reason}"),
         other => panic!("headless internal gate must pause, got {other:?}"),
     }
-    // Unresolved: nothing recorded (re-asks on resume, T7.2 convention).
+    // Unresolved: nothing recorded (re-asks on resume, same gate convention).
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events
         .iter()
@@ -4633,7 +4632,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     assert_eq!(resumed.terminal, RunTerminal::Finished);
 }
 
-// --- DI-05: run token budget (§8.3, limits.max_tokens_per_run) ---------------
+// --- run token budget (limits.max_tokens_per_run) ---------------
 
 const BUDGET_CONFIG: &str = r#"
 runners:
@@ -4872,7 +4871,7 @@ fn session_token_budget_is_an_equal_share_bounded_by_what_remains() {
     assert_eq!(yunta_engine::session_token_budget(1000, 0, 0), 1000);
 }
 
-// --- DI-05 etapa 5: limits.max_loop_iterations (§8.3) ------------------------
+// --- limits.max_loop_iterations ------------------------
 
 /// Three sequential tasks at concurrency 1 need four loop iterations
 /// (one per batch plus the closing empty-batch check) — a cap of 2 trips
@@ -4996,7 +4995,7 @@ async fn a_ledger_within_the_default_iteration_cap_runs_unasked() {
         .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
 }
 
-// --- DI-05 etapa 6: limits.inline_context_bytes (§9) -------------------------
+// --- limits.inline_context_bytes -------------------------
 
 /// A ~60-byte file source: inlined under the reference default (32000),
 /// referenced by pointer when the configured threshold is below it.
@@ -5049,7 +5048,7 @@ async fn a_source_under_the_default_inline_threshold_is_inlined() {
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
-// --- DI-09: session events (agent_session_opened / agent_message) ------------
+// --- session events (agent_session_opened / agent_message) ------------
 
 const SESSION_EVENTS_WORKFLOW: &str = r#"
 name: session-events
@@ -5109,7 +5108,7 @@ sessions:
         .collect();
     assert_eq!(messages.len(), 3, "one agent_message per adapter event");
 
-    // I12/O3: never the content — a mechanical size+digest summary only.
+    // Never the content — a mechanical size+digest summary only.
     let jsonl = serde_json::to_string(&messages).unwrap();
     assert!(
         !jsonl.contains("SECRET-TOKEN-123"),
@@ -5137,7 +5136,7 @@ sessions:
     assert_eq!(tool.target_digest.as_deref(), Some("abc123"));
 }
 
-// --- DI-11: loop/check cancellation under join: any --------------------------
+// --- loop/check cancellation under join: any --------------------------
 
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_loop_child_when_a_sibling_wins() {
@@ -5251,7 +5250,7 @@ nodes:
     }
 }
 
-// --- DI-13: skills chain (resolution → SessionRequest → degradation) ---------
+// --- skills chain (resolution → SessionRequest → degradation) ---------
 
 const SKILLS_CONFIG: &str = r#"
 runners:
@@ -5402,7 +5401,7 @@ sessions:
     assert_eq!(
         adapter.skills_seen(),
         vec![Vec::<std::path::PathBuf>::new()],
-        "the engine never populates skills an adapter didn't declare (A2)"
+        "the engine never populates skills an adapter didn't declare"
     );
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let degraded = events
@@ -5411,12 +5410,12 @@ sessions:
             yunta_core::events::EventPayload::CapabilityDegraded(p) => Some(p),
             _ => None,
         })
-        .expect("the degradation must be an event, never silence (A6)");
+        .expect("the degradation must be an event, never silence");
     assert_eq!(degraded.capability, "skills");
     assert_eq!(degraded.adapter, "mock");
 }
 
-// --- DI-24: on_finish.distill — deterministic knowledge distillation ---------
+// --- on_finish.distill — deterministic knowledge distillation ---------
 
 const DISTILL_WORKFLOW: &str = r#"
 name: distiller
@@ -5644,7 +5643,7 @@ async fn a_later_run_mounts_the_distilled_knowledge() {
     assert_eq!(terminal, RunTerminal::Finished);
 
     // Second run, same checkout: a knowledge context source must see
-    // the distilled file (§8.3 → §9.2, the loop closed).
+    // the distilled file — the loop closed, from budget limit to knowledge layering.
     let second_workflow = r#"
 name: consumer
 nodes:
@@ -5708,7 +5707,7 @@ sessions:
     );
 }
 
-// --- T9.4: runners fan-out end-to-end + node-level agent ---------------------
+// --- runners fan-out end-to-end + node-level agent ---------------------
 
 #[tokio::test]
 async fn a_fanout_review_runs_one_session_per_role_with_rendered_artifacts() {
@@ -5790,13 +5789,13 @@ sessions:
     assert_eq!(
         adapter.agents_seen(),
         vec![Some("security-auditor".to_string())],
-        "the node's own agent wins over the candidate's (§13.3)"
+        "the node's own agent wins over the candidate's"
     );
 }
 
 #[tokio::test]
 async fn max_per_run_holds_exactly_under_a_fully_concurrent_batch() {
-    // DI-16: four tasks in ONE batch (`concurrency: 4`) all request an
+    // Four tasks in ONE batch (`concurrency: 4`) all request an
     // expansion under `rules` with `max_per_run: 2`. The cap window
     // (read count → decide → commit) is atomic across the batch, so the
     // count is deterministic — exactly 2 granted, 2 escalated — never
@@ -5879,7 +5878,7 @@ nodes:
     );
 }
 
-// --- DI-17: `context:` at loop level ----------------------------------------
+// --- `context:` at loop level ----------------------------------------
 
 #[tokio::test]
 async fn a_loop_s_context_reaches_every_task_s_brief() {
@@ -5949,7 +5948,7 @@ nodes:
     );
 }
 
-// --- DI-21: events.jsonl on the Broken path ----------------------------------
+// --- events.jsonl on the Broken path ----------------------------------
 
 #[tokio::test]
 async fn a_broken_log_still_exports_events_jsonl_for_forensics() {
@@ -6022,13 +6021,13 @@ nodes:
         "a corrupt log is a Broken error, got {result:?}"
     );
     // The corrupt log is exactly the one you most want exported — the
-    // forensic copy exists even though the run errored (DI-21).
+    // forensic copy exists even though the run errored.
     let exported = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
     assert!(exported.contains("node_finished"));
     assert!(exported.contains("run_created"));
 }
 
-// --- DI-23: on_interrupt: resume_session -------------------------------------
+// --- on_interrupt: resume_session -------------------------------------
 
 /// Crafts an interrupted run: `run_created` + a `node_started` (and
 /// optionally an open `agent_session_opened`) with no terminal event —
@@ -6175,7 +6174,7 @@ sessions:
                 if p.capability == "resume_session"
                     && p.policy_applied.contains("restart_node")
         )),
-        "degrading to a fresh session must be an event, never a silence (A6/D99)"
+        "degrading to a fresh session must be an event, never a silence"
     );
 }
 

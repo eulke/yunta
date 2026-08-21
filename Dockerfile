@@ -1,5 +1,5 @@
-# Copies the already-built release binary in — never recompiles (RFC-0004
-# §4.1's publish-container job). `release.yml` assembles the build context
+# Copies the already-built release binary in — never recompiles.
+# `release.yml`'s publish-container job assembles the build context
 # as `ctx/<TARGETOS>/<TARGETARCH>/yunta` from the matching GitHub Release
 # artifact before invoking `docker buildx build --platform
 # linux/amd64,linux/arm64`, so each platform's build picks up its own

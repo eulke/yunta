@@ -1,7 +1,8 @@
-//! DI-32 end to end: `permissions.packs` (D51/D72, §6.1) actually
+//! End to end: `permissions.packs` actually
 //! enforced by `pack add`/`pack update` — the publisher allow-list and
 //! the `executors: allow|prompt|deny` policy, against the real compiled
-//! binary. Before DI-32 both parsed and merged but governed nothing.
+//! binary. Parsing and merging the field alone doesn't enforce anything;
+//! this suite proves the policy is actually applied.
 
 use std::path::Path;
 use std::process::Output;

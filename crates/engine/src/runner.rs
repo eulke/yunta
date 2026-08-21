@@ -1,12 +1,12 @@
-//! Runner resolution (Contrato §13.1) — **M-0 cut**.
+//! Runner resolution.
 //!
 //! A node names a role; the merged config's `runners:` maps that role to
 //! an ordered candidate list. Resolution walks the list and picks the
 //! first candidate whose adapter is actually available, recording every
 //! discarded candidate with its reason — `runner_resolved` makes the
 //! choice auditable, never implicit. Capability-based discarding (a
-//! candidate that lacks a capability the node demands) arrives with the
-//! capability checks of full T1.3/M1; M-0 availability is simply "is
+//! candidate that lacks a capability the node demands) is a separate,
+//! later concern; availability here is simply "is
 //! this adapter constructed in this invocation".
 
 use thiserror::Error;

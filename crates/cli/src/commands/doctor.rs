@@ -1,17 +1,16 @@
-//! `yunta doctor` (T7.1, Spec Adapter §2): probes every adapter this
-//! project's `runners:` names — binary present, version compatible, auth
-//! valid — and reports each one, healthy or not. The same `probe()` a
-//! real `yunta run`/`yunta resume` calls before spending anything (see
+//! `yunta doctor`: probes every adapter this project's `runners:`
+//! names — binary present, version compatible, auth valid — and
+//! reports each one, healthy or not. The same `probe()` a real
+//! `yunta run`/`yunta resume` calls before spending anything (see
 //! `commands::probe_or_refuse`); this command exists to run it on
 //! demand and report every result instead of stopping at the first
 //! failure.
 //!
 //! Also validates every installed pack's own `requires:` against this
-//! project's merged config (RFC-0002 §3, T11.6): roles resolvable,
-//! `mcp_servers:` defined, and — the one part `yunta_engine::
-//! check_pack_requires` deliberately leaves to this command, since it
-//! needs real filesystem access — `requires.commands` present on
-//! `PATH`.
+//! project's merged config: roles resolvable, `mcp_servers:` defined,
+//! and — the one part `yunta_engine::check_pack_requires` deliberately
+//! leaves to this command, since it needs real filesystem access —
+//! `requires.commands` present on `PATH`.
 
 use std::process::ExitCode;
 
@@ -92,7 +91,7 @@ pub async fn doctor() -> ExitCode {
     }
 }
 
-/// T11.6/§3: every installed pack's own `requires:` against this
+/// Checks every installed pack's own `requires:` against this
 /// project's merged config — roles resolvable, `mcp_servers:` defined,
 /// and `requires.commands` present on `PATH`. Returns `false` (and
 /// prints an actionable line per gap) when any pack has something

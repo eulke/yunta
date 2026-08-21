@@ -1,6 +1,6 @@
-//! The per-run MCP listener (§6.4/§6.5, D103, T8.2b), exercised by a
+//! The per-run MCP listener, exercised by a
 //! real rmcp client over real loopback HTTP — token auth, the four
-//! tools, and the scoping rules (I27, D49, D98) as observable behavior,
+//! tools, and the scoping rules as observable behavior,
 //! not as unit assertions on internals.
 
 use std::sync::Arc;
@@ -52,7 +52,7 @@ impl Bench {
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-tools-1");
         let workflow: Workflow = serde_yaml::from_str(BLACKBOARD_WORKFLOW).unwrap();
-        // T2.5: every log opens with run_created — the listener's own
+        // Every log opens with run_created — the listener's own
         // appends land on an already-born run in production too.
         storage
             .append_event(&Event {
@@ -170,7 +170,7 @@ async fn call(
     (result.is_error.unwrap_or(false), text_of(&result))
 }
 
-// --- Auth (§6.5: token bearer de un solo uso) --------------------------------
+// --- Auth (single-use bearer token) --------------------------------
 
 #[tokio::test]
 async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
@@ -189,7 +189,7 @@ async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
     allowed.cancel().await.unwrap();
 }
 
-// --- yunta_post_finding (§4.1, one schema both ways) -------------------------
+// --- yunta_post_finding (one schema both ways) -------------------------
 
 #[tokio::test]
 async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
@@ -213,7 +213,7 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     assert_eq!(bench.findings_by("solo"), vec!["hot-1"]);
 
     // An incomplete report is a visible error naming the schema — and a
-    // no-op on the log (§4.1: "reportar mal es un error visible").
+    // no-op on the log: reporting badly must fail visibly, not silently.
     let (is_error, text) = call(
         &client,
         "yunta_post_finding",
@@ -226,13 +226,13 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     client.cancel().await.unwrap();
 }
 
-// --- yunta_get_blackboard (D49 mount rule, D98 read rule) --------------------
+// --- yunta_get_blackboard (mount rule, read rule) --------------------
 
 #[tokio::test]
 async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
     let bench = Bench::new();
     // `solo` is no group's child; `reviewer` sits in an `independent`
-    // group — neither may even see the tool (D49).
+    // group — neither may even see the tool.
     for node in ["solo", "reviewer"] {
         let session = bench.listener(node, None).await;
         let client = client_for(&session, None).await.unwrap();
@@ -272,7 +272,7 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
     .await;
     assert!(!is_error, "got: {text}");
 
-    // D98: pre-join, the board shows worker-a its OWN post and nothing
+    // Pre-join, the board shows worker-a its OWN post and nothing
     // else — not the sibling's, not the foreign node's.
     let (is_error, text) = call(&client, "yunta_get_blackboard", json!({})).await;
     assert!(!is_error, "got: {text}");
@@ -311,7 +311,7 @@ async fn task_status_reflects_the_ledger_derived_from_the_log() {
     client.cancel().await.unwrap();
 }
 
-// --- yunta_request_scope_expansion (§6.2, task sessions only) ----------------
+// --- yunta_request_scope_expansion (task sessions only) ----------------
 
 #[tokio::test]
 async fn scope_expansion_request_round_trips_through_the_real_consumer() {
@@ -331,7 +331,7 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     .await;
     assert!(!is_error, "got: {text}");
 
-    // One request per attempt (§6.2) — a second one is refused while
+    // One request per attempt — a second one is refused while
     // the first sits unconsumed.
     let (is_error, text) = call(
         &client,
@@ -421,7 +421,7 @@ async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributi
     client_b.cancel().await.unwrap();
 }
 
-// --- §6.5: the listener dies with its session --------------------------------
+// --- the listener dies with its session --------------------------------
 
 #[tokio::test]
 async fn dropping_the_session_closes_the_endpoint() {
@@ -439,6 +439,6 @@ async fn dropping_the_session_closes_the_endpoint() {
     assert!(
         attempt.is_err(),
         "a dropped session's endpoint must be unreachable — credentials never outlive \
-         their session (§6.5)"
+         their session"
     );
 }

@@ -1,4 +1,4 @@
-//! The `AskQuestions` schedule step (DI-02/DI-03, §4.1/D86): a node the
+//! The `AskQuestions` schedule step: a node the
 //! log derives as waiting-on-questions gets its questions put to the
 //! human through `HumanInteraction::ask` — the ONE ask site, serving the
 //! first invocation (right after the node closes waiting) and every
@@ -15,7 +15,7 @@ use super::{RunCtx, RunError};
 /// What the ask round produced: the node was fully answered (and closed
 /// with `node_started` + `questions_answered` + `node_finished`), or a
 /// reason to pause — no surface, or an invalid reply, each citing
-/// exactly what's missing (A6).
+/// exactly what's missing.
 pub(super) enum AskOutcome {
     Answered,
     Pause { reason: String },
@@ -23,7 +23,8 @@ pub(super) enum AskOutcome {
 
 pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutcome, RunError> {
     // The declared questions artifacts, re-read from the frozen run.dir
-    // (I3) — the node produced them before it closed waiting.
+    // — artifacts are immutable once written — the node produced them
+    // before it closed waiting.
     let mut question_files: Vec<(std::path::PathBuf, yunta_core::QuestionsFile)> = Vec::new();
     if let Some(artifacts) = &node.artifacts {
         for spec in &artifacts.produces {
@@ -90,9 +91,9 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
 
     // Everything answered and valid: the node's remaining work — the
     // answers — happens now, as its own (session-less) attempt on the
-    // log: re-open, materialize each answers artifact (engine-written,
-    // I20) with its `questions_answered` (hash + channel + responder,
-    // §4.1), close finished.
+    // log: re-open, materialize each answers artifact (engine-written)
+    // with its `questions_answered` (hash + channel + responder),
+    // close finished.
     let attempt = ctx
         .load_events()?
         .iter()

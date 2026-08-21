@@ -1,5 +1,5 @@
-//! `yunta receipt <run_id>` (D54, RFC-0003 §1, T10.4): gathers the run's
-//! manifest, event log and hash-chain verification off disk — the only
+//! `yunta receipt <run_id>`: gathers the run's manifest, event log and
+//! hash-chain verification off disk — the only
 //! IO this command does — and hands them to `yunta_engine::build_receipt`
 //! for the actual derivation. Writes both formats to the run's own
 //! `run.dir` (`receipt.md`, `receipt.json`) so a later node (e.g. a `pr`

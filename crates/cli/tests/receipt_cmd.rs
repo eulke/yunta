@@ -1,4 +1,4 @@
-//! `yunta receipt <run_id>` end to end (D54, T10.4): the real compiled
+//! `yunta receipt <run_id>` end to end: the real compiled
 //! binary, same style `stats_cmd.rs`/`run_flow.rs` use — this is what
 //! proves the CLI wiring (writing `receipt.md`/`receipt.json` to
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of

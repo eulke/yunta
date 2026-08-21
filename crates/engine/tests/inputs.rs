@@ -1,4 +1,4 @@
-//! `resolve_inputs` (T1.5, §2.3, D82): CLI-provided values win, the
+//! `resolve_inputs`: CLI-provided values win, the
 //! spec's own `default` fills the rest, and every value — from either
 //! source — is validated before it reaches a manifest.
 

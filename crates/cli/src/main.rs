@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! `yunta` binary entrypoint. Stays thin by design (D04): parse args with
+//! `yunta` binary entrypoint. Stays thin by design: parse args with
 //! clap, delegate everything else to the library crates and the command
 //! modules.
 
@@ -45,19 +45,19 @@ enum Command {
         /// own resolution. `mock` is refused here — see `yunta test`.
         #[arg(long)]
         adapter: Option<String>,
-        /// Selects a workflow mode (§10.1, D44). Omitted with `modes:`
-        /// declared defaults to the first declared mode; a workflow
-        /// with no `modes:` at all ignores this entirely.
+        /// Selects a workflow mode. Omitted with `modes:` declared
+        /// defaults to the first declared mode; a workflow with no
+        /// `modes:` at all ignores this entirely.
         #[arg(long)]
         mode: Option<String>,
-        /// Prints progress (§8.5) as the run advances, polling the event
-        /// log every 500ms instead of only at the end.
+        /// Prints progress as the run advances, polling the event log
+        /// every 500ms instead of only at the end.
         #[arg(long)]
         follow: bool,
         /// Creates the run, then hands it off to a detached `yunta
         /// resume` child and returns immediately with the run id — the
-        /// workflow keeps running independent of this invocation (M8,
-        /// D101: what `run_workflow` triggers internally so the MCP
+        /// workflow keeps running independent of this invocation (the
+        /// same thing `run_workflow` triggers internally so the MCP
         /// control plane never blocks for a run's duration). Mutually
         /// exclusive with `--follow` (there is nothing left in this
         /// process to follow).
@@ -75,8 +75,8 @@ enum Command {
         run_id: String,
     },
     /// Answers a paused run's gate decision from a separate process — no
-    /// live surface attached to the run itself (M8/T8.1.3, DI-27).
-    /// Records the decision on the log and hands the run to a detached
+    /// live surface attached to the run itself. Records the decision
+    /// on the log and hands the run to a detached
     /// resume that applies it: exhausted re-routes (retry/abort/promote)
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
     /// pause reason; the option must be on that decision's own menu.
@@ -88,13 +88,12 @@ enum Command {
         /// Who's answering, for the audit trail (`gate_resolved.resolved_by`).
         #[arg(long)]
         by: Option<String>,
-        /// Free-form context alongside the choice (§5.3's own `free_text`).
+        /// Free-form context alongside the choice.
         #[arg(long = "text")]
         free_text: Option<String>,
     },
     /// Sends every running node's session an ordered interrupt,
-    /// escalating to `kill` if it doesn't close in time (Spec Adapter
-    /// §2, A4).
+    /// escalating to `kill` if it doesn't close in time.
     Cancel {
         /// The run id to cancel.
         run_id: String,
@@ -108,13 +107,13 @@ enum Command {
         runs: bool,
     },
     /// Health-checks every adapter this project's `runners:` names —
-    /// binary present, version compatible, auth valid (Spec Adapter §2).
+    /// binary present, version compatible, auth valid.
     Doctor,
-    /// Runs the control-plane MCP server over stdio (M8/T8.1, §6.4):
-    /// `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`,
-    /// `resolve_gate` — none of which ever blocks for a run's own
-    /// duration. Not a daemon (D05/D77): exits when the client closes
-    /// stdin, and no run's own life depends on this process staying up.
+    /// Runs the control-plane MCP server over stdio: `list_workflows`,
+    /// `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`
+    /// — none of which ever blocks for a run's own duration. Not a
+    /// daemon: exits when the client closes stdin, and no run's own
+    /// life depends on this process staying up.
     Mcp,
     /// Removes orphaned run and worktree directories, respecting
     /// `storage.retention_days`.
@@ -135,14 +134,14 @@ enum Command {
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
     Test,
-    /// Verifies a run's event hash chain (I26): integrity and order,
+    /// Verifies a run's event hash chain: integrity and order,
     /// recomputed from the log as persisted.
     Verify {
         /// The run id to verify.
         run_id: String,
     },
-    /// Generates a Verified Work Receipt for a finished run (D54):
-    /// markdown + JSON derived entirely from the event log, written to
+    /// Generates a Verified Work Receipt for a finished run: markdown
+    /// and JSON derived entirely from the event log, written to
     /// the run's own directory and printed to stdout.
     Receipt {
         /// The run id to generate a receipt for.
@@ -151,7 +150,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Installs, updates, removes and lists third-party packs (RFC-0002).
+    /// Installs, updates, removes and lists third-party packs.
     Pack {
         #[command(subcommand)]
         action: PackAction,
@@ -208,7 +207,7 @@ enum PackAction {
         /// Confirms installing a pack that ships executors (executable
         /// code, not just declarative YAML) — required whenever the
         /// pack's `declares.executors` is non-empty; review the audit
-        /// this command prints first (T11.5/§6.3).
+        /// this command prints first.
         #[arg(long)]
         yes: bool,
     },
@@ -218,9 +217,9 @@ enum PackAction {
         publisher_name: String,
         r#ref: String,
         /// Confirms updating to a ref that declares executors — same
-        /// gate as `add` (DI-32): a new ref is where new executable
-        /// code first appears. `permissions.packs.executors: deny`
-        /// refuses regardless; `allow` skips the confirmation.
+        /// gate as `add`: a new ref is where new executable code first
+        /// appears. `permissions.packs.executors: deny` refuses
+        /// regardless; `allow` skips the confirmation.
         #[arg(long)]
         yes: bool,
     },
@@ -232,7 +231,7 @@ enum PackAction {
     /// Lists every locked pack, verifying its vendored content against
     /// the lock.
     List,
-    /// Full static inventory of an installed pack (T11.4): every
+    /// Full static inventory of an installed pack: every
     /// command, context source, per-node permission, required agent,
     /// mcp server, executor, and each workflow's full prompt text —
     /// plus whether the pack ships tests and whether they pass.
@@ -354,9 +353,9 @@ pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
 
 fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     // A bare catalog name (no `.yaml`/`.yml` extension) resolves through
-    // the repo catalog, then a publisher's vendored packs (RFC-0002 §5,
-    // T11.3) — same rule `yunta run` follows; anything with an
-    // extension stays a literal path.
+    // the repo catalog, then a publisher's vendored packs — same rule
+    // `yunta run` follows; anything with an extension stays a literal
+    // path.
     let resolved_path: std::path::PathBuf;
     let workflow_path: &Path = if workflow_path.extension().is_none() {
         let cwd = match std::env::current_dir() {
@@ -385,9 +384,9 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Without `--config`, check sees the project's real layers (§2.2) —
-    // the same ones a run would — including the `permissions` layer
-    // conflict check (§6.1: a lower layer re-permitting what a higher one
+    // Without `--config`, check sees the project's real layers — the
+    // same ones a run would — including the `permissions` layer
+    // conflict check (a lower layer re-permitting what a higher one
     // denied is refused here, citing both layers). An explicit `--config`
     // is a single already-merged file: nothing layered to conflict.
     let config: ConfigLayer = match config_path {
@@ -425,9 +424,8 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     };
 
     let mut errors = yunta_engine::check(&workflow, &config);
-    // T9.3: composition references resolve against the repo catalog
-    // under the current directory (`.yunta/workflows/`), then packs
-    // (RFC-0002 §5, T11.3).
+    // Composition references resolve against the repo catalog under
+    // the current directory (`.yunta/workflows/`), then packs.
     if let Ok(cwd) = std::env::current_dir() {
         let origin = yunta_engine::origin_of(&cwd, workflow_path);
         errors.extend(yunta_engine::check_workflow_refs(
@@ -439,11 +437,12 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
         eprintln!("warning: {warning}");
     }
 
-    // §8.7/T7.10: "en el momento en que alguien ya está tocando ese
-    // workflow" — surfaced here too, not just `stats --workflow`. Best
-    // effort: a project with no state root yet (nothing ever ran) or an
-    // unnamed workflow simply shows nothing, same as `list_workflows`'s
-    // own stance on missing history.
+    // Verification-effectiveness findings, surfaced here too — right
+    // when someone is already looking at this workflow — not just via
+    // `stats --workflow`. Best effort: a project with no state root
+    // yet (nothing ever ran) or an unnamed workflow simply shows
+    // nothing, same as `list_workflows`'s own stance on missing
+    // history.
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(project) = project::resolve(&cwd) {
             if let Ok(storage) = yunta_storage::Storage::open(&project.storage_path) {

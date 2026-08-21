@@ -1,16 +1,16 @@
-//! Parses `claude --output-format stream-json` lines into `AgentEvent`s
-//! (T7.3). Pure and total: a line whose shape we don't recognize — a
-//! future stream kind, debug noise from a nested session — yields no
-//! events rather than an error, the same tolerant-reader stance
-//! `docs/eventos.md` takes for unknown event kinds in the log itself.
+//! Parses `claude --output-format stream-json` lines into `AgentEvent`s.
+//! Pure and total: a line whose shape we don't recognize — a future
+//! stream kind, debug noise from a nested session — yields no events
+//! rather than an error, the same tolerant-reader stance the event log
+//! itself takes for unknown event kinds.
 //!
 //! Token accounting trusts only the terminal `result` line's `usage`,
 //! never a per-message `assistant` line's: observed CLI output shows an
 //! `assistant` message's `output_tokens` undercounting thinking tokens
 //! later reconciled in the terminal total. Reporting a single, correct
-//! total costs mid-run budget granularity (T3.3 can't cut this adapter
-//! off mid-generation) but never double-counts or under-reports —
-//! correct cost attribution (§8.4) matters more than a cutoff this CLI's
+//! total costs mid-run budget granularity — this adapter can't cut a
+//! turn off mid-generation — but never double-counts or under-reports,
+//! and correct cost attribution matters more than a cutoff this CLI's
 //! atomic-turn execution model can't reliably support anyway.
 
 use serde_json::Value;
@@ -105,7 +105,7 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
             // [inferido]: the CLI's `result` subtypes beyond "success"
             // aren't documented field-by-field here; retrying is the
             // safe default — yunta's own max_retries still caps the
-            // cost of guessing wrong (§5.2).
+            // cost of guessing wrong.
             retryable: true,
         }
     } else {

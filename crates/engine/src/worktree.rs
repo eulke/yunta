@@ -1,4 +1,4 @@
-//! Working-tree isolation (T4.2, Contrato §7.3).
+//! Working-tree isolation.
 //!
 //! `worktree` (default): each run gets its own `git worktree`, checked
 //! out from the manifest's frozen `base_commit` — concurrent runs on the
@@ -6,13 +6,13 @@
 //! by the agent's edits. `none`: the run operates directly on the given
 //! checkout — legitimate for watching an agent edit live, or CI already
 //! inside an ephemeral container — but the engine **requires a clean
-//! tree** at the start (I3/§6: without that, scope-by-diff can't tell
+//! tree** at the start (without that, scope-by-diff can't tell
 //! the agent's work from the user's) and refuses a second concurrent run
 //! on that same repo via a lock file next to git's own metadata.
 //!
 //! Cleanup: a prepared worktree is left on disk after the run for
 //! inspection by default; a workflow that declares
-//! `on_finish.cleanup: worktree` (DI-13) gets [`cleanup_worktree`] at
+//! `on_finish.cleanup: worktree` gets [`cleanup_worktree`] at
 //! its real Finish instead. `none`'s lock is always released at
 //! Finish, since holding it forever would make every run after the
 //! first permanently refuse to start.
@@ -31,16 +31,16 @@ pub enum WorktreeError {
         detail: String,
     },
     #[error(
-        "`{path}` has uncommitted changes — isolation `none` requires a clean tree (§7.3): \
+        "`{path}` has uncommitted changes — isolation `none` requires a clean tree: \
          without it, scope-by-diff can't tell the agent's work from what was already there"
     )]
     DirtyTree { path: PathBuf },
     #[error(
         "`{path}` already has a run in progress under isolation `none` — only one at a time \
-         is allowed on the same checkout (§7.3); use isolation `worktree` to run concurrently"
+         is allowed on the same checkout; use isolation `worktree` to run concurrently"
     )]
     Locked { path: PathBuf },
-    /// DI-08: a lock whose owner can't be verified — pre-owner-format
+    /// A lock whose owner can't be verified — pre-owner-format
     /// (empty) or corrupted. Conservative on purpose: guessing that an
     /// unreadable lock is stale would break the old contract silently.
     #[error(
@@ -56,7 +56,7 @@ pub enum WorktreeError {
         #[source]
         source: std::io::Error,
     },
-    /// DI-28: another process has held the worktree-mutation lock past
+    /// Another process has held the worktree-mutation lock past
     /// the bounded wait — never silently proceed into the race the lock
     /// exists to prevent.
     #[error(
@@ -77,7 +77,7 @@ pub enum WorktreeError {
 /// `base_commit`; for `Isolation::None`, verifies `repo` itself is clean
 /// and takes its lock (`worktree_path` is ignored — the run operates on
 /// `repo` directly).
-/// What taking isolation `none`'s lock involved (DI-08) — the caller
+/// What taking isolation `none`'s lock involved — the caller
 /// (CLI) surfaces a takeover to the user; `Worktree` isolation always
 /// reports `Ready`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -164,10 +164,10 @@ pub enum WorktreeCleanup {
     NotALinkedWorktree,
 }
 
-/// `on_finish.cleanup: worktree` (§8.3/DI-13): removes the run's linked
+/// `on_finish.cleanup: worktree`: removes the run's linked
 /// worktree and then deletes the run branch only if git agrees it's
 /// safe (`branch -d`, never `-D`) — a branch still carrying unmerged,
-/// unpushed commits (a fresh distill, DI-24) survives, and that is not
+/// unpushed commits (a fresh distill) survives, and that is not
 /// an error. The worktree removal itself is `--force`: the workflow
 /// declared this checkout disposable, and un-committed leftovers are
 /// exactly what it wants gone.
@@ -193,7 +193,7 @@ pub async fn cleanup_worktree(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("/"));
 
-    // DI-28: removal rewrites the same `.git/worktrees/` metadata an
+    // Removal rewrites the same `.git/worktrees/` metadata an
     // `add` scans — same lock, same reasoning.
     let _mutation_lock = lock_worktree_mutations(Path::new(common_dir.trim())).await?;
     run_git(
@@ -235,13 +235,13 @@ async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
     Ok(common_git_dir(repo).await?.join("yunta-none.lock"))
 }
 
-/// DI-28: how long an acquirer waits on a live holder before giving up
+/// How long an acquirer waits on a live holder before giving up
 /// loudly. Worktree mutations take tens of milliseconds — 30s of
 /// patience means the holder is hung, not busy.
 const MUTATION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MUTATION_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(15);
 
-/// DI-28: holds `yunta-worktree.lock` for the duration of one `git
+/// Holds `yunta-worktree.lock` for the duration of one `git
 /// worktree` mutation; dropping it releases. Removal in `Drop` (not an
 /// explicit method) so an early `?` return can't leak the lock.
 struct WorktreeMutationGuard {
@@ -254,7 +254,7 @@ impl Drop for WorktreeMutationGuard {
     }
 }
 
-/// DI-28: serializes every `git worktree` mutation on one repo —
+/// Serializes every `git worktree` mutation on one repo —
 /// in-process *and* cross-process. Git mutates `.git/worktrees/`
 /// without a complete lock between `add`s, so N concurrent additions
 /// (a `concurrency: N` task batch, two `kind: workflow` nodes in one
@@ -266,7 +266,7 @@ impl Drop for WorktreeMutationGuard {
 /// and living inside this module's only mutation functions means no
 /// call site can forget it.
 ///
-/// Same owner model as DI-08's `none` lock: content is the holder's
+/// Same owner model as the `none` lock: content is the holder's
 /// pid, liveness by `kill -0` at contention time. A dead holder's lock
 /// is stolen by *removing* it and retrying the atomic `create_new` —
 /// never by overwriting in place, which would let two stealers both
@@ -329,7 +329,7 @@ async fn lock_worktree_mutations(
     }
 }
 
-/// The lock's content (DI-08): the owning `yunta` process. Liveness is
+/// The lock's content: the owning `yunta` process. Liveness is
 /// decided by `kill -0` at contention time, never by age — which is why
 /// there is no timestamp here.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -364,7 +364,7 @@ async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
             Ok(WorktreePrepared::Ready)
         }
         Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-            // DI-08: the lock has an owner — is it still alive?
+            // The lock has an owner — is it still alive?
             let owner: Option<LockOwner> = std::fs::read(&lock_path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok());

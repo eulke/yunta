@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fake `codex` binary for the codex adapter tests (T7.4) — no network, no
+# Fake `codex` binary for the codex adapter tests — no network, no
 # API cost, deterministic. Mirrors claude_code_stub.sh exactly; see that
 # file's own comment for the rationale each knob shares.
 #

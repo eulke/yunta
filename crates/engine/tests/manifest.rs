@@ -338,7 +338,7 @@ fn an_explicit_max_parallel_nodes_freezes_that_value() {
     assert_eq!(manifest.max_parallel_nodes, 4);
 }
 
-// --- T1.5: inputs: freeze into the manifest (§2.3, D82) --------------------
+// --- inputs: freeze into the manifest -----------------------------------------
 
 const WORKFLOW_WITH_INPUT: &str = r#"
 name: with-input
@@ -391,7 +391,7 @@ fn a_provided_input_value_freezes_into_the_manifest() {
     );
 }
 
-// --- T9.4: `runners:` fan-out expands statically in the manifest -------------
+// --- `runners:` fan-out expands statically in the manifest --------------------
 
 #[test]
 fn a_runners_fanout_node_expands_into_one_node_per_role() {

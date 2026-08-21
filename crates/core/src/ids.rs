@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// (Display, From<&str>/From<String>, as_str). CLAUDE.md: "Newtypes para
 /// todo identificador — nunca `String` pelada." Validation of an
 /// identifier's expected shape (e.g. the ledger's `^[A-Za-z][...]*$`
-/// pattern, T1.0 §2) belongs to whoever parses it into existence, not to
+/// pattern) belongs to whoever parses it into existence, not to
 /// the newtype itself — an id here can be any string, just never
 /// interchangeable with a different kind of id by accident.
 macro_rules! string_id {
@@ -43,26 +43,26 @@ macro_rules! string_id {
 }
 
 string_id!(
-    /// A node identifier, unique within a workflow (Contrato §2, §3).
+    /// A node identifier, unique within a workflow.
     NodeId
 );
 
 string_id!(
-    /// A run identifier (Contrato §2: ULID). Nothing generates real ULIDs
-    /// yet — that lands with T4.x/T7.1 via an injected id source per
+    /// A run identifier (a ULID). Nothing generates real ULIDs
+    /// yet — that comes later, via an injected id source per
     /// CLAUDE.md's "determinismo inyectado" — this type only fixes the
     /// domain shape ahead of that.
     RunId
 );
 
 string_id!(
-    /// A task identifier from the ledger (`docs/spec-ledger.md` §2:
-    /// `^[A-Za-z][A-Za-z0-9_-]*$`, unique within one ledger).
+    /// A task identifier from the ledger (`^[A-Za-z][A-Za-z0-9_-]*$`,
+    /// unique within one ledger).
     TaskId
 );
 
 string_id!(
-    /// An adapter session identifier — opaque to the engine (Spec
-    /// Adapter §2: "opaco para el engine", persisted for `resume`).
+    /// An adapter session identifier — opaque to the engine, persisted
+    /// for `resume`.
     SessionId
 );

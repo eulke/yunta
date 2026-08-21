@@ -1,15 +1,15 @@
-//! The run manifest (T1.4, Contrato §2.1) — **M-0 cut**.
+//! The run manifest.
 //!
 //! `Manifest` freezes everything needed to interpret a run: the parsed
 //! workflow, the merged config, the content of every file-referenced
-//! prompt (§9.3: editing the file mid-run must not alter the run, I3)
+//! prompt (editing the file mid-run must not alter the run)
 //! and the base commit. Editing any source on disk after the freeze
 //! changes nothing — the manifest is a value, and `manifest_hash` is a
 //! pure function of it.
 //!
-//! Out of the M-0 cut, waiting for their schema to exist: `mode` (§10),
+//! Still waiting for their schema to exist: `mode`,
 //! resolved `yunta_schema`, and `base_branch` (the `project:` config
-//! group is deferred from T1.2). `inputs` itself landed in T1.5.
+//! group isn't wired through yet).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{ConfigLayer, Isolation, NodeId, Workflow};
 
-/// Absolute, fully-resolved state roots at run creation (T2.4/DI-07) —
+/// Absolute, fully-resolved state roots at run creation —
 /// post `YUNTA_HOME`, post config layers. Frozen so a later
 /// `paths.runs`/`paths.worktrees` change can never lose a run that
 /// already exists: everything after the manifest is found reads these,
@@ -31,7 +31,7 @@ pub struct FrozenPaths {
 }
 
 /// Which pack (and exactly which version of it) a run's top-level
-/// workflow came from (RFC-0002 §7, T11.7) — frozen the same moment
+/// workflow came from — frozen the same moment
 /// `workflow` itself is: `update`-ing the pack afterward can't touch a
 /// run already born, since resume only ever re-reads this manifest,
 /// never the vendored pack on disk again. `commit` is `None` when the
@@ -47,22 +47,22 @@ pub struct PackProvenance {
     pub commit: Option<String>,
 }
 
-/// Everything a run needs frozen at creation time (Contrato §2.1). The
+/// Everything a run needs frozen at creation time. The
 /// engine never re-reads workflow, config or prompt files during a run —
 /// resume interprets the run with exactly what it was born with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
-    /// Version of this manifest's own schema (D07: everything persisted
-    /// is versioned from the first commit).
+    /// Version of this manifest's own schema — everything persisted
+    /// is versioned from the first commit.
     pub schema_version: u32,
     /// Version of the yunta binary that created the run.
     pub yunta_version: String,
     pub workflow: Workflow,
     pub config: ConfigLayer,
     /// Every declared input resolved to its final string value — CLI-
-    /// provided or the spec's own `default`, already validated (T1.5,
-    /// §2.3). Frozen here so a node never resolves a default itself:
-    /// that would be per-node non-deterministic state (D82).
+    /// provided or the spec's own `default`, already validated.
+    /// Frozen here so a node never resolves a default itself:
+    /// that would be per-node non-deterministic state.
     pub inputs: BTreeMap<String, String>,
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
@@ -72,30 +72,30 @@ pub struct Manifest {
     pub base_branch: String,
     /// Commit the run starts from (`git rev-parse HEAD` at creation).
     pub base_commit: String,
-    /// Resolved `defaults.isolation` (§7.3, T4.2) — a run's own mode
+    /// Resolved `defaults.isolation` — a run's own mode
     /// never changes after creation, even if config does.
     pub isolation: Isolation,
-    /// Resolved `defaults.max_parallel_nodes` (T4.1) — how many
+    /// Resolved `defaults.max_parallel_nodes` — how many
     /// independently-ready DAG nodes the scheduler may run at once for
     /// this run, frozen the same way as `isolation`.
     pub max_parallel_nodes: u32,
     pub workflow_hash: String,
     pub config_hash: String,
-    /// `None` on manifests written before DI-07 (tolerant reader, D70):
-    /// those fall back to the current config's paths — exactly the
+    /// `None` on manifests written before this field existed (tolerant
+    /// reader): those fall back to the current config's paths — exactly the
     /// pre-freeze behavior, so old runs stay resumable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<FrozenPaths>,
     /// `None` for a repo-origin workflow, or for a manifest written
-    /// before DI-13's pack support existed (tolerant reader, D70).
+    /// before pack support existed (tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pack: Option<PackProvenance>,
 }
 
 impl Manifest {
     /// Hash of the whole frozen manifest — the value `run_created`
-    /// records, and the genesis of the event hash chain (§3.3, not
-    /// implemented in M-0).
+    /// records, and the genesis of the event hash chain (not yet
+    /// implemented).
     pub fn manifest_hash(&self) -> String {
         content_hash(self)
     }
@@ -118,7 +118,7 @@ pub fn content_hash<T: Serialize>(value: &T) -> String {
 }
 
 /// Lowercase-hex SHA-256 of raw bytes — what `artifact_written` records
-/// for a file's content (§4: artifacts are verified by existence and
+/// for a file's content (artifacts are verified by existence and
 /// hash, never by format).
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);

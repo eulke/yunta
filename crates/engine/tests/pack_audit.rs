@@ -1,4 +1,4 @@
-//! `yunta pack audit` (RFC-0002 §6, D71, T11.4): `audit_pack`'s
+//! `yunta pack audit`: `audit_pack`'s
 //! completeness against a fixture pack's actual content, and the
 //! "prompts never trimmed" guarantee — pure filesystem fixtures, no
 //! live run needed.

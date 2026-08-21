@@ -1,8 +1,8 @@
-//! Namespaced resolution (RFC-0002 §5, T11.3): a bare name always means
+//! Namespaced resolution: a bare name always means
 //! the repo's own `.yunta/workflows/`; a `publisher/name` reference
 //! falls through to that publisher's vendored packs *only when the repo
-//! has nothing by that literal name* — "un workflow local con el mismo
-//! nombre pisa al del pack" (§5). Within a publisher, `name` addresses a
+//! has nothing by that literal name* — a local workflow with the same
+//! name shadows the one from a pack. Within a publisher, `name` addresses a
 //! **workflow's own file basename** as declared in some installed
 //! pack's `contents.workflows` — not the pack's own `name` field, which
 //! is packaging/versioning metadata (`review-pack`, `1.2.0`), distinct
@@ -44,8 +44,8 @@ pub enum CatalogError {
 }
 
 /// Where a resolved workflow file actually came from — `check`'s
-/// cross-pack composition rule (§5: "las referencias cross-pack quedan
-/// fuera de v1") needs this to tell "still inside the same pack" from
+/// cross-pack composition rule (cross-pack references aren't supported)
+/// needs this to tell "still inside the same pack" from
 /// "left it", which a bare [`PathBuf`] can't say on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowOrigin {
@@ -63,7 +63,7 @@ pub struct ResolvedWorkflow {
 }
 
 /// Resolves a `use:`/`yunta run` target name against the repo catalog
-/// first, packs second (§5's own layer order — packs are the bottom
+/// first, packs second (packs are the bottom
 /// layer, never shadowing something the repo already names).
 pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError> {
     let repo_path = repo_root

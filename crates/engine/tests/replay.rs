@@ -128,7 +128,7 @@ fn node_finished_without_a_prior_node_started_is_broken() {
 
 #[test]
 fn a_second_node_started_is_a_restart_not_a_broken_log() {
-    // §8.1 restart_node: a crash leaves node_started with no terminal
+    // restart_node: a crash leaves node_started with no terminal
     // event, and resume emits node_started again. The log records what
     // happened — the restart is legal and the attempt number carries it.
     let events = vec![

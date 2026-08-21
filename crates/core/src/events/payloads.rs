@@ -1,6 +1,6 @@
-//! Per-kind payload structs (`docs/eventos.md` §5). Field names and
-//! optionality match that document field for field; anything the document
-//! marks `[inferido]` carries the same note here.
+//! Per-kind payload structs. Field names and
+//! optionality match the reference event documentation field for field;
+//! anything provisional there carries the same note here.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,8 +11,8 @@ use crate::config::RunnerCandidate;
 use crate::ids::{NodeId, RunId, TaskId};
 use crate::Capabilities;
 
-/// A ledger criterion, frozen into `task_registered` (`docs/spec-ledger.md`
-/// §2.1) — the same shape the ledger parser (T5.1) will produce.
+/// A ledger criterion, frozen into `task_registered` — the same shape
+/// the ledger parser produces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Criterion {
     pub cmd: String,
@@ -34,9 +34,10 @@ pub struct CriterionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<CriterionType>,
     pub reused: bool,
-    /// Wall-clock milliseconds this execution took (DI-15) — the datum
-    /// D62's learned ordering feeds on. `None` for a `reused: true`
-    /// result (nothing ran) and for pre-DI-15 events (additive, D70).
+    /// Wall-clock milliseconds this execution took — the datum
+    /// the learned criterion ordering feeds on. `None` for a `reused: true`
+    /// result (nothing ran) and for events logged before this field
+    /// existed (additive, tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 }
@@ -48,7 +49,7 @@ pub enum Phase {
     Post,
 }
 
-/// `[inferido]`: exact variant names are provisional pending T5.2.
+/// Exact variant names are provisional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -60,7 +61,7 @@ pub enum TaskStatus {
     Failed,
 }
 
-/// Default `Deny` (§6.2): a node that omits `scope_expansion:` entirely
+/// Default `Deny`: a node that omits `scope_expansion:` entirely
 /// gets the same behavior as one that declares it with no `mode:` — no
 /// expansions, every request becomes a finding without interrupting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -73,7 +74,7 @@ pub enum ScopeExpansionMode {
 }
 
 impl ScopeExpansionMode {
-    /// DI-20/§6.1: the severity order the layered ceiling compares by —
+    /// The severity order the layered ceiling compares by —
     /// `rules` is the most permissive (auto-grants), `deny` the least.
     /// A higher number never grants what a lower one would refuse.
     pub fn strictness(self) -> u8 {
@@ -114,11 +115,11 @@ pub enum HookPhase {
     After,
 }
 
-/// One choice in a gate's escalation (§5.3): `id` is what
+/// One choice in a gate's escalation: `id` is what
 /// `GateResolvedPayload.chosen_option` names back, `label` is the
-/// human-facing text, `tradeoff` is mandatory — "las que amplían trabajo
-/// lo declaran" (§5.3's own text; there is no variant of this type that
-/// can omit it).
+/// human-facing text, `tradeoff` is mandatory — any option that expands
+/// scope of work must declare what it trades off, and no variant of
+/// this type can omit it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateOption {
     pub id: String,
@@ -135,7 +136,7 @@ pub enum Channel {
 }
 
 /// `severity`: `blocking | major | minor | note` — confirmed against the
-/// Contrato's `kind: findings` section (§4.1), not inferred.
+/// `kind: findings` schema, not inferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {
@@ -156,22 +157,22 @@ pub struct Finding {
     pub proposed_criterion: Option<ProposedCriterion>,
 }
 
-/// A `kind: findings` artifact's document — sole top-level key `findings:`
-/// (§4.1), mirroring `Ledger`'s `tasks:`-only shape (T5.12).
+/// A `kind: findings` artifact's document — sole top-level key `findings:`,
+/// mirroring `Ledger`'s `tasks:`-only shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FindingsFile {
     pub findings: Vec<Finding>,
 }
 
-/// `[inferido]`: exact variant names are provisional; a `cancel` command
-/// exists (T7.1) so `Cancelled` is included alongside the obvious two.
+/// Exact variant names are provisional; a `cancel` command
+/// exists, so `Cancelled` is included alongside the obvious two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalState {
     Done,
     Failed,
     Cancelled,
-    /// §10.2/D22: the run closed because its own gate accepted promotion
+    /// The run closed because its own gate accepted promotion
     /// to a later-declared mode — never because the work itself failed
     /// or was cancelled.
     Promoted,
@@ -191,13 +192,13 @@ pub struct DiscardedCandidate {
     pub reason: String,
 }
 
-/// One resolved `ContextSource` reference in `context_assembled.sources`
-/// (§9, T6.1). `kind` stays a plain string — M6 fixes the *set* of
+/// One resolved `ContextSource` reference in `context_assembled.sources`.
+/// `kind` stays a plain string — the engine fixes the *set* of
 /// builtin source kinds (`files | command | artifact | run-events |
-/// ledger | knowledge | node-output`, `mcp` from T6.2) but never closes
-/// it into an enum, since a pack can add its own sources (M11) without
-/// this type needing to change. `content_hash` is what makes "cada
-/// resolución emite evento con hash" (§9) literal — the hash of exactly
+/// ledger | knowledge | node-output`, `mcp` among them) but never closes
+/// it into an enum, since a pack can add its own sources without
+/// this type needing to change. `content_hash` is what makes every
+/// resolution's event carry a verifiable hash — the hash of exactly
 /// the bytes materialized under `context/<content_hash>/` for this
 /// source, so replay can name precisely what a session saw without
 /// re-running anything.
@@ -208,7 +209,7 @@ pub struct ContextSourceRef {
     pub content_hash: String,
 }
 
-// --- Per-kind payloads (docs/eventos.md §5.1-§5.25) -----------------------
+// --- Per-kind payloads ------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedPayload {
@@ -286,13 +287,13 @@ pub struct AgentMessagePayload {
 pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
     pub content_hash: String,
-    /// The artifact's declared `kind:` when it has one (DI-03) — what
+    /// The artifact's declared `kind:` when it has one — what
     /// lets `derive()` recognize a `questions` artifact without reading
-    /// any file (I2: state from events alone). `None` for opaque
-    /// artifacts and for logs written before the field existed (D70's
-    /// tolerant reader). Named `artifact_kind`, not `kind`: the event
+    /// any file (state comes from events alone). `None` for opaque
+    /// artifacts and for logs written before the field existed (tolerant
+    /// reader). Named `artifact_kind`, not `kind`: the event
     /// envelope's own internally-tagged discriminant already claims
-    /// `kind` in the serialized JSON (T2.2), and a colliding field name
+    /// `kind` in the serialized JSON, and a colliding field name
     /// silently corrupts the payload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_kind: Option<crate::workflow::ArtifactKind>,
@@ -301,14 +302,14 @@ pub struct ArtifactWrittenPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextAssembledPayload {
     /// `Some` when this assembly built one *task's* brief inside a loop
-    /// node (DI-17) — the same task-vs-node convention
+    /// node — the same task-vs-node convention
     /// `ScopeCheckedPayload.task_id` already follows. `None` for a
-    /// node-level assembly (a `prompt` node's own context). Additive
-    /// (D70): pre-DI-17 events parse with `None`.
+    /// node-level assembly (a `prompt` node's own context). Additive:
+    /// events logged before this field existed parse with `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<crate::ids::TaskId>,
     pub sources: Vec<ContextSourceRef>,
-    /// Keys are `"stable" | "run-stable" | "volatile"` (§9.1's fixed
+    /// Keys are `"stable" | "run-stable" | "volatile"` (the fixed
     /// stability classes) — kept as plain strings rather than an enum key
     /// to sidestep serde's map-key-as-enum ceremony for no real benefit.
     pub segment_hashes: HashMap<String, String>,
@@ -371,11 +372,11 @@ pub struct ScopeExpansionGrantedPayload {
     pub decided_by: Decider,
     pub mode: ScopeExpansionMode,
     pub count_this_run: u32,
-    /// The exact paths this grant authorized (DI-01) — self-contained
+    /// The exact paths this grant authorized — self-contained
     /// audit, and what a later attempt's effective scope derives from
-    /// the log (I2), instead of re-pairing the grant with the
+    /// the log, instead of re-pairing the grant with the
     /// `requested` event that preceded it. `default` for logs written
-    /// before the field existed (D70's tolerant reader).
+    /// before the field existed (tolerant reader).
     #[serde(default)]
     pub paths: Vec<String>,
 }
@@ -425,12 +426,12 @@ pub struct GateWaitingPayload {
     pub summary: String,
     pub evidence: String,
     pub options: Vec<GateOption>,
-    /// The forge's own handle for this gate (§5.6, T7.7) — a PR URL,
+    /// The forge's own handle for this gate — a PR URL,
     /// today — `None` for the internal escalation case (exhausted
-    /// re-routes, T7.2) this payload already covered before external
+    /// re-routes) this payload already covered before external
     /// gates existed. Round-trips the forge's `PublishedGate` through
-    /// the log so a later `poll` (from a completely different process,
-    /// §5.6's own "consulta al despertar") knows what to poll without
+    /// the log so a later `poll` (from a completely different process
+    /// waking up to check on the gate) knows what to poll without
     /// re-publishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<String>,
@@ -444,7 +445,7 @@ pub struct GateResolvedPayload {
     pub resolved_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free_text: Option<String>,
-    /// The commit SHA the forge's approval covered (§5.6, T7.7) —
+    /// The commit SHA the forge's approval covered —
     /// `None` for the internal escalation case, which has no SHA to
     /// speak of. What a later drift check compares against the PR's
     /// current head to decide whether the approval still holds.
@@ -492,12 +493,13 @@ pub struct ChildRunFinishedPayload {
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
     pub terminal_state: TerminalState,
-    /// The child run's whole derived spend at its close (§12: "el
-    /// `Usage` de los hijos agrega hacia arriba") — replay adds it to
-    /// the parent's own total, so a promotion *chain*'s every member
-    /// counts exactly once, resumes included, and the parent node's own
-    /// `node_finished` carries no child tokens (they'd double-count).
-    /// Additive (D70): pre-DI-25 events parse as zero.
+    /// The child run's whole derived spend at its close — a child
+    /// run's usage always aggregates up into its parent, so replay adds
+    /// it to the parent's own total. That means a promotion *chain*'s
+    /// every member counts exactly once, resumes included, and the
+    /// parent node's own `node_finished` carries no child tokens
+    /// (they'd double-count). Additive: events logged before this field
+    /// existed parse as zero.
     #[serde(default)]
     pub tokens: TokenUsage,
 }

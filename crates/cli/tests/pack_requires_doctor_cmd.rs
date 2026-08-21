@@ -1,5 +1,5 @@
 //! `yunta doctor` validating an installed pack's `requires:` against the
-//! local config (RFC-0002 §3, T11.6) — end to end against the real
+//! local config — end to end against the real
 //! compiled binary.
 
 use std::path::Path;

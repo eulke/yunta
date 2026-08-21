@@ -17,9 +17,8 @@ workflow's `criteria` do, by running and exiting `0`.
 
 ## Install
 
-Yunta isn't published to crates.io or as a prebuilt release binary yet (that's
-[M12](#roadmap) — GitHub releases with checksums, `cargo install`, Homebrew). Until
-then, [`install.sh`](install.sh) builds a static binary from source and installs it to
+Yunta isn't published to crates.io or as a prebuilt release binary yet.
+[`install.sh`](install.sh) builds a static binary from source and installs it to
 `~/.local/bin`, no sudo:
 
 ```bash
@@ -198,19 +197,6 @@ build caches across worktrees) worth knowing before writing a real workflow.
 
 ## Status
 
-Yunta is under active development, building itself with itself from the earliest
-usable milestone onward (every commit in this repo's history past the bootstrap was
-produced by a Yunta run against its own codebase). Milestones M0 through M9 are
-complete: schema and static validation, storage and the event log, the `mock`
-adapter, the scheduler core, task verification, context assembly, the CLI, MCP
-(control plane and per-run tools), and open modes with promotion and composition.
-M10 (this doc, factory packs, the release binary, the Verified Work Receipt) is in
-progress.
-
-## Roadmap
-
-M8–M12 round out a complete v1: MCP, modes and composition, packaging and docs
-(this milestone), shareable packs, and public distribution. Design documents —
-the Contrato del Run (the engine's normative contract), the Adapter trait spec, RFCs
-and the full milestone plan — live in the project's Notion workspace; `docs/` in this
-repo mirrors the subset that tracks implementation status day to day.
+Yunta is under active development. It builds itself with itself: every commit in
+this repo's history past the initial bootstrap was produced by a Yunta run against
+its own codebase.

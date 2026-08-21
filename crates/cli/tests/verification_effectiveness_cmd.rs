@@ -1,4 +1,4 @@
-//! §8.7/T7.10 end-to-end: a node whose declared re-route never fires
+//! End-to-end: a node whose declared re-route never fires
 //! across enough historical runs shows up both in `yunta check` and in
 //! `yunta stats --workflow`, never as a reason either command fails.
 

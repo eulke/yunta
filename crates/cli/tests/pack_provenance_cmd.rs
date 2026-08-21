@@ -1,7 +1,7 @@
-//! T11.7 end to end: the run manifest freezes which pack (and exactly
+//! End to end: the run manifest freezes which pack (and exactly
 //! which version) a top-level workflow came from, and a `pack update`
 //! while the run is paused never alters what it does on resume
-//! (RFC-0002 §7, I3) — against the real compiled binary.
+//! — against the real compiled binary.
 
 use std::path::Path;
 use std::process::Output;
@@ -125,7 +125,7 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     );
     let run_id = run_id_from(&run_out);
 
-    // T11.7's own claim: the manifest already names the pack and the
+    // The manifest already names the pack and the
     // exact version it was resolved against at creation time.
     let manifest_path = home.join("runs").join(&run_id).join("manifest.yaml");
     let manifest_text = std::fs::read_to_string(&manifest_path).unwrap();

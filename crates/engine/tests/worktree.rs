@@ -114,8 +114,8 @@ async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
         .unwrap();
 
     // A second run on the same repo must be refused while the first
-    // holds the lock — this is the "no concurrent runs" guarantee §7.3
-    // requires for `none`.
+    // holds the lock — this is the "no concurrent runs" guarantee
+    // required for `none`.
     let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
         .await
         .unwrap_err();
@@ -177,11 +177,11 @@ async fn releasing_a_worktree_isolated_run_leaves_the_worktree_on_disk() {
     release_worktree(&repo, Isolation::Worktree).await.unwrap();
 
     // Worktrees are left in place for inspection — cleanup is a
-    // separate, not-yet-built concern (on_finish, out of M-0).
+    // separate, not-yet-built concern (on_finish).
     assert!(worktree_path.join(".gitkeep").exists());
 }
 
-// --- DI-08: owner-aware `none` lock ------------------------------------------
+// --- owner-aware `none` lock ------------------------------------------
 
 fn lock_file(repo: &std::path::Path) -> std::path::PathBuf {
     repo.join(".git/yunta-none.lock")
@@ -263,7 +263,7 @@ async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
     );
 }
 
-// --- DI-28: concurrent `git worktree` mutations never corrupt metadata -------
+// --- concurrent `git worktree` mutations never corrupt metadata -------
 
 /// Git mutates `.git/worktrees/` without a complete lock between `add`s
 /// — N concurrent additions on one repo can read each other's

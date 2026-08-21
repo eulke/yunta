@@ -1,4 +1,4 @@
-# Minimal illustrative workflow exercising the full M-0 schema recorte:
+# Minimal illustrative workflow exercising the core schema:
 # prompt/bash/loop nodes, depends_on, scope, artifacts.produces (kind:
 # task-ledger), hooks.after and on_failure.goto/max_reroutes.
 name: fix-lint-loop

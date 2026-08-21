@@ -1,15 +1,16 @@
-//! Per-run process registry (DI-08): `run.dir/scratch/engine.json`,
+//! Per-run process registry: `run.dir/scratch/engine.json`,
 //! the one thing that lets a *separate* process — `yunta cancel`, a
 //! future `--detach` supervisor — find and signal a live run's process
-//! tree (A4). Scratch, deliberately: it is ephemeral process state, not
-//! an artifact and not event-log truth; it is written when `execute_run`
-//! starts, updated as sessions/hooks/executors spawn and close, and
-//! deleted at every terminal.
+//! tree so cancellation can always tear the whole tree down, not just
+//! the top process. Scratch, deliberately: it is ephemeral process
+//! state, not an artifact and not event-log truth; it is written when
+//! `execute_run` starts, updated as sessions/hooks/executors spawn and
+//! close, and deleted at every terminal.
 //!
 //! Registration is best-effort bookkeeping around processes that are
-//! already owned and killed by the in-process paths (T3.3/T4.6): a
-//! failed write here degrades to a `tracing` warning, never to a failed
-//! run — but it degrades *loudly*, never silently.
+//! already owned and killed by the in-process paths: a failed write
+//! here degrades to a `tracing` warning, never to a failed run — but it
+//! degrades *loudly*, never silently.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -155,8 +156,8 @@ pub fn read_registry(run_dir: &Path) -> Option<EngineProcessFile> {
     serde_json::from_slice(&bytes).ok()
 }
 
-/// `kill -0 <pid>` — POSIX liveness without `libc` or unsafe (D94 keeps
-/// Windows out of scope). Lives in the imperative shell only.
+/// `kill -0 <pid>` — POSIX liveness without `libc` or unsafe (Windows
+/// is out of scope). Lives in the imperative shell only.
 pub fn process_alive(pid: u32) -> bool {
     std::process::Command::new("kill")
         .arg("-0")

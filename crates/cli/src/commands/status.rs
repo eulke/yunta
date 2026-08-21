@@ -1,9 +1,9 @@
-//! `yunta status <run_id>` (T7.1, §8.5): progress derived from the event
-//! log alone, never an estimate or an agent's own report. Two levels —
-//! **flow** (nodes finished over the DAG frozen in the manifest) and
-//! **task** (ledger tasks done/total) — presented as counters with
-//! context, never a percentage (§8.5: percentages lie the moment a
-//! reroute grows the denominator).
+//! `yunta status <run_id>`: progress derived from the event log alone,
+//! never an estimate or an agent's own report. Two levels — **flow**
+//! (nodes finished over the DAG frozen in the manifest) and **task**
+//! (ledger tasks done/total) — presented as counters with context,
+//! never a percentage: a percentage lies the moment a reroute grows
+//! the denominator.
 
 use std::process::ExitCode;
 
@@ -16,8 +16,8 @@ use crate::load_yaml;
 use crate::project;
 
 /// Every node id the manifest's frozen DAG declares, `parallel` children
-/// included — the fixed denominator §8.5's flow counter measures
-/// against. Mirrors `yunta_engine::check`'s own id collection (never
+/// included — the fixed denominator the flow counter measures against.
+/// Mirrors `yunta_engine::check`'s own id collection (never
 /// exported, so duplicated here rather than widened just for this).
 /// The ids the run's mode includes (`None` = no narrowing) — the same
 /// derivation the scheduler itself uses (`yunta_engine::mode_included_nodes`),
@@ -29,9 +29,9 @@ fn mode_included_ids(
     yunta_engine::mode_included_nodes(workflow, mode)
 }
 
-/// §8.5's normative line — "contadores con contexto, no porcentajes" —
-/// derived from exactly `events` and the run's own frozen `manifest`.
-/// Shared by `yunta status` (one run, in detail) and `yunta list --runs`
+/// Counters with context, never percentages — derived from exactly
+/// `events` and the run's own frozen `manifest`. Shared by
+/// `yunta status` (one run, in detail) and `yunta list --runs`
 /// (every local run, one line each) so the two surfaces can never
 /// disagree about what a run's progress means.
 pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String {
@@ -53,11 +53,11 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
     } else {
         match events.iter().rev().find_map(|e| match &e.payload {
             EventPayload::RunFinished(_) => Some("finished".to_string()),
-            // §8.5: a paused run is waiting on a person, not stuck — the
-            // Contrato's own example phrasing ("waiting on gate
-            // approve-plan") is what a `run_paused` reason already reads
-            // like, so this reuses it verbatim rather than inventing a
-            // second vocabulary for the same fact.
+            // A paused run is waiting on a person, not stuck — e.g.
+            // "waiting on gate approve-plan" is what a `run_paused`
+            // reason already reads like, so this reuses it verbatim
+            // rather than inventing a second vocabulary for the same
+            // fact.
             EventPayload::RunPaused(p) => Some(format!("waiting — {}", p.reason)),
             EventPayload::RunResumed(_) | EventPayload::NodeStarted(_) => {
                 Some("running".to_string())
@@ -79,10 +79,10 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
         .values()
         .filter(|n| matches!(n, NodeState::Waiting { .. }))
         .count();
-    // §10.1/§3.2 (DI-03): the run's mode narrows the denominator — a
-    // change D45 requires to be visible and attributable, never silent.
-    // The mode comes from `run_created` (frozen there by T9.1); the
-    // excluded nodes render as `skipped`, not omitted.
+    // The run's mode narrows the denominator — a change that must be
+    // visible and attributable, never silent. The mode comes from
+    // `run_created`, frozen there at creation; the excluded nodes
+    // render as `skipped`, not omitted.
     let mode = events
         .iter()
         .find_map(|e| match &e.payload {
@@ -157,8 +157,8 @@ pub fn status(run_id: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // DI-07: search order (current runs root, then the default) — the
-    // run's own frozen paths take over once the manifest is open.
+    // Search order (current runs root, then the default) — the run's
+    // own frozen paths take over once the manifest is open.
     let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
         .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");

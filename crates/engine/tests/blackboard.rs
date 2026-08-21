@@ -1,5 +1,4 @@
-//! `coordination: blackboard` end to end (§5.9/§6.4, D49/D98, T8.2c):
-//! mock sessions acting as REAL MCP clients of the engine's per-run
+//! `coordination: blackboard` end to end: mock sessions acting as REAL MCP clients of the engine's per-run
 //! listener — posting findings over the wire mid-session, the group
 //! consolidating deterministically at its join, and every mount/
 //! capability rule observable as run behavior.
@@ -164,7 +163,7 @@ nodes:
 
 /// `a_first` staggers which reviewer's post lands on the log first —
 /// the property under test is that the consolidation is identical
-/// either way (D98: content order, never arrival order).
+/// either way: it is ordered by content, never by arrival order.
 fn blackboard_fixture(a_first: bool) -> String {
     let (a_delay, b_delay) = if a_first { (0, 60) } else { (60, 0) };
     format!(
@@ -187,7 +186,7 @@ sessions:
 async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     let (terminal, state, bench) = Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
 
-    // DI-30: a failure here must self-diagnose — the terminal's own
+    // A failure here must self-diagnose — the terminal's own
     // Paused reason only says "child rev-b failed", while the child's
     // real error (e.g. a run_tool transport failure under load) lives
     // in the node state this message carries.
@@ -199,12 +198,12 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
         ),
         "state: {state:?}"
     );
-    // Each post is a finding_posted authored by the session's own node
-    // (D26: mediated, logged, attributed).
+    // Each post is a finding_posted authored by the session's own node,
+    // mediated, logged, and attributed.
     assert_eq!(bench.findings_by("rev-a"), vec!["from-a"]);
     assert_eq!(bench.findings_by("rev-b"), vec!["from-b"]);
 
-    // D98: the group's own node-output carries the consolidation —
+    // The group's own node-output carries the consolidation —
     // consumable by a node AFTER the parallel, never between siblings.
     let output = bench
         .group_output("review")
@@ -220,7 +219,7 @@ async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
     let (terminal_2, state_2, bench_2) =
         Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(false)).await;
 
-    // DI-30: same self-diagnosis rule as above — the state names which
+    // Same self-diagnosis rule as above — the state names which
     // child failed and why; the finding digests distinguish "a post
     // never landed" from "posts landed but consolidation differed".
     assert_eq!(
@@ -242,7 +241,7 @@ async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
     assert_eq!(
         output_1,
         output_2,
-        "the consolidated blackboard must not depend on arrival order (D98)\n\
+        "the consolidated blackboard must not depend on arrival order\n\
          run 1 findings a/b: {:?}/{:?}\nrun 2 findings a/b: {:?}/{:?}",
         bench_1.findings_by("rev-a"),
         bench_1.findings_by("rev-b"),
@@ -253,7 +252,7 @@ async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_independent_group_never_serves_the_blackboard() {
-    // D49: `independent` (the default) mounts no blackboard tools at
+    // `independent` (the default) mounts no blackboard tools at
     // all — a session that tries anyway fails, visibly, and the group
     // fails with it.
     let workflow = r#"
@@ -286,7 +285,7 @@ sessions:
 
 #[tokio::test]
 async fn without_the_capability_no_endpoint_is_offered_and_nothing_degrades() {
-    // §6.5's resting state: capability absent, endpoint None — the
+    // Resting state: capability absent, endpoint None — the
     // session runs fine, and it is NOT a degradation event (nothing
     // declared needed the tools).
     let workflow = r#"
@@ -344,7 +343,7 @@ sessions:
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_blackboard_child_on_a_capability_less_adapter_fails_actionably() {
-    // A6: declared coordination the adapter can't carry is a node
+    // Declared coordination the adapter can't carry is a node
     // failure with a diagnostic — never silent emulation, never a
     // silently-missing blackboard.
     let fixture = r#"
@@ -365,7 +364,7 @@ sessions:
     }
 }
 
-// --- The pure half of D98's property -----------------------------------------
+// --- The pure half of the consolidation-order invariant -----------------------
 
 #[test]
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {

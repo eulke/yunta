@@ -185,9 +185,9 @@ outcome: { type: completed, summary: "done" }
         .unwrap();
     let _ = drain(session).await;
 
-    // O5: without the capability, the adapter ignores the constraint
+    // Without the capability, the adapter ignores the constraint
     // instead of failing — the engine's own post-check scope diff
-    // (T5.3) is what would catch this later.
+    // is what would catch this later.
     assert!(dir.path().join("outside/scope.rs").exists());
 }
 
@@ -200,7 +200,7 @@ async fn probe_reports_healthy() {
 
 #[tokio::test]
 async fn resume_serves_the_next_script_under_the_same_session_id() {
-    // DI-23: the mock's resume is scripted like spawn, but the stream
+    // The mock's resume is scripted like spawn, but the stream
     // reports the identity being continued — and records the ask, so
     // engine tests can prove the right conversation was picked up.
     let fixture = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
@@ -218,7 +218,7 @@ async fn resume_serves_the_next_script_under_the_same_session_id() {
         AgentEvent::SessionOpened { session_id, .. } => {
             assert_eq!(session_id, SessionId::from("some-session"));
         }
-        other => panic!("expected SessionOpened first (O1), got {other:?}"),
+        other => panic!("expected SessionOpened first, got {other:?}"),
     }
     assert_eq!(
         fixture.resumes_seen(),
@@ -351,7 +351,7 @@ fn prompt_request(cwd: PathBuf, prompt: &str) -> SessionRequest {
 
 #[tokio::test]
 async fn match_prompt_contains_picks_the_right_script_out_of_call_order() {
-    // T5.10: concurrent task dispatch means spawn() calls no longer land
+    // Concurrent task dispatch means spawn() calls no longer land
     // in fixture-declaration order — a script that names which request
     // it belongs to must be selectable regardless of when it's called.
     // Each request gets its OWN cwd (as real per-task worktrees would),

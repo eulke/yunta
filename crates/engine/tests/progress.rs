@@ -1,4 +1,4 @@
-//! `render_progress` (T5.5, Contrato §8.2) — pure derivation from a
+//! `render_progress` — pure derivation from a
 //! workflow and its event log, exercised directly without spinning up a
 //! full run.
 

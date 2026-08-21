@@ -8,21 +8,21 @@ description = "Adapter trait and CLI integrations (claude-code, codex, mock) for
 
 [dependencies]
 # `version` must track [workspace.package].version — crates.io publish
-# (T12.4) rejects a path dependency with no version requirement.
+# rejects a path dependency with no version requirement.
 yunta-core = { path = "../core", version = "0.1.0" }
 async-trait = "0.1"
 futures = "0.3"
 tracing = "0.1"
-# "process"/"io-util" drive the real `claude-code` subprocess (T7.3):
+# "process"/"io-util" drive the real `claude-code` subprocess:
 # spawning it, streaming its stdout, and reaping it on exit.
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "process", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
 thiserror = "2"
-# `GitHubForge` (T7.7, §5.6/D66): the REST calls that publish artifacts,
-# open a PR and poll its review state — same TLS backend `yunta-engine`
-# already selects for its own outbound HTTP (rustls, not native-tls).
+# `GitHubForge`: the REST calls that publish artifacts, open a PR and
+# poll its review state — same TLS backend `yunta-engine` already
+# selects for its own outbound HTTP (rustls, not native-tls).
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls",
@@ -30,12 +30,11 @@ reqwest = { version = "0.13", default-features = false, features = [
 # GitHub's Contents API takes file bodies base64-encoded — the one place
 # this crate needs to produce that encoding.
 base64 = "0.22"
-# The mock's `run_tool` fixture step (T8.2/A8): the mock acts as a real
-# MCP client against the engine's per-run listener, over the same
-# streamable-HTTP transport a real CLI would use — the whole per-run
-# tool path stays exercisable in CI without an LLM. Same features (and
-# the same already-in-tree crates) as `yunta-engine`'s own outbound
-# MCP client.
+# The mock's `run_tool` fixture step: the mock acts as a real MCP client
+# against the engine's per-run listener, over the same streamable-HTTP
+# transport a real CLI would use — the whole per-run tool path stays
+# exercisable in CI without an LLM. Same features (and the same
+# already-in-tree crates) as `yunta-engine`'s own outbound MCP client.
 rmcp = { version = "3", default-features = false, features = [
     "client",
     "transport-streamable-http-client-reqwest",

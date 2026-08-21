@@ -251,7 +251,7 @@ tasks:
       - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Plan T6.1. Materializar en context/<hash>/; fuente caída = nodo failed."
+    notes: "Materializar en context/<hash>/; fuente caída = nodo failed."
 
   - id: context-assembly
     title: "Stable-first context assembly with per-segment hashes"
@@ -261,7 +261,7 @@ tasks:
       - cmd: "cargo test -p yunta-engine --test context_stability"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Plan T6.4, Contrato §9.1."
+    notes: "Ver Contrato del Run."
 "#;
     let ledger: Ledger = serde_yaml::from_str(yaml).expect("reference ledger should parse");
     assert_eq!(ledger.tasks.len(), 2);

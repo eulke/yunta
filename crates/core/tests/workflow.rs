@@ -61,7 +61,7 @@ fn round_trips_through_serialization() {
 fn modes_include_all_round_trips_through_serialization() {
     // Regression: the untagged enum's derived `Serialize` would emit the
     // unit variant `All` as YAML `null`, not the string `"all"` the
-    // schema's own `include: all` (§10.1) reads — breaking every
+    // schema's own `include: all` reads — breaking every
     // manifest round-trip (`status`/`resume` reading back what `run`
     // just wrote) for any workflow using it. Caught by hand against the
     // real binary, not by this suite the first time around — this test
@@ -110,7 +110,7 @@ nodes:
     let second: Workflow = serde_yaml::from_str(&re_serialized).unwrap();
     assert_eq!(first, second);
 
-    // §10.1's own promotion-ladder guarantee: declaration order, not
+    // The promotion-ladder guarantee: declaration order, not
     // alphabetical or any other reordering.
     let names: Vec<&str> = first
         .modes
@@ -126,9 +126,9 @@ nodes:
 
 #[test]
 fn an_internal_gate_parses_the_reference_approve_plan_shape_round_trip() {
-    // DI-04 — the exact fragment `build-feature.yaml` (Config y
-    // workflows de referencia) declares; T1.1's own ✓ makes the
-    // reference YAML the parse fixture.
+    // The exact fragment `build-feature.yaml` (Config y
+    // workflows de referencia) declares; the reference YAML doubles as
+    // the parse fixture.
     let yaml = r#"
 name: fixture
 nodes:
@@ -624,7 +624,7 @@ prompt: { file: prompts/plan.md }
     }
 }
 
-// --- T6.1: context: (§9) ----------------------------------------------------
+// --- context: -----------------------------------------------------------
 
 #[test]
 fn a_node_s_context_defaults_to_empty() {
@@ -754,7 +754,7 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [galaxy] }
 "#;
-    // `ContextSpec` is untagged (T6.1) — serde_yaml doesn't surface which
+    // `ContextSpec` is untagged — serde_yaml doesn't surface which
     // variant's inner field rejected an unknown enum value, only that
     // none matched. It is still, correctly, a parse-time error rather
     // than something `resolve_knowledge` discovers at run time.
@@ -765,7 +765,7 @@ context:
     );
 }
 
-// --- T1.5: inputs: (§2.3, D82) ------------------------------------------
+// --- inputs: --------------------------------------------------------
 
 #[test]
 fn every_input_type_parses_with_its_own_type_specific_fields() {
@@ -885,7 +885,7 @@ nodes:
     assert!(workflow.inputs.is_empty());
 }
 
-// --- DI-13: reference-schema fields (interactive, fresh_context,
+// --- Reference-schema fields (interactive, fresh_context,
 // yunta_schema, skills, on_finish) --------------------------------------------
 
 #[test]

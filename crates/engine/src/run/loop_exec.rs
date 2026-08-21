@@ -1,12 +1,11 @@
-//! The loop node's task cycle (T4.1 + T5.2 + T5.10 wiring, Contrato
-//! §5.2/§5.5): each iteration forms a batch of up to `concurrency` `ready`
-//! tasks (ledger declaration order), dispatches every member in its own
-//! isolated worktree concurrently, then integrates them **serially, in
-//! that same declaration order** — rebase onto the current tree,
-//! re-verify criteria and scope there, and only then fast-forward the
-//! run's shared worktree. `concurrency: 1` (the default) walks the exact
-//! same path with a batch of one; §5.5/D65 are explicit that this needs
-//! no special case.
+//! The loop node's task cycle: each iteration forms a batch of up to
+//! `concurrency` `ready` tasks (ledger declaration order), dispatches
+//! every member in its own isolated worktree concurrently, then
+//! integrates them **serially, in that same declaration order** —
+//! rebase onto the current tree, re-verify criteria and scope there,
+//! and only then fast-forward the run's shared worktree. `concurrency:
+//! 1` (the default) walks the exact same path with a batch of one —
+//! there is no special case for it.
 
 use std::path::{Path, PathBuf};
 
@@ -42,7 +41,7 @@ pub(super) async fn execute_loop(
         return fail(
             ctx,
             node,
-            format!("loop until `{until}` is not supported — M-0 only has `all_tasks_complete`"),
+            format!("loop until `{until}` is not supported — only `all_tasks_complete` is"),
             false,
         );
     }
@@ -56,7 +55,7 @@ pub(super) async fn execute_loop(
     };
     let adapter = &ctx.adapters[&chosen.adapter];
 
-    // DI-13: one resolution for the whole loop — every task session
+    // One resolution for the whole loop — every task session
     // mounts the same skills, and a missing name fails the node before
     // any token is spent.
     let skills = match crate::skills::resolve_skills(
@@ -83,9 +82,9 @@ pub(super) async fn execute_loop(
     } else {
         skills
     };
-    // T8.2: same gating as a prompt session — the capability decides,
+    // Same gating as a prompt session — the capability decides,
     // and a blackboard-group loop on a capability-less adapter fails
-    // rather than silently dropping its declared coordination (A6).
+    // rather than silently dropping its declared coordination.
     let run_tools = if adapter.capabilities().run_tools {
         ctx.run_tools_host
             .as_ref()
@@ -100,7 +99,7 @@ pub(super) async fn execute_loop(
                 ctx,
                 node,
                 format!(
-                    "node `{}` is in a `coordination: blackboard` group but adapter                      `{}` declares no `run_tools` capability — the blackboard cannot                      be mounted (§6.4/D49)",
+                    "node `{}` is in a `coordination: blackboard` group but adapter                      `{}` declares no `run_tools` capability — the blackboard cannot                      be mounted",
                     node.id, chosen.adapter
                 ),
                 false,
@@ -127,14 +126,14 @@ pub(super) async fn execute_loop(
     };
 
     // Absent means the engine's own default, 1 — sequential, deliberately
-    // not config-overridable (§5.5/D65: token spend multiplies with it,
-    // so it's declared per-workflow, never inherited silently).
+    // not config-overridable: token spend multiplies with it, so it's
+    // declared per-workflow, never inherited silently.
     let concurrency = match &node.kind {
         NodeKind::Loop { concurrency, .. } => concurrency.unwrap_or(1).max(1),
         _ => 1,
     };
-    // Loop-scoped, never workflow/config-scoped (§6.2: a request is
-    // task-specific, and only a loop node's own tasks can ever write one).
+    // Loop-scoped, never workflow/config-scoped: a request is
+    // task-specific, and only a loop node's own tasks can ever write one.
     let scope_expansion = match &node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -142,31 +141,31 @@ pub(super) async fn execute_loop(
         _ => None,
     };
 
-    // DI-17: stable/run-stable context resolved once and reused across
+    // Stable/run-stable context resolved once and reused across
     // every task brief this invocation builds; volatile sources
     // re-resolve per brief.
     let context_memo = super::context_resolve::StableContextMemo::default();
 
     let mut tokens = TokenUsage::default();
     let mut iteration: u32 = 0;
-    // §8.3/DI-05: the only net under a ledger whose state oscillates
+    // The only net under a ledger whose state oscillates
     // forever. Checked only when a non-empty batch wants to run — the
     // closing empty-batch pass never trips it. `continue` lifts the cap
     // for this invocation only (same rule as the run token budget).
     let max_iterations = ctx.manifest.config.resolved_max_loop_iterations();
     let mut iterations_lifted = false;
     // Blocked reasons gathered this invocation, so the loop's own failure
-    // can cite them (§6.1 for permission blocks; useful for every block).
+    // can cite them (permission blocks included; useful for every block).
     // A resume starts empty — the log carries each task's *status*, and
     // the generic tail below still names which tasks are blocked.
     let mut blocked_reasons: Vec<String> = Vec::new();
     loop {
         iteration += 1;
-        // §6.2: a scope-expansion request left `Escalate`d (`ask` mode,
+        // A scope-expansion request left `Escalate`d (`ask` mode,
         // or `max_per_run` exhausted) is a decision owed to a human —
         // regardless of whether *this* attempt's own criteria happened
         // to succeed without needing the grant. Collected per batch and
-        // resolved (DI-01) through `ctx.human_interaction` once the
+        // resolved through `ctx.human_interaction` once the
         // whole batch has integrated; only what stays unresolved (no
         // live surface) pauses the run.
         let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
@@ -218,14 +217,15 @@ pub(super) async fn execute_loop(
         }
 
         // Every batch member's worktree branches from the same starting
-        // point (§5.5: "worktree por tarea desde el commit base actual"),
-        // captured once so all N tasks work from an identical snapshot.
+        // point — one worktree per task, derived from the current base
+        // commit — captured once so all N tasks work from an identical
+        // snapshot.
         let base_commit = head_commit(ctx.worktree).await?;
 
-        // DI-17: each batch member's brief carries the loop's declared
+        // Each batch member's brief carries the loop's declared
         // `context:` — resolved per task (volatile sources fresh, stable
         // ones from the memo), audited as one `context_assembled` per
-        // task. A failing source is the node's failure (§9), before any
+        // task. A failing source is the node's failure, before any
         // session is spent.
         let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
         for task in &batch {
@@ -238,7 +238,7 @@ pub(super) async fn execute_loop(
             }
         }
 
-        // DI-16: one grant ledger per batch, seeded from the log —
+        // One grant ledger per batch, seeded from the log —
         // the atomic cap window every concurrent member's evaluation
         // commits through, so `max_per_run` holds exactly.
         let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
@@ -260,20 +260,19 @@ pub(super) async fn execute_loop(
         // Cumulative grants this run, kept live across the integration
         // loop below so each emitted `ScopeExpansionGranted` carries an
         // accurate `count_this_run` — the cap *decision* already
-        // happened atomically in the batch's `GrantLedger` (DI-16);
+        // happened atomically in the batch's `GrantLedger`;
         // this count only feeds the event payload.
         let mut expansions_granted_this_run = granted_count(&events);
 
         // Integration is serial and follows the batch's own order, which
-        // is ledger declaration order (§5.5: "en orden de declaración del
-        // ledger — no en orden de finalización") — never the order
-        // dispatch happened to finish in.
+        // is ledger declaration order — the order tasks were declared
+        // in, never the order dispatch happened to finish in.
         for dispatch in dispatches {
             let (task, task_worktree, mut report) = dispatch?;
             let needs_human_decision = report.needs_human_decision;
             // The escalated request itself (paths, reason, criterion +
             // its pre-check exit), captured off the attempt that raised
-            // it — what the §5.3 object below is built from.
+            // it — what the escalation object below is built from.
             let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
 
             let mut last_check_seq = ctx.emit(
@@ -320,10 +319,10 @@ pub(super) async fn execute_loop(
                 }
             }
 
-            // DI-11: a cancelled dispatch ends the whole loop node
+            // A cancelled dispatch ends the whole loop node
             // without a verdict — the task stays `running` in the log
             // (orphaned), which is exactly what makes a later resume
-            // re-execute it (§5.5's own "huérfanas se reejecutan"), and
+            // re-execute it — orphaned tasks always get re-run — and
             // the node's own fate follows the same root-vs-sibling rule
             // every other kind applies.
             if matches!(report.outcome, TaskOutcome::Interrupted) {
@@ -351,14 +350,14 @@ pub(super) async fn execute_loop(
                         &mut last_check_seq,
                     )
                     .await?;
-                    // §5.5's own words: a rejected integration "vuelve a
-                    // ready sobre el árbol nuevo" — back to `Pending`, so
-                    // a future batch retries it automatically. This is
-                    // deliberately NOT `Blocked`: green in isolation but
-                    // broken by a sibling's integration is a timing
-                    // artifact of concurrency, not evidence the task
-                    // itself can't succeed — that verdict only comes from
-                    // `run_task`'s own retry exhaustion, the branch above.
+                    // A rejected integration goes back to ready on the
+                    // new tree — back to `Pending`, so a future batch
+                    // retries it automatically. This is deliberately NOT
+                    // `Blocked`: green in isolation but broken by a
+                    // sibling's integration is a timing artifact of
+                    // concurrency, not evidence the task itself can't
+                    // succeed — that verdict only comes from `run_task`'s
+                    // own retry exhaustion, the branch above.
                     let new_status = match &outcome {
                         IntegrationOutcome::Integrated => TaskStatus::Done,
                         IntegrationOutcome::Rejected(reason) => {
@@ -415,7 +414,7 @@ pub(super) async fn execute_loop(
             // pending `ask`/exhausted-cap request must reach a human
             // before the run spends any further budget, never be
             // bypassed just because the task that raised it happened to
-            // succeed on its own declared scope (A6). DI-01: with a live
+            // succeed on its own declared scope. With a live
             // surface the human decides right here; only what stays
             // unresolved pauses the run, exactly as before.
             let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
@@ -428,7 +427,7 @@ pub(super) async fn execute_loop(
                     unresolved.push(pending.task_id);
                     continue;
                 };
-                // Same T7.2 convention as every other gate: waiting and
+                // Same convention as every other gate: waiting and
                 // resolved land together, only once actually resolved —
                 // an unresolved question re-asks on resume instead of
                 // remembering a decision nobody made.
@@ -458,7 +457,7 @@ pub(super) async fn execute_loop(
                 } else {
                     // Anything that isn't an explicit grant denies — the
                     // conservative reading of an ambiguous resolution,
-                    // and every denial converts to a finding (D80), same
+                    // and every denial converts to a finding, same
                     // as the rule-mode path.
                     let reason = resolution
                         .free_text
@@ -503,8 +502,8 @@ pub(super) async fn execute_loop(
                 }
                 // Granted or denied, the task gets its retry: with the
                 // widened scope (from the log's own granted paths), or
-                // within the original one (§6.2 — a denial never kills
-                // the task, it re-runs inside what was declared).
+                // within the original one — a denial never kills
+                // the task, it re-runs inside what was declared.
                 if pending.was_blocked {
                     ctx.emit(
                         Some(&node.id),
@@ -533,7 +532,7 @@ pub(super) async fn execute_loop(
     }
 }
 
-/// One `Escalate`d request waiting for the human's verdict (DI-01).
+/// One `Escalate`d request waiting for the human's verdict.
 struct PendingEscalation {
     task_id: yunta_core::TaskId,
     attempt_no: u32,
@@ -544,7 +543,7 @@ struct PendingEscalation {
     was_blocked: bool,
 }
 
-/// Builds the §5.3 escalation object for a scope-expansion request — the
+/// Builds the escalation object for a scope-expansion request — the
 /// engine assembles summary + mechanical evidence from what it already
 /// verified (the request, the proposed criterion's own pre-check exit,
 /// the cap state); the agent's only contribution is the reason it wrote
@@ -595,7 +594,7 @@ fn expansion_escalation(
             yunta_core::events::GateOption {
                 id: "deny".to_string(),
                 label: "Deny the expansion".to_string(),
-                tradeoff: "The denial becomes a finding (D80); the task retries within its \
+                tradeoff: "The denial becomes a finding; the task retries within its \
                            original scope"
                     .to_string(),
             },
@@ -607,12 +606,12 @@ fn expansion_escalation(
 /// Up to `concurrency` tasks this iteration may work on, in ledger
 /// declaration order: a task whose dependencies are all `Done` and is
 /// itself still `Pending`, or an orphaned `Running` task with no
-/// terminal event after it (a crash mid-batch, §5.5's own resume
-/// guarantee — "las que quedaron `running` huérfanas se reejecutan").
-/// Scope disjointness between independent tasks is **not** re-checked
-/// here: `ledger::register` (T5.1) already refuses two tasks without a
-/// `depends_on` edge declaring overlapping scope, so any two tasks that
-/// can both be `ready` at once are disjoint by construction.
+/// terminal event after it (a crash mid-batch — orphaned tasks always
+/// get re-run on resume). Scope disjointness between independent tasks
+/// is **not** re-checked here: `ledger::register` already refuses two
+/// tasks without a `depends_on` edge declaring overlapping scope, so
+/// any two tasks that can both be `ready` at once are disjoint by
+/// construction.
 fn select_batch<'a>(ledger: &'a Ledger, state: &RunState, concurrency: u32) -> Vec<&'a Task> {
     ledger
         .tasks
@@ -649,8 +648,8 @@ fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
 }
 
 /// How many `scope_expansion_granted` events the run's whole log already
-/// has (§6.2: `max_per_run` is run-scoped, never per-task). Read once per
-/// batch to seed that batch's `GrantLedger` (DI-16): grants from prior
+/// has — `max_per_run` is run-scoped, never per-task. Read once per
+/// batch to seed that batch's `GrantLedger`: grants from prior
 /// batches are already events by then (integration is serial and
 /// completes before the next batch dispatches), and grants *within* the
 /// batch go through the ledger's atomic window — so the cap holds
@@ -663,8 +662,8 @@ fn granted_count(events: &[Event]) -> u32 {
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized
-/// for `task_id` (DI-01) — the retry after a human grant derives its
-/// widened scope from here, never from in-memory state (I2).
+/// for `task_id` — the retry after a human grant derives its
+/// widened scope from here, never from in-memory state.
 fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<String> {
     events
         .iter()
@@ -678,14 +677,14 @@ fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<Stri
         .collect()
 }
 
-/// Isolates one batch member in its own worktree (§5.5: "cada tarea del
-/// lote recibe su propio worktree derivado del commit base actual") and
-/// runs it through the ordinary task cycle there — pre-check, dispatch,
-/// post-check, scope-check, retried up to `max_task_retries` exactly as
-/// the sequential path always has. Never commits or marks the task
-/// `done`/`blocked` in the log itself; that's the caller's job once every
-/// batch member's dispatch has settled, so integration can stay strictly
-/// serial and in declaration order.
+/// Isolates one batch member in its own worktree — each task in the
+/// batch gets its own worktree derived from the current base commit —
+/// and runs it through the ordinary task cycle there — pre-check,
+/// dispatch, post-check, scope-check, retried up to `max_task_retries`
+/// exactly as the sequential path always has. Never commits or marks
+/// the task `done`/`blocked` in the log itself; that's the caller's job
+/// once every batch member's dispatch has settled, so integration can
+/// stay strictly serial and in declaration order.
 /// Everything every member of one batch dispatches with — identical
 /// across the whole `batch.iter().zip(&briefs).map(...)` fan-out that
 /// calls [`dispatch_task_in_isolation`]; only `task`/`instruction` vary
@@ -779,7 +778,7 @@ enum IntegrationOutcome {
     Rejected(String),
 }
 
-/// Integrates one task verified `Done` in isolation (§5.5, D65): rebase
+/// Integrates one task verified `Done` in isolation: rebase
 /// its branch onto the run's *current* integration HEAD (which may have
 /// moved since this batch started, if an earlier-declared sibling
 /// integrated first), re-run criteria and scope right there — green in
@@ -856,7 +855,7 @@ async fn integrate_task(
 
     let task_head = head_commit(task_worktree).await?;
     if !run_git_ok(ctx.worktree, &["merge", "--ff-only", &task_head]).await? {
-        // §5.5's integration is strictly serial (the engine itself, not
+        // Integration is strictly serial (the engine itself, not
         // an external actor, is the only writer to `ctx.worktree` between
         // reading `integration_head` above and this merge) — a non-fast-
         // forward here means that invariant broke, not a legitimate task
@@ -871,7 +870,7 @@ async fn integrate_task(
 }
 
 /// Commits a done task's work in `cwd` — the task's own isolated worktree
-/// during integration (§5.5), or the run's shared worktree when
+/// during integration, or the run's shared worktree when
 /// `concurrency` never applies. A task that changed nothing (its criteria
 /// were satisfied by side effects that left no diff) simply produces no
 /// commit — never an error.
@@ -954,16 +953,16 @@ async fn head_commit(repo: &Path) -> Result<String, RunError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Emits the events one attempt's scope-expansion outcome requires (§6.2):
+/// Emits the events one attempt's scope-expansion outcome requires:
 /// always a `ScopeExpansionRequested`, then a `Granted` or `Denied` — never
 /// both, and neither for `Escalate`, which has no event kind of its own
-/// (D73: nothing has been decided yet, so there's nothing to announce
+/// (nothing has been decided yet, so there's nothing to announce
 /// beyond the request itself; the pause and its diagnostic already come
 /// from `run_task`'s own `needs_human_decision`/`Blocked` outcome). Every
-/// `Denied` also becomes a `FindingPosted` (D80), using the agent's own
+/// `Denied` also becomes a `FindingPosted`, using the agent's own
 /// `reason`/`proposed_criterion` as the finding's evidence rather than the
 /// engine inventing new wording. `decided_by` is always `Decider::Rule`
-/// here — this recorte has no `kind: gate` (T7.2) for a person to decide
+/// here — this recorte has no gate node for a person to decide
 /// through, so `ask` mode only ever reaches `Escalate`, never a rendered
 /// verdict.
 fn emit_scope_expansion_events(
@@ -1068,7 +1067,7 @@ fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
 
 /// Finds the task ledger the run registered: the `kind: task-ledger`
 /// artifact of a node that produced it earlier, re-read from the run's
-/// frozen `artifacts/` (I3: artifacts are immutable once written).
+/// frozen `artifacts/` — artifacts are immutable once written.
 fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> {
     for node in &ctx.manifest.workflow.nodes {
         let Some(artifacts) = &node.artifacts else {

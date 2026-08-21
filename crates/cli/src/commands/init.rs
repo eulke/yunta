@@ -1,12 +1,12 @@
-//! `yunta init` (T7.6, D58): prepares a repo for Yunta once — detects
-//! ecosystem, test command, base branch and available adapter CLIs
-//! (`probe()`, same call `doctor`/`run` use), writes `.yunta/config.yaml`
-//! and defensive `.gitignore` entries, installs the D74 mechanism skill,
-//! and offers (never writes) a CLAUDE.md line. Non-interactive by
-//! default (D58): every step picks the best answer it can detect and
-//! reports it; `-i/--interactive` only adds confirmation prompts, and
-//! degrades to non-interactive with a warning when stdin isn't a TTY —
-//! `init` must never hang waiting for input that isn't coming.
+//! `yunta init`: prepares a repo for Yunta once — detects ecosystem,
+//! test command, base branch and available adapter CLIs (`probe()`,
+//! same call `doctor`/`run` use), writes `.yunta/config.yaml` and
+//! defensive `.gitignore` entries, installs the mechanism skill, and
+//! offers (never writes) a CLAUDE.md line. Non-interactive by default:
+//! every step picks the best answer it can detect and reports it;
+//! `-i/--interactive` only adds confirmation prompts, and degrades to
+//! non-interactive with a warning when stdin isn't a TTY — `init` must
+//! never hang waiting for input that isn't coming.
 
 use std::io::IsTerminal;
 use std::path::Path;
@@ -20,10 +20,9 @@ const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 struct Ecosystem {
     name: &'static str,
     test_cmd: &'static str,
-    /// A D64 tip printed to the terminal, never written to config — no
-    /// key for this exists anywhere in the reference schema (checked:
-    /// `docs/m0-status.md`'s own T7.6 entry records this as a deliberate
-    /// scoping decision, not an oversight).
+    /// A tip printed to the terminal, never written to config — no key
+    /// for this exists anywhere in the reference schema; this is a
+    /// deliberate scoping decision, not an oversight.
     cache_tip: &'static str,
 }
 
@@ -39,7 +38,7 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
                 test_cmd: "cargo test",
                 cache_tip: "share a build cache across worktrees: export \
                             CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target \
-                            before running yunta (§9.1/D64) — otherwise every \
+                            before running yunta — otherwise every \
                             worktree rebuilds the whole dependency tree.",
             },
         ),
@@ -51,7 +50,7 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
                 cache_tip: "share a package cache across worktrees: point \
                             npm's cache at a shared directory (`npm config \
                             set cache <shared-dir>`) or use a package manager \
-                            with content-addressed storage (§9.1/D64).",
+                            with content-addressed storage.",
             },
         ),
         (
@@ -61,7 +60,7 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
                 test_cmd: "go test ./...",
                 cache_tip: "Go's own build/module caches (GOCACHE/GOMODCACHE) \
                             are already shared machine-wide by default — \
-                            nothing extra to configure for worktrees (§9.1/D64).",
+                            nothing extra to configure for worktrees.",
             },
         ),
         (
@@ -71,8 +70,7 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
                 test_cmd: "pytest",
                 cache_tip: "share a virtualenv or package cache across \
                             worktrees (e.g. a shared `uv`/`pip` cache dir) to \
-                            avoid reinstalling dependencies per worktree \
-                            (§9.1/D64).",
+                            avoid reinstalling dependencies per worktree.",
             },
         ),
     ];
@@ -153,7 +151,7 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
     let mut out = String::new();
     out.push_str("# Written by `yunta init` — team-shared, commit this file.\n");
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
-    out.push_str("# config layer, §2.2) — never in this file (D58).\n\n");
+    out.push_str("# config layer) — never in this file.\n\n");
     out.push_str("project:\n");
     out.push_str(&format!("  name: {project_name}\n"));
     out.push_str(&format!("  base_branch: {base_branch}\n"));
@@ -189,10 +187,10 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
 
 const GITIGNORE_MARKER: &str = "# added by `yunta init`";
 
-/// Defensive only — `paths.runs`/`paths.worktrees` default to `~/.yunta`
-/// (D58's own "lo personal en ~/.yunta/"), outside the repo entirely, so
-/// none of this exists in a repo with default config. It's here for the
-/// day someone points `paths:` back into the repo on purpose.
+/// Defensive only — `paths.runs`/`paths.worktrees` default to `~/.yunta`,
+/// outside the repo entirely, so none of this exists in a repo with
+/// default config. It's here for the day someone points `paths:` back
+/// into the repo on purpose.
 fn gitignore_block() -> String {
     format!(
         "\n{GITIGNORE_MARKER} — only matters if `paths:` ever points inside \
@@ -213,16 +211,15 @@ fn write_gitignore(repo: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// D74's mechanism skill: teaches a client agent when to prefer a
+/// The mechanism skill: teaches a client agent when to prefer a
 /// verified workflow over ad-hoc implementation and how to discover
 /// what exists (`yunta list` / `list_workflows`) — the skill itself
-/// never embeds a catalog (D74: "el catálogo se consulta en el momento,
-/// nunca se escribe dentro de la skill"), since one written at `init`
+/// never embeds a catalog, since the catalog is consulted at the
+/// moment it's needed rather than baked in, and one written at `init`
 /// time would be empty and stale the moment anyone adds a workflow.
 /// Format: a `SKILL.md` with frontmatter, the shape Claude Code's own
 /// skill mechanism reads — no other file format is specified anywhere
-/// in the docs this was built against (`docs/m0-status.md`'s T7.6 entry
-/// records this as the implementation decision it is).
+/// in the docs this was built against.
 fn mechanism_skill_content() -> String {
     "---\n\
      name: yunta-mechanism\n\
@@ -296,7 +293,7 @@ pub async fn init(interactive: bool, force: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // D58: `-i` degrades to non-interactive with a warning rather than
+    // `-i` degrades to non-interactive with a warning rather than
     // hanging on a stdin that will never produce a line.
     let interactive = if interactive && !std::io::stdin().is_terminal() {
         eprintln!("warning: --interactive given but stdin isn't a TTY — using detected defaults");
@@ -389,7 +386,7 @@ pub async fn init(interactive: bool, force: bool) -> ExitCode {
 
     println!(
         "\nsuggested line for this repo's CLAUDE.md (paste it yourself — \
-         Yunta never writes to that file, D74):\n\n{}\n",
+         Yunta never writes to that file):\n\n{}\n",
         claude_md_suggestion()
     );
 

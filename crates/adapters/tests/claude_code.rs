@@ -1,8 +1,8 @@
-//! Integration tests for the real `claude-code` adapter (T7.3) against a
-//! fake `claude` binary (`fixtures/claude_code_stub.sh`) — no network, no
-//! API cost, no real LLM in CI (A8). The one thing this suite cannot
-//! cover is whether the real CLI's actual output matches what the stub
-//! scripts: that is the manual smoke test `docs/m0-status.md` records.
+//! Integration tests for the real `claude-code` adapter against a fake
+//! `claude` binary (`fixtures/claude_code_stub.sh`) — no network, no
+//! API cost, no real LLM in CI. The one thing this suite cannot cover
+//! is whether the real CLI's actual output matches what the stub
+//! scripts: that is what the manual smoke test covers instead.
 //!
 //! Stub configuration travels through `SessionRequest.env` (the child
 //! process's own environment), never `std::env::set_var` on the test
@@ -83,9 +83,9 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.permission_profiles);
     assert!(caps.custom_agents);
     assert!(caps.usage_reporting);
-    // A6: never claim a capability that isn't wired end-to-end yet — M-0
-    // has no live edit-hook blocking for the real CLI, only the engine's
-    // post-hoc scope check (T5.3).
+    // Never claim a capability that isn't wired end-to-end yet — there
+    // is no live edit-hook blocking for the real CLI, only the engine's
+    // post-hoc scope check.
     assert!(!caps.edit_hooks);
     assert!(!caps.run_tools);
 }
@@ -347,7 +347,7 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
 
     session.kill().await.unwrap();
 
-    // A4: the grandchild the stub spawned must die too, not just the
+    // The grandchild the stub spawned must die too, not just the
     // stub itself — proving the kill reached the whole process group.
     // `kill -0` alone isn't enough here: a killed process whose parent
     // is also gone lingers as a zombie (still `kill -0`-visible) until

@@ -1,4 +1,4 @@
-//! `pack.yaml` (RFC-0002 §3, T11.1) — schema and parsing.
+//! `pack.yaml` — schema and parsing.
 
 use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest};
 

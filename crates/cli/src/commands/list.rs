@@ -1,13 +1,12 @@
-//! `yunta list` (T7.1): the repo's own catalog of workflows — name,
+//! `yunta list`: the repo's own catalog of workflows — name,
 //! description, declared inputs — with `--runs` switching to local runs
 //! and their derived state instead. Both answer the same question
 //! without a server: "what's here, and where does it stand."
 //!
-//! The catalog is two layers (RFC-0002 §5, T11.3): the repo's own
-//! `.yunta/workflows/`, then every installed pack's declared
-//! `contents.workflows`, addressed `publisher/name` — a bare repo name
-//! never collides with a pack entry since the two are printed and
-//! looked up under different keys.
+//! The catalog is two layers: the repo's own `.yunta/workflows/`, then
+//! every installed pack's declared `contents.workflows`, addressed
+//! `publisher/name` — a bare repo name never collides with a pack entry
+//! since the two are printed and looked up under different keys.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -34,7 +33,7 @@ pub fn list_workflows() -> ExitCode {
         }
     };
 
-    // §8.6: best-effort — a project with no state root yet (never ran
+    // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
     // runs" does; neither is an error worth refusing the catalog over.
     let history_source = project::resolve(&cwd).ok().and_then(|project| {

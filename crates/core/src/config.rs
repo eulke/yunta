@@ -1,16 +1,16 @@
-//! Layered config types (T1.2, completed by DI-13): every group of the
+//! Layered config types: every group of the
 //! reference config parses and round-trips — `runners`, `adapters`,
 //! `mcp_servers`, `skills`, `baseline`/`coverage`, `storage`, `limits`,
 //! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets`,
 //! `telemetry` (the one sanctioned parse-and-hold group — inert until
-//! T13.3, per the reference's own text) and `version`. Each field
+//! the telemetry exporter is built) and `version`. Each field
 //! entered with its consumer or an explicit refusal in `check` — never
-//! accepted and silently ignored (A6).
+//! accepted and silently ignored.
 //!
-//! Merge semantics (§2.2, D52): maps merge key by key, more specific layer
+//! Merge semantics: maps merge key by key, more specific layer
 //! wins per key; arrays (like a role's candidate list) replace wholesale
 //! rather than concatenate. Precedence is repo > usuario > org — with one
-//! deliberate exception: `permissions` (§6.1, T5.7) inverts it, the org
+//! deliberate exception: `permissions` inverts it, the org
 //! layer is a ceiling and lower layers only narrow (see
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).
 
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::workflow::OnInterrupt;
 
-/// One binding candidate for a role in `runners:` (Contrato §13.1, I17).
+/// One binding candidate for a role in `runners:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunnerCandidate {
     pub adapter: String,
@@ -30,9 +30,9 @@ pub struct RunnerCandidate {
     pub agent: Option<String>,
 }
 
-/// One server in `mcp_servers:` (§9.2, T6.2) — the reference config's own
+/// One server in `mcp_servers:` — the reference config's own
 /// shape: a streamable-HTTP endpoint plus the *name* of an env var
-/// carrying the bearer token, never the token itself (I12/O3: secrets are
+/// carrying the bearer token, never the token itself (secrets are
 /// env var names in config, values only ever come from the process
 /// environment at resolve time).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,15 +42,15 @@ pub struct McpServerConfig {
     pub auth_env: Option<String>,
 }
 
-/// `forge:` (§5.6, D66, T7.7) — the team's forge, so `check` can tell a
+/// `forge:` — the team's forge, so `check` can tell a
 /// `kind: gate` with `external:` apart from one with nowhere to
 /// actually publish. GitHub only in v1, same "closed enum over an open
 /// abstraction" stance `ForgeKind` takes on the workflow side — a
 /// second forge is a new field here, not a schema break. `token_env`
-/// names an env var, never carries the token itself (I12/O3, same
+/// names an env var, never carries the token itself (same
 /// convention as `McpServerConfig::auth_env`); its absence at *runtime*
 /// (not at `check` time — see [`GitHubForgeConfig`]) is exactly what
-/// makes person B's machine work with no credentials at all (D66):
+/// makes a machine with no credentials at all work:
 /// degrade to console, don't refuse to exist.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ForgeConfig {
@@ -66,9 +66,9 @@ pub struct GitHubForgeConfig {
 }
 
 /// Adapter-specific settings: a portable binary override plus the
-/// reference config's opaque `adapter_settings` map (Spec Adapter §2 —
+/// reference config's opaque `adapter_settings` map — this is
 /// only for what has NO portable expression; model/agent/permissions
-/// are typed request fields precisely so this stays small). Passed
+/// are typed request fields precisely so this stays small. Passed
 /// through to `SessionRequest.adapter_settings` untouched; the adapter
 /// validates what it can in `probe()` and rejects what it doesn't know.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -79,7 +79,7 @@ pub struct AdapterSettings {
     pub adapter_settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// `storage:` (D53 — SQLite is the only backend).
+/// `storage:` — SQLite is the only backend.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StorageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,10 +88,10 @@ pub struct StorageConfig {
     pub retention_days: Option<u32>,
 }
 
-/// `project:` (§9's own `{{project.*}}` template namespace, T6.3) — the
-/// reference config's own three fields. M-0 cut: read-only data for
+/// `project:` — backs the `{{project.*}}` template namespace, the
+/// reference config's own three fields. Currently read-only data for
 /// templates, nothing here drives behavior yet (`base_branch` isn't
-/// consulted by any re-route/PR logic in this recorte).
+/// consulted by any re-route/PR logic).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,7 +102,7 @@ pub struct ProjectConfig {
     pub branch_prefix: Option<String>,
 }
 
-/// `paths:` (§2.2, D52) — where run/worktree state lives. `YUNTA_HOME` is
+/// `paths:` — where run/worktree state lives. `YUNTA_HOME` is
 /// an environment override applied when resolving the merged config, not
 /// a field of it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -114,9 +114,9 @@ pub struct PathsConfig {
 }
 
 /// The user state root: `$YUNTA_HOME`, or `~/.yunta` when unset. Shared by
-/// the CLI (which layers `config.yaml` from it, T1.2) and the engine
-/// (which reads `knowledge/` from it live at context-resolution time,
-/// T6.5) so the two never drift on what "the user layer" means. `None`
+/// the CLI (which layers `config.yaml` from it) and the engine
+/// (which reads `knowledge/` from it live at context-resolution time)
+/// so the two never drift on what "the user layer" means. `None`
 /// only when neither `YUNTA_HOME` nor `HOME` is set.
 pub fn user_state_root() -> Option<PathBuf> {
     if let Ok(home) = std::env::var("YUNTA_HOME") {
@@ -126,12 +126,12 @@ pub fn user_state_root() -> Option<PathBuf> {
 }
 
 /// How a first-level run isolates its working tree from the checkout
-/// that started it (§7.3, T4.2). `worktree` (default) gives each run its
+/// that started it. `worktree` (default) gives each run its
 /// own `git worktree`; `none` operates directly on the given checkout,
 /// legitimate for watching an agent edit live or for CI already inside
-/// an ephemeral container. `inherit` (§12, sub-runs only) isn't a value
+/// an ephemeral container. `inherit` (sub-runs only) isn't a value
 /// here — a first-level run has no parent to inherit from — and
-/// `container` isn't a schema value at all (A-09, undesigned).
+/// `container` isn't a schema value at all (not yet designed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
@@ -140,17 +140,17 @@ pub enum Isolation {
     None,
 }
 
-/// `defaults:` — the reference config's whole group (DI-13). Each field
-/// has its consumer: `isolation` (T4.2), `max_parallel_nodes` (T4.1),
-/// `on_interrupt` (T4.5), `runner` (a node that declares none),
+/// `defaults:` — the reference config's whole group. Each field
+/// has its consumer: `isolation`, `max_parallel_nodes`,
+/// `on_interrupt`, `runner` (a node that declares none),
 /// `timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is
 /// built — `check` refuses the others rather than accepting them
-/// silently, A6).
+/// silently).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Isolation>,
-    /// The role a node without `runner:` resolves through (DI-13).
+    /// The role a node without `runner:` resolves through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
     /// Per-session wall-clock budget (`Budget.timeout`), in minutes —
@@ -162,13 +162,13 @@ pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<DefaultOnFailure>,
     /// How many DAG nodes with no dependency on each other the scheduler
-    /// may run at once (T4.1). Absent means the schema's own default of
-    /// `1`, not "unbounded" — §5.5 states the analogous rationale for
-    /// `concurrency` in loops and it applies just as much here: nobody
+    /// may run at once. Absent means the schema's own default of
+    /// `1`, not "unbounded" — the same rationale applies to
+    /// `concurrency` in loops: nobody
     /// should discover parallel token spend by reading the bill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallel_nodes: Option<u32>,
-    /// Fallback `on_interrupt` (§8.1, T4.5) a node without its own
+    /// Fallback `on_interrupt` a node without its own
     /// override resolves to. Same default (`restart_node`) as the
     /// schema's own, so absent here changes nothing either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,7 +186,7 @@ pub enum DefaultOnFailure {
     Continue,
 }
 
-/// One `pricing:` entry (§8.4, reference shape): a struct rather than a
+/// One `pricing:` entry (reference shape): a struct rather than a
 /// bare number so a later per-direction price is a field addition, not
 /// a schema break.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -194,8 +194,8 @@ pub struct PricingEntry {
     pub cost_per_1k_tokens: f64,
 }
 
-/// `telemetry:` (§8.8) — parsed so the reference config round-trips;
-/// **inert until T13.3 (OTel)**, and the reference text itself says so:
+/// `telemetry:` — parsed so the reference config round-trips;
+/// **inert until the OTel exporter is built**, and the reference text itself says so:
 /// this is the one sanctioned parse-and-hold group.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TelemetryConfig {
@@ -214,20 +214,20 @@ pub enum TelemetryProtocol {
     Http,
 }
 
-/// `limits:` (§8.3, DI-05) — declared budgets and guards. Every field is
+/// `limits:` — declared budgets and guards. Every field is
 /// optional: an absent limit means "no cap", never a hidden default —
 /// except where the reference schema itself names one
 /// ([`LimitsConfig::resolved_max_loop_iterations`],
 /// [`LimitsConfig::resolved_inline_context_bytes`]), and that default
 /// lives here and nowhere else. Budgets are advisory ceilings the engine
-/// enforces by escalation/diagnostic (§5.3), never OS enforcement (D105).
+/// enforces by escalation/diagnostic, never OS enforcement.
 ///
 /// Canonical integer form is `2000000` — serde_yaml (YAML 1.2) resolves
 /// `2_000_000` as a *string*, which fails the parse loudly instead of
 /// silently becoming an unlimited run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LimitsConfig {
-    /// Run-wide token budget (§8.3): exceeded → §5.3 escalation
+    /// Run-wide token budget: exceeded → escalation
     /// (`continue`/`abort`), or `run_paused { reason: budget }` with no
     /// surface to ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -241,20 +241,20 @@ pub struct LimitsConfig {
     /// `yunta run` invocations can both pass the check).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent_runs: Option<u32>,
-    /// Ceiling on workflow-invoking-workflow nesting (consumer: T9.3).
+    /// Ceiling on workflow-invoking-workflow nesting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_workflow_depth: Option<u32>,
-    /// Guard against runaway artifacts at close (§4): an artifact over
+    /// Guard against runaway artifacts at close: an artifact over
     /// this size fails the node with a diagnostic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_artifact_bytes: Option<u64>,
     /// Context sources at or under this size are inlined into the
-    /// prompt; larger ones are referenced by path (§9).
+    /// prompt; larger ones are referenced by path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context_bytes: Option<u64>,
 }
 
-/// `baseline:` (§7.2, T5.4's `baseline_compare`) — the suite the engine
+/// `baseline:` — backs the `baseline_compare` check kind; the suite the engine
 /// runs and re-runs to catch regressions ("cero regresiones" as a data
 /// comparison, never an agent's claim).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -262,10 +262,10 @@ pub struct BaselineConfig {
     pub suite: String,
 }
 
-/// `coverage:` (§7.2, T5.4's `coverage_gate`) — `cmd`'s stdout must
+/// `coverage:` — backs the `coverage_gate` check kind; `cmd`'s stdout must
 /// contain a bare percentage (`NN[.NN]%`); the last match found is taken
-/// as the measured coverage. Not specified by the Contrato's prose,
-/// which only says "medido y comparado por el engine" — a permissive,
+/// as the measured coverage. Not specified any more precisely than
+/// "measured and compared by the engine" — a permissive,
 /// documented convention rather than inventing a stricter parsing
 /// contract with no source to check it against.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -274,23 +274,23 @@ pub struct CoverageConfig {
     pub threshold: f64,
 }
 
-/// `skills:` (D47/D87, T5.6) — M-0 cut carries only `executors`, the one
+/// `skills:` — currently carries only `executors`, the one
 /// sub-field `kind: executor` needs to resolve its own `executor:` name
 /// to a binary on disk. `paths`/`always` (skill discovery and injection
-/// into a node's assembled context) are M6's context-assembly work, with
-/// no consumer yet in this recorte.
+/// into a node's assembled context) are context-assembly work, with
+/// no consumer yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillsConfig {
     #[serde(default)]
     pub executors: Vec<ExecutorRegistration>,
     /// Directories skill names resolve against, in order — repo first,
-    /// per the reference config (DI-13). Absent means the convention
+    /// per the reference config. Absent means the convention
     /// default, `.yunta/skills` (where `yunta init` installs the
-    /// mechanism skill, D74).
+    /// mechanism skill).
     #[serde(default)]
     pub paths: Vec<PathBuf>,
     /// Skill names mounted on every session, before any node's own
-    /// list (DI-13).
+    /// list.
     #[serde(default)]
     pub always: Vec<String>,
 }
@@ -304,23 +304,23 @@ pub struct ExecutorRegistration {
     pub path: PathBuf,
 }
 
-/// Closed at `binary` today — D47 explicitly reserves `wasm` as a future
-/// additive variant ("`kind: wasm` queda como extensión aditiva futura si
-/// los datos la piden"), so this is an enum even with a single variant,
-/// not a bare string that would silently accept anything.
+/// Closed at `binary` today — `wasm` is reserved as a future
+/// additive variant once demand for it shows up, so this is an enum even
+/// with a single variant, not a bare string that would silently accept
+/// anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorKind {
     Binary,
 }
 
-/// `permissions:` (§6.1, D51, I18, T5.7) — ONE model of ceilings, not
+/// `permissions:` — ONE model of ceilings, not
 /// loose mechanisms: each level may only narrow the one above, never
 /// loosen it. Unlike every other config group (repo > user > org), the
 /// org layer rules here and lower layers only restrict further — without
 /// that inversion, governance is theater: any repo could undo it.
 ///
-/// This is governance, not a sandbox (§6.1's own honest limit): an agent
+/// This is governance, not a sandbox: an agent
 /// with write access can route around a textual pattern by writing a
 /// script and running it. The model stops the accident and the careless
 /// pack, and leaves an auditable trail of the deliberate attempt — real
@@ -337,11 +337,11 @@ pub struct PermissionsConfig {
     pub scope_expansion: Option<ScopeExpansionPermissions>,
 }
 
-/// `permissions.scope_expansion` (§6.2/D73, DI-20): the layered ceiling
+/// `permissions.scope_expansion`: the layered ceiling
 /// over how a loop node may let its tasks grow past declared scope.
 /// `max_mode` is the most *permissive* node-level `scope_expansion.mode`
 /// the layer allows (`rules < ask < deny` in severity) — the same
-/// only-narrowing model every other `permissions` group follows (§6.1):
+/// only-narrowing model every other `permissions` group follows:
 /// merge keeps the strictest declared ceiling, a lower layer softening
 /// it is a reported conflict, and a node declaring a mode over the
 /// merged ceiling fails `check`.
@@ -351,9 +351,9 @@ pub struct ScopeExpansionPermissions {
 }
 
 /// `permissions.commands` — patterns matched against every hook, criterion,
-/// bash node and executor command right before it runs (§6.1). Empty
+/// bash node and executor command right before it runs. Empty
 /// `allow` = denylist mode (everything not denied runs); a non-empty
-/// `allow` is D51's "allowlist opcional estricta".
+/// `allow` switches to a strict, opt-in allowlist.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CommandPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -362,11 +362,11 @@ pub struct CommandPermissions {
     pub allow: Vec<String>,
 }
 
-/// `permissions.packs` — governance over pack contents (D51/D72). Parsed
-/// and merged here from T5.7; *enforced* at `pack add`/check when packs
-/// themselves land (M11, T11.5) — a key without its consumer yet, kept
+/// `permissions.packs` — governance over pack contents. Parsed
+/// and merged here; *enforced* at `pack add`/check once pack support
+/// lands fully — a key without its consumer yet, kept
 /// because the org ceiling file is one document and its schema shouldn't
-/// dribble in per-milestone.
+/// dribble in piecemeal.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PackPermissions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -377,7 +377,7 @@ pub struct PackPermissions {
 
 /// `allow | prompt | deny`, strictly ordered: `Deny` is the narrowest,
 /// `Allow` the loosest — the ceiling merge keeps the strictest across
-/// layers. `prompt` asks for confirmation at `yunta pack add` (D72),
+/// layers. `prompt` asks for confirmation at `yunta pack add`,
 /// never mid-run: runs are headless, humans interact through gates only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -398,14 +398,14 @@ impl PackExecutorPolicy {
 }
 
 /// `permissions.packs.publishers` — `allow` empty means every publisher
-/// is accepted (§6.1's "vacío = todos").
+/// is accepted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PublisherPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
 }
 
-/// `permissions.network` — declarative ONLY (D105): `default: false`
+/// `permissions.network` — declarative ONLY: `default: false`
 /// activates no sandboxing whatsoever. It exists for policy and audit; an
 /// executor that wants to actually enforce it does so on its own. Policy
 /// ≠ capability ≠ OS enforcement — Yunta core never promises the third.
@@ -447,7 +447,7 @@ pub struct ConfigLayer {
     pub permissions: Option<PermissionsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<LimitsConfig>,
-    /// `pricing:` (§8.4, T7.5) — `{model: cost_per_1k_tokens}`, an
+    /// `pricing:` — `{model: cost_per_1k_tokens}`, an
     /// optional currency conversion `yunta stats` and the receipt add
     /// *alongside* their token figures, never in place of them. Absent
     /// means everything stays in tokens — the engine has no opinion of
@@ -456,7 +456,7 @@ pub struct ConfigLayer {
     pub pricing: Option<HashMap<String, PricingEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forge: Option<ForgeConfig>,
-    /// `secrets:` (I12) — env var *names* a session may receive; values
+    /// `secrets:` — env var *names* a session may receive; values
     /// only ever come from the process environment at spawn time, and
     /// nothing undeclared reaches a session's env at all.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -467,8 +467,8 @@ pub struct ConfigLayer {
 
 impl ConfigLayer {
     /// Merges layers in increasing order of precedence — pass
-    /// `[org, user, repo]` so the last one's keys win (D52/§2.2's default
-    /// precedence; `permissions` will invert this once it exists).
+    /// `[org, user, repo]` so the last one's keys win (the default
+    /// precedence; `permissions` inverts this).
     pub fn merge_layers(layers: impl IntoIterator<Item = ConfigLayer>) -> ConfigLayer {
         layers.into_iter().fold(ConfigLayer::default(), merge)
     }
@@ -495,7 +495,7 @@ impl ConfigLayer {
 
     /// `defaults.on_interrupt`, with the schema's own default
     /// (`restart_node`) applied — a node's own `on_interrupt` still wins
-    /// over this when it declares one (T4.5's per-node override).
+    /// over this when it declares one.
     pub fn resolved_on_interrupt(&self) -> OnInterrupt {
         self.defaults
             .as_ref()
@@ -517,9 +517,9 @@ impl ConfigLayer {
     /// forever, so "absent" means the reference cap, never "unbounded".
     /// `limits.max_workflow_depth`, with the reference default (`4`)
     /// applied — how many `kind: workflow` nesting levels below the
-    /// root run are allowed (§12's "profundidad máxima configurable";
-    /// consumer: T9.3's static graph check and the runtime guard at
-    /// child birth).
+    /// root run are allowed (a configurable maximum depth, checked
+    /// statically at graph-build time and again at runtime when a
+    /// child run is created).
     pub fn resolved_max_workflow_depth(&self) -> u32 {
         self.limits
             .as_ref()
@@ -583,7 +583,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         defaults: merge_fields(base.defaults, more_specific.defaults, merge_defaults_config),
         // Budgets, not permissions: normal precedence (repo > user >
         // org), field by field — the inverted ceiling merge below is
-        // exclusive to `permissions` (§6.1).
+        // exclusive to `permissions`.
         limits: merge_fields(base.limits, more_specific.limits, merge_limits_config),
         // Every field in these two is required (no internal optionality
         // to merge field-by-field) — a more specific layer replaces the
@@ -591,7 +591,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
         baseline: more_specific.baseline.or(base.baseline),
         coverage: more_specific.coverage.or(base.coverage),
         skills: more_specific.skills.or(base.skills),
-        // The deliberate inversion (§6.1): `merge_layers` folds org
+        // The deliberate inversion: `merge_layers` folds org
         // first, so `base` here is always the HIGHER layer for
         // permissions — the ceiling. The lower layer only ever narrows
         // the result; a loosening attempt is surfaced as an error by
@@ -600,7 +600,7 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
     }
 }
 
-/// Ceiling merge for `permissions` (§6.1/I18): the effective model is the
+/// Ceiling merge for `permissions`: the effective model is the
 /// most restrictive combination of both layers, computed conservatively —
 /// even when a lower layer *tried* to loosen (a check error via
 /// [`permission_layer_conflicts`]), the runtime model never runs anything
@@ -663,7 +663,7 @@ fn merge_permissions(
                 (Some(p), None) => Some(p),
                 (None, Some(p)) => Some(p),
                 (Some(c_pub), Some(l_pub)) => {
-                    // Empty = everyone (§6.1) — a non-empty ceiling bounds
+                    // Empty = everyone — a non-empty ceiling bounds
                     // the lower list; both non-empty intersect.
                     let allow = if c_pub.allow.is_empty() {
                         l_pub.allow
@@ -713,9 +713,10 @@ fn merge_permissions(
     })
 }
 
-/// Detects loosening attempts across ordered permission layers (§6.1,
-/// T5.7's own acceptance case: "repo que intenta re-permitir un patrón
-/// denegado por org: check lo rechaza citando la capa"). `layers` come
+/// Detects loosening attempts across ordered permission layers — the
+/// case this guards is a repo layer trying to re-allow a pattern the org
+/// layer denied: `check` rejects it, citing the offending layer.
+/// `layers` come
 /// ordered highest ceiling first (org, then user, then repo); every
 /// returned string names the offending layer, the ceiling layer it
 /// violated, and the exact pattern — comparison is textual on purpose:
@@ -736,12 +737,12 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 for pattern in &lower_cmds.allow {
                     if higher_cmds.deny.contains(pattern) {
                         conflicts.push(format!(
-                            "layer `{lower_name}` re-allows command pattern `{pattern}` denied by layer `{higher_name}` — permissions only narrow (§6.1)"
+                            "layer `{lower_name}` re-allows command pattern `{pattern}` denied by layer `{higher_name}` — permissions only narrow"
                         ));
                     } else if !higher_cmds.allow.is_empty() && !higher_cmds.allow.contains(pattern)
                     {
                         conflicts.push(format!(
-                            "layer `{lower_name}` allows command pattern `{pattern}` outside layer `{higher_name}`'s allowlist — permissions only narrow (§6.1)"
+                            "layer `{lower_name}` allows command pattern `{pattern}` outside layer `{higher_name}`'s allowlist — permissions only narrow"
                         ));
                     }
                 }
@@ -753,7 +754,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 {
                     if lower_pol.strictness() < higher_pol.strictness() {
                         conflicts.push(format!(
-                            "layer `{lower_name}` loosens `packs.executors` to `{lower_pol:?}` below layer `{higher_name}`'s `{higher_pol:?}` — permissions only narrow (§6.1)"
+                            "layer `{lower_name}` loosens `packs.executors` to `{lower_pol:?}` below layer `{higher_name}`'s `{higher_pol:?}` — permissions only narrow"
                         ));
                     }
                 }
@@ -764,7 +765,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                         for publisher in &lower_pub.allow {
                             if !higher_pub.allow.contains(publisher) {
                                 conflicts.push(format!(
-                                    "layer `{lower_name}` allows publisher `{publisher}` outside layer `{higher_name}`'s allowlist — permissions only narrow (§6.1)"
+                                    "layer `{lower_name}` allows publisher `{publisher}` outside layer `{higher_name}`'s allowlist — permissions only narrow"
                                 ));
                             }
                         }
@@ -775,7 +776,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             if let (Some(lower_net), Some(higher_net)) = (lower.network, higher.network) {
                 if lower_net.default && !higher_net.default {
                     conflicts.push(format!(
-                        "layer `{lower_name}` re-enables `network.default` turned off by layer `{higher_name}` — permissions only narrow (§6.1)"
+                        "layer `{lower_name}` re-enables `network.default` turned off by layer `{higher_name}` — permissions only narrow"
                     ));
                 }
             }
@@ -785,7 +786,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             {
                 if lower_se.max_mode.strictness() < higher_se.max_mode.strictness() {
                     conflicts.push(format!(
-                        "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow (§6.1/§6.2)",
+                        "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
                         lower_se.max_mode.as_str(),
                         higher_se.max_mode.as_str()
                     ));
@@ -825,7 +826,7 @@ fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> Limit
     }
 }
 
-/// A map whose values are arrays: per §2.2 "arrays reemplazan", a key
+/// A map whose values are arrays: a key
 /// present in the more specific layer replaces the base's value for that
 /// key wholesale, rather than concatenating the two arrays.
 fn merge_map_replacing_values<K, V>(

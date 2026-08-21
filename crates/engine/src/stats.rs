@@ -1,21 +1,21 @@
-//! `yunta stats` (T7.5, Contrato §8.4/§8.6): every number here is derived
+//! `yunta stats`: every number here is derived
 //! from the event log alone — never estimated, never trusting an agent's
-//! own report (I20, same guarantee [`crate::progress`] and
+//! own report (the same guarantee [`crate::progress`] and
 //! [`crate::replay`] already give). Two things live here: **CPTV and its
-//! companions** (§8.4 — one run, computed from that run's own log) and
-//! **prior estimation** (§8.6 — a workflow's own run history, computed
+//! companions** (one run, computed from that run's own log) and
+//! **prior estimation** (a workflow's own run history, computed
 //! from several runs' logs at once). Presentation (terminal bars,
 //! sparklines, `--json`) is the CLI's job; this module only derives
 //! numbers.
 //!
-//! **CPTV is the headline metric because it optimizes what matters**
-//! (§8.4's own text): not minimizing tokens — a cheap run that verifies
+//! **CPTV is the headline metric because it optimizes what matters:**
+//! not minimizing tokens — a cheap run that verifies
 //! nothing is the most expensive kind there is — but the cost of each
 //! unit of *demonstrated* work. Tokens are the unit, always; a currency
 //! estimate is an optional, additive line the CLI prints only when
 //! `pricing:` is configured — this module never converts to currency
-//! itself, so it can never be the thing that invents a number (§8.4:
-//! "sin `pricing:` declarado, todo se expresa en tokens y nada se
+//! itself, so it can never be the thing that invents a number
+//! ("sin `pricing:` declarado, todo se expresa en tokens y nada se
 //! inventa").
 //!
 //! **Rework rate** is tokens spent on attempts beyond the first — a
@@ -23,8 +23,8 @@
 //! first try from a retry or a re-route's correction attempt, so no new
 //! bookkeeping is needed to tell them apart.
 //!
-//! **Blocked wall-clock** (the "fracción bloqueada" the plan asks for,
-//! feeding A-08's own trigger condition) is a *best-effort* derived
+//! **Blocked wall-clock** (the "fracción bloqueada" a workflow author
+//! watches for) is a *best-effort* derived
 //! signal, not a scheduler replay: a node's `ready_at` is the latest
 //! terminal timestamp among its own `depends_on` (or the run's first
 //! event, for a node with none), and "blocked" is the gap between that
@@ -84,19 +84,19 @@ impl NodeStat {
     }
 }
 
-/// One run's derived stats (§8.4) — everything `yunta stats <run_id>`
+/// One run's derived stats — everything `yunta stats <run_id>`
 /// shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunStats {
     /// `None` until at least one task is `done` — never a made-up number
-    /// (§8.4's own definition: total run tokens / tasks done).
+    /// (the definition is total run tokens / tasks done).
     pub cptv: Option<f64>,
     /// Tokens spent on attempts beyond the first, over total tokens.
     /// `None` when the run spent no tokens at all.
     pub rework_rate: Option<f64>,
     /// Cached input tokens over total input tokens. `None` when no
     /// adapter in this run ever reported a cache figure (`Usage`'s
-    /// `cached_input_tokens` is an optional extension, §8.4) — distinct
+    /// `cached_input_tokens` is an optional extension) — distinct
     /// from `Some(0.0)`, which means it reported and the answer was zero.
     pub cache_rate: Option<f64>,
     pub total_tokens: TokenUsage,
@@ -113,8 +113,8 @@ pub struct RunStats {
 
 impl RunStats {
     /// Tokens grouped by resolved role, node order broken and re-grouped
-    /// — the "por rol" half of §8.4's "costo por nodo, por rol y por
-    /// modo" (mode is a whole-run property in M-0, since `modes:` isn't
+    /// — the "por rol" half of "costo por nodo, por rol y por
+    /// modo" (mode is a whole-run property today, since `modes:` isn't
     /// implemented yet — nothing to break out per role *and* per mode
     /// within one run until it is; `--workflow`'s history view is where
     /// mode comparison lives).
@@ -131,7 +131,7 @@ impl RunStats {
     }
 }
 
-/// CPTV (§8.4): total run tokens / tasks done. The one number every
+/// CPTV: total run tokens / tasks done. The one number every
 /// `RunFinished.metrics` and `RunStats` alike report, computed once here
 /// so the two call sites can never disagree.
 pub fn cptv(state: &RunState) -> Option<f64> {
@@ -147,7 +147,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
     Some(total as f64 / done as f64)
 }
 
-/// Derives one run's stats (§8.4) from its workflow and event log alone.
+/// Derives one run's stats from its workflow and event log alone.
 /// Pure: same input, same output, always.
 pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
     let state = derive(events);
@@ -315,10 +315,10 @@ fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
     }
 }
 
-// --- History across runs of the same workflow (§8.4's `--workflow`, §8.6) --
+// --- History across runs of the same workflow (`--workflow`) --
 
 /// One past run's contribution to a workflow's history — enough to drive
-/// `--workflow`'s comparison table and §8.6's prior estimation, without
+/// `--workflow`'s comparison table and its prior estimation, without
 /// this module doing any storage I/O itself (that's the CLI's job, same
 /// functional-core/imperative-shell split as everywhere else).
 #[derive(Debug, Clone, PartialEq)]
@@ -368,10 +368,10 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
-/// §8.6's prior estimation: median and p90 of tokens, wall-clock and task
+/// Prior estimation: median and p90 of tokens, wall-clock and task
 /// count over a workflow's own run history. `None` with fewer than three
-/// samples — "sin datos suficientes, el engine no dice nada" is the
-/// section's own line, not a threshold this function invented.
+/// samples — "sin datos suficientes, el engine no dice nada": not a
+/// threshold this function invented.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PriorEstimation {
     pub sample_count: usize,
@@ -382,7 +382,7 @@ pub struct PriorEstimation {
 
 pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
 
-/// §8.6/DI-05: the informative — never blocking — line `yunta run`
+/// The informative — never blocking — line `yunta run`
 /// prints when the declared run budget sits below what history says this
 /// workflow typically needs. `None` without a cap to compare, or without
 /// enough history (the estimation's own ≥3-run floor).

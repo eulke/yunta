@@ -1,11 +1,11 @@
-//! The `kind: questions` artifact schema (§4.1, T5.14) — parsed once at
-//! the frontier into these types; validation against the field rules is
-//! T5.14, in `yunta-engine` (mirrors `ledger.rs`'s own split: types here,
+//! The `kind: questions` artifact schema — parsed once at
+//! the frontier into these types; validation against the field rules
+//! lives in `yunta-engine` (mirrors `ledger.rs`'s own split: types here,
 //! `register()` in the engine).
 
 use serde::{Deserialize, Serialize};
 
-/// `text | choice | boolean` (§4.1, verbatim).
+/// `text | choice | boolean`, verbatim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnswerType {
@@ -14,7 +14,7 @@ pub enum AnswerType {
     Boolean,
 }
 
-/// One question (§4.1): `id`, `text`, `answer_type`, `values` only when
+/// One question: `id`, `text`, `answer_type`, `values` only when
 /// `answer_type` is `choice`, and `required`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
@@ -34,26 +34,26 @@ pub struct QuestionsFile {
     pub questions: Vec<Question>,
 }
 
-/// One answer (DI-02): the question's `id` and the human's value, as
+/// One answer: the question's `id` and the human's value, as
 /// text — a `boolean` answer is the string `true`/`false`, a `choice`
 /// one of the declared `values`. Strings deliberately, not a typed enum
 /// per answer kind: the artifact is what a *following node's session*
-/// reads (§4.1 "consumibles por el nodo siguiente"), and text is the
-/// only shape every consumer shares.
+/// reads — meant to be consumed by whatever node comes next — and text
+/// is the only shape every consumer shares.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Answer {
     pub id: String,
     pub value: String,
 }
 
-/// The answers artifact's document — written by the ENGINE (never an
-/// agent, I20) next to the questions artifact it answers.
+/// The answers artifact's document — written by the ENGINE, never an
+/// agent, next to the questions artifact it answers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnswersFile {
     pub answers: Vec<Answer>,
 }
 
-/// Validates a reply against its questions (DI-02): every `required`
+/// Validates a reply against its questions: every `required`
 /// question answered, every answer names a declared question, `choice`
 /// values within the declared list, `boolean` values parseable. All
 /// violations reported together, never just the first (same principle

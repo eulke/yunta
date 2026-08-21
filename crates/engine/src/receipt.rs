@@ -1,4 +1,4 @@
-//! Verified Work Receipt (D54, RFC-0003 §1, T10.4): a PR-attachable
+//! Verified Work Receipt: a PR-attachable
 //! certificate derived **entirely** from the event log — never a summary
 //! an agent wrote. "El recibo ES la evidencia": every number here traces
 //! back to a specific event kind, the same discipline [`crate::stats`]
@@ -17,8 +17,8 @@ use crate::replay::{derive, NodeState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReceiptError {
-    /// A receipt certifies *closed* work (§8.3's own "al cierre de un
-    /// run") — a run still `running`/`waiting`/`paused` has no
+    /// A receipt certifies *closed* work — a run still
+    /// `running`/`waiting`/`paused` has no
     /// `run_finished` metrics (CPTV, final token total) to report yet.
     #[error(
         "run `{0}` hasn't reached a terminal state yet — `yunta status {0}` shows where it is; \
@@ -45,8 +45,7 @@ pub struct CriteriaSummary {
 
 /// `None` on a [`Receipt`] when the workflow declares no `baseline_compare`
 /// check at all — never a manufactured "0 regressions" for a run that
-/// never looked (§8.4's own "sin pricing declarado, nada se inventa"
-/// principle applies here too).
+/// never looked; nothing gets invented for what the run never measured.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BaselineSummary {
     pub suite: String,
@@ -150,8 +149,8 @@ pub fn build_receipt(
 }
 
 /// The latest post-check `criteria_checked` per task — a retried task's
-/// earlier, superseded attempts don't get counted twice (§5.2: the log
-/// keeps every attempt, but the receipt certifies the final verdict).
+/// earlier, superseded attempts don't get counted twice: the log keeps
+/// every attempt, but the receipt certifies only the final verdict.
 fn criteria_summary(events: &[Event]) -> CriteriaSummary {
     let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
         HashMap::new();
@@ -252,7 +251,7 @@ fn runner_usage(events: &[Event]) -> Vec<RunnerUsage> {
         .collect()
 }
 
-/// Fan-out siblings share a `<base>@<role>` id (T9.4, `manifest.rs`) —
+/// Fan-out siblings share a `<base>@<role>` id (see `manifest.rs`) —
 /// grouped here purely for the markdown's "reviewed by N independent
 /// runners" line; the JSON receipt exposes the flat `runners` list
 /// instead and leaves grouping to whoever consumes it.
@@ -271,7 +270,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(String, Vec<&RunnerUsage>
     groups
 }
 
-/// Markdown rendering — the PR-facing format (RFC-0003 §1's own example).
+/// Markdown rendering — the PR-facing markdown format.
 pub fn render_markdown(receipt: &Receipt) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -372,8 +371,8 @@ fn mark(ok: bool) -> &'static str {
     }
 }
 
-/// JSON rendering — the machine-consumable format (D54: same data, no
-/// separate derivation).
+/// JSON rendering — the machine-consumable format: same data as the
+/// markdown, no separate derivation.
 pub fn render_json(receipt: &Receipt) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(receipt)
 }

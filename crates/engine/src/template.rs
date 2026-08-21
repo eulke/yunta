@@ -1,10 +1,9 @@
-//! Template rendering (T6.3 recorte, Contrato §9.3/§6.3 syntax) —
-//! `{{name}}` substitution with a hard error on any undefined variable
-//! (never silent pass-through: a prompt that ships `{{run.dir}}`
-//! verbatim to an agent is a degradation nobody declared). The M-0 cut
-//! is the full final syntax with a minimal variable set — M6 (T6.3)
-//! adds more variables (`{{inputs.*}}`, `{{runner.role}}`, ...), not
-//! more syntax.
+//! Template rendering — `{{name}}` substitution with a hard error on
+//! any undefined variable (never silent pass-through: a prompt that
+//! ships `{{run.dir}}` verbatim to an agent is a degradation nobody
+//! declared). The syntax here is the full, final grammar; growing the
+//! available variables (`{{inputs.*}}`, `{{runner.role}}`, ...) never
+//! requires touching the syntax itself.
 
 use std::collections::BTreeMap;
 

@@ -41,9 +41,9 @@ jobs:
             echo "::endgroup::"
           done
 
-  # T10.3/RFC-0004 §4.1: musl is what makes the Linux release binary a real
-  # static binary (no glibc dependency at runtime) — a link failure here is
-  # a release-blocking regression, not just a style nit, so it gets its own
+  # musl is what makes the Linux release binary a real static binary (no
+  # glibc dependency at runtime) — a link failure here is a
+  # release-blocking regression, not just a style nit, so it gets its own
   # job rather than riding along inside `ci`.
   musl-build:
     runs-on: ubuntu-latest

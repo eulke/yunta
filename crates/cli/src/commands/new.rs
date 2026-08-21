@@ -1,11 +1,11 @@
-//! `yunta new <name> [--shape ...]` (T7.6, D58): writes
+//! `yunta new <name> [--shape ...]`: writes
 //! `.yunta/workflows/<name>.yaml` from a minimal, commented schema
-//! skeleton — "más cerca de `cargo new` que de un workflow real" (D58's
-//! own words): ruled paper to edit, not a working pipeline. Never
-//! references a pack and never touches `yunta.lock` — `new` creates the
-//! team's own content, `pack add` (M11) is the only verb that brings in
-//! someone else's (D58's disjoint-verbs rule). Runs `check` on what it
-//! wrote and reports the result, same as `yunta check` would.
+//! skeleton — closer to `cargo new` than to a working workflow: ruled
+//! paper to edit, not a working pipeline. Never references a pack and
+//! never touches `yunta.lock` — `new` creates the team's own content,
+//! `pack add` is the only verb that brings in someone else's, and the
+//! two stay disjoint on purpose. Runs `check` on what it wrote and
+//! reports the result, same as `yunta check` would.
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -75,8 +75,8 @@ nodes:
 
 const LINT_FIX_TEMPLATE: &str = "\
 name: {{workflow-name}}
-# A verify-then-correct chain (Contrato §11.2): `lint` runs a check;
-# if it fails, `on_failure.goto` re-routes to `fix`, which gets an
+# A verify-then-correct chain: `lint` runs a check; if it fails,
+# `on_failure.goto` re-routes to `fix`, which gets an
 # agent session to address what's wrong, then control returns to
 # `lint` to re-verify. `max_reroutes` caps how many correction
 # attempts run before escalating to a person.
@@ -93,8 +93,8 @@ nodes:
 
 const LEDGER_TEMPLATE: &str = "\
 name: {{workflow-name}}
-# A task-ledger cycle (Contrato §5, empty to start): `plan` opens an
-# agent session that writes a task ledger artifact; `implement` loops
+# A task-ledger cycle, empty to start: `plan` opens an agent session
+# that writes a task ledger artifact; `implement` loops
 # over it, dispatching one mechanically-verified session per ready
 # task, until every task is `done`.
 nodes:

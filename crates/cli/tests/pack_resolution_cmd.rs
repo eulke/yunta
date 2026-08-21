@@ -1,5 +1,5 @@
-//! Namespaced resolution against a real installed pack (RFC-0002 §5,
-//! T11.3): `yunta run <publisher>/<name>` and `yunta list` both go
+//! Namespaced resolution against a real installed pack:
+//! `yunta run <publisher>/<name>` and `yunta list` both go
 //! through the real compiled binary, exercising `resolve_workflow`
 //! wired into the actual CLI commands, not just the resolver in
 //! isolation (`crates/engine/tests/catalog.rs` already covers that).
@@ -144,7 +144,7 @@ fn yunta_list_shows_both_the_repo_catalog_and_installed_pack_workflows() {
 fn a_repo_workflow_with_the_same_namespaced_name_shadows_the_pack() {
     let (_root, _upstream, repo, home) = setup();
 
-    // §5: "un workflow local con el mismo nombre pisa al del pack" — a
+    // "un workflow local con el mismo nombre pisa al del pack" — a
     // repo file at the same publisher/name path wins over the pack.
     std::fs::create_dir_all(repo.join(".yunta/workflows/acme")).unwrap();
     std::fs::write(

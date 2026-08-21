@@ -1,6 +1,6 @@
-//! T11.5 end to end: the executor-confirmation gate on `pack add`
-//! (RFC-0002 §6.3) and `declares.permissions` enforced as a ceiling by
-//! `yunta check` (§3) — both against the real compiled binary.
+//! End to end: the executor-confirmation gate on `pack add`
+//! and `declares.permissions` enforced as a ceiling by
+//! `yunta check` — both against the real compiled binary.
 
 use std::path::Path;
 use std::process::Output;

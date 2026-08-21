@@ -1,10 +1,9 @@
-//! `kind: executor` (D47/D87, T5.6) — the extension point when neither
+//! `kind: executor` — the extension point when neither
 //! `bash` nor `check`'s closed builtin list is enough: external code, a
-//! JSON contract over stdio. D47/D87 fix the high-level shape (JSON in,
-//! JSON out, exit code is the verdict) but stop short of naming fields —
-//! this module's own doc comments carry the concrete contract this
-//! recorte adds on top, written up in `docs/m0-status.md`'s T5.6 entry
-//! pending a real ADR revision.
+//! JSON contract over stdio. The spec fixes the high-level shape (JSON
+//! in, JSON out, exit code is the verdict) but stops short of naming
+//! fields — this module's own doc comments carry the concrete contract
+//! this recorte adds on top, pending a real spec revision.
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +16,7 @@ use yunta_core::{ExecutorKind, ExecutorRegistration, Node};
 use super::node_exec::{close_node, fail, kill_process_group, NodeEnd};
 use super::{RunCtx, RunError};
 
-/// The stdin JSON shape (D47: "`with:`, paths del run, env declarado").
+/// The stdin JSON shape (`with:`, the run's own paths, declared env).
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
 /// every other node already exposes (`node_exec::template_vars`), rather
 /// than inventing different names for the same two paths. `env` is
@@ -42,7 +41,7 @@ fn build_stdin(
 
 /// The stdout JSON shape this recorte defines: an optional `summary`
 /// string, used as the node's outcome text when present. Exit code, not
-/// this payload, is the pass/fail verdict (D47's own text) — stdout that
+/// this payload, is the pass/fail verdict — stdout that
 /// is empty, not JSON, or JSON without `summary` never fails the node by
 /// itself; it just falls back to a generic outcome string.
 #[derive(serde::Deserialize)]
@@ -87,13 +86,13 @@ pub(super) async fn execute_executor(
         );
     };
     // The only variant today (`ExecutorKind::Binary`) — matched
-    // explicitly rather than ignored so a future `wasm` variant (D47)
+    // explicitly rather than ignored so a future `wasm` variant
     // breaks this call site at compile time instead of silently running
     // it as a binary.
     let ExecutorKind::Binary = registration.kind;
     let path = resolve_path(ctx.worktree, registration);
 
-    // §6.1 names executors among the four command surfaces the model
+    // Executors are among the four command surfaces the permission model
     // covers; an executor's "command" is its resolved binary path.
     if let Some(rule) = crate::permissions::command_violation(
         &path.display().to_string(),
@@ -120,7 +119,7 @@ pub(super) async fn execute_executor(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    // A4: an executor's whole process tree must die together on timeout
+    // An executor's whole process tree must die together on timeout
     // or cancellation, the same process-group pattern every other
     // engine-spawned command in this codebase uses.
     #[cfg(unix)]

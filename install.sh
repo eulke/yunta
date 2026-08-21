@@ -1,13 +1,12 @@
 #!/bin/sh
-# Yunta installer (RFC-0004 §4.2).
+# Yunta installer.
 #
 # Prefers a precompiled binary from a GitHub release, verified by SHA-256
 # against that release's checksums.txt before anything is extracted. If no
-# release exists yet for the resolved version/platform (T12.2's pipeline
-# hasn't published one, or none matches this target), falls back to
-# building from source — the whole path T12.3 replaced. Either way: no
-# sudo, installs to ~/.local/bin (or $YUNTA_INSTALL_DIR), warns about PATH,
-# and closes by suggesting `yunta doctor`.
+# release exists yet for the resolved version/platform, falls back to
+# building from source. Either way: no sudo, installs to ~/.local/bin (or
+# $YUNTA_INSTALL_DIR), warns about PATH, and closes by suggesting
+# `yunta doctor`.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/eulke/yunta/main/install.sh | sh
@@ -35,10 +34,10 @@ need() {
     command -v "$1" >/dev/null 2>&1 || fail "\`$1\` is required to install yunta from source"
 }
 
-# 1. Detect platform, mapped to the same target triples RFC-0004 §4.1's
-#    build matrix uses — musl for Linux, so the eventual switch to a
-#    downloaded prebuilt binary changes nothing about what this script
-#    reports or installs.
+# 1. Detect platform, mapped to the same target triples the release
+#    build matrix uses — musl for Linux, so the reported target matches
+#    exactly whether this script ends up downloading a prebuilt binary
+#    or building from source.
 os="$(uname -s)"
 arch="$(uname -m)"
 case "$os" in
@@ -176,7 +175,7 @@ case ":$PATH:" in
         ;;
 esac
 
-# 6. Close with version + the suggested next command (RFC-0004 §4.2 step 7).
+# 6. Close with version + the suggested next command.
 "$INSTALL_DIR/yunta" --version
 say ""
 say "next: run \`yunta doctor\` to see which coding agents it found."

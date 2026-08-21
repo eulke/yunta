@@ -1,4 +1,4 @@
-//! `yunta pack audit` end to end (RFC-0002 §6, D71, T11.4): the real
+//! `yunta pack audit` end to end: the real
 //! compiled binary against an installed pack, plus `add`'s own
 //! automatic audit before vendoring.
 

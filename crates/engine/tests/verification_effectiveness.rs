@@ -1,4 +1,4 @@
-//! `analyze_verification_effectiveness` (§8.7, D93, T7.10) — golden
+//! `analyze_verification_effectiveness` — golden
 //! tests over hand-built historical logs, same style `tests/stats.rs`
 //! uses for its own pure derivation.
 
@@ -144,8 +144,8 @@ fn fewer_than_min_samples_flags_nothing() {
 
 #[test]
 fn a_criterion_red_before_green_after_is_never_flagged() {
-    // Exactly the distinction §8.7 itself draws: "nunca rojo antes" vs.
-    // "nunca falló" — this criterion *did* go red at least once, in
+    // The relevant distinction is "never red before" vs.
+    // "never failed" — this criterion *did* go red at least once, in
     // pre-check, which is the metric that matters; that it later passed
     // (post-check) is irrelevant to this signal.
     let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
@@ -365,7 +365,7 @@ fn no_history_flags_nothing_at_all() {
     assert!(findings.is_empty());
 }
 
-// --- DI-06: señales atadas a modos (§8.7, desbloqueadas por T9.1) -----------
+// --- signals tied to modes -----------
 
 fn run_created_in_mode(mode: &str) -> Vec<Event> {
     use std::collections::HashMap;
@@ -444,8 +444,8 @@ fn a_mode_used_even_once_is_never_flagged() {
 
 #[test]
 fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
-    // ✓ estructural de T7.10: "nunca sugiere quitar nodos `invariant:
-    // true`" — a verification node that never fails is doing its job;
+    // Structural guarantee: never suggests removing `invariant:
+    // true` nodes — a verification node that never fails is doing its job;
     // its never-fired re-route and its always-approved gate are
     // excluded from the findings by construction.
     use yunta_core::events::NodeFinishedPayload;

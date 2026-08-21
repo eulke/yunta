@@ -1,4 +1,4 @@
-//! Manifest resolution (T1.4, Contrato §2.1) — the IO shell that freezes
+//! Manifest resolution — the IO shell that freezes
 //! a [`Manifest`]. Reading prompt files and asking git for the base
 //! commit happen here, once, at run creation; everything downstream
 //! operates on the frozen value and never goes back to disk.
@@ -13,7 +13,7 @@ use yunta_core::{
 
 use crate::inputs::{resolve_inputs, InputsError};
 
-/// Version of the manifest's own schema (D07).
+/// Version of the manifest's own schema.
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
@@ -35,12 +35,12 @@ pub enum ManifestError {
     Inputs(#[from] InputsError),
 }
 
-/// Freezes a manifest from already-parsed sources (Contrato §2.1).
+/// Freezes a manifest from already-parsed sources.
 ///
 /// `workflow_dir` is the directory of the workflow file — `prompt:
-/// {file: ...}` paths resolve relative to it (§9.3). `repo` is the
+/// {file: ...}` paths resolve relative to it. `repo` is the
 /// working tree whose `HEAD` becomes the base commit, and also the base
-/// a `path`-typed input in `provided_inputs` resolves against (T1.5):
+/// a `path`-typed input in `provided_inputs` resolves against:
 /// inputs are validated before any worktree exists, so there is nowhere
 /// else for a relative path to mean.
 pub fn build_manifest(
@@ -79,7 +79,7 @@ pub fn build_manifest(
         max_parallel_nodes: config.resolved_max_parallel_nodes(),
         // The resolved state roots live in the shell that knows them
         // (the CLI's project resolution) — it fills this in before
-        // `create_run` freezes the manifest (DI-07). `None` here keeps
+        // `create_run` freezes the manifest. `None` here keeps
         // library callers (tests) on the fallback-to-current-config
         // path, which is also the tolerant reading of old manifests.
         paths: None,
@@ -87,7 +87,7 @@ pub fn build_manifest(
     })
 }
 
-/// T11.7/RFC-0002 §7: which pack (and exactly which version) the
+/// Which pack (and exactly which version) the
 /// top-level workflow being frozen came from, if any — best-effort,
 /// since this field is provenance for `yunta status`/`receipt`, never
 /// load-bearing for the run's own correctness (that guarantee comes
@@ -127,7 +127,7 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
     })
 }
 
-/// §9's `context: [{ artifact: { node, name } }]` creates an *implicit*
+/// `context: [{ artifact: { node, name } }]` creates an *implicit*
 /// `depends_on` edge onto `node` — folded into the ordinary field here,
 /// once, so `check`'s cycle detection and the scheduler's own readiness
 /// calculation (both already only ever read `Node.depends_on`) need zero
@@ -137,7 +137,7 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
 /// caught statically rather than deadlocking a real run. Idempotent: a
 /// node that already lists the referenced node explicitly gets no
 /// duplicate.
-/// §13.2/T9.4: a node with `runners: [a, b]` becomes one `<id>@<role>`
+/// A node with `runners: [a, b]` becomes one `<id>@<role>`
 /// node per role — **statically, in the manifest**, before anything
 /// runs: the fan-out is visible in `status`, each expanded node
 /// resolves its own runner and renders its own `{{runner.role}}`, and
@@ -207,17 +207,17 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
             expand_implicit_dependencies_in(child);
         }
     }
-    // §12/D108: a mount is a read of the referenced node's outcome, so
+    // A mount is a read of the referenced node's outcome, so
     // it orders behind it exactly like a context artifact does — and
-    // it's this edge that guarantees "hermanos terminados" at the time
-    // the child is born and the copy happens.
+    // it's this edge that guarantees the source node has already
+    // finished at the time the child is born and the copy happens.
     let mut implied: Vec<NodeId> = Vec::new();
     if let NodeKind::Workflow { mounts, .. } = &node.kind {
         implied.extend(mounts.iter().map(|mount| mount.artifact.node.clone()));
     }
     for spec in &node.context {
         if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-            // A node-less reference (D108) reads this run's own
+            // A node-less reference reads this run's own
             // artifacts dir — no producer to order behind.
             if let Some(referenced) = &artifact.node {
                 implied.push(referenced.clone());
@@ -234,7 +234,7 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
 /// Freezes one node's own file prompt (if any) — `build_manifest` walks
 /// every node (`parallel` children included, via `iter_nodes`): a
 /// child's `prompt: {file: ...}` needs the same freeze-at-creation
-/// guarantee (§2.1) as a top-level node's, since it's dispatched
+/// guarantee as a top-level node's, since it's dispatched
 /// through the identical `execute_node`.
 fn freeze_prompt(
     node: &Node,

@@ -5,7 +5,7 @@ plan registered as a verified task ledger, implementation checked task by
 task, a lint→fix cycle, a baseline check, a two-runner review, and a PR.
 Open modes throughout (`quick`/`standard`/`full`) and the plan distilled to
 knowledge on finish. Installable and removable like any third-party pack —
-the engine grants it no special status (D57).
+the engine grants it no special status.
 
 ```bash
 yunta pack add <source-of-this-pack>
@@ -18,7 +18,7 @@ node.
 
 ## Attaching the receipt
 
-`yunta receipt <run_id>` can only run once a run is finished (D54) — never
+`yunta receipt <run_id>` can only run once a run is finished — never
 from inside the run that produced it, since the run can't be "finished"
 while one of its own nodes is still executing the receipt command. That's
 why the `pr` node above doesn't try to attach one itself. The recommended
@@ -32,7 +32,7 @@ gh pr comment <pr-number> --body-file <run_dir>/receipt.md
 ```
 
 Making the receipt a required PR check is a team decision Yunta doesn't
-impose (D54) — configure it in your own forge, not in this pack.
+impose — configure it in your own forge, not in this pack.
 
 ## Installing
 

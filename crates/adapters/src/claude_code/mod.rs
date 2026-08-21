@@ -1,10 +1,10 @@
-//! The real `claude-code` adapter (T7.3, Spec Adapter): spawns the
-//! `claude` CLI headless (`-p --output-format stream-json`), streams its
-//! JSON lines into `AgentEvent`s (`parse.rs`), and maps yunta's portable
-//! request fields onto the CLI's own flags (`permissions.rs`). Never
-//! exercised by the automated suite (A8: no real LLM in CI) — covered by
+//! The real `claude-code` adapter: spawns the `claude` CLI headless
+//! (`-p --output-format stream-json`), streams its JSON lines into
+//! `AgentEvent`s (`parse.rs`), and maps yunta's portable request fields
+//! onto the CLI's own flags (`permissions.rs`). Never exercised by the
+//! automated suite — no real LLM in CI — covered instead by
 //! `crates/adapters/tests/claude_code.rs` against a scripted fake binary,
-//! plus the one manual smoke test `docs/m0-status.md` records.
+//! plus one manual smoke test.
 
 mod parse;
 mod permissions;
@@ -75,7 +75,7 @@ impl ClaudeCodeAdapter {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // A4: the whole session's process tree must die together on
+        // The whole session's process tree must die together on
         // interrupt/kill. Putting the child in its own process group
         // means a group-targeted signal (negative pid) reaches every
         // descendant the CLI spawns — its own tool subprocesses included
@@ -127,8 +127,8 @@ impl ClaudeCodeAdapter {
                     }
                 }
             }
-            // A4/T3.3: reap the child so a killed or naturally-finished
-            // session never leaves a zombie behind.
+            // Reap the child so a killed or naturally-finished session
+            // never leaves a zombie behind.
             let _ = child.wait().await;
         });
         tokio::spawn(drain_stderr(stderr));
@@ -156,16 +156,17 @@ impl Adapter for ClaudeCodeAdapter {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
-            // No live edit-hook blocking wired for the real CLI in M-0
-            // (A6: never claim what isn't built) — the engine's own
-            // post-hoc scope check (T5.3) is the real boundary today.
+            // No live edit-hook blocking wired for the real CLI — a
+            // capability must never claim more than is actually built,
+            // so this stays false. The engine's own post-hoc scope
+            // check is the real boundary today.
             edit_hooks: false,
             permission_profiles: true,
             custom_agents: true,
             usage_reporting: true,
-            // MCP per-run tools are M8.
+            // MCP per-run tools aren't wired yet.
             run_tools: false,
-            // DI-13: mounted by staging into the session cwd's own
+            // Mounted by staging into the session cwd's own
             // `.claude/skills/` — the CLI's native discovery location.
             skills: true,
         }
@@ -241,7 +242,7 @@ impl AgentSession for ClaudeCodeSession {
     }
 }
 
-/// DI-13: the CLI's native skills discovery is `.claude/skills/` under
+/// The CLI's native skills discovery is `.claude/skills/` under
 /// its working directory — mounting is staging a symlink per resolved
 /// skill directory there, named after the directory itself. Re-staging
 /// (a retry, a resume) replaces the link; the engine's scope check
@@ -275,7 +276,7 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
     Ok(())
 }
 
-/// Sends `signal` to the whole process group (A4) — a negative pid
+/// Sends `signal` to the whole process group — a negative pid
 /// targets every descendant the CLI spawned, not just the CLI process
 /// itself. The `--` before the negative pid is load-bearing: procps-ng's
 /// `kill` (confirmed empirically) silently signals nothing and still

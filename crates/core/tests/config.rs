@@ -299,7 +299,7 @@ permissions:
 
 #[test]
 fn permissions_merge_unions_deny_lists_instead_of_replacing() {
-    // §6.1's inversion: adding denies is narrowing, always legal — unlike
+    // The inversion: adding denies is narrowing, always legal — unlike
     // every other config array, deny lists accumulate across layers.
     let org = ConfigLayer {
         permissions: Some(PermissionsConfig {
@@ -446,7 +446,7 @@ fn an_unknown_executor_kind_fails_to_parse() {
     let result: Result<ConfigLayer, _> = serde_yaml::from_str(yaml);
     assert!(
         result.is_err(),
-        "`wasm` is reserved by D47 but not built yet — must not silently parse as binary"
+        "`wasm` is reserved for later but not built yet — must not silently parse as binary"
     );
 }
 
@@ -655,7 +655,7 @@ fn repo_overrides_only_the_project_fields_it_sets() {
     assert_eq!(merged.branch_prefix, None);
 }
 
-// --- DI-20: layered ceiling for scope_expansion ------------------------------
+// --- Layered ceiling for scope_expansion -------------------------------------
 
 #[test]
 fn scope_expansion_ceiling_merges_to_the_strictest_layer() {

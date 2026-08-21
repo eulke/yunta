@@ -1,8 +1,8 @@
-//! Executing one node (T4.1 recorte) — the imperative half. Every
+//! Executing one node — the imperative half. Every
 //! outcome, good or bad, lands in the event log; a node that cannot run
 //! (undefined template variable, unresolvable runner, unsupported
 //! `until`) fails *in the log* with a diagnostic, it does not abort the
-//! engine — degradación explícita, jamás silenciosa.
+//! engine — explicit degradation, never silent.
 
 use std::collections::BTreeMap;
 
@@ -27,15 +27,15 @@ use super::{RunCtx, RunError};
 pub(super) enum NodeEnd {
     Finished,
     Failed,
-    /// DI-11: the run's root cancellation cut this node mid-flight — no
+    /// The run's root cancellation cut this node mid-flight — no
     /// terminal event was recorded, on purpose: the node stays orphaned
     /// (`running` in the log) so a later resume re-treats it per its
-    /// `on_interrupt` policy, exactly like a crash (§8.1).
+    /// `on_interrupt` policy, exactly like a crash.
     Interrupted,
-    /// T9.3: a `kind: workflow` node's child run paused on its own log
+    /// A `kind: workflow` node's child run paused on its own log
     /// (a gate, a failure without re-route, its budget). No terminal
     /// event here either — the node stays open so a later resume
-    /// re-enters it and resumes the child recursively (§12) — but
+    /// re-enters it and resumes the child recursively — but
     /// unlike `Interrupted` the *parent run* must pause with this
     /// reason rather than fall through to its loop-top cancel check.
     ChildPaused {
@@ -43,7 +43,7 @@ pub(super) enum NodeEnd {
     },
 }
 
-/// DI-11: the shared "my token fired" epilogue — which cancellation was
+/// The shared "my token fired" epilogue — which cancellation was
 /// it? A user/root cancel leaves the node orphaned; a `join: any`
 /// sibling race records the loss so the group can close over it.
 pub(super) fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
@@ -59,7 +59,7 @@ pub(super) fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, Ru
 }
 
 /// `cancel` only ever fires for a child of a `join: any` parallel group
-/// once a sibling has won (T4.6) — every other call site passes a token
+/// once a sibling has won — every other call site passes a token
 /// nothing ever cancels, so this is a no-op parameter for them.
 pub(super) async fn execute_node(
     ctx: &RunCtx<'_>,
@@ -72,7 +72,7 @@ pub(super) async fn execute_node(
         EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
     )?;
 
-    // hooks.before (§11.1): a failing before aborts without spending a
+    // hooks.before: a failing before aborts without spending a
     // token; a failing after fails the node before verification. Either
     // phase's step can opt into `on_failure: warn` instead of the default
     // `fail`, in which case a non-zero exit is recorded but doesn't stop
@@ -105,7 +105,7 @@ pub(super) async fn execute_node(
             nodes,
         } => {
             let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
-            // D98: the blackboard's consolidation happens exactly once,
+            // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
             // the posts are findings either way), as the group's
             // node-output: sorted by content, never by arrival order,
@@ -157,7 +157,7 @@ pub(super) async fn execute_node(
             )
             .await?
         }
-        // §5.6/T7.7: a gate's resolution is a forge round-trip, not a
+        // A gate's resolution is a forge round-trip, not a
         // session — `schedule::next_step` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
         // `ScheduleStep::PublishGate`/`PollGate`, handled in
@@ -173,7 +173,7 @@ pub(super) async fn execute_node(
     Ok(end)
 }
 
-/// Runs `node`'s children (§5.8, T4.6): all of them concurrently, joined
+/// Runs `node`'s children: all of them concurrently, joined
 /// per `join`. Re-entrant on resume: a child already terminal in the log
 /// — `Finished`, or `Failed` — is never re-dispatched, and a group whose
 /// winning child already finished (crash between the child's own
@@ -195,9 +195,10 @@ async fn execute_parallel(
         .collect();
     // Fresh children start at attempt 1; a child left `running` with no
     // terminal event (crash, root cancel, or a paused child run under a
-    // T9.3 workflow node) is an orphan the group's own restart re-runs,
-    // §8.1's `restart_node` applied inside the group — for a workflow
-    // child that re-run is what resumes its child run recursively.
+    // workflow node) is an orphan the group's own restart re-runs,
+    // the same `restart_node` rule applied inside the group — for a
+    // workflow child that re-run is what resumes its child run
+    // recursively.
     let to_run: Vec<(&Node, u32)> = children
         .iter()
         .filter_map(|child| match state.nodes.get(&child.id) {
@@ -232,14 +233,14 @@ async fn execute_parallel(
                     NodeEnd::Failed => {
                         failed_child.get_or_insert(&child.id);
                     }
-                    // DI-11: a root cancellation unwound this child —
+                    // A root cancellation unwound this child —
                     // the group closes nothing; the whole run is
                     // pausing, and resume re-enters it. Noted, not
                     // returned yet: every sibling's result was already
                     // awaited above, and dropping a sibling's recorded
                     // failure here would change nothing it wrote.
                     NodeEnd::Interrupted => interrupted = true,
-                    // T9.3: same shape — the group stays open and the
+                    // Same shape — the group stays open and the
                     // run pauses naming the paused child run.
                     NodeEnd::ChildPaused { reason } => {
                         child_paused.get_or_insert(reason);
@@ -306,13 +307,13 @@ async fn execute_parallel(
                         group_cancel.cancel();
                     }
                     NodeEnd::Failed => failures.push(child_id),
-                    // DI-11: root cancellation, not a sibling race —
+                    // Root cancellation, not a sibling race —
                     // drain the rest and unwind without a terminal.
                     NodeEnd::Interrupted => {
                         while running.next().await.is_some() {}
                         return Ok(NodeEnd::Interrupted);
                     }
-                    // T9.3: a paused child run is neither a win nor a
+                    // A paused child run is neither a win nor a
                     // loss — the race stays live: a sibling can still
                     // win the group. Recorded for the no-winner ending.
                     NodeEnd::ChildPaused { reason } => {
@@ -345,7 +346,7 @@ async fn execute_parallel(
                     if let Some(reason) = child_paused {
                         // No winner and a child run waiting on its own
                         // pause: the group can't close over an open
-                        // child (§12) — the run pauses and resume
+                        // child — the run pauses and resume
                         // re-enters the race.
                         return Ok(NodeEnd::ChildPaused { reason });
                     }
@@ -361,15 +362,15 @@ async fn execute_parallel(
     }
 }
 
-/// Template variables for one node's own rendering (§9.3/T6.3): `run.*`
+/// Template variables for one node's own rendering: `run.*`
 /// is always present; `runner.role` is the node's own declared `runner:`
 /// (the role name itself, known statically from the workflow — never the
 /// adapter/model a later resolution step picks, so no ordering
 /// dependency on `resolve_node_runner`); `project.*` mirrors whatever
-/// the merged config's `project:` group declares; `inputs.*` (T1.5) is
+/// the merged config's `project:` group declares; `inputs.*` is
 /// every declared input's already-resolved-and-validated value, read
 /// straight from the frozen manifest — never re-resolved per node, since
-/// that would make a `default` non-deterministic across nodes (D82).
+/// that would make a `default` non-deterministic across nodes.
 pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, String> {
     let mut vars = BTreeMap::from([
         ("run.dir".to_string(), ctx.run_dir.display().to_string()),
@@ -377,11 +378,11 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
             "run.worktree".to_string(),
             ctx.worktree.display().to_string(),
         ),
-        // §5.6/T7.7's own example (`external.branch: "{{run.branch}}"`)
-        // — a fresh push target derived from the run id, not
-        // necessarily the worktree's own local checkout branch (which
-        // `isolation: none` never creates one of at all, `worktree.rs`'s
-        // own doc comment).
+        // The reference example (`external.branch:
+        // "{{run.branch}}"`) — a fresh push target derived from the
+        // run id, not necessarily the worktree's own local checkout
+        // branch (which `isolation: none` never creates one of at all,
+        // `worktree.rs`'s own doc comment).
         ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
     ]);
     if let Some(role) = &node.runner {
@@ -424,15 +425,15 @@ pub(super) fn render_or_fail(
 /// How one hook step went: it ran (with its own success bool, before the
 /// caller applies `on_failure`), or the permissions model refused it
 /// outright. The distinction matters because `on_failure: warn` downgrades
-/// a hook's own failure, never a governance violation (§6.1) — otherwise
+/// a hook's own failure, never a governance violation — otherwise
 /// any hook could opt out of the model by declaring itself warn-only.
 pub(super) enum HookRun {
     Ran(bool),
     Violation(String),
 }
 
-/// A hook only ever fails or warns (§11.1) — unless the permissions model
-/// (§6.1, T5.7) refuses its rendered command before it ever spawns.
+/// A hook only ever fails or warns — unless the permissions model
+/// refuses its rendered command before it ever spawns.
 async fn run_hook(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -456,7 +457,7 @@ async fn run_hook(
         }
     };
 
-    // §6.1's runtime moment: the *rendered* command, right before it runs
+    // The runtime moment: the *rendered* command, right before it runs
     // — a template can assemble what the YAML never showed.
     if let Some(rule) =
         crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
@@ -466,7 +467,7 @@ async fn run_hook(
 
     let mut std_cmd = std::process::Command::new("sh");
     std_cmd.arg("-c").arg(&rendered).current_dir(ctx.worktree);
-    // A4: a timed-out hook's whole process tree must die together, not
+    // A timed-out hook's whole process tree must die together, not
     // just the `sh` that ran it — same reasoning as the adapter session's
     // own process group (yunta-adapters::claude_code).
     #[cfg(unix)]
@@ -525,7 +526,7 @@ async fn run_hook(
     Ok(HookRun::Ran(exit_code == 0))
 }
 
-/// The node's rung on the permissions ladder (§6.1, T5.7) mapped onto the
+/// The node's rung on the permissions ladder mapped onto the
 /// adapter's session profile — absent means the engine's long-standing
 /// default, `edit`.
 pub(super) fn session_profile(node: &Node) -> PermissionProfile {
@@ -536,7 +537,7 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
     }
 }
 
-/// Sends `SIGKILL` to `pid`'s whole process group (A4) — the `--` before
+/// Sends `SIGKILL` to `pid`'s whole process group — the `--` before
 /// the negative pid is load-bearing, see `claude_code::signal_group`'s
 /// doc comment for the procps-ng behavior this avoids.
 pub(super) async fn kill_process_group(pid: u32) {
@@ -548,11 +549,11 @@ pub(super) async fn kill_process_group(pid: u32) {
         .await;
 }
 
-/// A node's hooks with `node_defaults.hooks` filled in per phase (§11.1):
+/// A node's hooks with `node_defaults.hooks` filled in per phase:
 /// a phase the node itself leaves empty inherits the workflow-level
 /// default's list for that phase; a phase the node declares replaces the
-/// default wholesale, the same "arrays reemplazan" rule config layers use
-/// (§2.2/D52) rather than concatenating the two.
+/// default wholesale, the same "arrays replace" rule config layers use
+/// rather than concatenating the two.
 fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
     let defaults = ctx
         .manifest
@@ -576,7 +577,7 @@ fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
     Hooks { before, after }
 }
 
-/// T9.4: the declared artifact names re-render with the node's own
+/// The declared artifact names re-render with the node's own
 /// template vars (`{{runner.role}}` above all), so each fan-out sibling
 /// declares — and verifies — its own file. Nodes without templates in
 /// their names come back unchanged.
@@ -599,8 +600,8 @@ fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, String> 
 }
 
 /// Runs after-hooks, then verifies scope and artifacts — the close
-/// sequence every successful node body goes through (§11.1's order:
-/// session → after → verificación).
+/// sequence every successful node body goes through (session → after →
+/// verification).
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -623,7 +624,7 @@ pub(super) async fn close_node(
         }
     }
 
-    // Scope check over the node's whole diff (§6) — hook edits included.
+    // Scope check over the node's whole diff — hook edits included.
     if !node.scope.is_empty() {
         let result = scope_check(ctx.worktree, &node.scope).await?;
         ctx.emit(
@@ -654,7 +655,7 @@ pub(super) async fn close_node(
         .limits
         .as_ref()
         .and_then(|limits| limits.max_artifact_bytes);
-    // T9.4: artifact names are templates too (`findings-{{runner.role}}`
+    // Artifact names are templates too (`findings-{{runner.role}}`
     // in the reference workflow) — rendered per node so every fan-out
     // sibling verifies its own file.
     let node_rendered = match render_artifact_names(ctx, node) {
@@ -664,7 +665,7 @@ pub(super) async fn close_node(
     let node = &node_rendered;
     match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
         Ok(verified) => {
-            // §4.1/T5.14/DI-02: a `kind: questions` artifact's own
+            // A `kind: questions` artifact's own
             // session has already closed by this point (the same
             // "artifact read only at node close" ordering
             // `task-ledger`/`findings` already rely on) — nothing
@@ -672,10 +673,9 @@ pub(super) async fn close_node(
             // are put to the human right here (after the artifacts are
             // recorded, below); without one — or on an invalid reply —
             // the run pauses citing exactly what's unanswered, never
-            // hangs, never silently proceeds as if nothing were asked
-            // (A6).
+            // hangs, never silently proceeds as if nothing were asked.
 
-            // §5.7/T5.13: a re-plan — this same node producing a task
+            // A re-plan — this same node producing a task
             // ledger a second time, whether via a reroute back to it or a
             // resumed run — must not silently keep a task `done` whose
             // identity actually changed. Identity is exactly the
@@ -746,7 +746,7 @@ pub(super) async fn close_node(
                     }
                 }
             }
-            // DI-02/DI-03: unanswered questions close the node as
+            // Unanswered questions close the node as
             // waiting-shaped (`node_failed` here, derived `Waiting` by
             // replay via the typed `kind: questions` on the artifact
             // event above) — the actual asking happens in ONE place, the
@@ -804,10 +804,10 @@ pub(super) fn fail(
     fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default())
 }
 
-/// Regenerates `progress.md` at `run.dir`'s root (§2, §8.2, T5.5) — the
+/// Regenerates `progress.md` at `run.dir`'s root — the
 /// engine's own call, right after the `node_finished` that triggers it
-/// (§8.2's literal text names only `node_finished`, not `node_failed`, as
-/// the regeneration point).
+/// (the Contrato's literal text names only `node_finished`, not
+/// `node_failed`, as the regeneration point).
 pub(super) fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events()?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
@@ -835,7 +835,7 @@ pub(super) fn fail_with_tokens(
     Ok(NodeEnd::Failed)
 }
 
-/// Runs the bash command, cancellable (T4.6): a `join: any` sibling
+/// Runs the bash command, cancellable: a `join: any` sibling
 /// winning sends `SIGKILL` to this whole process group and fails the
 /// node rather than waiting for `sh` to exit on its own. Stdout/stderr
 /// are drained concurrently with `wait()` by owned reader tasks — reading
@@ -853,7 +853,7 @@ async fn execute_bash(
         Err(end) => return Ok(end),
     };
 
-    // §6.1's runtime moment: the rendered command against the merged
+    // The runtime moment: the rendered command against the merged
     // model, right before spawn — a template can assemble what the static
     // scan in `check` never saw.
     if let Some(rule) =
@@ -927,7 +927,7 @@ async fn execute_bash(
                 Some(task) => task.await.unwrap_or_default(),
                 None => Vec::new(),
             };
-            // §9/§11.2, T6.1: captured regardless of exit status — a
+            // Captured regardless of exit status — a
             // failing `lint` is exactly the case a corrective node's own
             // `node-output` context wants to read.
             crate::run::context_resolve::write_node_output(
@@ -962,7 +962,7 @@ async fn execute_bash(
 
 /// The node's prompt text: frozen file content from the manifest when the
 /// workflow declared `{file: ...}`, the inline string otherwise — never a
-/// re-read from disk (§2.1).
+/// re-read from disk.
 pub(super) fn prompt_text<'a>(
     ctx: &'a RunCtx<'_>,
     node: &'a Node,
@@ -989,7 +989,7 @@ pub(super) fn resolve_node_runner(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Result<yunta_core::RunnerCandidate, NodeEnd>, RunError> {
-    // DI-13: a node without `runner:` falls back to `defaults.runner`.
+    // A node without `runner:` falls back to `defaults.runner`.
     let default_runner = ctx
         .manifest
         .config
@@ -1015,12 +1015,12 @@ pub(super) fn resolve_node_runner(
     }) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();
-            // §13.3/T9.4: the node's own `agent:` wins over the
+            // The node's own `agent:` wins over the
             // candidate's.
             if let Some(agent) = &node.agent {
                 chosen.agent = Some(agent.clone());
             }
-            // A6: an adapter without `custom_agents` fails the node
+            // An adapter without `custom_agents` fails the node
             // rather than silently dropping the requested agent.
             if chosen.agent.is_some() {
                 let has_custom_agents = ctx
@@ -1061,13 +1061,13 @@ pub(super) fn resolve_node_runner(
     }
 }
 
-/// T8.2: opens this session attempt's per-run MCP listener, or decides
+/// Opens this session attempt's per-run MCP listener, or decides
 /// it must not exist. `Ok(None)` — no `run_tools` capability outside a
-/// blackboard group, or the host degraded at run start — is §6.5's
-/// resting state. `Err(diagnostic)` is the A6 case: the node's group
-/// declared `coordination: blackboard` and this session cannot carry
-/// it (capability missing, host down, or the listener failed to bind)
-/// — the caller fails the node with it, never emulates.
+/// blackboard group, or the host degraded at run start — is the
+/// resting state. `Err(diagnostic)` is the degradation case: the node's
+/// group declared `coordination: blackboard` and this session cannot
+/// carry it (capability missing, host down, or the listener failed to
+/// bind) — the caller fails the node with it, never emulates.
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -1083,7 +1083,7 @@ pub(super) async fn open_run_tools(
     if !adapter.capabilities().run_tools {
         if needs_blackboard {
             return Err(format!(
-                "node `{}` is in a `coordination: blackboard` group but adapter                  `{adapter_id}` declares no `run_tools` capability — the blackboard                  cannot be mounted; pick a runner on an adapter that can be a client                  of the per-run MCP endpoint (§6.4/D49)",
+                "node `{}` is in a `coordination: blackboard` group but adapter                  `{adapter_id}` declares no `run_tools` capability — the blackboard                  cannot be mounted; pick a runner on an adapter that can be a client                  of the per-run MCP endpoint",
                 node.id
             ));
         }
@@ -1160,7 +1160,7 @@ async fn execute_prompt(
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
-    // DI-13: names resolved by the engine; mounting is the adapter's —
+    // Names resolved by the engine; mounting is the adapter's —
     // and an adapter without the capability degrades with an event,
     // never a fatal error (a skill is instruction, not correctness).
     let skills = match crate::skills::resolve_skills(
@@ -1187,11 +1187,11 @@ async fn execute_prompt(
     } else {
         skills
     };
-    // T8.2/§6.5: a fresh listener + credential for THIS session attempt
+    // A fresh listener + credential for THIS session attempt
     // when the adapter can be a client of it; `None` without the
     // capability is the resting state, not degradation — unless the
     // node sits in a `coordination: blackboard` group, whose declared
-    // semantics the engine never emulates (A6): that's a node failure.
+    // semantics the engine never emulates: that's a node failure.
     let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
         Ok(run_tools) => run_tools,
         Err(diagnostic) => return fail(ctx, node, diagnostic, false),
@@ -1210,7 +1210,7 @@ async fn execute_prompt(
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
     };
 
-    // DI-23/§8.1/D99: an orphaned node under `resume_session` picks its
+    // An orphaned node under `resume_session` picks its
     // cut conversation back up instead of opening a new one. Anything
     // less than a clean resume — no capability, no recorded session —
     // degrades to a fresh session WITH an event, never silently.
@@ -1272,7 +1272,7 @@ async fn execute_prompt(
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens)
         }
-        // O2: no terminal event means the engine synthesizes a retryable
+        // No terminal event means the engine synthesizes a retryable
         // failure — the adapter never invents one.
         DispatchOutcome::Crashed => fail_with_tokens(
             ctx,
@@ -1288,7 +1288,7 @@ async fn execute_prompt(
     }
 }
 
-/// What DI-23's resume finds in the log for `node`: the id of a session
+/// What resume finds in the log for `node`: the id of a session
 /// cut mid-flight (this dispatch is an orphan restart — a prior
 /// `node_started` with no terminal event before the current one, and an
 /// `agent_session_opened` inside that window), an orphan restart with no

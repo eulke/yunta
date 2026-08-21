@@ -1,11 +1,10 @@
-//! `yunta pack add/remove/list/update` (RFC-0002 §4, T11.2): the
-//! command layer — argument handling and printing — over
-//! `crate::pack`'s git/filesystem mechanics. `add` and `update` also
-//! enforce `permissions.packs` (D51/D72/§6.1, DI-32): the publisher
-//! allow-list refuses a source outside it, and the `executors:
-//! allow|prompt|deny` policy governs the confirmation gate — `prompt`
-//! (the default) requires `--yes` after the audit has shown exactly
-//! what the executors are (T11.5/§6.3), `deny` refuses even with it,
+//! `yunta pack add/remove/list/update`: the command layer — argument
+//! handling and printing — over `crate::pack`'s git/filesystem
+//! mechanics. `add` and `update` also enforce `permissions.packs`: the
+//! publisher allow-list refuses a source outside it, and the
+//! `executors: allow|prompt|deny` policy governs the confirmation
+//! gate — `prompt` (the default) requires `--yes` after the audit has
+//! shown exactly what the executors are, `deny` refuses even with it,
 //! `allow` installs without asking. `update` gates too: a new ref is
 //! where new executor code first appears, so a gate on `add` alone
 //! would be governance theater.
@@ -23,14 +22,15 @@ use crate::pack::{
 
 /// The merged `permissions.packs` verdicts, with the layers that
 /// declare each restriction kept by name — a refusal that can't say
-/// *which* config file to change isn't actionable (§6.1's ceiling means
-/// the answer may be a file the user can't even edit).
+/// *which* config file to change isn't actionable, since a permissions
+/// ceiling set by a higher layer may name a file the user can't even
+/// edit.
 struct PackPolicy {
     /// Non-empty allow-list, with the declaring layer names — `None`
-    /// when no layer restricts publishers (empty = everyone, §6.1).
+    /// when no layer restricts publishers (empty = everyone).
     publishers_allow: Option<(Vec<String>, Vec<&'static str>)>,
     /// The merged (strictest-wins) executor policy; `Prompt` when no
-    /// layer declares one — exactly the pre-DI-32 de facto behavior.
+    /// layer declares one — the longstanding default behavior.
     executors: PackExecutorPolicy,
     /// Layers declaring the policy that ended up winning the merge.
     executors_declared_by: Vec<&'static str>,
@@ -93,7 +93,7 @@ fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, ExitCode> {
     })
 }
 
-/// The publisher allow-list gate (DI-32): a non-empty
+/// The publisher allow-list gate: a non-empty
 /// `permissions.packs.publishers.allow` in the merged config refuses
 /// any publisher outside it, naming the declaring layer(s).
 fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &str) -> Result<(), ExitCode> {
@@ -114,10 +114,10 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &str) -> Result<(),
     Err(ExitCode::FAILURE)
 }
 
-/// The executor policy gate (DI-32/D72, generalizing T11.5's fixed
-/// `--yes`): `deny` refuses regardless of confirmation — a ceiling a
-/// flag must never override (§6.1) — `prompt` requires `--yes`, `allow`
-/// passes. Only consulted when the manifest actually declares
+/// The executor policy gate, generalizing a fixed `--yes` into a
+/// configurable policy: `deny` refuses regardless of confirmation — a
+/// ceiling a flag must never override — `prompt` requires `--yes`,
+/// `allow` passes. Only consulted when the manifest actually declares
 /// executors.
 fn enforce_executor_policy(
     policy: &PackPolicy,
@@ -134,7 +134,7 @@ fn enforce_executor_policy(
             eprintln!(
                 "error: this pack declares {} executor(s) and `permissions.packs.executors` \
                  is `deny` (declared by the {} config layer{}) — `--yes` cannot override a \
-                 permissions ceiling (§6.1). Change the policy there, or {verb} a pack \
+                 permissions ceiling. Change the policy there, or {verb} a pack \
                  without executors.",
                 manifest.declares.executors.len(),
                 policy.executors_declared_by.join("/"),
@@ -206,8 +206,8 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // DI-32: the publisher gate fires before the audit is even printed —
-    // a policy-refused publisher leaves no decision for a human to make.
+    // The publisher gate fires before the audit is even printed — a
+    // policy-refused publisher leaves no decision for a human to make.
     let policy = match load_pack_policy(&cwd) {
         Ok(policy) => policy,
         Err(code) => return code,
@@ -216,8 +216,8 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         return code;
     }
 
-    // §6: "corre el audit... nada ejecuta hasta que el humano vio el
-    // inventario" — shown before anything is vendored, let alone run.
+    // The audit runs and prints before anything is vendored, let alone
+    // run — nothing executes until a human has seen the inventory.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
     print_report(&audit);
     let tests = run_pack_tests(clone_dir.path()).await;
@@ -231,10 +231,9 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     }
     println!();
 
-    // T11.5/§6.3 + DI-32: executors are code, not declarative YAML —
-    // the configurable policy decides whether that needs confirmation
-    // (`prompt`, the default), is refused outright (`deny`), or passes
-    // (`allow`).
+    // Executors are code, not declarative YAML — the configurable
+    // policy decides whether that needs confirmation (`prompt`, the
+    // default), is refused outright (`deny`), or passes (`allow`).
     if let Err(code) = enforce_executor_policy(&policy, &manifest, confirmed_executors, "install") {
         return code;
     }
@@ -365,9 +364,9 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
         return ExitCode::FAILURE;
     }
 
-    // DI-32: the same policy gates as `add` — a new ref is where new
-    // executor code first appears, and an allow-list narrowed since the
-    // install must stop pulling from a publisher it no longer trusts.
+    // The same policy gates as `add` — a new ref is where new executor
+    // code first appears, and an allow-list narrowed since the install
+    // must stop pulling from a publisher it no longer trusts.
     let policy = match load_pack_policy(&cwd) {
         Ok(policy) => policy,
         Err(code) => return code,
@@ -377,8 +376,8 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
     }
     if !manifest.declares.executors.is_empty() {
         // The decision being demanded needs the same evidence `add`
-        // shows (§6: "nada ejecuta hasta que el humano vio el
-        // inventario") — printed only when there's a decision to make.
+        // shows — nothing executes until a human has seen the
+        // inventory — printed only when there's a decision to make.
         print_report(&audit_pack(clone_dir.path(), manifest.clone()));
         println!();
     }
@@ -504,10 +503,10 @@ pub fn list() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // §4's own "instalación offline reproducible... verificando contra
-    // el lock": re-hash what's actually vendored on disk and say so
-    // when it no longer matches what the lock recorded, rather than
-    // just trusting the lock's own numbers back at the user.
+    // Reproducible offline installs mean verifying against the lock:
+    // re-hash what's actually vendored on disk and say so when it no
+    // longer matches what the lock recorded, rather than just trusting
+    // the lock's own numbers back at the user.
     for (key, entry) in &lock.packs {
         let dest = vendor_dir(&cwd, &entry.publisher, &entry.name);
         let status = match hash_tree(&dest) {

@@ -1,8 +1,8 @@
 name: review
 description: >-
   Fan-out review — the same prompt runs once per declared runner
-  (`runners:`, T9.4), each producing its own findings independently, so
-  a second opinion never anchors on the first. yunta/starter, T10.2.
+  (`runners:`), each producing its own findings independently, so
+  a second opinion never anchors on the first.
 nodes:
   - id: review
     kind: prompt

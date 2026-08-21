@@ -1,4 +1,4 @@
-//! `yunta pack add/remove/list/update` end to end (RFC-0002 §4, T11.2):
+//! `yunta pack add/remove/list/update` end to end:
 //! the real compiled binary against a local git repo standing in for a
 //! real pack source — no network dependency, same reasoning every other
 //! `git`-touching test in this workspace uses a local repo for.

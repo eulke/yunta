@@ -1,10 +1,9 @@
 name: Release
 
-# RFC-0004 §4.1: the only human gesture is pushing a `vX.Y.Z` tag. The
-# GitHub release is the single source of truth — every other channel
-# (crates.io, the Homebrew tap, GHCR) consumes its artifacts and never
-# compiles anything itself, so a secondary channel failing never un-publishes
-# the release.
+# The only human gesture is pushing a `vX.Y.Z` tag. The GitHub release is
+# the single source of truth — every other channel (crates.io, the
+# Homebrew tap, GHCR) consumes its artifacts and never compiles anything
+# itself, so a secondary channel failing never un-publishes the release.
 on:
   push:
     tags:
@@ -124,10 +123,10 @@ jobs:
           cp LICENSE README.md "$stage/"
           7z a "${stage}.zip" "$stage"
 
-      # RFC-0004 §4.4: verified install in a clean environment, per
-      # platform, is non-negotiable for a release to ship. Linux gets an
-      # actual clean container (proving the musl binary has no hidden
-      # glibc dependency); macOS/Windows use the runner itself, which is
+      # Verified install in a clean environment, per platform, is
+      # non-negotiable for a release to ship. Linux gets an actual clean
+      # container (proving the musl binary has no hidden glibc
+      # dependency); macOS/Windows use the runner itself, which is
       # already a fresh, single-use VM.
       - uses: docker/setup-qemu-action@v3
         if: matrix.docker_platform
@@ -192,8 +191,8 @@ jobs:
             dist/checksums.txt
 
   # Secondary channels — parallel, each independent of the others. A
-  # failure here is a channel-specific problem to retry, never a reason to
-  # touch the release above (RFC-0004 §4).
+  # failure here is a channel-specific problem to retry, never a reason
+  # to touch the release above.
   publish-crates:
     needs: release
     runs-on: ubuntu-latest
@@ -201,8 +200,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # crates.io rejects a crate whose path dependencies aren't yet
-      # indexed — dependency order and waiting for each to actually appear
-      # aren't optional (RFC-0004 §4.1).
+      # indexed — dependency order and waiting for each to actually
+      # appear aren't optional.
       - name: publish yunta-core
         run: cargo publish -p yunta-core --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: wait for yunta-core to index
@@ -222,10 +221,10 @@ jobs:
       - name: publish yunta (binary)
         run: cargo publish -p yunta --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # `update-tap` (RFC-0004 §4.1's Homebrew formula render-and-push) isn't
-  # wired in yet: it needs `eulke/homebrew-tap` to exist first (T12.5), a
-  # decision — creating a new public repo — that's this workflow's author's
-  # to make explicitly, not something to stub in ahead of time.
+  # `update-tap` (rendering and pushing the Homebrew formula) isn't wired
+  # in yet: it needs `eulke/homebrew-tap` to exist first, a decision —
+  # creating a new public repo — that's this workflow's author's to make
+  # explicitly, not something to stub in ahead of time.
 
   publish-container:
     needs: release

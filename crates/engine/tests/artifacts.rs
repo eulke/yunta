@@ -98,7 +98,7 @@ artifacts:
 #[test]
 fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
     let run_dir = tempfile::tempdir().unwrap();
-    // Content that is not valid YAML/JSON/anything — §4: the engine
+    // Content that is not valid YAML/JSON/anything — the engine
     // assumes no format for opaque artifacts.
     write_artifact(run_dir.path(), "report.md", "{{{ not : parseable ][");
     let n = node(
@@ -136,7 +136,7 @@ fn a_valid_task_ledger_is_parsed_and_returned_for_registration() {
 fn an_invalid_ledger_reports_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     // Two independent violations: T001 has no criteria, T002 has an
-    // empty scope. Both must surface in one pass (spec-ledger §4).
+    // empty scope. Both must surface in one pass.
     write_artifact(
         run_dir.path(),
         "plan.yaml",
@@ -371,7 +371,7 @@ run: "true"
     assert!(verified.is_empty());
 }
 
-// --- DI-05 etapa 8: limits.max_artifact_bytes (§4) ---------------------------
+// --- limits.max_artifact_bytes ------------------------------------------------
 
 #[test]
 fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {

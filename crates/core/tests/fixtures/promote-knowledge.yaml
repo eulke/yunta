@@ -1,4 +1,4 @@
-# The reference `promote-knowledge` workflow (T10.5, D56/RFC-0003 §4):
+# The reference `promote-knowledge` workflow:
 # "la promoción de conocimiento local a org no es automática y no la
 # hace el engine — es un workflow de Yunta como cualquier otro:
 # candidatos desde los `knowledge/` de los repos, gate con `assignee`
@@ -26,7 +26,7 @@ inputs:
     required: true
     description: >-
       The org pack's next version, e.g. "1.4.0" — the curator's own
-      explicit choice (D56: a version bump is a decision, never computed)
+      explicit choice: a version bump is a decision, never computed
 
 nodes:
   - id: review-candidates
@@ -40,7 +40,7 @@ nodes:
       has. For everything that belongs, copy it into knowledge/ verbatim
       — promoted knowledge is never rewritten or summarized, the same
       "inventory, never verdict" discipline `pack audit` applies to a
-      pack's own prompts (RFC-0002 §6). Note what you promoted and what
+      pack's own prompts. Note what you promoted and what
       you left out, and why, in your own artifact.
     artifacts:
       produces: [promotion-notes.md]

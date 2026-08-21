@@ -53,13 +53,13 @@ pub enum StorageError {
         source: rusqlite::Error,
     },
 
-    /// I26/T2.5: the hash chain's genesis is `SHA-256(manifest_hash)`,
-    /// and only `run_created` carries one — a run whose log starts with
-    /// anything else has no chain to anchor, so the append is refused
-    /// instead of hashed against an invented constant.
+    /// The hash chain's genesis is `SHA-256(manifest_hash)`, and only
+    /// `run_created` carries one — a run whose log starts with anything
+    /// else has no chain to anchor, so the append is refused instead of
+    /// hashed against an invented constant.
     #[error(
         "run `{run_id}`: the first event of a run must be `run_created` — the hash chain's \
-         genesis is derived from its manifest_hash (I26)"
+         genesis is derived from its manifest_hash"
     )]
     GenesisMissing { run_id: RunId },
 

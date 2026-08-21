@@ -28,9 +28,9 @@ use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForg
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
-/// DI-08: Ctrl-C → the run's root `CancellationToken`. The in-process
-/// interrupt→kill path (T3.3/T4.6) does the actual exterminating; this
-/// only bridges the signal to the token and tells the user what's
+/// Ctrl-C → the run's root `CancellationToken`. The in-process
+/// interrupt→kill path does the actual exterminating; this only
+/// bridges the signal to the token and tells the user what's
 /// happening. Installing the handler means SIGINT no longer kills the
 /// process outright — the run pauses cleanly with `run_paused
 /// { reason: "cancelled by user" }` instead.
@@ -46,8 +46,8 @@ pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
     root
 }
 
-/// M8/D101: hands a run off to a fully independent `yunta resume` and
-/// returns without waiting on it — what `run --detach` and
+/// Hands a run off to a fully independent `yunta resume` and returns
+/// without waiting on it — what `run --detach` and
 /// `resolve-gate` both need (a control-plane operation that must never
 /// block for the run's own duration). No new execution path: the
 /// detached child is an ordinary resume, exactly what a human would run
@@ -80,8 +80,8 @@ pub(crate) fn spawn_detached_resume(
     child_cmd.spawn()?;
     // Deliberately not awaited, not tracked: the whole point is that
     // this run's life stops depending on this process the moment it's
-    // launched (I25's own rule, applied here to the CLI launcher rather
-    // than an MCP session).
+    // launched, the same rule applied here to the CLI launcher rather
+    // than an MCP session.
     Ok(())
 }
 
@@ -108,13 +108,12 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
     }
 }
 
-/// The adapter registry a real invocation can offer: `claude-code` (T7.3)
-/// and `codex` (T7.4), each built only when `runners:` names it as a
-/// candidate somewhere in the merged config, with that adapter's own
-/// settings (a `binary` override, if declared). Mock fixtures stay
-/// routed through `yunta test` only — real invocations never touch the
-/// mock (A8 the other way around: a real run never gets a simulated
-/// agent either).
+/// The adapter registry a real invocation can offer: `claude-code` and
+/// `codex`, each built only when `runners:` names it as a candidate
+/// somewhere in the merged config, with that adapter's own settings (a
+/// `binary` override, if declared). Mock fixtures stay routed through
+/// `yunta test` only — real invocations never touch the mock, and a
+/// real run never gets a simulated agent either.
 pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Adapter>> {
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     let named: Vec<&str> = config
@@ -150,10 +149,10 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Ada
     adapters
 }
 
-/// The forge a real invocation can offer (§5.6, D66, T7.7) — `None`
-/// when either `forge.github` isn't configured, or (D66's own
-/// "degrada a consola") the named `token_env` isn't actually set in
-/// *this* process's environment. `yunta check` already refuses a
+/// The forge a real invocation can offer — `None` when either
+/// `forge.github` isn't configured, or the named `token_env` isn't
+/// actually set in *this* process's environment, in which case a gate
+/// degrades to the console instead. `yunta check` already refuses a
 /// workflow with an external gate when the former is missing; the
 /// latter is a legitimate, expected runtime state — person B's machine,
 /// with no credentials at all, still runs `yunta` just fine, it only
@@ -166,7 +165,7 @@ pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
 }
 
 /// Refuses early when `workflow` needs agent sessions no available
-/// adapter can provide (A6: error in check, not emulation at runtime).
+/// adapter can provide: an error in check, never emulation at runtime.
 pub(crate) fn refuse_unrunnable(
     workflow: &Workflow,
     adapters: &HashMap<String, Arc<dyn Adapter>>,
@@ -180,7 +179,7 @@ pub(crate) fn refuse_unrunnable(
     if needs_sessions && adapters.is_empty() {
         eprintln!(
             "error: this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (only `claude-code`/T7.3 and `codex`/T7.4\n\
+             names no adapter this binary can run (only `claude-code` and `codex`\n\
              are built). To exercise this workflow with the `mock` adapter instead, declare\n\
              a test case under .yunta/tests/ and run `yunta test`."
         );
@@ -189,11 +188,10 @@ pub(crate) fn refuse_unrunnable(
     Ok(())
 }
 
-/// Health-checks every real adapter this run would use (Spec Adapter §2:
-/// `probe()` "corre en `yunta doctor` y al crear runs") — binary
-/// present, version compatible, auth valid — and refuses before any
-/// worktree or token is spent if one comes back unhealthy. `yunta
-/// doctor` (T7.1) calls the same adapters' `probe()` directly instead of
+/// Health-checks every real adapter this run would use via `probe()` —
+/// binary present, version compatible, auth valid — and refuses before
+/// any worktree or token is spent if one comes back unhealthy. `yunta
+/// doctor` calls the same adapters' `probe()` directly instead of
 /// through this helper, since it reports every result rather than
 /// stopping at the first failure.
 pub(crate) async fn probe_or_refuse(
@@ -223,22 +221,22 @@ pub(crate) async fn probe_or_refuse(
 /// `yunta check` before running anything — a workflow that fails static
 /// validation never creates a run. `workflow_path` is where `workflow`
 /// itself was loaded from — needed to tell `check_workflow_refs`
-/// whether this workflow already lives inside a pack (T11.3: the
-/// cross-pack composition rule only applies once you're inside one).
+/// whether this workflow already lives inside a pack, since the
+/// cross-pack composition rule only applies once you're inside one.
 pub(crate) fn check_or_refuse(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_path: &std::path::Path,
 ) -> Result<(), ExitCode> {
-    // Warnings (D100: a `parallel` group that can't verify its children
+    // Warnings (e.g. a `parallel` group that can't verify its children
     // won't collide) are visible but never block — only `check()`'s
     // errors do.
     for warning in yunta_engine::check_warnings(workflow, config) {
         eprintln!("warning: {warning}");
     }
     let mut errors = yunta_engine::check(workflow, config);
-    // T9.3: the composition reference graph (`use:` names resolve,
-    // acyclic, within depth) reads the repo catalog under the current
+    // The composition reference graph (`use:` names resolve, acyclic,
+    // within depth) reads the repo catalog under the current
     // directory — the same `.yunta/workflows/` a run's children resolve
     // against at birth.
     if let Ok(cwd) = std::env::current_dir() {

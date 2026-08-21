@@ -1,4 +1,4 @@
-//! `current_escalation` (M8/T8.1): reconstructs the §5.3 escalation
+//! `current_escalation` reconstructs the escalation
 //! object a paused run is currently waiting on — purely from the
 //! manifest and its own log, no live process required. This is what
 //! lets `resolve_gate` (a separate `yunta mcp` invocation, not the
@@ -203,7 +203,7 @@ nodes:
     assert!(current_escalation(&manifest, &events).is_none());
 }
 
-// --- resolve_gate (DI-27): writes ONLY the decision; the engine
+// --- resolve_gate writes ONLY the decision; the engine
 // consumes it on wake through its one existing consequence path.
 
 use yunta_engine::{resolve_gate, ResolveGateError, RunState};
@@ -328,7 +328,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     .await;
 
     bench.resolve("retry").unwrap();
-    // DI-27: resolve_gate writes ONLY the decision pair — the reroute
+    // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
         bench.count(|p| matches!(p, yunta_core::events::EventPayload::NodeRerouted(_))),
@@ -516,7 +516,7 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
     bench.resolve("ajustar").unwrap();
     let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
 
-    // §11.2 through a pre-seeded choice: plan re-ran, the gate came
+    // A reroute through a pre-seeded choice: plan re-ran, the gate came
     // back to ask again, and with no live surface the run parks there.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert_eq!(plan_runs(&bench.worktree), 2);
@@ -556,7 +556,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
 
 #[tokio::test]
 async fn live_and_pre_seeded_retry_reach_the_same_final_state() {
-    // §5.3's own promise, as a property: the surface is presentation,
+    // As a property: the surface is presentation,
     // the decision is the data — answering live or by a later separate
     // process must land the run in the identical derived state.
     struct RetryOnce;

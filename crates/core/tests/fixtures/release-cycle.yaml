@@ -1,6 +1,6 @@
 # The canonical composed reference workflow (Notion: "Config y
-# workflows de referencia", Contrato §12) as a parse fixture — T9.3's
-# `kind: workflow` schema criterion.
+# workflows de referencia") as a parse fixture — exercises the
+# `kind: workflow` schema.
 name: release-cycle
 inputs:
   rfc:

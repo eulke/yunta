@@ -1,5 +1,5 @@
-//! `requires:` validated against the local merged config (RFC-0002 §3,
-//! T11.6) — pure comparison, no filesystem/PATH involved.
+//! `requires:` validated against the local merged config —
+//! pure comparison, no filesystem/PATH involved.
 
 use std::collections::HashMap;
 

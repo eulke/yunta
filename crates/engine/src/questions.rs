@@ -1,10 +1,10 @@
-//! `kind: questions` validation (T5.14, Contrato §4.1).
+//! `kind: questions` validation.
 //!
 //! Mirrors `findings.rs`'s shape: collect every violation, never just the
 //! first. `id` uniqueness and non-empty `text` are cross-entry/basic
 //! checks a raw `String` type can't express on its own; `choice` needing
-//! non-empty `values` is the one rule §4.1 states explicitly beyond the
-//! schema itself.
+//! non-empty `values` is the one additional rule beyond what the schema
+//! itself enforces.
 
 use std::collections::HashSet;
 

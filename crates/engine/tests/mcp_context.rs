@@ -1,4 +1,4 @@
-//! `mcp:` context source (§9, T6.2) — exercised against a real MCP
+//! `mcp:` context source — exercised against a real MCP
 //! server speaking streamable-HTTP, run in-process on a loopback port
 //! for the test's own duration. No stdio, no stub: this drives the real
 //! `context_resolve.rs` client code path against a real (if minimal)

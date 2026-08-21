@@ -1,10 +1,10 @@
-# Smoke tests en vivo pendientes (DI-22)
+# Smoke tests en vivo pendientes
 
 Checklist ejecutable para la primera sesión con credenciales y binarios
 reales — lo que este sandbox no tiene (ni `codex` instalado, ni
-token+repo descartable de GitHub). No es opcional: T7.4 y T7.7 se
-construyeron contra documentación y fuente real, y estas corridas son su
-✓ de aceptación diferido.
+token+repo descartable de GitHub). No es opcional: el adapter de codex
+y la integración con `GitHubForge` se construyeron contra documentación
+y fuente real, y estas corridas son su ✓ de aceptación diferido.
 
 **Protocolo común**
 
@@ -12,20 +12,20 @@ construyeron contra documentación y fuente real, y estas corridas son su
   "de paso" en otra — con un test de regresión que la hubiera atrapado.
 - El resultado de cada corrida (fecha, versión del binario, divergencias
   o "limpio") se registra en la entrada correspondiente de
-  `docs/m0-status.md`, y al completar ambas se cierra DI-22 en
-  `docs/deuda-implementacion.md`.
+  `internal/m0-status.md`, y al completar ambas se cierra este pendiente en
+  `internal/deuda-implementacion.md`.
 
-## A. `codex` real (T7.4)
+## A. `codex` real
 
 Prerrequisitos: `codex` en el PATH (`codex --version` responde), sesión
 autenticada (`codex login status`).
 
 1. **Probe**: `yunta doctor` en un repo con `runners:` apuntando a
    `codex` → el probe reporta la versión, sin error.
-2. **El workflow de 3 nodos de T7.3, contra codex**: en un repo de
-   juguete (git init + commit), `.yunta/config.yaml` con
+2. **El workflow de 3 nodos plan→implement→verify, contra codex**: en un
+   repo de juguete (git init + commit), `.yunta/config.yaml` con
    `runners: { executor: [{ adapter: codex, model: <modelo vigente> }] }`
-   y el workflow plan→implement→verify de la entrada T7.3 de
+   y el workflow plan→implement→verify documentado en
    `m0-status.md` (o el equivalente mínimo: un `prompt` que escribe un
    archivo y un `bash` que lo verifica). Correr
    `yunta run wf.yaml --follow`.
@@ -47,12 +47,12 @@ autenticada (`codex login status`).
 4. **Resume**: matar el engine a mitad de sesión (Ctrl-C dos veces o
    `kill -9` al engine), `yunta resume <run>` → re-corre el nodo
    (`restart_node`, el default). Repetir con `on_interrupt:
-   resume_session` (DI-23, ya cableado) y verificar que
+   resume_session` (ya cableado) y verificar que
    `codex exec resume <thread_id>` continúa la MISMA conversación —
    mismo `session_id` en el segundo `agent_session_opened`, y el agente
    retiene lo dicho antes del corte.
 
-## B. `GitHubForge` real (T7.7)
+## B. `GitHubForge` real
 
 Prerrequisitos: repo descartable en GitHub (con permiso de admin), token
 fine-grained con `contents: rw` + `pull_requests: rw` en una env var, y
@@ -70,7 +70,7 @@ usuario.
    misma, si el repo lo permite) → `yunta resume` → `gate_resolved` con
    `resolved_by` = el login del reviewer y `approved_sha` = el head del
    PR; el DAG continúa.
-4. **SHA drift (T7.7)**: repetir 1–3 pero, tras aprobar, pushear un
+4. **SHA drift**: repetir 1–3 pero, tras aprobar, pushear un
    commit más al branch del PR antes del `resume` → la aprobación vieja
    NO vale: el gate se re-abre/re-consulta en vez de darse por aprobado.
 5. **Cambios pedidos**: un PR con review "request changes" → `resume` →
@@ -79,7 +79,7 @@ usuario.
 6. **Degradación sin credenciales**: quitar la env var del token y
    `yunta run` de nuevo → degrada a consola con evento
    (`capability_degraded`/pausa explicando), jamás un crash ni un
-   silencio (D66).
+   silencio.
 
 ## C. `claude-code` — deltas posteriores a la sesión en vivo original
 
@@ -88,19 +88,19 @@ construyeron después, contra documentación sola — merecen su corrida
 tanto como codex. Prerrequisitos: `claude` en el PATH, sesión
 autenticada.
 
-1. **Staging de skills (DI-13)**: un nodo con `skills: [mi-skill]` y el
+1. **Staging de skills**: un nodo con `skills: [mi-skill]` y el
    skill en `.yunta/skills/mi-skill/` → verificar que la sesión ve el
    skill (el symlink aparece en `<worktree>/.claude/skills/mi-skill` y
    el CLI lo descubre — pedirle al agente que lo invoque), que el
    scope-check NO reporta `.claude/skills` como trabajo del agente, y
    que un segundo intento del nodo re-staged sin error (el symlink se
    reemplaza).
-2. **`agent:` a nivel nodo (T9.4/D37)**: un nodo con `agent: <nombre>`
+2. **`agent:` a nivel nodo**: un nodo con `agent: <nombre>`
    de un agente definido en el repo → la sesión corre con `--agent
    <nombre>` y responde con la persona correcta; un nombre inexistente
    → el error del CLI llega como fallo del nodo con diagnóstico, no
    como cuelgue.
-3. **`resume_session` (DI-23)**: mismo caso que A.4 pero con
+3. **`resume_session`**: mismo caso que A.4 pero con
    claude-code: matar el engine a mitad de sesión, `on_interrupt:
    resume_session`, `yunta resume` → `claude --resume <session_id>`
    continúa la MISMA conversación (mismo `session_id` en el log; el
@@ -108,36 +108,36 @@ autenticada.
    `session_id` del historial local del CLI (o correr en otro
    `$HOME`) → degrada a `restart_node` con `capability_degraded`/
    warning, jamás cuelga.
-4. **`adapter_settings` passthrough (DI-13)**: declarar en config
+4. **`adapter_settings` passthrough**: declarar en config
    `adapters: { claude-code: { adapter_settings: {...} } }` con una
    clave que el CLI honre → verificar que llega (comportamiento
    observable o flag en el spawn), y que una clave desconocida no
    rompe el spawn.
 
-## D. Superficies live-only posteriores (M8/M11)
+## D. Superficies live-only agregadas en fases posteriores
 
-Agregadas al cerrar M8–M11 (todo construido y testeado con mock/repos
-locales; estas tres partes son las únicas que ninguna corrida sin
-credenciales puede ejercitar).
+Todo lo demás se construyó y testeó con mock/repos locales; estas tres
+partes son las únicas que ninguna corrida sin credenciales puede
+ejercitar.
 
-1. **`yunta mcp` montado en Claude Code real (T8.1)**: agregar la
+1. **`yunta mcp` montado en Claude Code real**: agregar la
    config JSON de referencia (`mcpServers: { yunta: { command: yunta,
    args: [mcp] } }`) a una sesión real de Claude Code → pedirle al
    agente que liste workflows (`list_workflows` refleja el catálogo
    vivo, packs incluidos), dispare `run_workflow` (retorna `run_id` en
    milisegundos, el run corre desacoplado), consulte `workflow_status`
    y resuelva un gate con `resolve_gate`. Matar la sesión MCP a mitad
-   de run → el run sigue (I25); `workflow_status` desde una sesión
-   nueva lo confirma.
-2. **MCP por-run con agente real (T8.2)**: un nodo `prompt` con
+   de run → el run sigue corriendo de todos modos; `workflow_status`
+   desde una sesión nueva lo confirma.
+2. **MCP por-run con agente real**: un nodo `prompt` con
    claude-code real dentro de un grupo `coordination: blackboard`,
    pidiéndole al agente en el prompt que reporte un hallazgo con
    `yunta_post_finding` → verificar que el endpoint por-sesión llega
    montado al CLI real (la traducción adapter-specific se construyó
    contra documentación), que el `finding_posted` queda en el log
    atribuido al nodo, y que `yunta_get_blackboard` antes del join
-   devuelve solo lo propio (D98).
-3. **`pack add` contra un host remoto real (T11.2)**: `yunta pack add
+   devuelve solo lo propio de ese grupo.
+3. **`pack add` contra un host remoto real**: `yunta pack add
    github.com/<owner>/<repo>@<tag>` con un repo público real → el
    shorthand `host/path` expande a `https://`, el clone-por-ref y el
    vendoring funcionan igual que con los repos locales de los tests;

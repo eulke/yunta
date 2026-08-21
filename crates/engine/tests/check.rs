@@ -261,7 +261,7 @@ fn depends_on_cycle_is_reported() {
 fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
     // lint depends_on implement; on failure it re-routes to fix-lint,
     // which itself depends_on lint. That is a cycle if goto edges were
-    // folded into depends_on — but I14 says re-route edges are a
+    // folded into depends_on — but re-route edges are a
     // separate set that never relaxes depends_on's acyclicity, so this
     // must check clean.
     let mut lint = bash("lint", "cargo clippy", &["implement"]);
@@ -408,7 +408,7 @@ fn an_invariant_node_present_in_every_mode_has_no_error() {
 
 #[test]
 fn a_reroute_target_excluded_from_a_mode_is_reported() {
-    // Mirrors §10.1's own example: a node in-mode whose on_failure.goto
+    // A node in-mode whose on_failure.goto
     // lands on a node that mode leaves out.
     let mut lint = bash("lint", "cargo clippy", &[]);
     lint.on_failure = Some(OnFailure {
@@ -535,9 +535,9 @@ fn a_gate_on_targeting_an_unknown_node_is_reported() {
 
 #[test]
 fn a_mode_excluding_a_gate_option_target_is_reported() {
-    // T1.3's own full wording: "un modo que incluye un nodo cuyo `goto`
+    // "un modo que incluye un nodo cuyo `goto`
     // u opción de gate apunta a un nodo excluido" — now checkable since
-    // gate options exist in the schema (DI-04).
+    // gate options exist in the schema.
     let wf = workflow_with_modes(
         vec![
             bash("plan", "true", &[]),
@@ -760,7 +760,7 @@ fn a_denied_command_inside_a_parallel_child_is_found_by_the_static_scan() {
 fn a_command_built_from_a_template_is_not_a_static_error() {
     // The static scan sees the literal YAML text; `{{run.worktree}}` only
     // becomes a real path at runtime — which is exactly where the second
-    // enforcement moment catches it (§6.1's two moments).
+    // enforcement moment (runtime command validation) catches it.
     let wf = workflow(vec![bash("templated", "ls {{run.worktree}}", &[])]);
     let errors = check(&wf, &config_with_denied(&["sudo *"]));
     assert_eq!(errors, Vec::new());
@@ -768,8 +768,8 @@ fn a_command_built_from_a_template_is_not_a_static_error() {
 
 #[test]
 fn a_read_only_parallel_child_does_not_count_toward_the_write_collision_warning() {
-    // D100's real condition is "two or more children WITH WRITE
-    // permissions" — now that `permissions: read-only` exists (T5.7), a
+    // The real condition is "two or more children WITH WRITE
+    // permissions" — now that `permissions: read-only` exists, a
     // read-only child is out of the collision count by declaration.
     let mut reader = bash("reader", "cat notes.md", &[]);
     reader.permissions = Some(yunta_core::NodePermissions::ReadOnly);
@@ -787,7 +787,7 @@ fn a_read_only_parallel_child_does_not_count_toward_the_write_collision_warning(
     );
 }
 
-// --- T6.1: context: (§9) ----------------------------------------------------
+// --- context: -----------------------------------------------------------------
 
 #[test]
 fn context_on_a_bash_node_is_a_check_error() {
@@ -832,7 +832,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     // Two nodes that reference each other's artifact purely through
     // `context:` — no explicit `depends_on` at all — must still be
     // caught as a cycle: the implicit edge is exactly as real as a
-    // declared one (§9).
+    // declared one.
     let mut a = prompt("a", "planner", &[]);
     a.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
@@ -870,7 +870,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     );
 }
 
-// --- T1.5: inputs: (§2.3, D82) --------------------------------------------
+// --- inputs: --------------------------------------------------------------
 
 #[test]
 fn required_true_together_with_a_default_is_a_check_error() {
@@ -984,7 +984,7 @@ fn an_undeclared_input_reference_inside_a_files_context_pattern_is_caught() {
         .any(|e| matches!(e, CheckError::UndeclaredInput { name, .. } if name == "changelog")));
 }
 
-// --- DI-12: top-level fan-out write collision (D100 extended) ----------------
+// --- top-level fan-out write collision ---------------------------------------
 
 fn config_with_fanout(max_parallel_nodes: u32) -> ConfigLayer {
     serde_yaml::from_str(&format!(
@@ -1065,7 +1065,7 @@ fn scopeless_independent_writers_warn_once_per_component() {
     assert_eq!(check_warnings(&wf, &config_with_fanout(1)), Vec::new());
 }
 
-// --- DI-13: fresh_context / yunta_schema -------------------------------------
+// --- fresh_context / yunta_schema ---------------------------------------------
 
 #[test]
 fn fresh_context_false_is_refused_until_session_resume_exists() {
@@ -1114,7 +1114,7 @@ fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
     );
 }
 
-// --- DI-24: distill paths must be declared artifacts -------------------------
+// --- distill paths must be declared artifacts ---------------------------------
 
 #[test]
 fn a_distill_path_no_node_declares_producing_fails_check() {
@@ -1143,7 +1143,7 @@ on_finish:
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
 }
 
-// --- T9.4: fan-out declaration rules -----------------------------------------
+// --- fan-out declaration rules -------------------------------------------------
 
 #[test]
 fn a_node_with_both_runner_and_runners_is_refused() {
@@ -1192,7 +1192,7 @@ nodes:
     );
 }
 
-// --- T9.3: `kind: workflow` static rules -------------------------------------
+// --- `kind: workflow` static rules ----------------------------------------------
 
 #[test]
 fn runner_bindings_on_a_workflow_node_are_refused() {
@@ -1244,7 +1244,7 @@ nodes:
     let wf: Workflow = serde_yaml::from_str(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     // `feat-a` shares the parent's tree with a concurrent sibling and
-    // declares nothing — disjointness is unverifiable, refused (§12).
+    // declares nothing — disjointness is unverifiable, so it is refused.
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1296,7 +1296,7 @@ nodes:
     );
 }
 
-// --- T9.3: the composition reference graph (`check_workflow_refs`) -----------
+// --- the composition reference graph (`check_workflow_refs`) -----------------
 
 fn catalog_root(files: &[(&str, &str)]) -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
@@ -1406,7 +1406,7 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
     .is_empty());
 }
 
-// --- DI-17: `context:` allowed on loops --------------------------------------
+// --- `context:` allowed on loops ------------------------------------------------
 
 #[test]
 fn context_on_a_loop_node_is_accepted_and_on_bash_still_refused() {
@@ -1426,7 +1426,7 @@ nodes:
         !check(&wf, &ConfigLayer::default())
             .iter()
             .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })),
-        "a loop's context is resolved into every task brief (DI-17) — no refusal"
+        "a loop's context is resolved into every task brief — no refusal"
     );
 
     let bash = r#"
@@ -1444,7 +1444,7 @@ nodes:
         .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })));
 }
 
-// --- DI-18: minor check rules ------------------------------------------------
+// --- minor check rules ----------------------------------------------------------
 
 #[test]
 fn max_parallel_nodes_zero_is_a_check_error() {
@@ -1488,8 +1488,8 @@ nodes:
         check_warnings(&wf, &config)
     );
 
-    // The same push behind a gate is deliberate — no warning (D48's own
-    // carve-out).
+    // The same push behind a gate is deliberate — no warning: a gate
+    // upstream is the carve-out.
     let gated = r#"
 name: pushy
 nodes:
@@ -1538,7 +1538,7 @@ nodes:
         .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
 }
 
-// --- DI-20: scope_expansion ceiling in check ---------------------------------
+// --- scope_expansion ceiling in check --------------------------------------------
 
 #[test]
 fn a_loop_mode_over_the_scope_expansion_ceiling_is_refused() {
@@ -1576,7 +1576,7 @@ nodes:
         .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
 }
 
-// --- DI-23: resume_session only where a session exists -----------------------
+// --- resume_session only where a session exists ----------------------------------
 
 #[test]
 fn resume_session_on_a_non_prompt_node_is_refused() {
@@ -1612,7 +1612,7 @@ nodes:
         .any(|e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { .. })));
 }
 
-// --- DI-26/D108: mount declaration rules -------------------------------------
+// --- mount declaration rules -------------------------------------------------
 
 fn parsed(yaml: &str) -> Workflow {
     serde_yaml::from_str(yaml).unwrap()
@@ -1698,7 +1698,7 @@ nodes:
 #[test]
 fn a_mount_inside_a_parallel_group_is_refused() {
     // Parallel children run concurrently — there is no DAG order inside
-    // the group, so "hermanos terminados" (§12) cannot hold there.
+    // the group, so "hermanos terminados" (siblings having finished) cannot hold there.
     let wf = parsed(
         r#"
 name: parent
@@ -1729,7 +1729,7 @@ nodes:
 
 #[test]
 fn a_cycle_formed_only_through_a_mount_is_caught() {
-    // The mount implies depends_on (D108) — check's own expansion must
+    // The mount implies depends_on — check's own expansion must
     // see the edge, or this deadlocks a real run instead of failing
     // statically.
     let wf = parsed(

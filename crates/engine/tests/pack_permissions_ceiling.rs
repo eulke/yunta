@@ -1,5 +1,5 @@
-//! `declares.permissions` as a ceiling enforced by `check` (RFC-0002
-//! §3/§6, T11.5): a pack's own `prompt`/`loop` node can never request a
+//! `declares.permissions` as a ceiling enforced by `check`:
+//! a pack's own `prompt`/`loop` node can never request a
 //! session profile above what its manifest promises — pure filesystem
 //! fixtures, no live run needed.
 

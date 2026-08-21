@@ -1,4 +1,4 @@
-//! `kind: findings` validation (T5.12, Contrato §4.1).
+//! `kind: findings` validation.
 //!
 //! Mirrors `ledger.rs`'s shape: collect every violation, never just the
 //! first. What's validated here is structural — the schema itself
@@ -58,9 +58,9 @@ pub fn register(file: &FindingsFile) -> Vec<FindingsError> {
     errors
 }
 
-/// §10.2/DI-10: the findings a successor inherits, derived purely from
-/// the parent's own log — every `finding_posted`, deduplicated by the
-/// normative rule (location + title normalized for case and whitespace).
+/// The findings a successor inherits, derived purely from
+/// the parent's own log — every `finding_posted`, deduplicated by
+/// location + title normalized for case and whitespace.
 /// The first occurrence's full record wins, so no authorship or detail
 /// is lost to the collapse. Deterministic: same log, same output — the
 /// promotion close serializes exactly this into

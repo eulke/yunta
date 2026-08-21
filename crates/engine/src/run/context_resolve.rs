@@ -1,55 +1,56 @@
-//! Context resolution (§9, T6.1): every `context:` entry is resolved and
+//! Context resolution: every `context:` entry is resolved and
 //! materialized under `context/<content_hash>/` *before* the node's
 //! session opens, then folded into the rendered prompt — so replay can
-//! name exactly what a session saw without re-running anything (§9's own
-//! "el hash identifica, no sustituye").
+//! name exactly what a session saw without re-running anything (the
+//! hash identifies the content, it never substitutes for it).
 //!
-//! Scope of this recorte, deliberate and documented in
-//! `docs/m0-status.md`'s T6.1/T6.2 entries rather than left silent:
-//! - Resolved for `kind: prompt` nodes only — `check` (T6.1) rejects
+//! Scope of this recorte, deliberate and documented rather than left
+//! silent:
+//! - Resolved for `kind: prompt` nodes only — validation rejects
 //!   `context:` on any other kind. A loop node's own per-task sessions
-//!   don't go through `execute_prompt` at all (`run_task`'s own dispatch,
-//!   T5.2); task-scoped context is a separate integration this recorte
-//!   doesn't cover.
+//!   don't go through `execute_prompt` at all (`run_task`'s own
+//!   dispatch); task-scoped context is a separate integration this
+//!   recorte doesn't cover.
 //! - `files:` resolves each entry as a literal path (after template
 //!   rendering), never a filesystem glob walk — the Contrato's own
-//!   example uses two literal paths, and no ✓ of T6.1 exercises pattern
+//!   example uses two literal paths, and no test here exercises pattern
 //!   expansion; real glob support is debt, not silently approximated.
-//! - `knowledge:` (T6.5, completed by D109/DI-31) resolves all three
-//!   layers of §9.2 with real precedence: the layers merge by filename,
-//!   `repo` overwriting `user` overwriting `org` on a name collision,
-//!   regardless of the order `layers:` names them in. `org` is the
-//!   union of every installed knowledge pack's declared contents
-//!   (RFC-0002 vendoring, via the M11 catalog); two *packs* shipping
-//!   the same filename is a typed error naming both — between packs
-//!   there is no precedence to fall back on (D109).
+//! - `knowledge:` resolves all three layers with real precedence: the
+//!   layers merge by filename, `repo` overwriting `user` overwriting
+//!   `org` on a name collision, regardless of the order `layers:` names
+//!   them in. `org` is the union of every installed knowledge pack's
+//!   declared contents (RFC-0002 vendoring, via the pack catalog); two
+//!   *packs* shipping the same filename is a typed error naming both —
+//!   between packs there is no precedence to fall back on.
 //! - `node-output:` only ever has something to read for `kind: bash`
 //!   nodes (`execute_bash` is the only place this module captures output
 //!   from, right after the process exits, success or failure alike —
-//!   exactly the lint→fix-lint→lint case §11.2 describes). `executor`
-//!   node output capture is real debt, not yet wired.
-//! - Stable-first assembly (§9.1, T6.4): every source is classified
-//!   `stable | run-stable | volatile` (`stability_class`, straight from
-//!   §9.1's own examples) and the final text is always segment-ordered
-//!   that way, regardless of `context:`'s own declaration order — the
-//!   ordering a provider's prompt cache needs a byte-stable prefix to
-//!   help at all. `context_assembled.segment_hashes` carries one hash
-//!   per non-empty class, over exactly that class's own canonical text.
-//! - `mcp:` (T6.2) speaks streamable-HTTP only, matching the reference
-//!   config's own `mcp_servers:` shape (`{ url, auth_env }` — a bearer
-//!   token's env var *name*, never the token itself, I12/O3). No stdio
-//!   MCP transport exists here; `mcp_servers:` never declares a launch
-//!   command, only a URL, so there is nothing to spawn.  The Contrato
-//!   fixes neither which MCP verb `query:` maps to nor a tool name —
-//!   resolved as a `tools/call` on a tool literally named `query`, the
-//!   simplest reading of the field's own name; the toy server this
-//!   recorte's own tests spawn implements exactly that tool.
+//!   exactly the lint→fix-lint→lint case a corrective node needs to
+//!   read back). `executor` node output capture is real debt, not yet
+//!   wired.
+//! - Stable-first assembly: every source is classified
+//!   `stable | run-stable | volatile` (`stability_class`) and the final
+//!   text is always segment-ordered that way, regardless of `context:`'s
+//!   own declaration order — the ordering a provider's prompt cache
+//!   needs a byte-stable prefix to help at all.
+//!   `context_assembled.segment_hashes` carries one hash per non-empty
+//!   class, over exactly that class's own canonical text.
+//! - `mcp:` speaks streamable-HTTP only, matching the reference config's
+//!   own `mcp_servers:` shape (`{ url, auth_env }` — a bearer token's
+//!   env var *name*, never the token itself, so no secret ever lands in
+//!   config or the log). No stdio MCP transport exists here;
+//!   `mcp_servers:` never declares a launch command, only a URL, so
+//!   there is nothing to spawn. The Contrato fixes neither which MCP
+//!   verb `query:` maps to nor a tool name — resolved as a `tools/call`
+//!   on a tool literally named `query`, the simplest reading of the
+//!   field's own name; the toy server this recorte's own tests spawn
+//!   implements exactly that tool.
 //! - No literal `trait ContextSource` — the Contrato names one, but with
-//!   a single set of builtins and no second implementer (packs are M11),
-//!   a trait object buys nothing CLAUDE.md would call a real boundary.
-//!   Every builtin is a plain resolver function behind one `match`;
-//!   nothing here stops a future dynamic-dispatch version once a pack
-//!   actually needs to plug in its own source.
+//!   a single set of builtins and no second implementer (packs are
+//!   still ahead), a trait object buys nothing CLAUDE.md would call a
+//!   real boundary. Every builtin is a plain resolver function behind
+//!   one `match`; nothing here stops a future dynamic-dispatch version
+//!   once a pack actually needs to plug in its own source.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -69,8 +70,9 @@ use super::{RunCtx, RunError};
 
 /// Bound on how long any single external call (`command:`'s subprocess,
 /// `mcp:`'s round trip) may run before this recorte gives up and fails
-/// the node — §9 says "command: stdout con timeout" but names no number;
-/// same "no number in §9" treatment T5.11 gave `MAX_EXPANSION_FILES`.
+/// the node — the spec requires a timeout on `command:` stdout but names
+/// no number; the same "no number specified" treatment applies to
+/// `MAX_EXPANSION_FILES` elsewhere in the engine.
 const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
@@ -114,7 +116,7 @@ pub(super) enum ContextResolveError {
     MissingArtifact {
         node: NodeId,
         source_id: String,
-        /// `None` for the node-less form (D108): the read is against
+        /// `None` for the node-less form: the read is against
         /// this run's own `artifacts/`, producer unnamed on purpose.
         referenced: Option<NodeId>,
         name: String,
@@ -134,13 +136,13 @@ pub(super) enum ContextResolveError {
         source_id: String,
         filter: String,
     },
-    /// D109 (DI-31): between org knowledge packs there is no order —
+    /// Between org knowledge packs there is no order —
     /// same filename from two installed packs never resolves by
     /// alphabetical or install order, it names both and stops.
     #[error(
         "context `{source_id}` on node `{node}`: knowledge file `{file}` is shipped by two \
          installed packs — `{pack_a}` and `{pack_b}` — and the org layer has no precedence \
-         between packs (D109); remove one, or shadow the file with the repo's own \
+         between packs; remove one, or shadow the file with the repo's own \
          `.yunta/knowledge/{file}`"
     )]
     OrgKnowledgeCollision {
@@ -192,9 +194,9 @@ pub(super) enum ContextResolveError {
 /// one `context_assembled` event, and returns the block of text to
 /// prepend to the node's rendered prompt — `None` when the node declares
 /// no context at all, so callers never prepend an empty header. A
-/// resolution failure is the node's own failure (§9: "una fuente que
-/// falla es fallo del nodo"), routed through the same `fail` every other
-/// node-level error already uses — never a `RunError`.
+/// resolution failure is the node's own failure ("a source that fails
+/// is a failure of the node"), routed through the same `fail` every
+/// other node-level error already uses — never a `RunError`.
 pub(super) async fn resolve_and_assemble(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -212,22 +214,22 @@ pub(super) async fn resolve_and_assemble(
     }
 }
 
-/// DI-17: resolved content cached across one loop node's task briefs,
+/// Resolved content cached across one loop node's task briefs,
 /// for the classes that cannot change within a run — `stable` (repo
-/// files, knowledge) and `run-stable` (frozen artifacts, I3). Volatile
-/// sources (`command`, `run-events`, `ledger`, `node-output`, `mcp`)
-/// re-resolve for every brief, which is the whole reason they're a
-/// class of their own (§9.1/D42).
+/// files, knowledge) and `run-stable` (frozen artifacts, immutable once
+/// written). Volatile sources (`command`, `run-events`, `ledger`,
+/// `node-output`, `mcp`) re-resolve for every brief, which is the whole
+/// reason they're a class of their own.
 #[derive(Default)]
 pub(super) struct StableContextMemo {
     cache: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
 }
 
-/// DI-17: one task brief's context — the same resolution, materialization
+/// One task brief's context — the same resolution, materialization
 /// and `context_assembled` audit a `prompt` node gets, keyed to the task
 /// (`task_id` in the event) and memoizing stable sources across briefs.
 /// Same error contract as [`resolve_and_assemble`]: a failing source is
-/// the node's own failure (§9), never a `RunError`.
+/// the node's own failure, never a `RunError`.
 pub(super) async fn resolve_for_task(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -293,7 +295,7 @@ async fn resolve_all(
                 source,
             })?;
 
-        // §9's "umbral configurable" (DI-05): `limits.inline_context_bytes`,
+        // The configurable threshold: `limits.inline_context_bytes`,
         // reference default 32000 — the resolved value lives in
         // `ConfigLayer`, never re-invented here.
         let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
@@ -310,7 +312,7 @@ async fn resolve_all(
         });
     }
 
-    // §9.1/T6.4: always assembled stable → run-stable → volatile,
+    // Always assembled stable → run-stable → volatile,
     // regardless of `context:`'s own declaration order — the ordering a
     // provider's prompt cache needs a byte-stable prefix to actually
     // help. Each non-empty class's own canonical text (same order,
@@ -508,7 +510,7 @@ async fn resolve_ledger(ctx: &RunCtx<'_>) -> Result<Vec<u8>, ContextResolveError
     Ok(lines.join("\n").into_bytes())
 }
 
-/// Fixed precedence order (§9.2): most general first, so a later layer
+/// Fixed precedence order: most general first, so a later layer
 /// overwrites an earlier one by filename — `repo` wins over `user` wins
 /// over `org` when they declare the same doc — never the order
 /// `layers:` happens to name them in.
@@ -525,13 +527,13 @@ fn knowledge_dir(ctx: &RunCtx<'_>, layer: yunta_core::KnowledgeLayer) -> Option<
             yunta_core::user_state_root().map(|root| root.join("knowledge"))
         }
         // Org is not one directory — it's the union of every installed
-        // knowledge pack's declared contents (D109); resolved by
+        // knowledge pack's declared contents; resolved by
         // `org_knowledge_files`, never through this single-dir path.
         yunta_core::KnowledgeLayer::Org => None,
     }
 }
 
-/// The org layer's files (D109, DI-31): every pack vendored under
+/// The org layer's files: every pack vendored under
 /// `.yunta/packs/` whose `contents.knowledge` is non-empty contributes
 /// each declared entry (a file, or a directory read recursively — the
 /// same rule the other layers use). Returns `(filename, path)` pairs
@@ -597,10 +599,10 @@ fn list_knowledge_files(
         // mean something the workflow expected to exist doesn't.
         return Ok(Vec::new());
     }
-    // Recursive since DI-24: the distilled subtree
-    // (`distilled/<workflow>/<run>/…`) is part of the layer — §9.2's own
-    // "lo destilado acá" — so a flat listing would silently hide exactly
-    // the knowledge the close deposited.
+    // Recursive: the distilled subtree
+    // (`distilled/<workflow>/<run>/…`) is part of the layer — the
+    // distilled knowledge lives here too — so a flat listing would
+    // silently hide exactly the knowledge the close deposited.
     let mut entries: Vec<PathBuf> = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(current) = pending.pop() {
@@ -635,11 +637,12 @@ async fn resolve_knowledge(
         params.layers.clone()
     };
 
-    // Precedence (§9.2): "lo del repo pisa a lo general ante conflicto" —
-    // a later layer in KNOWLEDGE_PRECEDENCE overwrites an earlier one by
-    // filename, so the same doc name in two layers resolves to exactly
-    // one copy, never two. Org (D109) is the union of installed
-    // knowledge packs, collision-checked among themselves first.
+    // Precedence: the repo layer overrides the more general ones on
+    // conflict — a later layer in KNOWLEDGE_PRECEDENCE overwrites an
+    // earlier one by filename, so the same doc name in two layers
+    // resolves to exactly one copy, never two. Org is the union of
+    // installed knowledge packs, collision-checked among themselves
+    // first.
     let mut by_name: std::collections::BTreeMap<std::ffi::OsString, PathBuf> =
         std::collections::BTreeMap::new();
     for layer in KNOWLEDGE_PRECEDENCE {
@@ -697,7 +700,7 @@ fn node_output_path(run_dir: &Path, node_id: &NodeId) -> PathBuf {
         .join(format!("{}.txt", node_id.as_str()))
 }
 
-/// `mcp: { server, query }` (§9, T6.2): looks `server` up in the merged
+/// `mcp: { server, query }`: looks `server` up in the merged
 /// config's `mcp_servers:`, connects over streamable-HTTP (bearer token
 /// read from the env var `auth_env` names, never from config itself),
 /// and calls a tool literally named `query` with the rendered `query:`
@@ -803,8 +806,8 @@ async fn call_mcp_query(
     }
 }
 
-/// Captures a `kind: bash` node's own stdout/stderr right after it exits
-/// (§9/§11.2) — called regardless of exit status, since a *failing*
+/// Captures a `kind: bash` node's own stdout/stderr right after it
+/// exits — called regardless of exit status, since a *failing*
 /// node's output is exactly what a corrective node's `node-output`
 /// context wants to read.
 pub(super) fn write_node_output(
@@ -865,7 +868,7 @@ fn render_block(
     }
 }
 
-/// §9.1's own three fixed classes, in assembly order.
+/// The three fixed classes, in assembly order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StabilityClass {
     Stable,
@@ -873,16 +876,15 @@ enum StabilityClass {
     Volatile,
 }
 
-/// §9.1's own examples, applied literally: `files`/`knowledge` are
-/// "archivos del repo que el run no toca"/"conocimiento durable" —
-/// `stable`; `artifact` is "artifacts congelados: brief, plan" —
-/// `run-stable` (I3 already makes every artifact immutable once
-/// written, so this is the class its own guarantee already earns);
-/// `command`/`run-events`/`node-output`/the aggregate `ledger` view are
-/// named `volatile` verbatim. `mcp` isn't in any of §9.1's own lists —
-/// classified `volatile` here since a live external server's response
-/// is never something this recorte can promise is byte-stable between
-/// sessions.
+/// Applied literally: `files`/`knowledge` are repo files the run never
+/// touches, or durable knowledge — `stable`; `artifact` is a frozen
+/// artifact such as a brief or plan — `run-stable` (every artifact is
+/// already immutable once written, so this is the class its own
+/// guarantee already earns); `command`/`run-events`/`node-output`/the
+/// aggregate `ledger` view are `volatile`. `mcp` has no obvious home in
+/// that scheme — classified `volatile` here since a live external
+/// server's response is never something this recorte can promise is
+/// byte-stable between sessions.
 fn stability_class(spec: &ContextSpec) -> StabilityClass {
     match spec {
         ContextSpec::Files { .. } | ContextSpec::Knowledge { .. } => StabilityClass::Stable,

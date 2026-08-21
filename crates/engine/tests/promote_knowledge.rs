@@ -1,4 +1,4 @@
-//! `promote-knowledge` (T10.5, D56/RFC-0003 §4): the reference workflow
+//! `promote-knowledge`: the reference workflow
 //! for curating locally-distilled knowledge into a new version of the
 //! org knowledge pack — "no es automática y no la hace el engine, es
 //! un workflow de Yunta como cualquier otro." Runs end to end with
@@ -29,7 +29,7 @@ impl Clock for FixedClock {
 
 /// Always picks the escalation's first declared option — `approve`,
 /// here (the engine appends its own `abort` after whatever the
-/// workflow declares, §5.3).
+/// workflow declares).
 struct ApproveEverything;
 
 #[async_trait::async_trait]

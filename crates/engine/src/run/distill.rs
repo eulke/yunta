@@ -1,4 +1,4 @@
-//! `on_finish.distill` (§8.3/§9.2/D20, DI-24): a **deterministic
+//! `on_finish.distill`: a **deterministic
 //! transform**, never an agent session — an LLM-written distillate at
 //! close would be unverifiable content entering the knowledge layer
 //! past every criterion and scope, the exact back door "la palabra del
@@ -15,8 +15,8 @@
 //! `provenance.yaml` derived purely from (manifest, log, clock): the
 //! evidence a later reader checks the distillate against, not anyone's
 //! word. Runs only at real closes (`Finish` and promotion — a short
-//! attempt's knowledge is knowledge), before `run_finished` (I3:
-//! nothing is emitted after the close event), never at a pause.
+//! attempt's knowledge is knowledge), before `run_finished` (nothing is
+//! emitted after the close event), never at a pause.
 //!
 //! How it reaches the repo: under `isolation: worktree` the engine
 //! commits the distilled files to the run's own branch
@@ -175,7 +175,8 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &str) -> Result<(), RunE
             Err(_) => {
                 // Declared durable, never produced (a mode excluded its
                 // node, a reroute never reached it): registered, never
-                // lost (§4.1's own channel) — the rest distills anyway.
+                // lost — reported as a finding — and the rest distills
+                // anyway.
                 ctx.emit(
                     None,
                     EventPayload::FindingPosted(FindingPostedPayload {

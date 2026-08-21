@@ -7,12 +7,12 @@ impone a sus agentes también te aplican a vos como implementador.
 
 ## Fuentes de verdad (en este orden)
 
-1. `docs/contrato-del-run.md` — documento normativo central: secciones §1–§15,
-   invariantes I1–I22.
-2. `docs/spec-adapter.md` — trait `Adapter`/`AgentSession`, capacidades, obligaciones
-   O1–O6, invariantes A1–A8.
-3. `docs/spec-ledger.md` — schema formal del ledger de tareas; se escribe a mano desde
-   el bootstrap, así que precédela leer antes de tocar el ciclo de tareas.
+1. `docs/contrato-del-run.md` — documento normativo central del comportamiento del
+   engine, con sus invariantes.
+2. `docs/spec-adapter.md` — trait `Adapter`/`AgentSession`, capacidades y
+   obligaciones de un adapter.
+3. `docs/spec-ledger.md` — schema formal del ledger de tareas; se escribe a mano,
+   así que precede leerla antes de tocar el ciclo de tareas.
 4. `docs/adrs.md` — decisiones con racionales y alternativas descartadas. **Fuente de
    desempate: ante cualquier ambigüedad, buscá acá antes de decidir.**
 5. `docs/rfc-0001-vision.md`, `docs/rfc-0002-packs.md`, `docs/rfc-0003-producto.md` y
@@ -53,47 +53,48 @@ código se corrige — salvo que un ADR diga lo contrario.
 
 | Usá | Nunca | Por qué |
 |---|---|---|
-| adapter | driver, backend | integración con un CLI (D27) |
-| runner | agente (para bindings) | binding \{adapter, model, agent?\} (D27) |
-| agente | subagente, persona | agente nombrado DEL adapter (D27/D29) |
-| `runner:` | `role:` | `role:` no existe en el schema (D28) |
-| pack | plugin | "plugin" no existe en el vocabulario (D38) |
-| executor | plugin | extensión de código del engine (D38) |
+| adapter | driver, backend | integración con un CLI |
+| runner | agente (para bindings) | binding \{adapter, model, agent?\} |
+| agente | subagente, persona | agente nombrado DEL adapter |
+| `runner:` | `role:` | `role:` no existe en el schema |
+| pack | plugin | "plugin" no existe en el vocabulario |
+| executor | plugin | extensión de código del engine |
 
 "Rol" solo como palabra descriptiva en prosa/docs, jamás como clave YAML.
 
 ## Reglas de código
 
-- **Estructura**: workspace de Cargo (D03) — `crates/{core,storage,adapters,engine,cli}`,
+- **Estructura**: workspace de Cargo — `crates/{core,storage,adapters,engine,cli}`,
   packages `yunta-core`, `yunta-storage`, `yunta-adapters`, `yunta-engine` y `yunta`
   (el binario). Dependencias unidireccionales: core ← storage/adapters ← engine ←
   cli; jamás ciclos, jamás dependencias hacia arriba. **Si te encontrás queriendo
   agregar una dependencia que rompe ese orden, el diseño de lo que estás escribiendo
-  está mal, no el layout.** `yunta-engine` no depende de rusqlite/sqlx (D53) ni de
-  ningún CLI concreto (A1) — lo impone el compilador, no el checklist. Sin features
-  opcionales: no hay `serve` (proyecto separado, D77) ni `postgres`.
+  está mal, no el layout.** `yunta-engine` no depende de rusqlite/sqlx ni de ningún
+  CLI concreto — lo impone el compilador, no el checklist. Sin features opcionales:
+  no hay `serve` (proyecto separado) ni `postgres`.
 - **Calidad**: `cargo clippy --workspace -- -D warnings` limpio, `cargo fmt` aplicado,
   errores con `thiserror` (nada de `unwrap()`/`expect()` fuera de tests),
   observabilidad con `tracing`. `#![forbid(unsafe_code)]` en todos los crates.
 - **Tests**: cada crate tiene sus tests de integración en su propio `tests/`,
-  ejercitando el engine con el adapter `mock` — nunca un LLM real en CI (A8). Todo
+  ejercitando el engine con el adapter `mock` — nunca un LLM real en CI. Todo
   camino del engine debe ser ejercitable con mock; si no podés testear algo sin un
   LLM, el diseño de ese algo está mal.
-- **Eventos**: todo evento y payload lleva `schema_version` desde el primer commit
-  (D07). El event log es append-only; el estado se deriva por replay — si te
-  encontrás guardando estado derivado como fuente de verdad, pará (I2).
-- **Secretos**: jamás en el event log, en eventos de adapter ni en fixtures (I12/O3).
-  Solo env vars declaradas.
+- **Eventos**: todo evento y payload lleva `schema_version`. El event log es
+  append-only; el estado se deriva por replay — si te encontrás guardando estado
+  derivado como fuente de verdad, pará.
+- **Secretos**: jamás en el event log, en eventos de adapter ni en fixtures. Solo
+  env vars declaradas.
 
 ## Checklist de PR (definition of done)
 
-1. El criterio de aceptación de la tarea (plan M0–M14) pasa, ejecutado, no supuesto.
+1. El criterio de aceptación de la tarea pasa, ejecutado, no supuesto.
 2. Tests verdes en CI con mock; clippy sin warnings; fmt aplicado.
-3. Ningún invariante I1–I30 / A1–A8 violado — repasá la lista, están para eso.
+3. Ningún invariante del Contrato del Run ni obligación del Adapter violado —
+   repasá la lista completa en la fuente de verdad correspondiente, están para eso.
 4. Terminología de la tabla respetada en código, docs y mensajes de commit.
 5. Documentación de módulo actualizada si cambió comportamiento público.
-6. Redacción nativa (D35): sin referencias históricas, cada mecanismo justificado
-   desde primeros principios.
+6. Redacción nativa: sin referencias históricas, cada mecanismo justificado desde
+   primeros principios.
 
 ## Comandos
 
@@ -109,15 +110,15 @@ cargo run -p yunta -- run <wf> --adapter mock   # correr un workflow sin LLM
 
 - No introducir `role:` ni "plugin" en schema, código o docs.
 - No emular capacidades ausentes de un adapter — error en check o degradación con
-  evento (A6).
-- No darle a ningún agente (ni al mock) una vía para marcar estado de tareas (I5).
-- No mutar artifacts ni manifests — el progreso son eventos (I3/I4).
+  evento.
+- No darle a ningún agente (ni al mock) una vía para marcar estado de tareas.
+- No mutar artifacts ni manifests — el progreso son eventos.
 - No resolver ítems de `docs/deuda.md` de facto.
-- No agregar conocimiento específico de un CLI fuera de `yunta-adapters` (A1) — si
+- No agregar conocimiento específico de un CLI fuera de `yunta-adapters` — si
   `yunta-engine` necesita saber qué adapter tiene enfrente, falta una capacidad, no
   un branch.
 - No dejar procesos huérfanos: todo camino de cancelación extermina el árbol
-  completo (A4).
+  completo.
 
 ## Diseño y patrones del codebase
 
@@ -145,11 +146,12 @@ cargo run -p yunta -- run <wf> --adapter mock   # correr un workflow sin LLM
   `HumanInteraction`, `Clock`, storage. No abstraer "por las dudas": una abstracción
   sin segunda implementación real (o mock con propósito) es costo sin beneficio. La
   señal de que falta un trait es un `if adapter.id() == "claude-code"` en el engine —
-  eso viola A1 y se corrige con capacidad, no con branch.
+  eso viola la frontera adapter/engine y se corrige con capacidad, no con branch.
 - **Concurrencia estructurada.** Toda task de tokio tiene dueño (el scheduler retiene
   los `JoinHandle`); nada se spawnea y se olvida. Cancelación por `CancellationToken`
   propagado, y el camino de cancelación se testea con la misma seriedad que el camino
-  feliz — A4 depende de esto.
+  feliz — la limpieza completa del árbol de procesos ante una cancelación depende
+  de esto.
 - **Errores tipados en la lib, contexto en el borde.** `thiserror` con enums por
   módulo; el `main` traduce a mensajes accionables. Un error debe decir qué hacer:
   "workflow `x` referencia el rol `planner` que ninguna capa de config define —
@@ -160,7 +162,7 @@ cargo run -p yunta -- run <wf> --adapter mock   # correr un workflow sin LLM
 - **Idioma: inglés en TODA superficie que toque al usuario.** Identificadores,
   comentarios, rustdoc, commits — y además README, documentación de uso, guías,
   textos de ayuda del CLI, mensajes de error, salida de `status`/`stats`/`--follow`/
-  `graph` (D40/D46). El ecosistema al que Yunta aspira (packs compartidos, adapters
+  `graph`. El ecosistema al que Yunta aspira (packs compartidos, adapters
   de terceros) lo exige y los términos del glosario mapean 1:1: `Runner`, `Adapter`,
   `Pack`, `Ledger`, `Scope`. Única excepción: los documentos de diseño internos
   (corpus en Notion), que son del equipo y permanecen en español. Si escribís algo

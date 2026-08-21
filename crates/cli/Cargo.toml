@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 # `version` must track [workspace.package].version — crates.io publish
-# (T12.4) rejects a path dependency with no version requirement.
+# rejects a path dependency with no version requirement.
 yunta-core = { path = "../core", version = "0.1.0" }
 yunta-engine = { path = "../engine", version = "0.1.0" }
 yunta-adapters = { path = "../adapters", version = "0.1.0" }
@@ -21,29 +21,29 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-# `yunta stats --json` (T7.5, §8.4) — already a transitive dependency of
-# every crate here via `yunta-engine`, made direct now that the CLI
-# serializes its own JSON DTOs rather than only ever deserializing YAML.
+# `yunta stats --json` — already a transitive dependency of every crate
+# here via `yunta-engine`, made direct now that the CLI serializes its
+# own JSON DTOs rather than only ever deserializing YAML.
 serde_json = "1"
 # `yunta test` sandboxes each case in a throwaway worktree/runs root.
 tempfile = "3"
 thiserror = "2"
 # `yunta run`/`resume`/`test` drive the async engine; a current-thread
-# runtime is all the sequential M-0 scheduler needs.
+# runtime is all the sequential scheduler needs.
 tokio = { version = "1", features = ["rt", "macros", "signal", "time", "process"] }
-# CancellationToken for the Ctrl-C -> root-token bridge (DI-08); the
-# engine already speaks this type on its execute_run surface.
+# CancellationToken for the Ctrl-C -> root-token bridge; the engine
+# already speaks this type on its execute_run surface.
 tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# `ConsoleInteraction` (T7.2) implements `yunta_engine::HumanInteraction`,
-# whose method is dyn-safe async — same reason yunta-engine/yunta-adapters
+# `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
+# method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
 async-trait = "0.1"
-# `yunta mcp` (M8/T8.1.4, §6.4): the control-plane MCP server, stdio.
-# `server` + `transport-io` only — no HTTP transport, no client features:
-# the per-run MCP server (T8.2) is a separate, later concern with its own
-# transport (D103, HTTP loopback).
+# `yunta mcp`: the control-plane MCP server, stdio. `server` +
+# `transport-io` only — no HTTP transport, no client features: the
+# per-run MCP server is a separate, later concern with its own
+# transport (HTTP loopback).
 rmcp = { version = "3", default-features = false, features = ["server", "transport-io"] }
 
 [dev-dependencies]

@@ -1,4 +1,4 @@
-//! `inputs:` (T1.5, Contrato §2.3, D82) — a workflow's own declared
+//! `inputs:` — a workflow's own declared
 //! parameters, keyed by name so the schema's own format guarantees
 //! uniqueness instead of a validation pass over a `[{name, ...}]` list.
 //! One variant per type, `#[serde(tag = "type")]`, so a workflow author
@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One entry of `inputs:` (Contrato §2.3). `required` and `default` are
+/// One entry of `inputs:`. `required` and `default` are
 /// mutually exclusive by convention, not by the type: `required: true`
 /// with no `default` is the ordinary case (and the implicit default when
 /// neither field is given — an input the schema is silent about is
@@ -61,7 +61,7 @@ pub enum InputSpec {
         description: Option<String>,
     },
     /// Always validated for existence at resolution time, no `exists:`
-    /// flag and no file/directory distinction (D82) — the filesystem
+    /// flag and no file/directory distinction — the filesystem
     /// call fails either way, so checking eagerly turns a late, expensive
     /// error (after worktree + baseline + maybe tokens) into an
     /// immediate one. An input naming a path that doesn't exist yet

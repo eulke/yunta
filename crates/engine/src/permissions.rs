@@ -1,10 +1,9 @@
-//! Runtime permission enforcement, pure half (T5.7, §6.1, I18).
+//! Runtime permission enforcement, pure half.
 //!
-//! The Contrato fixes the model (patterns over hook/criterion/bash/
-//! executor commands, checked "justo antes de ejecutarlo") and shows
-//! three example patterns (`"sudo *"`, `"curl * | *"`) without defining
-//! the matching dialect. The dialect implemented here — documented in
-//! `docs/m0-status.md`'s T5.7 entry as the D51 addendum proposal:
+//! The permissions model matches patterns over hook/criterion/bash/
+//! executor commands, checked right before execution. Three example
+//! patterns (`"sudo *"`, `"curl * | *"`) motivate the shape without
+//! fully defining the matching dialect. The dialect implemented here:
 //!
 //! - A pattern matches the **whole** command string, anchored at both
 //!   ends: `sudo *` blocks `sudo rm` and never `echo sudo` — a mention is
@@ -14,10 +13,10 @@
 //!   Everything else is literal; case-sensitive; no character classes,
 //!   no `?` — governance patterns stay boring and predictable.
 //! - `deny` wins over `allow`. An empty `allow` is denylist mode
-//!   (everything not denied runs, §6.1's default); a non-empty `allow`
-//!   is D51's strict allowlist — the command must match one.
+//!   (everything not denied runs, the default); a non-empty `allow`
+//!   is a strict allowlist — the command must match one.
 //!
-//! The honest limit (§6.1, D105): this is governance, not a sandbox. A
+//! The honest limit: this is governance, not a sandbox. A
 //! write-capable agent can route around a textual pattern by writing a
 //! script and running it — the model stops accidents and careless packs,
 //! and leaves an auditable trail of the deliberate attempt.
@@ -25,8 +24,8 @@
 use yunta_core::PermissionsConfig;
 
 /// Checks one rendered command against the effective (ceiling-merged)
-/// permissions. `None` = allowed; `Some(rule)` = blocked, with the
-/// diagnostic §6.1 demands ("citando la regla") ready to become the
+/// permissions. `None` = allowed; `Some(rule)` = blocked, with a
+/// diagnostic that cites the rule, ready to become the
 /// node's `node_failed.outcome`.
 pub fn command_violation(command: &str, permissions: Option<&PermissionsConfig>) -> Option<String> {
     let commands = permissions?.commands.as_ref()?;
@@ -34,7 +33,7 @@ pub fn command_violation(command: &str, permissions: Option<&PermissionsConfig>)
     for pattern in &commands.deny {
         if glob_match(pattern, command) {
             return Some(format!(
-                "command `{command}` matches denied pattern `{pattern}` (permissions.commands.deny, §6.1)"
+                "command `{command}` matches denied pattern `{pattern}` (permissions.commands.deny)"
             ));
         }
     }
@@ -46,7 +45,7 @@ pub fn command_violation(command: &str, permissions: Option<&PermissionsConfig>)
             .any(|pattern| glob_match(pattern, command))
     {
         return Some(format!(
-            "command `{command}` matches no pattern in the strict allowlist (permissions.commands.allow, §6.1)"
+            "command `{command}` matches no pattern in the strict allowlist (permissions.commands.allow)"
         ));
     }
 

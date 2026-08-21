@@ -1,5 +1,5 @@
 //! The run manifest freezes which pack (and exactly which version) its
-//! top-level workflow came from (RFC-0002 §7, T11.7) — pure
+//! top-level workflow came from — pure
 //! `build_manifest` behavior, no live run needed.
 
 use std::collections::HashMap;

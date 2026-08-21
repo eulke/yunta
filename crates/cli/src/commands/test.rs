@@ -1,7 +1,7 @@
-//! `yunta test` (T7.9 recorte, Contrato §14): discover cases under
-//! `.yunta/tests/`, execute each workflow with the `mock` adapter driven
-//! by the case's fixture, derive the final state by replay and compare
-//! it against `expect`. No LLM, no network, deterministic.
+//! `yunta test`: discover cases under `.yunta/tests/`, execute each
+//! workflow with the `mock` adapter driven by the case's fixture,
+//! derive the final state by replay and compare it against `expect`.
+//! No LLM, no network, deterministic.
 //!
 //! Each case runs in its own sandbox: a fresh git worktree, a fresh runs
 //! root and a fresh event-log DB under a temp dir — a test run never
@@ -10,10 +10,10 @@
 //! session can place artifacts exactly where a real agent (told
 //! `{{run.dir}}` in its prompt) would.
 //!
-//! M-0 cut of the §14 case format: `workflow`, `fixture` and `expect`
+//! Current cut of the case format: `workflow`, `fixture` and `expect`
 //! with `final_state` (`finished` | `paused`), `nodes` and `tasks`.
 //! `mode`/`inputs` wait for their schema; `events`/`never` clauses wait
-//! for full T7.9.
+//! for a fuller case format.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -53,10 +53,10 @@ struct Expect {
 enum FinalState {
     Finished,
     Paused,
-    /// Never actually reachable under `NoInteraction` (§10.2's own
-    /// `promote` option needs a live `HumanInteraction` to be chosen at
-    /// all) — kept for schema completeness rather than making
-    /// `RunTerminal`'s mapping here partial.
+    /// Never actually reachable under `NoInteraction` — the `promote`
+    /// option needs a live `HumanInteraction` to be chosen at all —
+    /// kept for schema completeness rather than making `RunTerminal`'s
+    /// mapping here partial.
     Promoted,
 }
 
@@ -115,8 +115,8 @@ pub async fn test() -> ExitCode {
 /// doesn't exist (as opposed to existing and being empty, which is a
 /// separate case each caller decides how to treat). Shared by `yunta
 /// test` (root = the project's own `cwd`) and `yunta pack audit`
-/// (T11.4, root = a pack directory) — same case format, same discovery
-/// rule, so a pack's own tests are authored exactly like a repo's.
+/// (root = a pack directory) — same case format, same discovery rule,
+/// so a pack's own tests are authored exactly like a repo's.
 pub(crate) fn discover_case_paths(root: &Path) -> Option<Vec<PathBuf>> {
     let tests_dir = root.join(".yunta/tests");
     let mut case_paths: Vec<PathBuf> = std::fs::read_dir(&tests_dir)
@@ -186,10 +186,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         }
     }
 
-    // Test cases don't declare input values yet (§14/T7.9's own recorte,
-    // `docs/m0-status.md`) — every input a tested workflow declares must
-    // have a `default`, same as any other consumer of `build_manifest`
-    // that has none to offer.
+    // Test cases don't declare input values yet — every input a tested
+    // workflow declares must have a `default`, same as any other
+    // consumer of `build_manifest` that has none to offer.
     let manifest = yunta_engine::build_manifest(
         &workflow,
         &config,
@@ -199,10 +198,10 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     )
     .map_err(|e| e.to_string())?;
 
-    // §10.1/D44: `"default"` runs the whole graph unfiltered — a test
-    // case (T7.9/D89) doesn't declare a mode of its own, and exercising
-    // the full workflow is the more useful default for a fixture-driven
-    // test than picking one mode out from under it.
+    // `"default"` runs the whole graph unfiltered — a test case doesn't
+    // declare a mode of its own, and exercising the full workflow is
+    // the more useful default for a fixture-driven test than picking
+    // one mode out from under it.
     yunta_engine::create_run(
         yunta_engine::CreateRunParams {
             run_id: &run_id,

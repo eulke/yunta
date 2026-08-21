@@ -12,7 +12,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
-# `modes:` (§10.1, D44) is an ordered map, free in name and count — its
+# `modes:` is an ordered map, free in name and count — its
 # declaration order *is* the promotion ladder, so plain iteration order
 # has to survive parse. Already in the workspace's own dependency graph
 # transitively (schemars, reqwest); making it direct here costs nothing

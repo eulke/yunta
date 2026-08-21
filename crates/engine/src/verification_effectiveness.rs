@@ -1,13 +1,13 @@
-//! Verification-performance findings (§8.7, D93, T7.10) — the same
+//! Verification-performance findings — the same
 //! judgment the engine applies to a task's own work ("si algo no puede
 //! fallar, no está probando nada") applied to the workflow's own
 //! ceremony. Pure: takes a workflow and every past run's raw log,
 //! returns findings — no I/O, no mutation, nothing that ever touches a
-//! workflow file (§8.7's own third guard: "sugiere, jamás actúa").
+//! workflow file ("sugiere, jamás actúa").
 //!
 //! **Core metric is the pre-check red rate, not the total failure
 //! rate** — confusing the two would suggest deleting exactly the
-//! criteria doing their job best (§8.7's own text). A criterion that's
+//! criteria doing their job best. A criterion that's
 //! red before the work and green after, every time, is working exactly
 //! as intended and never appears here.
 //!
@@ -16,9 +16,9 @@
 //! criterion just added to a workflow with 50 historical runs starts
 //! with zero samples of its own, not the workflow's history.
 //!
-//! **Mode-scoped signals (DI-06, unblocked by T9.1)**: a declared mode
-//! no run ever chose (with the same evidence floor), and the structural
-//! guard §8.7 demands — an `invariant: true` node is never the subject
+//! **Mode-scoped signals**: a declared mode
+//! no run ever chose (with the same evidence floor), and a structural
+//! guard — an `invariant: true` node is never the subject
 //! of a remove-shaped finding (its never-fired re-route or
 //! always-approved gate is the node doing its job, excluded by
 //! construction).
@@ -30,8 +30,8 @@ use yunta_core::{NodeId, Workflow};
 
 /// Below this many independent samples, a signal says nothing — a
 /// number without a distribution behind it is a guess wearing a data
-/// costume (same floor, and the same reasoning, as §8.6's own prior
-/// estimation, T7.5).
+/// costume (same floor, and the same reasoning, as the prior
+/// estimation in `stats.rs`).
 pub const MIN_SAMPLES: usize = 3;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,7 +58,7 @@ pub struct AlwaysFirstTryTasks {
     pub sample_count: usize,
 }
 
-/// A declared mode no historical run ever chose (§8.7 "modo sin uso") —
+/// A declared mode no historical run ever chose ("modo sin uso") —
 /// evidence is "enough runs happened and none picked it", never "it has
 /// existed a long time".
 #[derive(Debug, Clone, PartialEq)]
@@ -98,7 +98,7 @@ pub fn analyze(workflow: &Workflow, history: &[Vec<Event>]) -> VerificationFindi
     }
 }
 
-/// §8.7 "modo sin uso" (DI-06): every declared mode against the mode
+/// "modo sin uso": every declared mode against the mode
 /// each historical run actually recorded in its own `run_created`.
 fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> {
     let Some(modes) = &workflow.modes else {
@@ -127,11 +127,11 @@ fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> 
 }
 
 /// Every `criteria_checked` result, of any phase — pre-check red rate is
-/// what §8.7 names as the metric, but a criterion that's *only* ever
+/// the metric, but a criterion that's *only* ever
 /// checked post (never pre, e.g. a node with no explicit pre-check
 /// declared) still deserves the same "never red" reading if that's
 /// literally true of every observation this codebase has of it. Reused
-/// (memoized, T5.9) results count too: a reused verdict is still a real
+/// (memoized) results count too: a reused verdict is still a real
 /// exit code for that command, not a different answer standing in for
 /// one.
 fn never_red_criteria(history: &[Vec<Event>]) -> Vec<NeverRedCriterion> {
@@ -168,18 +168,18 @@ fn never_red_criteria(history: &[Vec<Event>]) -> Vec<NeverRedCriterion> {
 /// One sample per historical run where the node actually ran (reached
 /// *any* terminal state, finished or failed) — not per run where it
 /// failed: a node that finished clean every single time is exactly
-/// "the prior flow is more reliable than expected" (§8.7's own
-/// reading), the strongest possible version of "this re-route never
-/// fired". A run where the node never even executed (blocked behind
-/// something else entirely) says nothing about its re-route either
-/// way, so it isn't counted as a sample.
+/// "the prior flow is more reliable than expected", the strongest
+/// possible version of "this re-route never fired". A run where the
+/// node never even executed (blocked behind something else entirely)
+/// says nothing about its re-route either way, so it isn't counted as
+/// a sample.
 fn never_triggered_reroutes(
     workflow: &Workflow,
     history: &[Vec<Event>],
 ) -> Vec<NeverTriggeredReroute> {
     let mut findings = Vec::new();
     for node in workflow.iter_nodes() {
-        // §8.7's own structural guard (T7.10 ✓): an invariant node that
+        // A structural guard: an invariant node that
         // never fails is verification doing its job — never a removal
         // candidate, so never a finding.
         if node.invariant {
@@ -220,8 +220,8 @@ fn never_triggered_reroutes(
     findings
 }
 
-/// A gate "needed adjustment" when its resolution reroutes (T7.2's
-/// internal `retry`, or T7.7's external changes-requested — both land
+/// A gate "needed adjustment" when its resolution reroutes (an
+/// internal `retry`, or an external changes-requested — both land
 /// as `gate_resolved.chosen_option: Some("retry")` or a `node_failed`
 /// right after it) rather than letting the node finish clean. One
 /// sample per `gate_resolved` this node ever emitted, across history.
@@ -231,9 +231,9 @@ fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<Alw
         .filter(|n| matches!(n.kind, yunta_core::NodeKind::Gate { .. }) && !n.invariant)
         .map(|n| n.id.clone())
         .collect();
-    // Also every node with `on_failure` — T7.2's internal gate escalates
+    // Also every node with `on_failure` — its internal gate escalates
     // *that* node once its re-routes are exhausted, so it's a gate too,
-    // by the same §5.3 object, even without `kind: gate`.
+    // by the same escalation object, even without `kind: gate`.
     let internal_gate_ids: Vec<NodeId> = workflow
         .iter_nodes()
         .filter(|n| n.on_failure.is_some() && !n.invariant && !gate_node_ids.contains(&n.id))
@@ -253,7 +253,7 @@ fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<Alw
                     continue;
                 }
                 total += 1;
-                // T7.7's own mapping: `approved_sha` is only ever set on
+                // `approved_sha` is only ever set on
                 // a clean approval — an internal "retry"/"abort", or an
                 // external changes-requested/closed, all leave it
                 // `None`, and all of them are an adjustment.

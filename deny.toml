@@ -1,7 +1,7 @@
-# cargo-deny config (`cargo deny check`, wired into CI's `test` gate per
-# RFC-0004 §4.1). Checks four things: known security advisories, license
-# compatibility with Apache-2.0 distribution, banned/duplicate crates, and
-# that every dependency actually comes from crates.io.
+# cargo-deny config (`cargo deny check`, wired into CI's `test` gate).
+# Checks four things: known security advisories, license compatibility
+# with Apache-2.0 distribution, banned/duplicate crates, and that every
+# dependency actually comes from crates.io.
 
 [graph]
 all-features = false

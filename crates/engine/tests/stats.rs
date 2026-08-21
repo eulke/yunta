@@ -1,4 +1,4 @@
-//! `compute_run_stats`/`prior_estimation` (T7.5, Contrato §8.4/§8.6) —
+//! `compute_run_stats`/`prior_estimation` —
 //! golden tests over a hand-built log fixture with a retry and a
 //! re-route, exercised directly without spinning up a full run (same
 //! style `tests/progress.rs` uses for `render_progress`).
@@ -375,7 +375,7 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     assert_eq!(summary.wall_clock, Some(std::time::Duration::from_secs(37)));
 }
 
-// --- DI-05 etapa 4: budget-vs-p90 warning (§8.6) -----------------------------
+// --- budget-vs-p90 warning -----------------------------
 
 #[test]
 fn a_cap_below_the_historical_p90_produces_the_warning() {

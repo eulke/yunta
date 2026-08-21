@@ -1,11 +1,11 @@
-//! `yunta resume <run_id>` (T4.5 recorte, §8.1): reload the frozen
-//! manifest from run.dir and drive the run forward with the same
-//! `execute_run` that started it — the log decides what remains.
+//! `yunta resume <run_id>`: reload the frozen manifest from run.dir and
+//! drive the run forward with the same `execute_run` that started it —
+//! the log decides what remains.
 //!
-//! DI-07/T2.4: run.dir is looked up in search order (current config's
-//! runs root, then the default) — and once the manifest is open, the
-//! worktree comes from its *frozen* paths, so a `paths.*` change between
-//! `run` and `resume` never loses the run.
+//! run.dir is looked up in search order (current config's runs root,
+//! then the default) — and once the manifest is open, the worktree
+//! comes from its *frozen* paths, so a `paths.*` change between `run`
+//! and `resume` never loses the run.
 
 use std::process::ExitCode;
 
@@ -46,8 +46,8 @@ pub async fn resume(run_id: &str) -> ExitCode {
         Err(code) => return code,
     };
 
-    // The manifest's own frozen config, not the project's current one
-    // (§2.1: a run never re-reads config after it's created).
+    // The manifest's own frozen config, not the project's current one:
+    // a run never re-reads config after it's created.
     let adapters = super::real_adapters(&manifest.config);
     if let Err(code) = super::refuse_unrunnable(&manifest.workflow, &adapters) {
         return code;
@@ -63,9 +63,9 @@ pub async fn resume(run_id: &str) -> ExitCode {
 
     // The worktree (or the checkout itself, for `none`) was already
     // prepared by the `run` that created this run — resume finds it by
-    // the same rule, it never prepares a fresh one (T4.2, §7.3).
-    // DI-07: the frozen roots win; a pre-freeze manifest (no `paths:`)
-    // falls back to the current config, exactly the old behavior.
+    // the same rule, it never prepares a fresh one.
+    // The frozen roots win; a pre-freeze manifest (no `paths:`) falls
+    // back to the current config, exactly the old behavior.
     let worktrees_root = manifest
         .paths
         .as_ref()
@@ -119,9 +119,9 @@ pub async fn resume(run_id: &str) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            // DI-08: a user cancellation also releases `none`'s lock —
-            // the engine process is exiting, and the register's own
-            // design says a Ctrl-C leaves nothing held.
+            // A user cancellation also releases `none`'s lock — the
+            // engine process is exiting, and a Ctrl-C is designed to
+            // leave nothing held.
             if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
                 if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
                     eprintln!("error: {e}");

@@ -1,17 +1,17 @@
-//! `GitHubForge` (T7.7, §5.6/D66): the only real `Forge` in v1. Talks to
-//! GitHub's REST API directly (no local git) — the Contents/Refs
-//! endpoints can create a branch and commit files over plain HTTP, so
-//! publishing a gate needs nothing beyond the same bearer token that
-//! reads its PR state back.
+//! `GitHubForge`: the only real `Forge` in v1. Talks to GitHub's REST
+//! API directly (no local git) — the Contents/Refs endpoints can create
+//! a branch and commit files over plain HTTP, so publishing a gate
+//! needs nothing beyond the same bearer token that reads its PR state
+//! back.
 //!
 //! **No live smoke test against the real API — a documented gap, not a
-//! silent skip**, the same shape T7.4's `codex` adapter already
-//! documents for the same reason: no GitHub token or a disposable repo
-//! to publish real PRs against exists in this environment. Every
-//! endpoint/field used here is documented, current GitHub REST API v3
-//! shape (`git/refs`, `contents`, `pulls`, `pulls/.../reviews`,
+//! silent skip**, the same shape the `codex` adapter already documents
+//! for the same reason: no GitHub token or a disposable repo to publish
+//! real PRs against exists in this environment. Every endpoint/field
+//! used here is documented, current GitHub REST API v3 shape
+//! (`git/refs`, `contents`, `pulls`, `pulls/.../reviews`,
 //! `pulls/.../comments`), not a guess — but that's not the same as
-//! having run it. See `docs/m0-status.md`'s T7.7 entry.
+//! having run it.
 
 use base64::Engine;
 use serde::Deserialize;
@@ -221,7 +221,7 @@ impl Forge for GitHubForge {
                 "head": req.branch,
                 "base": req.base_branch,
                 "body": format!(
-                    "{}\n\n---\nrun_id: `{}`\n\n_Opened by Yunta (§5.6) — approve or request \
+                    "{}\n\n---\nrun_id: `{}`\n\n_Opened by Yunta — approve or request \
                      changes like any other PR review._",
                     req.summary, req.run_id
                 ),
@@ -296,7 +296,7 @@ impl Forge for GitHubForge {
             .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
 
         // Last decisive review wins (APPROVED/CHANGES_REQUESTED) —
-        // COMMENTED/DISMISSED aren't decisions §5.6 maps to anything.
+        // COMMENTED/DISMISSED aren't decisions this maps to anything.
         // GitHub returns reviews in submission order, oldest first.
         let last_decision = reviews
             .into_iter()

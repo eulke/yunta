@@ -1,4 +1,4 @@
-//! `scope_expansion::evaluate` (T5.11, §6.2/D73) — the engine's own
+//! `scope_expansion::evaluate` — the engine's own
 //! decision over an agent's expansion request, exercised directly against
 //! a real git worktree (the pre-check and the `rules`-mode size bound
 //! both need real `git diff`).

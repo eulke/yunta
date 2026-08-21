@@ -1,12 +1,11 @@
-//! The `mock` adapter's fixture format (T3.2) — a YAML script of events
+//! The `mock` adapter's fixture format — a YAML script of events
 //! plus filesystem effects, parsed once and replayed on `spawn()`.
 //!
-//! A fixture scripts a whole run, not a single session (Contrato §14: a
-//! workflow test declares one fixture for everything its run spawns).
-//! Two forms parse:
+//! A fixture scripts a whole run, not a single session: a workflow test
+//! declares one fixture for everything its run spawns. Two forms parse:
 //!
 //! - **multi-session**: `sessions:` lists one script per spawn, consumed
-//!   in spawn order — deterministic because M-0 execution is sequential;
+//!   in spawn order — deterministic because execution is sequential;
 //! - **single-session**: the script's fields at the top level — sugar
 //!   for a one-entry `sessions:`.
 //!
@@ -83,10 +82,10 @@ pub struct SessionScript {
     pub effects: Vec<MockEffect>,
     pub outcome: MockOutcome,
     /// Selects this script by a substring of the spawning request's own
-    /// prompt, instead of by call order (T5.10: concurrent task dispatch
-    /// means several `spawn()` calls race, so pure declaration-order
+    /// prompt, instead of by call order: concurrent task dispatch means
+    /// several `spawn()` calls race, so pure declaration-order
     /// consumption can no longer promise which request gets which
-    /// script). Absent — the vast majority of fixtures, unchanged — keeps
+    /// script. Absent — the vast majority of fixtures, unchanged — keeps
     /// today's exact behavior: consumed strictly in declaration order,
     /// among the other unmatched scripts.
     #[serde(default)]
@@ -121,8 +120,8 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
-    /// T8.2/A8: perform a REAL MCP `tools/call` against the session's
-    /// own `run_tools_endpoint` — the mock as a genuine client of the
+    /// Performs a REAL MCP `tools/call` against the session's own
+    /// `run_tools_endpoint` — the mock as a genuine client of the
     /// engine's per-run listener, over the wire. A fixture using this
     /// on a session the engine gave no endpoint is an authoring error
     /// and fails the session loudly, never silently skips.
@@ -159,8 +158,9 @@ pub struct MockEffect {
 }
 
 /// How the session's stream ends. `Crash` and `Hang` exist to exercise
-/// the engine's side of O2 and of interrupt/kill (T3.3) — a mock
-/// terminal `Completed`/`Failed` on its own can't test either.
+/// the engine's side of detecting a session that ends with no terminal
+/// event, and of interrupt/kill — a mock terminal `Completed`/`Failed`
+/// on its own can't test either.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MockOutcome {

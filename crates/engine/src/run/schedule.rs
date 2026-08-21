@@ -1,24 +1,23 @@
-//! The scheduler's decision function (T4.1 recorte) — pure.
+//! The scheduler's decision function — pure.
 //!
 //! `next_step` looks at the workflow and the event log and says what the
 //! run does next: execute a batch of independently-ready nodes (up to
 //! `max_parallel_nodes`), emit a re-route, pause, or finish. It performs
-//! no IO and holds no state of its own — the log is the state (I2), which
+//! no IO and holds no state of its own — the log is the state, which
 //! is what makes `yunta run` and `yunta resume` the same code path: both
 //! just keep asking "what's next" until the answer is terminal.
 //!
-//! Node states cover §3.2 in full since DI-03: `waiting` is derived (a
+//! Node states are covered in full: `waiting` is derived (a
 //! published gate, or unanswered questions — sections 0/0b below) and
-//! `skipped` is the render-side reading of a mode-excluded node (T9.1's
-//! filter here + `status`'s own display). `on_interrupt` (T4.5, D99)
-//! covers the Contrato's full triple since DI-23 — `resume_session`
-//! orphans re-Execute exactly like `restart_node` ones from this
-//! function's point of view; the *dispatch* path (`node_exec`) is what
-//! continues the recorded session instead of opening a new one.
-//! Concurrency is DAG-shaped fan-out only (independent nodes with no
-//! `depends_on` relation to each other); it does not cover `kind:
-//! parallel`'s named groups (T4.6) or a loop's own task `concurrency:`
-//! (T5.10), both separate mechanisms per §5.5/§5.8.
+//! `skipped` is the render-side reading of a mode-excluded node (the
+//! filter here + `status`'s own display). `on_interrupt` covers the
+//! Contrato's full triple — `resume_session` orphans re-Execute exactly
+//! like `restart_node` ones from this function's point of view; the
+//! *dispatch* path (`node_exec`) is what continues the recorded session
+//! instead of opening a new one. Concurrency is DAG-shaped fan-out only
+//! (independent nodes with no `depends_on` relation to each other); it
+//! does not cover `kind: parallel`'s named groups or a loop's own task
+//! `concurrency:`, both separate mechanisms.
 
 use std::collections::HashSet;
 
@@ -27,7 +26,7 @@ use yunta_core::{ModeInclude, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::replay::{derive, NodeState};
 
-/// The top-level node ids `mode_name` makes schedulable (§10.1/D44), or
+/// The top-level node ids `mode_name` makes schedulable, or
 /// `None` when nothing narrows the graph — no `modes:` declared at all,
 /// or the resolved mode's own `include: all`. A name with no matching
 /// entry in `modes:` never reaches this function — `create_run` already
@@ -41,10 +40,10 @@ pub fn mode_included_nodes(workflow: &Workflow, mode_name: &str) -> Option<HashS
 }
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
-/// order (§10.1/§10.2/D44) — the *only* direction promotion ever moves
-/// ("retroceder a un modo anterior en la declaración no existe"), and
-/// the smallest possible escalation past the current one, rather than
-/// jumping straight to whichever mode a human might name off-hand.
+/// order — the *only* direction promotion ever moves (going back to an
+/// earlier mode in the declaration doesn't exist), and the smallest
+/// possible escalation past the current one, rather than jumping
+/// straight to whichever mode a human might name off-hand.
 /// `None` when the workflow declares no modes, the current mode name
 /// isn't one of them (the `"default"` sentinel, or a stale/renamed
 /// mode), or it's already the last one declared — nothing to promote
@@ -75,21 +74,21 @@ pub enum ScheduleStep {
     Pause {
         reason: String,
     },
-    /// A node's re-routes are exhausted (§11.2) — the one pause this
+    /// A node's re-routes are exhausted — the one pause this
     /// recorte gives real options for, since "retry the same
     /// destination once more" and "abort" are both well-defined here
     /// (unlike a plain failure with no `on_failure` at all, which stays
     /// `Pause`). The imperative shell builds the actual
     /// `GateWaitingPayload` from these facts and asks `HumanInteraction`
-    /// (T7.2) — this function stays a pure read of the log, no I/O.
+    /// — this function stays a pure read of the log, no I/O.
     GateExhaustedReroutes {
         node: NodeId,
         goto: NodeId,
         max_reroutes: u32,
         cause: String,
     },
-    /// A `kind: gate` node is ready and has never been published (§5.6,
-    /// T7.7) — the imperative shell commits its declared artifacts,
+    /// A `kind: gate` node is ready and has never been published —
+    /// the imperative shell commits its declared artifacts,
     /// opens the PR (or degrades to console without a forge), and
     /// pauses. One at a time, same reasoning as `GateExhaustedReroutes`:
     /// publishing is I/O this pure function only decides is needed.
@@ -98,29 +97,29 @@ pub enum ScheduleStep {
     },
     /// A `kind: gate` node has already been published and isn't
     /// resolved yet (or its prior approval needs re-checking against
-    /// the PR's current head, T7.7's SHA-drift case) — the imperative
-    /// shell polls the forge and maps aprobado/cambios/cerrado/pendiente
-    /// (§5.6). `external_ref` is the forge's own handle, carried
+    /// the PR's current head — the SHA-drift case) — the imperative
+    /// shell polls the forge and maps approved/changes-requested/
+    /// closed/pending. `external_ref` is the forge's own handle, carried
     /// forward from this node's last `gate_waiting` event so the
     /// imperative shell never needs to re-derive it itself.
     PollGate {
         node: NodeId,
         external_ref: String,
     },
-    /// An internal gate (`external: None`, DI-04) is ready (or came
+    /// An internal gate (`external: None`) is ready (or came
     /// back after its chosen option's re-route completed): the
-    /// imperative shell builds the §5.3 object from `message`/`options`/
-    /// `on` and asks `HumanInteraction`. One at a time, same reasoning
-    /// as the other gate steps.
+    /// imperative shell builds the escalation object from
+    /// `message`/`options`/`on` and asks `HumanInteraction`. One at a
+    /// time, same reasoning as the other gate steps.
     ResolveInternalGate {
         node: NodeId,
     },
-    /// A non-gate node the log derives as waiting-on-questions
-    /// (§3.2/§4.1, DI-03): its `kind: questions` artifact has no
-    /// `questions_answered` yet. The imperative shell re-reads the
-    /// questions from the artifact and puts them to `HumanInteraction`
-    /// (`questions_exec`) — the ONE ask site for first run and resume
-    /// alike. One at a time, same reasoning as the gate steps.
+    /// A non-gate node the log derives as waiting-on-questions: its
+    /// `kind: questions` artifact has no `questions_answered` yet. The
+    /// imperative shell re-reads the questions from the artifact and
+    /// puts them to `HumanInteraction` (`questions_exec`) — the ONE ask
+    /// site for first run and resume alike. One at a time, same
+    /// reasoning as the gate steps.
     AskQuestions {
         node: NodeId,
     },
@@ -131,14 +130,14 @@ pub enum ScheduleStep {
 }
 
 /// Whether `node`'s `kind` is `gate` — the one kind whose "ready"/
-/// "orphaned" handling never goes through the generic `Execute` path
-/// (§5.6, T7.7): its resolution is a forge round-trip, not a session.
+/// "orphaned" handling never goes through the generic `Execute` path:
+/// its resolution is a forge round-trip, not a session.
 fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
 }
 
-/// Whether a gate node has an `external:` block (forge-published, T7.7)
-/// — decides which of the gate steps serves it (DI-04).
+/// Whether a gate node has an `external:` block (forge-published)
+/// — decides which of the gate steps serves it.
 fn is_external_gate(node: &Node) -> bool {
     matches!(
         &node.kind,
@@ -150,7 +149,7 @@ fn is_external_gate(node: &Node) -> bool {
 }
 
 /// Whether `node` declares a `kind: questions` artifact — what routes a
-/// `Waiting` non-gate node to `AskQuestions` (DI-03) instead of an
+/// `Waiting` non-gate node to `AskQuestions` instead of an
 /// orphan-style restart.
 fn declares_questions(node: &Node) -> bool {
     node.artifacts.as_ref().is_some_and(|artifacts| {
@@ -202,11 +201,11 @@ pub fn next_step(
         return ScheduleStep::Broken { diagnostic };
     }
 
-    // §10.1/D44: a node this run's mode excludes is never scheduled and
+    // A node this run's mode excludes is never scheduled and
     // never counted toward completion — `check`'s own `check_modes`
     // already guarantees no *included* node's `depends_on`/
     // `on_failure.goto` reaches outside the mode, but an excluded node's
-    // dependents (§10.1's own examples: `implement` depends_on the
+    // dependents (a mode's own examples: `implement` depends_on the
     // excluded `approve-plan` in "quick") still need their edge to it
     // treated as satisfied — a mode cuts deliberation, never blocks on
     // work it deliberately skipped.
@@ -222,17 +221,16 @@ pub fn next_step(
         })
     };
 
-    // DI-29: a node named only as an `on_failure.goto` or gate `on:`
-    // target — §11.2's own example is "un nodo fuera del camino
-    // principal, existente solo para esto" — declares no `depends_on`
-    // of its own on purpose. Left unfiltered, that empty list reads as
-    // trivially satisfied and the generic "fresh nodes" batch below
-    // schedules it exactly like a genuine independent root, regardless
-    // of whether anything ever actually failed or chose that gate
-    // option. Reachability for these nodes comes exclusively from the
-    // `Reroute`/gate-`on:` schedule steps (sections 2 and the gate-
-    // resolution paths above), so they're pulled out of the generic
-    // scan entirely.
+    // A node named only as an `on_failure.goto` or gate `on:`
+    // target — a node outside the main path, existing only for this —
+    // declares no `depends_on` of its own on purpose. Left unfiltered,
+    // that empty list reads as trivially satisfied and the generic
+    // "fresh nodes" batch below schedules it exactly like a genuine
+    // independent root, regardless of whether anything ever actually
+    // failed or chose that gate option. Reachability for these nodes
+    // comes exclusively from the `Reroute`/gate-`on:` schedule steps
+    // (sections 2 and the gate-resolution paths above), so they're
+    // pulled out of the generic scan entirely.
     //
     // A goto/`on:` target that's genuinely part of the main path stays
     // untouched — declaring no `depends_on` isn't itself the signal
@@ -269,7 +267,7 @@ pub fn next_step(
     };
 
     // A degenerate 0 would starve every ready node forever. `yunta
-    // check` refuses it up front since DI-18 (`MaxParallelNodesZero`);
+    // check` refuses it up front (`MaxParallelNodesZero`);
     // this clamp stays as defense in depth for a manifest frozen before
     // that rule existed — a stuck-looking run is worse than a
     // sequential one either way.
@@ -295,13 +293,13 @@ pub fn next_step(
     let history = history; // read-only from here
     let hist = |id: &NodeId| history.get(id).cloned().unwrap_or_default();
 
-    // 0. A `Running` gate node is never a crash orphan (§8.1's
-    //    `on_interrupt` is about session-crash uncertainty, which a gate
-    //    has none of — it isn't a session). It only reaches `Running`
-    //    via T7.7's own SHA-drift recheck (re-opening a stale approval,
-    //    the imperative shell's own doing, before this function ever
-    //    runs) — resolve it the same way as any other unresolved,
-    //    already-published gate: poll again.
+    // 0. A `Running` gate node is never a crash orphan (`on_interrupt`
+    //    is about session-crash uncertainty, which a gate has none of —
+    //    it isn't a session). It only reaches `Running` via the
+    //    SHA-drift recheck (re-opening a stale approval, the imperative
+    //    shell's own doing, before this function ever runs) — resolve
+    //    it the same way as any other unresolved, already-published
+    //    gate: poll again.
     if let Some(node) = nodes.iter().copied().find(|node| {
         is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
     }) {
@@ -313,7 +311,7 @@ pub fn next_step(
         }
     }
 
-    // 0b. Nodes the log derives as `waiting` (§3.2, DI-03) — a human's
+    // 0b. Nodes the log derives as `waiting` — a human's
     //     move next, one at a time: a published gate polls its forge, a
     //     node with declared questions asks them, and anything else
     //     Waiting (only reachable through a crash inside the tiny
@@ -350,11 +348,11 @@ pub fn next_step(
     }
 
     // 1. Every orphaned `running` node (crash/Ctrl-C with no terminal
-    //    event) is resolved per its own `on_interrupt` (§8.1, D99): a node
+    //    event) is resolved per its own `on_interrupt`: a node
     //    with no override inherits `default_on_interrupt`. Any orphan
     //    resolving to `fail_if_uncertain` pauses the whole resume rather
     //    than restarting even the `restart_node` orphans alongside it —
-    //    "never assume, never guess" (§8.1) applies to the batch as a
+    //    "never assume, never guess" applies to the batch as a
     //    whole, not node by node. Orphans that DO restart go together,
     //    already committed to running concurrently before the crash, so
     //    capacity doesn't retroactively apply to how many come back.
@@ -394,7 +392,7 @@ pub fn next_step(
         return ScheduleStep::Execute(orphans);
     }
 
-    // 2. Resolve failures one at a time (§11.2): re-route, hand control to
+    // 2. Resolve failures one at a time: re-route, hand control to
     //    a pending corrective node, return control to a corrected node, or
     //    pause. A failure this iteration leaves unresolved is picked up
     //    again on the next (the reroute/restart it emits changes the log,
@@ -445,9 +443,9 @@ pub fn next_step(
                     .is_some_and(|seq| seq > reroute_seq);
 
                 if corrective_finished_since {
-                    // §11.2: destination completed — the failed node
+                    // Destination completed — the failed node
                     // returns to ready and re-runs. A gate never goes
-                    // through Execute (DI-04): it re-asks (internal) or
+                    // through Execute: it re-asks (internal) or
                     // re-polls/republishes (external).
                     if is_gate(node) {
                         return if !is_external_gate(node) {
@@ -483,7 +481,7 @@ pub fn next_step(
     // 3. Fresh nodes whose dependencies are all finished, up to capacity.
     //    A ready `kind: gate` is never batched with ordinary nodes — its
     //    resolution is a forge round-trip, one at a time, same as
-    //    section 0/1's own gate handling (§5.6, T7.7).
+    //    section 0/1's own gate handling.
     for node in nodes.iter().copied() {
         if !is_gate(node) || state.nodes.contains_key(&node.id) {
             continue;
@@ -491,7 +489,7 @@ pub fn next_step(
         if is_reroute_only_target(&node.id) || !deps_satisfied(node) {
             continue;
         }
-        // A published gate carries `Waiting` state (DI-03) and is
+        // A published gate carries `Waiting` state and is
         // handled in section 0b — a stateless ready gate here is
         // always unpublished (external) or never-asked (internal).
         return if is_external_gate(node) {
@@ -514,7 +512,7 @@ pub fn next_step(
             continue; // finished, failed-and-handled-above, or a gate (handled above)
         }
         if is_reroute_only_target(&node.id) {
-            continue; // DI-29: only `Reroute`/gate-`on:` may start this node
+            continue; // only `Reroute`/gate-`on:` may start this node
         }
         if deps_satisfied(node) {
             batch.push((node.id.clone(), 1));
@@ -527,12 +525,13 @@ pub fn next_step(
     // 4. Nothing runnable: either everything finished, or something is
     //    stuck behind a failure this pass already chose to leave failed.
     //    Only nodes this mode actually includes count — an excluded node
-    //    never reaches any terminal state (§10.1: it's never scheduled at
+    //    never reaches any terminal state (it's never scheduled at
     //    all), so requiring it here would mean the run could never finish.
-    //    Same reasoning for DI-29: an untouched reroute-only target that
+    //    Same reasoning applies to an untouched reroute-only target that
     //    was simply never needed (its source never failed, or the gate
-    //    never chose its option) never reaches a terminal state either —
-    //    counting it here would make an ordinary green run un-finishable.
+    //    never chose its option): it never reaches a terminal state
+    //    either — counting it here would make an ordinary green run
+    //    un-finishable.
     let all_finished = nodes.iter().all(|node| {
         matches!(state.nodes.get(&node.id), Some(NodeState::Finished { .. }))
             || (is_reroute_only_target(&node.id) && !state.nodes.contains_key(&node.id))

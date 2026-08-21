@@ -1,13 +1,13 @@
-//! `yunta pack audit` (RFC-0002 §6, D71, T11.4): a full static inventory
+//! `yunta pack audit`: a full static inventory
 //! of everything a pack's own workflows would do — every `bash`/hook/
 //! loop-`until` command, every context source and what it points at,
 //! per-node permissions, required `agent:`, `mcp` servers a node's
 //! context reaches, executors marked as code, and each workflow's
 //! **full, untrimmed** prompt text (inline or read from its referenced
-//! file). Inventory, never verdict (D71): there is no pattern-matching
+//! file). Inventory, never verdict: there is no pattern-matching
 //! for "suspicious" natural-language content — that would be trivially
 //! evadible and would give false confidence. Nothing here runs
-//! anything; whether the pack's own tests pass (D89) is a separate,
+//! anything; whether the pack's own tests pass is a separate,
 //! IO-heavy step the CLI layer owns (it needs an adapter and a sandbox,
 //! neither of which this module touches).
 
@@ -123,7 +123,7 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
 
 /// A node's hooks with `node_defaults.hooks` filled in per phase — the
 /// same "own list replaces, empty inherits" rule the run-time
-/// `effective_hooks` applies (§11.1), reimplemented here in pure form:
+/// `effective_hooks` applies, reimplemented here in pure form:
 /// the run-time version takes a live `RunCtx`, which an audit — reading
 /// a pack directory that may not even be installed yet — has no reason
 /// to construct.

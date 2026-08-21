@@ -1,4 +1,4 @@
-//! §5.3's escalation object, built once and shared (M8/T8.1). Two
+//! The escalation object, built once and shared. Two
 //! constructors — one per gate shape this recorte covers — used by both
 //! the live pause path (`run/mod.rs`'s `GateExhaustedReroutes` arm and
 //! `gate_exec::resolve_internal_gate`, which await a `HumanInteraction`
@@ -12,7 +12,7 @@ use yunta_core::{Manifest, NodeId, NodeKind, RunId, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 
-/// §5.3's object for a node whose re-routes are exhausted (§11.2):
+/// The escalation object for a node whose re-routes are exhausted:
 /// retry once more, abort, or — when `modes:` has somewhere later to go
 /// — promote.
 pub(crate) fn build_reroute_escalation(
@@ -45,7 +45,7 @@ pub(crate) fn build_reroute_escalation(
             label: format!("Promote to mode `{next_mode}`"),
             tradeoff: format!(
                 "Closes this run (`run_finished: promoted`) and starts a successor in \
-                 `{next_mode}`, inheriting this run's artifacts; §10.2 — there's no \
+                 `{next_mode}`, inheriting this run's artifacts — there's no \
                  mechanism to demote back to `{mode_name}`"
             ),
         });
@@ -61,8 +61,8 @@ pub(crate) fn build_reroute_escalation(
     }
 }
 
-/// §5.3's object for an unresolved internal gate (`kind: gate`,
-/// `external: None`, DI-04): its declared options (default: a single
+/// The escalation object for an unresolved internal gate (`kind: gate`,
+/// `external: None`): its declared options (default: a single
 /// `approve`), each with a tradeoff derived from its own `on:` mapping,
 /// plus the engine's own `abort` unless the author already claimed
 /// that id.
@@ -109,7 +109,7 @@ pub(crate) fn build_internal_gate_escalation(
     }
 }
 
-/// M8/T8.1: reconstructs the §5.3 escalation object a paused run is
+/// Reconstructs the escalation object a paused run is
 /// currently waiting on, purely from the manifest and its own log — no
 /// live process required. This is what lets `resolve_gate` (a `yunta
 /// mcp` tool call, running in a process that never paused this run)
@@ -117,9 +117,9 @@ pub(crate) fn build_internal_gate_escalation(
 /// it again on the same log deterministically reaches the same
 /// `GateExhaustedReroutes`/`ResolveInternalGate` step the paused
 /// invocation saw — same inputs, same escalation, even though nothing
-/// was ever logged for the "no live surface" case (§5.3's "el que
-/// escala hace el trabajo de armar la decisión" is a computation, not a
-/// persisted fact, until a human actually answers).
+/// was ever logged for the "no live surface" case (the one who escalates
+/// does the work of building the decision — that's a computation, not
+/// a persisted fact, until a human actually answers).
 ///
 /// `None` covers every pause this function's two cases don't: a plain
 /// failure with no `on_failure`, a budget cap, a cancellation, an
@@ -202,8 +202,8 @@ fn current_step(manifest: &Manifest, events: &[Event]) -> Option<ScheduleStep> {
     }
 }
 
-/// DI-27: answers the escalation a paused run is currently waiting on
-/// by appending **only the decision** to its log — the §5.3 pair
+/// Answers the escalation a paused run is currently waiting on
+/// by appending **only the decision** to its log — the same pair
 /// (`gate_waiting`, so the object the human saw is auditable, plus
 /// `gate_resolved`). The *consequence* is never written here: the next
 /// engine to wake this run (the detached `yunta resume` the caller
@@ -270,8 +270,8 @@ pub fn resolve_gate(
     Ok(())
 }
 
-/// DI-27: the pre-seeded decision waiting for `node`, if one qualifies
-/// — pure over the log (I2). The latest `gate_resolved` for the node
+/// The pre-seeded decision waiting for `node`, if one qualifies
+/// — pure over the log. The latest `gate_resolved` for the node
 /// qualifies iff its seq is greater than the node's last
 /// `node_failed`/`node_rerouted`/`node_finished` **and** the run's last
 /// `run_paused`. That makes exactly the right pairs qualify: one

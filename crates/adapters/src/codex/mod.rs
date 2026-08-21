@@ -1,36 +1,35 @@
-//! The real `codex` adapter (T7.4, Spec Adapter §6): spawns `codex exec
-//! --json` headless, streams its JSONL into `AgentEvent`s (`parse.rs`),
-//! and maps yunta's portable request fields onto the CLI's own flags
-//! (`permissions.rs`). Never exercised by the automated suite (A8) —
-//! covered by `crates/adapters/tests/codex.rs` against a scripted fake
+//! The real `codex` adapter: spawns `codex exec --json` headless,
+//! streams its JSONL into `AgentEvent`s (`parse.rs`), and maps yunta's
+//! portable request fields onto the CLI's own flags (`permissions.rs`).
+//! Never exercised by the automated suite — no real LLM in CI — covered
+//! instead by `crates/adapters/tests/codex.rs` against a scripted fake
 //! binary, matching `claude_code`'s own testing shape exactly.
 //!
 //! **No live smoke test against the real binary — a documented gap, not
-//! a silent skip.** T7.3's own manual smoke test ran against `claude`,
-//! which is installed and authenticated in that sandbox. No `codex`
-//! binary exists here (`which codex` finds nothing) and no OpenAI
-//! credentials are configured — there is no way to run one from this
-//! environment. What the wire protocol looks like isn't a guess, though:
-//! `parse.rs`'s own doc comment cites the CLI's own source
-//! (`codex-rs/exec/src/exec_events.rs`, openai/codex) for every event
-//! and field shape this adapter reads, the same rigor T7.3 used for
-//! *its* CLI-specific mapping — the piece that's missing is only the
-//! live confirmation step T7.3 had (does the installed binary actually
-//! behave the way its own source says it should). See
-//! `docs/m0-status.md`'s T7.4 entry for what that means for the
-//! acceptance criterion.
+//! a silent skip.** The `claude_code` adapter's own manual smoke test
+//! ran against `claude`, which is installed and authenticated in that
+//! sandbox. No `codex` binary exists here (`which codex` finds nothing)
+//! and no OpenAI credentials are configured — there is no way to run one
+//! from this environment. What the wire protocol looks like isn't a
+//! guess, though: `parse.rs`'s own doc comment cites the CLI's own
+//! source (`codex-rs/exec/src/exec_events.rs`, openai/codex) for every
+//! event and field shape this adapter reads, the same rigor applied to
+//! `claude_code`'s own CLI-specific mapping — the piece that's missing
+//! is only live confirmation that the installed binary actually behaves
+//! the way its own source says it should.
 //!
 //! **`resume_session` is a fixed `true`, not literally "calculated in
-//! the constructor from `probe()`"** the way the Spec Adapter's own
+//! the constructor from `probe()`"** the way the adapter spec's own
 //! prose for `codex` reads. `Adapter::new` is synchronous and
-//! `capabilities()` (A2: constant post-construction) has no `&self`
-//! access to an async probe result — `claude_code` doesn't attempt this
-//! either, despite the same general framing applying to it too. `codex
-//! exec resume` is a documented, stable subcommand at the CLI version
-//! this was written against, so declaring the capability unconditionally
-//! is accurate today; version-gating it for real would need an async
-//! constructor threaded through `real_adapters()`, a bigger change than
-//! this one adapter justifies on its own.
+//! `capabilities()` — fixed at construction, with no I/O needed to
+//! report it — has no `&self` access to an async probe result —
+//! `claude_code` doesn't attempt this either, despite the same general
+//! framing applying to it too. `codex exec resume` is a documented,
+//! stable subcommand at the CLI version this was written against, so
+//! declaring the capability unconditionally is accurate today;
+//! version-gating it for real would need an async constructor threaded
+//! through `real_adapters()`, a bigger change than this one adapter
+//! justifies on its own.
 
 mod parse;
 mod permissions;
@@ -83,7 +82,7 @@ impl CodexAdapter {
         // Codex's own `thread.started` line never carries the model it
         // used (confirmed gap in the CLI — openai/codex#14736, still
         // open) — the request's own model is the only source `parse.rs`
-        // has for `SessionOpened.model`, matching what O1 requires.
+        // has for `SessionOpened.model`, which must always report one.
         let requested_model = req.model.clone().unwrap_or_else(|| "default".to_string());
         let args = self.build_args(&req, resume);
 
@@ -95,7 +94,7 @@ impl CodexAdapter {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // A4: the whole session's process tree must die together on
+        // The whole session's process tree must die together on
         // interrupt/kill — same reasoning as claude_code's own.
         #[cfg(unix)]
         {
@@ -128,7 +127,7 @@ impl CodexAdapter {
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            // §5.3-unrelated, purely a parsing need: `turn.completed`
+            // Purely a parsing need: `turn.completed`
             // carries no text of its own (`parse.rs`'s own doc comment)
             // — the last `agent_message` item seen is what becomes the
             // outcome summary when the turn closes.
@@ -179,23 +178,22 @@ impl Adapter for CodexAdapter {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
-            // `codex exec` has no skills mechanism to mount into (A6:
-            // never claim what isn't built) — the engine degrades with
-            // `capability_degraded` when a node declares skills here.
+            // `codex exec` has no skills mechanism to mount into — a
+            // capability must never claim more than is actually built —
+            // so the engine degrades with `capability_degraded` when a
+            // node declares skills here.
             skills: false,
-            // No live edit-hook blocking wired (A6: never claim what
-            // isn't built) — same honest gap as claude_code, same reason:
-            // the engine's own post-hoc scope check (T5.3) is the real
-            // boundary today.
+            // No live edit-hook blocking wired — same honest gap as
+            // claude_code, same reason: the engine's own post-hoc scope
+            // check is the real boundary today.
             edit_hooks: false,
             permission_profiles: true,
             // `codex exec` has no documented `--agent <name>` selector —
             // nothing here to map `agent:` onto, so declaring the
-            // capability would be A6's forbidden "claim what isn't
-            // built."
+            // capability would be claiming something that isn't built.
             custom_agents: false,
             usage_reporting: true,
-            // MCP per-run tools are M8.
+            // MCP per-run tools aren't wired yet.
             run_tools: false,
         }
     }
@@ -268,7 +266,7 @@ impl AgentSession for CodexSession {
     }
 }
 
-/// Sends `signal` to the whole process group (A4) — identical mechanism
+/// Sends `signal` to the whole process group — identical mechanism
 /// to `claude_code`'s own, see that module's doc comment for why the
 /// `--` before the negative pid is load-bearing.
 async fn signal_group(pid: u32, signal: &str) -> Result<()> {

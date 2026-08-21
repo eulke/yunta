@@ -1,4 +1,4 @@
-//! `kind: workflow` — composition as linked runs (§12, T9.3): each
+//! `kind: workflow` — composition as linked runs: each
 //! sub-workflow is a **complete run** (own run_id, manifest, log,
 //! run.dir), the parent records `child_run_created`/`child_run_finished`
 //! and treats the child's terminal state as the node's result, resume
@@ -329,8 +329,8 @@ sessions:
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    // §12: the children's Usage aggregates upward — each chain member's
-    // whole spend rides its own `child_run_finished.tokens` (DI-25), so
+    // The children's Usage aggregates upward — each chain member's
+    // whole spend rides its own `child_run_finished.tokens`, so
     // the parent's derived total (what `limits.max_tokens_per_run`
     // compares against) includes it exactly once. The node's own close
     // deliberately carries none — it would double-count.
@@ -390,8 +390,7 @@ nodes:
     let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new());
     // No interaction surface: the child's internal gate has nobody to
     // ask, so the child pauses waiting — and the parent pauses with it,
-    // exactly §12's "un run padre que pasa la mayor parte de su vida en
-    // waiting".
+    // since a parent run spends most of its life waiting on its children.
     let (terminal, _) = bench
         .execute(&run_id, &manifest, EMPTY_FIXTURE, &NoInteraction)
         .await;
@@ -445,7 +444,7 @@ nodes:
     );
 }
 
-// --- Historical reproducibility (T9.3's ✓ fixture) ---------------------------
+// --- Historical reproducibility ---------------------------
 
 #[tokio::test]
 async fn history_pins_the_child_manifest_and_never_re_resolves_the_name() {
@@ -486,7 +485,7 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     let (first_child, v1_hash) = bench.children_created(&first)[0].clone();
 
-    // The child workflow evolves between parent executions (§12: a long
+    // The child workflow evolves between parent executions (a long
     // process picks up improvements)...
     bench.recommit_catalog("evolving", CHILD_V2);
     let second = RunId::from("run-parent-v2");
@@ -519,7 +518,7 @@ nodes:
     assert_eq!(pinned.workflow.nodes[0], v1_workflow.nodes[0]);
 }
 
-// --- The composed reference workflow (T9.3's ✓ criterion) --------------------
+// --- The composed reference workflow --------------------
 
 struct ApproveEverything;
 
@@ -735,7 +734,7 @@ nodes:
     assert!(bench.children_created(&run_id).is_empty());
 }
 
-// --- DI-25: a promoted child chains into its successor -----------------------
+// --- a promoted child chains into its successor -----------------------
 
 struct AlwaysPromote;
 
@@ -851,7 +850,7 @@ nodes:
     assert!(successor_tree.join("shipped.txt").exists());
 }
 
-// --- DI-26/D108: cross-run artifact mounts -----------------------------------
+// --- cross-run artifact mounts -----------------------------------
 
 #[tokio::test]
 async fn mounts_copy_parent_and_sibling_artifacts_into_the_child_at_birth() {
@@ -898,7 +897,7 @@ nodes:
     let run_id = RunId::from("run-mounts");
     let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new());
 
-    // D108: each mount implies depends_on — visible in the frozen graph.
+    // Each mount implies depends_on — visible in the frozen graph.
     let cons = manifest
         .workflow
         .nodes

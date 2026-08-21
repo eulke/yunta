@@ -1,11 +1,11 @@
-//! `requires:` validated against the installer's own merged config
-//! (RFC-0002 §3, T11.6) — the mirror image of `declares` (T11.5):
+//! `requires:` validated against the installer's own merged config —
+//! the mirror image of `declares`:
 //! `declares` is a ceiling the pack promises never to exceed, `requires`
 //! is a floor the *installer's* config must clear before the pack can
 //! actually run anywhere. Pure comparison only: whether a role name
 //! resolves to at least one candidate, whether an `mcp_servers:` name
 //! is defined — no adapter probing (`check` doesn't do that for a
-//! workflow's own `runner:` either, T1.3's own recorte) and no PATH
+//! workflow's own `runner:` either) and no PATH
 //! lookup for `requires.commands` (that needs real filesystem access,
 //! `yunta doctor`'s job, not this pure function's).
 

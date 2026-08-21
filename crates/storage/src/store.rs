@@ -7,13 +7,13 @@ use yunta_core::{NodeId, RunId};
 
 use crate::error::{Result, StorageError};
 
-/// T2.1's migration, embedded in the binary rather than shipped as a file
-/// — the whole schema is one append-only table, so there is nothing a
-/// migration runner would buy over `CREATE TABLE IF NOT EXISTS` today.
-/// `event_hash` (T2.5, I26) is nullable at the SQL level only so the
-/// `ALTER TABLE` migration below can add it to pre-T2.5 databases —
-/// every append since writes it, and `verify_chain` reports a NULL as a
-/// break, never skips it.
+/// The schema migration, embedded in the binary rather than shipped as a
+/// file — the whole schema is one append-only table, so there is nothing
+/// a migration runner would buy over `CREATE TABLE IF NOT EXISTS` today.
+/// `event_hash` is nullable at the SQL level only so the `ALTER TABLE`
+/// migration below can add it to databases created before the hash chain
+/// existed — every append since writes it, and `verify_chain` reports a
+/// NULL as a break, never skips it.
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS events (
     run_id TEXT NOT NULL,
@@ -28,9 +28,8 @@ CREATE TABLE IF NOT EXISTS events (
 );
 ";
 
-/// `yunta verify` / receipt-time integrity (T2.5, I26,
-/// `docs/eventos.md` §3): the chain covers integrity and order, never
-/// authenticity.
+/// `yunta verify` / receipt-time integrity: the chain covers integrity
+/// and order, never authenticity.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChainVerification {
     Intact {
@@ -56,7 +55,7 @@ type StoredRow = (
     Option<String>,
 );
 
-/// One event's chain hash (`docs/eventos.md` §3): SHA-256 over the
+/// One event's chain hash: SHA-256 over the
 /// previous hash followed by the structural fields in the schema's own
 /// fixed order, each length-prefixed (`len:bytes;`) so no field boundary
 /// is ambiguous — computed over the bytes exactly as persisted, before
@@ -96,14 +95,14 @@ fn chain_hash(fields: ChainHashFields) -> String {
 }
 
 /// Genesis: `H0 = SHA-256(manifest_hash)` — deterministic, unique per
-/// run, no arbitrary constant (`docs/eventos.md` §3).
+/// run, no arbitrary constant.
 fn genesis_hash(manifest_hash: &str) -> String {
     yunta_core::sha256_hex(manifest_hash.as_bytes())
 }
 
-/// The event log (Contrato §3; D53 — SQLite is the only backend, and
-/// nothing about it leaks past this interface: every method takes and
-/// returns `yunta_core` types, never rusqlite's).
+/// The event log. SQLite is the only backend, and nothing about it leaks
+/// past this interface: every method takes and returns `yunta_core`
+/// types, never rusqlite's.
 ///
 /// A single mutex-guarded connection serializes writes at the Rust level;
 /// WAL mode (set in [`Storage::open`]) is what lets readers proceed
@@ -137,12 +136,12 @@ impl Storage {
         let conn = Connection::open(path).map_err(open_err)?;
         // WAL admits exactly one writer at a time; a second handle onto
         // the same database (a status/follower reader, a per-session
-        // run-tools listener, T8.2) must wait for a busy writer instead
-        // of surfacing SQLITE_BUSY as a spurious append failure. Writes
+        // run-tools listener) must wait for a busy writer instead of
+        // surfacing SQLITE_BUSY as a spurious append failure. Writes
         // here are all sub-millisecond appends — 5s of patience means
         // something is truly wedged, not busy. Set before the journal
         // pragma so even that first statement waits rather than fails
-        // when another connection happens to be mid-write (DI-30).
+        // when another connection happens to be mid-write.
         // Note the timeout alone is NOT enough for `append_event` — see
         // the BEGIN IMMEDIATE note there.
         conn.busy_timeout(std::time::Duration::from_secs(5))
@@ -151,10 +150,10 @@ impl Storage {
             .map_err(open_err)?;
         conn.execute_batch(SCHEMA_V1).map_err(open_err)?;
 
-        // T2.5 migration: a database created before the chain existed
-        // has the table but not the column — added here once, with old
-        // rows left NULL (visible to `verify_chain` as a break, never
-        // silently backfilled with hashes nothing ever wrote).
+        // A database created before the chain existed has the table but
+        // not the column — added here once, with old rows left NULL
+        // (visible to `verify_chain` as a break, never silently
+        // backfilled with hashes nothing ever wrote).
         let has_hash_column = conn
             .prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'event_hash'")
             .and_then(|mut stmt| stmt.exists([]))
@@ -172,8 +171,8 @@ impl Storage {
 
     /// A second, independent handle onto the same database — what a
     /// concurrent reader/writer with a `'static` life of its own (the
-    /// per-session run-tools listener, T8.2; the CLI's `--follow`
-    /// poller already does this by path from outside) opens instead of
+    /// per-session run-tools listener; the CLI's `--follow` poller
+    /// already does this by path from outside) opens instead of
     /// sharing this handle's connection. WAL + the busy timeout above
     /// are what make the concurrency safe; `seq` assignment stays
     /// correct because [`Storage::append_event`] computes it inside its
@@ -183,7 +182,7 @@ impl Storage {
     }
 
     /// Appends one event, assigning the next `seq` for its `run_id`
-    /// (append-only per I2 — nothing here ever updates or deletes a row).
+    /// (append-only — nothing here ever updates or deletes a row).
     /// Returns the assigned `seq`.
     pub fn append_event(&self, event: &Event) -> Result<u64> {
         let append_err = |source| StorageError::Append {
@@ -192,12 +191,12 @@ impl Storage {
         };
 
         let mut conn = lock(&self.conn);
-        // BEGIN IMMEDIATE, not deferred (DI-30): this transaction reads
+        // BEGIN IMMEDIATE, not deferred: this transaction reads
         // (`MAX(seq)`, the previous hash) before it writes, and a
         // deferred read→write upgrade against a concurrently-busy writer
-        // (another connection — the per-session run-tools listener,
-        // T8.2) returns SQLITE_BUSY *immediately*: SQLite refuses to
-        // invoke the busy handler on an upgrade, since waiting there can
+        // (another connection — the per-session run-tools listener)
+        // returns SQLITE_BUSY *immediately*: SQLite refuses to invoke
+        // the busy handler on an upgrade, since waiting there can
         // deadlock, so the connection's `busy_timeout` never applies.
         // Taking the write lock up front puts the wait where the busy
         // handler does work, and holds the lock across the read+insert —
@@ -220,8 +219,8 @@ impl Storage {
                 source,
             })?;
 
-        // T2.5/I26: the chain hash, computed inside the same transaction
-        // that assigns `seq` — the previous event's stored hash (or the
+        // The chain hash, computed inside the same transaction that
+        // assigns `seq` — the previous event's stored hash (or the
         // manifest-derived genesis for the run's first event) anchors it.
         let prev_hash = if seq == 1 {
             let EventPayload::RunCreated(created) = &event.payload else {
@@ -237,9 +236,10 @@ impl Storage {
                 |row| row.get::<_, Option<String>>(0),
             )
             .map_err(append_err)?
-            // A NULL here means the run predates T2.5 — its chain is
-            // already unverifiable; anchoring on the empty string keeps
-            // the append working while `verify_chain` reports the truth.
+            // A NULL here means the run predates the hash chain — its
+            // chain is already unverifiable; anchoring on the empty
+            // string keeps the append working while `verify_chain`
+            // reports the truth.
             .unwrap_or_default()
         };
 
@@ -278,9 +278,9 @@ impl Storage {
     }
 
     /// Walks the run's whole chain recomputing every hash from the bytes
-    /// as persisted (T2.5, I26): an altered payload, a deleted, inserted
-    /// or reordered event, an altered stored hash, or a missing one all
-    /// surface as [`ChainVerification::Broken`] naming the exact seq.
+    /// as persisted: an altered payload, a deleted, inserted or reordered
+    /// event, an altered stored hash, or a missing one all surface as
+    /// [`ChainVerification::Broken`] naming the exact seq.
     /// Runs automatically at receipt time and on demand via
     /// `yunta verify <run_id>`.
     pub fn verify_chain(&self, run_id: &RunId) -> Result<ChainVerification> {
@@ -394,7 +394,7 @@ impl Storage {
     }
 
     /// All events for a run, ordered by `seq` ascending — the order
-    /// replay (T2.3) depends on.
+    /// replay depends on.
     pub fn events_for_run(&self, run_id: &RunId) -> Result<Vec<Event>> {
         let read_err = |source| StorageError::Read {
             run_id: run_id.clone(),
@@ -450,8 +450,8 @@ impl Storage {
         Ok(events)
     }
 
-    /// DI-14/§8.3: deletes every row for `run_id` — the database side
-    /// of `storage.retention_days`. The one deliberate exception to the
+    /// Deletes every row for `run_id` — the database side of
+    /// `storage.retention_days`. The one deliberate exception to the
     /// append-only discipline, and the *caller* (`yunta gc`) owns the
     /// safety rule: rows die only after the run.dir (whose exported
     /// `events.jsonl` is the self-contained copy) is already gone — the
@@ -472,7 +472,7 @@ impl Storage {
     }
 
     /// Every distinct `run_id` with at least one event, for `yunta run
-    /// --runs` (T7.1) to enumerate.
+    /// --runs` to enumerate.
     pub fn list_run_ids(&self) -> Result<Vec<RunId>> {
         let conn = lock(&self.conn);
         let mut stmt = conn

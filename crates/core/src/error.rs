@@ -5,15 +5,14 @@ use thiserror::Error;
 /// or `expect()` outside tests).
 #[derive(Debug, Error)]
 pub enum YuntaError {
-    /// An adapter was asked for a capability it never declared (Spec
-    /// Adapter §4/§7, A2/A6): the engine fails typed instead of
-    /// emulating or degrading in silence.
+    /// An adapter was asked for a capability it never declared: the
+    /// engine fails typed instead of emulating or degrading in silence.
     #[error("adapter `{adapter}` does not support `{what}`")]
     Unsupported { adapter: String, what: &'static str },
 
     /// An adapter operation failed at the I/O boundary — e.g. `mock`
-    /// (T3.2) applying a fixture's filesystem effects, or a real adapter
-    /// (T7.3) failing to spawn its CLI subprocess.
+    /// applying a fixture's filesystem effects, or a real adapter
+    /// failing to spawn its CLI subprocess.
     #[error("adapter `{adapter}` failed to {action}")]
     AdapterIo {
         adapter: String,

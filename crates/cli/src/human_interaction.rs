@@ -1,11 +1,11 @@
-//! `ConsoleInteraction` (T7.2, §5.3) — the TTY implementation of
+//! `ConsoleInteraction` — the TTY implementation of
 //! `yunta_engine::HumanInteraction`. Renders the escalation object
 //! exactly as the engine built it (summary, mechanical evidence,
 //! options with their mandatory tradeoff) and reads a decision from
 //! stdin. Never auto-decides: on a non-interactive stdin (piped, no
 //! TTY, redirected from `/dev/null`) it reports "can't interact"
 //! (`None`) rather than guessing, and the caller degrades to pausing —
-//! the same rule `kind: questions` already applies (§4.1).
+//! the same rule `kind: questions` already applies.
 
 use std::io::{IsTerminal, Write};
 
@@ -89,8 +89,8 @@ impl HumanInteraction for ConsoleInteraction {
         })
     }
 
-    /// §4.1/D86 (DI-02): question by question over the TTY, honoring
-    /// each `answer_type` at input time (the engine re-validates the
+    /// Question by question over the TTY, honoring each `answer_type`
+    /// at input time (the engine re-validates the
     /// whole reply anyway — the surface's checks are UX, the engine's
     /// are the verdict). A non-required question accepts an empty line
     /// as "no answer"; a required one re-asks.

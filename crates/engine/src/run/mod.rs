@@ -1,24 +1,23 @@
-//! Run creation and execution (T4.1/T4.5 recorte, Contrato §2/§8.1).
+//! Run creation and execution.
 //!
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
 //! `run_created`); `execute_run` drives the run forward and is also
 //! `yunta resume` — it replays the log, asks [`schedule::next_action`]
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
-//! happened; everything else re-runs (§8.1, `restart_node`).
+//! happened; everything else re-runs (`restart_node`).
 //!
-//! **`events.jsonl` export (§8.3, T5.8)**: the Contrato says only "al
-//! cierre" without enumerating which terminal states count — a real gap,
-//! documented in `docs/m0-status.md`'s T5.8 entry rather than guessed
-//! silently. This recorte exports on every terminal `RunReport` the
-//! schedule loop already recognizes — `Finish` and `Pause` alike, via
-//! [`RunCtx::export_events_jsonl`] — unconditionally, independent of
-//! whether the workflow declares `on_finish:` at all (D20/§8.3's own
-//! phrasing reads as two actions conjoined at close, not one gated on the
-//! other). Since DI-21 the `ScheduleStep::Broken` path exports too,
+//! **`events.jsonl` export**: the Contrato says only "at close" without
+//! enumerating which terminal states count — a real gap, documented
+//! rather than guessed silently. This recorte exports on every terminal
+//! `RunReport` the schedule loop already recognizes — `Finish` and
+//! `Pause` alike, via [`RunCtx::export_events_jsonl`] — unconditionally,
+//! independent of whether the workflow declares `on_finish:` at all (the
+//! Contrato's phrasing reads as two actions conjoined at close, not one
+//! gated on the other). The `ScheduleStep::Broken` path exports too,
 //! best-effort before its `Err` — a corrupt log is exactly the one a
-//! forensic reader most wants on disk. `on_finish.distill` is DI-24's deterministic
-//! transform (ADR D107) — see `distill.rs`; the close sequence is
+//! forensic reader most wants on disk. `on_finish.distill` is a
+//! deterministic transform — see `distill.rs`; the close sequence is
 //! distill → `run_finished` → export → cleanup.
 
 mod budget;
@@ -71,7 +70,7 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
-    /// §10.1/D44: `create_run`'s own guard — `check` validates every
+    /// `create_run`'s own guard — `check` validates every
     /// mode's *internal* coherence, but never sees which one a run
     /// actually asks for, so this is where an unknown `--mode` name is
     /// caught, before anything is written.
@@ -130,40 +129,41 @@ pub(crate) struct RunCtx<'a> {
     pub storage: &'a Storage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
-    /// Criteria memoization (§5.4, T5.9) — one cache per `execute_run`
+    /// Criteria memoization — one cache per `execute_run`
     /// call, never persisted: a resume simply starts cold, which is safe
     /// (over-verifying) rather than risking a stale cross-run hit.
     pub memo: Memo,
-    /// The one surface every §5.3 escalation goes through (T7.2, DI-01):
+    /// The one surface every escalation goes through:
     /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
     /// so the deep execution paths (loop_exec) reach it without threading
     /// one more parameter through every layer.
     pub human_interaction: &'a dyn HumanInteraction,
-    /// §8.3/DI-05: a human's `continue` past the token cap, held for
+    /// A human's `continue` past the token cap, held for
     /// this invocation only — in memory, never derived from the log, so
     /// every resume asks again before spending new money. Atomic because
     /// concurrent batch members read it while the scheduler loop writes.
     pub budget_lifted: std::sync::atomic::AtomicBool,
-    /// DI-08: `run.dir/scratch/engine.json`, so a separate process can
+    /// `run.dir/scratch/engine.json`, so a separate process can
     /// find this run's live process tree. `None` when the file could not
-    /// be written — the run proceeds, degraded loudly (A4's external
-    /// paths lose their map, the internal ones never needed it).
+    /// be written — the run proceeds, degraded loudly (an external
+    /// cancellation loses its map to this run's processes; internal
+    /// paths never needed it).
     pub process_registry: Option<crate::process_registry::ProcessRegistry>,
-    /// DI-08/DI-11: the invocation's root cancellation (Ctrl-C, `yunta
+    /// The invocation's root cancellation (Ctrl-C, `yunta
     /// cancel`). Execution paths consult it to tell a user cancellation
     /// (leave the node orphaned — resume re-treats it per
-    /// `on_interrupt`, §8.1) apart from a `join: any` sibling race
+    /// `on_interrupt`) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
-    /// T9.3: the forge this invocation was given — on the ctx so a
+    /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
     /// own gates are as real as the parent's).
     pub forge: Option<&'a dyn Forge>,
-    /// T9.3: how many `kind: workflow` levels above this run (0 = the
+    /// How many `kind: workflow` levels above this run (0 = the
     /// root invocation) — compared against
     /// `limits.max_workflow_depth` before a child is born.
     pub depth: u32,
-    /// T8.2: the per-run MCP host every session listener of this run
+    /// The per-run MCP host every session listener of this run
     /// shares (its own reopened storage handle — listeners outlive any
     /// borrow of ours). `None` when the reopen failed at run start:
     /// sessions run without an endpoint, degraded loudly where a node
@@ -192,13 +192,13 @@ impl RunCtx<'_> {
         Ok(self.storage.events_for_run(self.run_id)?)
     }
 
-    /// Exports the run's whole log to `run.dir/events.jsonl` (§8.3, T5.8)
-    /// — called at every close this recorte recognizes (`Finish` and
-    /// `Pause`; see this module's own doc comment on the trigger
-    /// decision). Re-exports in full each time, same "regenerate from the
-    /// log" principle `progress.md` (T5.5) already follows — a run that
-    /// pauses, resumes, and later finishes just gets the file rewritten
-    /// with the fuller log, never appended to.
+    /// Exports the run's whole log to `run.dir/events.jsonl` — called
+    /// at every close this recorte recognizes (`Finish` and `Pause`; see
+    /// this module's own doc comment on the trigger decision). Re-exports
+    /// in full each time, same "regenerate from the log" principle
+    /// `progress.md` already follows — a run that pauses, resumes, and
+    /// later finishes just gets the file rewritten with the fuller log,
+    /// never appended to.
     pub(crate) fn export_events_jsonl(&self) -> Result<(), RunError> {
         let events = self.load_events()?;
         let jsonl = crate::events_export::render_events_jsonl(&events)?;
@@ -208,15 +208,16 @@ impl RunCtx<'_> {
         })
     }
 
-    /// The [`Budget`] for one agent session (§8.3/T3.3, DI-05): an equal
+    /// The [`Budget`] for one agent session: an equal
     /// share of the remaining run cap
     /// ([`budget::session_token_budget`]'s policy). Unlimited — exactly
     /// the pre-limits behavior — when no cap is declared, or when a
     /// human already answered `continue` this invocation (their lift
     /// must not resurface as a zero-token session budget). `timeout`
-    /// stays `None`: `defaults.timeout_minutes` is outside T1.2's cut.
+    /// stays `None`: `defaults.timeout_minutes` is resolved separately,
+    /// outside this function's scope.
     pub(crate) fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
-        // `defaults.timeout_minutes` (DI-13) applies on every path —
+        // `defaults.timeout_minutes` applies on every path —
         // the wall clock is orthogonal to the token cap and to a
         // human's `continue`.
         let timeout = self.manifest.config.resolved_session_timeout();
@@ -265,7 +266,7 @@ impl RunCtx<'_> {
     }
 
     /// The opaque `adapter_settings` the config declares for `adapter`
-    /// (DI-13) — passed through to the request untouched.
+    /// — passed through to the request untouched.
     pub(crate) fn adapter_settings(
         &self,
         adapter: &str,
@@ -280,7 +281,7 @@ impl RunCtx<'_> {
     }
 }
 
-/// DI-09: `RunCtx` is the one real [`SessionObserver`] — audit events
+/// `RunCtx` is the one real [`SessionObserver`] — audit events
 /// land in the run's own log as they arrive, so a concurrent `status`
 /// sees the live session. A failed append warns instead of aborting the
 /// stream: the run's next mandatory event hits the same storage and
@@ -305,10 +306,10 @@ pub enum RunTerminal {
     Paused {
         reason: String,
     },
-    /// §10.2/D22: this run's own gate accepted promotion — `run_finished`
+    /// This run's own gate accepted promotion — `run_finished`
     /// (`terminal_state: Promoted`) is already on *this* log, closing it
-    /// for good (I3: nothing reopens a finished run, same guarantee
-    /// T7.7's own SHA-drift recheck leans on). Creating and starting the
+    /// for good (nothing reopens a finished run, the same guarantee the
+    /// SHA-drift recheck leans on). Creating and starting the
     /// successor — a fresh run, its own `run_id`, in `suggested_mode`,
     /// `promoted_from` this one — is the caller's job: it needs the
     /// original repo checkout (`cwd`) to prepare a worktree, which
@@ -324,7 +325,7 @@ pub struct RunReport {
     pub state: RunState,
 }
 
-/// What [`create_run`] freezes (DI-19): the run's identity and its
+/// What [`create_run`] freezes: the run's identity and its
 /// declared birth facts, bundled — `storage`/`clock` stay separate
 /// arguments because they are the caller's *infrastructure*, not this
 /// run's data.
@@ -332,24 +333,24 @@ pub struct CreateRunParams<'a> {
     pub run_id: &'a RunId,
     pub manifest: &'a Manifest,
     pub runs_root: &'a Path,
-    /// §10.1/D44 — frozen into `run_created.mode` and never re-resolved.
+    /// Frozen into `run_created.mode` and never re-resolved.
     pub mode: &'a str,
-    /// §10.2/D22 — the predecessor this run inherits from, if any.
+    /// The predecessor this run inherits from, if any.
     pub promoted_from: Option<&'a RunId>,
 }
 
-/// Creates the run's anatomy (§2): run.dir with `artifacts/` and
+/// Creates the run's anatomy: run.dir with `artifacts/` and
 /// `scratch/`, the frozen `manifest.yaml`, and the `run_created` event.
 /// Returns the run directory.
 ///
-/// `mode` (§10.1/D44) is frozen into `run_created.mode` right here and
+/// `mode` is frozen into `run_created.mode` right here and
 /// never re-resolved again — a resume reads the same name back off the
 /// log. `"default"` — the caller's choice when nothing else applies,
-/// same sentinel `events::run_mode` falls back to for a pre-T9.1 log —
-/// always passes: a workflow declaring no `modes:` at all has nothing
-/// to validate a name against, and every node stays schedulable,
-/// exactly pre-T9.1 behavior. A workflow that *does* declare `modes:`
-/// rejects any other unrecognized name.
+/// same sentinel `events::run_mode` falls back to for a log with no
+/// mode recorded — always passes: a workflow declaring no `modes:` at
+/// all has nothing to validate a name against, and every node stays
+/// schedulable, exactly the behavior before modes existed. A workflow
+/// that *does* declare `modes:` rejects any other unrecognized name.
 pub fn create_run(
     params: CreateRunParams<'_>,
     storage: &Storage,
@@ -411,12 +412,12 @@ pub fn create_run(
         node_id: None,
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
-            inputs: HashMap::new(), // `inputs:` schema is T1.5, out of M-0
+            inputs: HashMap::new(), // `inputs:` schema isn't designed yet
             mode: mode.to_string(),
             promoted_from: promoted_from.cloned(),
-            // §2.1/DI-13: resolved once here — declared range as
+            // Resolved once here — declared range as
             // written, or the binary's own schema when absent (the
-            // reference text's "se infiere del binario").
+            // reference text's "inferred from the binary").
             yunta_schema: Some(
                 manifest
                     .workflow
@@ -454,15 +455,15 @@ pub struct RunEnv<'a> {
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and
 /// `yunta resume` with the same function is the point: the log decides
-/// what remains, never in-process state (I2).
+/// what remains, never in-process state.
 pub async fn execute_run(env: RunEnv<'_>) -> Result<RunReport, RunError> {
     execute_run_at_depth(env, 0).await
 }
 
-/// [`execute_run`] with an explicit composition depth (T9.3):
+/// [`execute_run`] with an explicit composition depth:
 /// `workflow_exec` re-enters here for each child run, one level deeper —
-/// the recursion the Contrato's "resume del padre retoma hijos
-/// huérfanos recursivamente" (§12) is made of.
+/// the recursion the Contrato's "a parent's resume recursively resumes
+/// orphaned children" is made of.
 pub(crate) async fn execute_run_at_depth(
     env: RunEnv<'_>,
     depth: u32,
@@ -480,9 +481,9 @@ pub(crate) async fn execute_run_at_depth(
         forge,
         cancel,
     } = env;
-    // DI-08: the root of every per-node token this invocation hands out.
+    // The root of every per-node token this invocation hands out.
     // `None` (tests, callers with no signal source) gets a token nothing
-    // ever fires — the pre-DI-08 behavior exactly.
+    // ever fires.
     let root_cancel = cancel.cloned().unwrap_or_default();
     let root_cancel_for_ctx = root_cancel.clone();
     let ctx = RunCtx {
@@ -511,7 +512,7 @@ pub(crate) async fn execute_run_at_depth(
         root_cancel: root_cancel_for_ctx,
         forge,
         depth,
-        // T8.2: one host per execute_run invocation; every session
+        // One host per execute_run invocation; every session
         // listener reopens nothing — they share this handle's clone of
         // the storage connection path. A failed reopen degrades here,
         // once, loudly; nodes that *need* the endpoint (a blackboard
@@ -552,7 +553,7 @@ pub(crate) async fn execute_run_at_depth(
     }
     if events.len() > 1 {
         // Anything beyond run_created means a previous invocation worked
-        // on this run — this one is a resume (§8.1).
+        // on this run — this one is a resume.
         ctx.emit(
             None,
             EventPayload::RunResumed(RunResumedPayload {
@@ -561,26 +562,26 @@ pub(crate) async fn execute_run_at_depth(
         )?;
     }
 
-    // §5.6/T7.7: "al despertar" means once per invocation, not once per
+    // "On wake" means once per invocation, not once per
     // scheduling iteration — checked here, before the loop, so both the
     // very first `yunta run` call and every later `yunta resume` do this
     // exactly once. Placed *after* the "already `run_finished`" early
     // return above, deliberately: a genuinely finished run is immutable
-    // (I2/§2 — nothing reopens it, ever), so a stale approval only
+    // — nothing reopens it, ever — so a stale approval only
     // matters, and is only ever rechecked, while the run still has
     // unresolved work of its own keeping it open.
     gate_exec::recheck_approved_gates(&ctx, forge).await?;
 
-    // §10.1/D44: the mode is frozen once, in `run_created` (`events[0]`
+    // The mode is frozen once, in `run_created` (`events[0]`
     // — never absent, checked above), and never re-resolved — a resume
     // reads the same name back off the log rather than re-deriving it,
     // same "resolved once, reused forever" discipline runner resolution
-    // already follows (§13.1).
+    // already follows.
     let mode_name = yunta_core::events::run_mode(&events).to_string();
     let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
 
     loop {
-        // DI-08: a Ctrl-C (or any root cancellation) between scheduler
+        // A Ctrl-C (or any root cancellation) between scheduler
         // steps pauses here; one that lands mid-batch is honored by the
         // per-node child tokens below, whose failed nodes land in the
         // log first and then reach this same check.
@@ -608,7 +609,7 @@ pub(crate) async fn execute_run_at_depth(
             mode_nodes.as_ref(),
         ) {
             ScheduleStep::Broken { diagnostic } => {
-                // DI-21: a corrupt log is exactly the one you most want
+                // A corrupt log is exactly the one you most want
                 // exported — each event serializes on its own, so a
                 // broken *sequence* doesn't stop the forensic copy.
                 // Best-effort by design: if the export itself fails, the
@@ -623,8 +624,8 @@ pub(crate) async fn execute_run_at_depth(
                 return Err(RunError::Broken { diagnostic });
             }
             ScheduleStep::Finish => {
-                // §8.3/DI-24: distill before `run_finished` — nothing is
-                // emitted after the close event (I3), and its findings
+                // Distill before `run_finished` — nothing is
+                // emitted after the close event, and its findings
                 // are events.
                 distill::run_distill(&ctx, &mode_name).await?;
                 let state = derive(&ctx.load_events()?);
@@ -639,7 +640,7 @@ pub(crate) async fn execute_run_at_depth(
                     }),
                 )?;
                 ctx.export_events_jsonl()?;
-                // §8.3/DI-13: `on_finish.cleanup: worktree` — after the
+                // `on_finish.cleanup: worktree` — after the
                 // export, only at a real Finish (a paused run expects a
                 // resume in that tree; a promoted one seeds its
                 // successor's worktree from it). A cleanup failure warns
@@ -713,10 +714,10 @@ pub(crate) async fn execute_run_at_depth(
                 max_reroutes,
                 cause,
             } => {
-                // T7.2/§5.3: the engine assembles the escalation (summary
+                // The engine assembles the escalation (summary
                 // + mechanical evidence from the log) — never the node
                 // that failed, which has no further say once it's
-                // failed. Shared with `current_escalation` (M8/T8.1) so
+                // failed. Shared with `current_escalation` so
                 // a `resolve_gate` MCP call, running in a process that
                 // never paused this run, reconstructs the identical
                 // object instead of a second copy that could drift.
@@ -729,10 +730,10 @@ pub(crate) async fn execute_run_at_depth(
                     max_reroutes,
                     &cause,
                 );
-                // DI-27: a decision `resolve_gate` pre-seeded onto the
+                // A decision `resolve_gate` pre-seeded onto the
                 // log while this run was parked is consumed here, by
                 // this same consequence code — never re-asked, and its
-                // §5.3 pair is already recorded so it is never
+                // escalation pair is already recorded so it is never
                 // re-emitted. The option is re-validated against the
                 // re-derived menu: a mismatch means ask normally.
                 let pre_seeded = escalation::pre_seeded_resolution(&events, &node).filter(|r| {
@@ -747,9 +748,8 @@ pub(crate) async fn execute_run_at_depth(
                 };
                 let Some(resolution) = resolution else {
                     // No live surface to ask (headless, no TTY, `yunta
-                    // test`) — the pre-T7.2 behavior: pause and let a
-                    // later `yunta resume` (or a future MCP client)
-                    // carry the decision instead.
+                    // test`): pause and let a later `yunta resume` (or a
+                    // future MCP client) carry the decision instead.
                     ctx.emit(
                         None,
                         EventPayload::RunPaused(RunPausedPayload {
@@ -792,14 +792,15 @@ pub(crate) async fn execute_run_at_depth(
                             suggested_mode: next_mode.clone(),
                         }),
                     )?;
-                    // §8.3/DI-24: a promotion is a real close — the
+                    // A promotion is a real close — the
                     // short attempt's knowledge is knowledge, and the
                     // successor inherits it through the repo layer.
                     distill::run_distill(&ctx, &mode_name).await?;
-                    // DI-10/§10.2: findings without an artifact (D80
-                    // denials) live only on this log — derive them into
-                    // an inheritable artifact so the successor's copied
-                    // context carries them. No findings, no file.
+                    // Findings without an artifact (scope-expansion
+                    // denials, for instance) live only on this log —
+                    // derive them into an inheritable artifact so the
+                    // successor's copied context carries them. No
+                    // findings, no file.
                     let events_for_close = ctx.load_events()?;
                     let inherited = crate::findings::inherited_findings(&events_for_close);
                     if !inherited.is_empty() {
@@ -856,7 +857,7 @@ pub(crate) async fn execute_run_at_depth(
                 }
             }
             ScheduleStep::Execute(batch) => {
-                // §8.3/DI-05: the budget check guards exactly the steps
+                // The budget check guards exactly the steps
                 // that spend tokens — a run whose remaining work is gates
                 // and questions finishes without ever tripping it.
                 if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
@@ -892,11 +893,11 @@ pub(crate) async fn execute_run_at_depth(
                 // A batch runs to completion together (every member reaches
                 // a terminal per-node state) before the next iteration
                 // decides what comes next — the same simplification
-                // `kind: parallel`'s `join: all` makes explicit (§5.8),
-                // here implicit for scheduler-formed batches. Top-level DAG
+                // `kind: parallel`'s `join: all` makes explicit, here
+                // implicit for scheduler-formed batches. Top-level DAG
                 // fan-out never interrupts a still-running sibling the
-                // moment one fails — that's `join: any`'s own semantics
-                // (T4.6), scoped to a named `parallel` group, not implicit
+                // moment one fails — that's `join: any`'s own semantics,
+                // scoped to a named `parallel` group, not implicit
                 // `max_parallel_nodes` batches — so each node gets a token
                 // nothing ever cancels.
                 let cancel_for_batch = root_cancel.child_token();
@@ -917,8 +918,8 @@ pub(crate) async fn execute_run_at_depth(
                         node_exec::execute_node(ctx, node, attempt, &cancel_for_batch).await
                     }
                 });
-                // T9.3: a workflow node whose child run paused can't
-                // close its node (§12: the parent waits on the child's
+                // A workflow node whose child run paused can't
+                // close its node (the parent waits on the child's
                 // *terminal* state) — after the whole batch lands, the
                 // parent pauses too, naming the child. A root
                 // cancellation takes precedence: the loop-top check

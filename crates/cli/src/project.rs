@@ -1,4 +1,4 @@
-//! Project/config resolution for the CLI (§2.2 — M-0 cut).
+//! Project/config resolution for the CLI.
 //!
 //! Layers, most specific first: `.yunta/config.yaml` in the current
 //! repo, then the user root's `config.yaml`, then the org layer
@@ -36,7 +36,7 @@ pub enum ProjectError {
         #[source]
         source: std::io::Error,
     },
-    /// DI-13: a layer declaring a `version:` this binary doesn't read is
+    /// A layer declaring a `version:` this binary doesn't read is
     /// refused up front — parsing on regardless could silently misread
     /// a future format.
     #[error(
@@ -89,8 +89,7 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
 
 /// The project's config layers as actually present on disk, org first —
 /// named so `permissions` conflicts can cite which layer tried to loosen
-/// which (§6.1, T5.7). Shared by [`resolve`] and by `yunta check`'s
-/// layered path.
+/// which. Shared by [`resolve`] and by `yunta check`'s layered path.
 pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
     let user_root = user_root()?;
     let candidates = [
@@ -108,17 +107,17 @@ pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>,
     Ok(layers)
 }
 
-/// `version:` a layer may declare (DI-13) — the one this binary reads.
+/// `version:` a layer may declare — the one this binary reads.
 const CONFIG_VERSION: u32 = 1;
 
-/// Finds an existing run's directory (DI-07's search order): (a) the
-/// current config's runs root, (b) the built-in default under the user
-/// state root. Once the manifest inside is open, everything else reads
-/// its *frozen* paths — this search only exists because finding the
+/// Finds an existing run's directory, in search order: (a) the current
+/// config's runs root, (b) the built-in default under the user state
+/// root. Once the manifest inside is open, everything else reads its
+/// *frozen* paths — this search only exists because finding the
 /// manifest needs somewhere to look first. A run created under roots
 /// that no longer appear in any layer needs `YUNTA_HOME` pointing there
-/// — a documented limit: a global index would be derived state as a
-/// source of truth (I2).
+/// — a documented limit: a global index would make derived state the
+/// source of truth, which this design avoids.
 pub fn find_run_dir(project: &Project, run_id: &str) -> Option<PathBuf> {
     let mut candidates = vec![project.runs_root.clone()];
     if let Ok(user_root) = user_root() {

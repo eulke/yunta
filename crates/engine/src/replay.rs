@@ -1,23 +1,23 @@
-//! State derivation by replay (T2.3) — **M-0 cut only**.
+//! State derivation by replay — covers what the event schema can
+//! currently produce.
 //!
 //! `derive` is the "functional core" CLAUDE.md asks for: a pure function
 //! over an event slice, no IO, safe to call from a property test or from
-//! `yunta resume` alike. It tracks what M-0's schema can actually produce
+//! `yunta resume` alike. It tracks what the schema can actually produce
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
 //! and task status (`task_registered`/`task_status_changed`) — plus the
-//! running token total `limits.max_tokens_per_run` (DI-05) is compared
-//! against. Since DI-03, §3.2's
-//! `waiting` is derived too: a published gate without its resolution
-//! (T7.7 — the state that outlives an invocation), and a node whose
-//! `kind: questions` artifact has no `questions_answered` yet (§4.1).
-//! T7.2's internal pair (waiting+resolved emitted together) round-trips
+//! running token total `limits.max_tokens_per_run` is compared
+//! against. `waiting` is derived too: a published gate without its
+//! resolution (the state that outlives an invocation), and a node whose
+//! `kind: questions` artifact has no `questions_answered` yet.
+//! The internal waiting+resolved pair, emitted together, round-trips
 //! back to the node's prior state by construction.
 //!
 //! A log that is insufficient or inconsistent — e.g. `node_finished` for a
 //! node that was never `node_started` — marks the result `broken` with a
-//! diagnostic naming the exact event, rather than panicking or guessing
-//! (Contrato §8.1). Replay stops at the first such event; the state
-//! accumulated up to that point is still returned.
+//! diagnostic naming the exact event, rather than panicking or guessing.
+//! Replay stops at the first such event; the state accumulated up to
+//! that point is still returned.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ pub enum NodeState {
         tokens: TokenUsage,
         retryable: bool,
     },
-    /// §3.2/DI-03: waiting on a human — a published, unresolved gate
+    /// Waiting on a human — a published, unresolved gate
     /// (`gate_waiting` with no `gate_resolved` after it), or a node
     /// whose `kind: questions` artifact has no `questions_answered`
     /// after it. `external_ref` is the forge's handle (a PR URL) for
@@ -57,12 +57,12 @@ pub struct RunState {
     pub tasks: HashMap<TaskId, TaskStatus>,
     pub total_tokens: TokenUsage,
     /// Every `finding_posted` entry, in log order, never deduplicated
-    /// here — the raw log keeps every contributing posting (§4.1's "sin
+    /// here — the raw log keeps every contributing posting ("sin
     /// perder autorías"); [`dedup_findings`] is the query-side view for
     /// counting/display, not something replay bakes in.
     pub findings: Vec<Finding>,
     /// Every `artifact_written` path, grouped by the node that wrote it,
-    /// in log order (§8.2, T5.5 — `progress.md`'s own "qué produjo cada
+    /// in log order (`progress.md`'s own "qué produjo cada
     /// nodo"). A node with no artifact has no entry here at all, not an
     /// empty `Vec`.
     pub artifacts: HashMap<NodeId, Vec<PathBuf>>,
@@ -73,11 +73,12 @@ pub struct RunState {
 }
 
 /// Bookkeeping `derive` needs across events without exposing it on
-/// [`RunState`] (DI-03): what a `Waiting` node was before its gate
-/// opened (so `gate_resolved` can restore it — the internal T7.2 pair
-/// leaves a `Failed` node `Failed`), and which nodes have a `questions`
-/// artifact still unanswered (so their `node_failed` derives `Waiting`,
-/// §3.2's own "nodos cuyas preguntas pendientes esperan respuesta").
+/// [`RunState`]: what a `Waiting` node was before its gate
+/// opened (so `gate_resolved` can restore it — the internal
+/// waiting+resolved pair leaves a `Failed` node `Failed`), and which
+/// nodes have a `questions` artifact still unanswered (so their
+/// `node_failed` derives `Waiting`, "nodos cuyas preguntas pendientes
+/// esperan respuesta").
 #[derive(Default)]
 struct Aux {
     pre_gate: HashMap<NodeId, Option<NodeState>>,
@@ -85,8 +86,8 @@ struct Aux {
 }
 
 /// Derives run state from its event log, in `seq` order. Pure: same
-/// input, same output, always (T2.3's property test relies on exactly
-/// this).
+/// input, same output, always — a property test relies on exactly
+/// this.
 pub fn derive(events: &[Event]) -> RunState {
     let mut state = RunState::default();
     let mut aux = Aux::default();
@@ -106,10 +107,10 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
         EventPayload::NodeStarted(p) => {
             let node_id = require_node_id(event)?;
             // Any prior state is a legal starting point: a `Failed` node
-            // re-runs after its re-route resolves (§11.2), a `Finished`
+            // re-runs after its re-route resolves, a `Finished`
             // corrective node re-runs on the next re-route to it, and a
             // `Running` node restarts when resume finds it orphaned
-            // (§8.1, `restart_node`). The log records what happened; the
+            // (`restart_node`). The log records what happened; the
             // attempt number carries the history.
             state
                 .nodes
@@ -141,7 +142,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
                     state.total_tokens = sum_tokens(state.total_tokens, p.tokens_used);
-                    // §3.2/DI-03: a node that failed *because its
+                    // A node that failed *because its
                     // questions are unanswered* is `waiting`, not
                     // `failed` — the questions artifact preceding it
                     // (with no `questions_answered` since) is the typed
@@ -165,14 +166,14 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
             }
         }
         EventPayload::GateWaiting(p) => {
-            // No node = a run-level escalation (§8.3's token budget,
-            // DI-05): it gates the whole invocation, not any node's
+            // No node = a run-level escalation (the token budget check):
+            // it gates the whole invocation, not any node's
             // state, so derivation records nothing for it.
             if event.node_id.is_none() {
                 return Ok(());
             }
             let node_id = require_node_id(event)?;
-            // A published (or console-rendered-and-resolved-next, T7.2)
+            // A published (or console-rendered-and-resolved-next)
             // gate: the node is waiting on a human from this point until
             // `gate_resolved`. What it was before is remembered so the
             // synchronous internal pair restores it exactly.
@@ -252,7 +253,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
             Ok(())
         }
         EventPayload::ChildRunFinished(p) => {
-            // §12/DI-25: the child's whole spend aggregates into the
+            // The child's whole spend aggregates into the
             // parent's total right here — once per chain member, at its
             // close; the parent node's own `node_finished` deliberately
             // carries none of it (see the payload's doc).
@@ -266,7 +267,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
         // expansion, hook_executed, node_rerouted, promotion_signaled,
         // capability_degraded, run_paused/resumed/finished, loop_iteration
         // beyond what tasks already cover). child_run_created/finished
-        // (T9.3) deliberately included: the parent node's own
+        // deliberately included: the parent node's own
         // started/finished/failed events carry its derived state (child
         // tokens aggregate through node_finished.tokens_used), while the
         // link pair stays pure audit — `workflow_exec` reads it directly
@@ -276,7 +277,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), Strin
     }
 }
 
-/// Query-side view of `RunState.findings` (§4.1): "findings entre
+/// Query-side view of `RunState.findings`: "findings entre
 /// reviewers se deduplican por `location` + título normalizado". The raw
 /// log (and `RunState.findings`) keeps every posting; this collapses
 /// duplicates for counting/display, keeping the first occurrence — the

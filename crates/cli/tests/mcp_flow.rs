@@ -1,4 +1,4 @@
-//! `yunta mcp` end to end (M8/T8.1.4): a real MCP client, talking real
+//! `yunta mcp` end to end: a real MCP client, talking real
 //! stdio JSON-RPC, against the real binary spawned as a child process —
 //! the same combination rmcp documents for testing a stdio server from
 //! the outside. Proves the whole chain works, not just that the
@@ -247,7 +247,7 @@ nodes:
 
 #[tokio::test]
 async fn a_run_survives_yunta_mcp_being_killed_and_a_fresh_session_confirms_it() {
-    // I25/D101: no run's own life depends on the MCP session that
+    // No run's own life depends on the MCP session that
     // created it. Killing `yunta mcp` outright — not a graceful
     // shutdown — must not touch the run it started via `run_workflow`'s
     // own detached child.

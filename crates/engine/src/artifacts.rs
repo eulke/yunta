@@ -1,10 +1,10 @@
-//! Artifact verification at node close (Contrato §4/§4.1) — **M-0 cut**.
+//! Artifact verification at node close.
 //!
 //! When a node finishes, everything it declared under `artifacts.produces`
 //! must exist and be non-empty under the run's `artifacts/` directory —
-//! no matter what the agent reported (I5). Opaque artifacts are verified
-//! by existence and content hash only, never by format. `task-ledger`
-//! (T5.1), `findings` (T5.12) and `questions` (T5.14) are the interpreted
+//! no matter what the agent reported. Opaque artifacts are verified
+//! by existence and content hash only, never by format. `task-ledger`,
+//! `findings` and `questions` are the interpreted
 //! kinds: each is parsed and validated with every violation reported
 //! together, and the parsed result handed back to the caller — `Ledger`
 //! for `task_registered`, `Finding`s for `finding_posted`, `Question`s so
@@ -32,8 +32,8 @@ pub enum ArtifactError {
     )]
     Empty { node: NodeId, name: String },
 
-    /// §4's guard against accidents (DI-05): a runaway artifact fails
-    /// the node with both numbers on the table, never a truncation.
+    /// Guard against accidents: a runaway artifact fails the node with
+    /// both numbers on the table, never a truncation.
     #[error(
         "node `{node}` produced artifact `{name}` at {bytes} bytes — \
          `limits.max_artifact_bytes` is {max_bytes}"
@@ -107,7 +107,7 @@ pub struct VerifiedArtifact {
     pub path: PathBuf,
     pub content_hash: String,
     /// The declared `kind:`, if any — carried onto `artifact_written`
-    /// (DI-03) so replay can recognize interpreted artifacts by type.
+    /// so replay can recognize interpreted artifacts by type.
     pub kind: Option<ArtifactKind>,
     pub ledger: Option<Ledger>,
     pub findings: Option<Vec<Finding>>,

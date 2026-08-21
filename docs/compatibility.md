@@ -41,8 +41,7 @@ rejecting them, with an error that names the field and the fix.
 ## In-flight runs are never affected by an upgrade
 
 A run's [manifest](guide.md) — workflow, config, inputs, and resolved
-runners — is hashed and frozen at creation (`I3` in the engine's own
-invariants). Upgrading the `yunta` binary mid-run, or between `yunta run`
+runners — is hashed and frozen at creation. Upgrading the `yunta` binary mid-run, or between `yunta run`
 and a later `yunta resume`, changes nothing about how that run's remaining
 nodes execute: `resume` replays the run's own event log against its own
 frozen manifest, never against whatever the newly-installed binary would

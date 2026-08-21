@@ -1,4 +1,4 @@
-//! `yunta/starter` and `yunta/fragua` (T10.2, RFC-0001 §3/D57) installed
+//! `yunta/starter` and `yunta/fragua` installed
 //! and checked through the real pack pipeline — `pack add`, `check`,
 //! and `pack audit`'s own test discovery — against the actual pack
 //! directories this repo ships at `packs/starter`/`packs/fragua`, not a
@@ -142,20 +142,20 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     assert!(add_out.status.success(), "{}", stderr(&add_out));
     // fragua's own end-to-end mock proof lives in
     // crates/engine/tests/factory_packs.rs — its `.yunta/tests/` case
-    // format has no `mode:` field yet (M-0 cut), so a case here could
+    // format has no `mode:` field yet, so a case here could
     // only assert "paused at approve-plan", strictly less than what
     // that engine-level test already proves.
     assert!(stdout(&add_out).contains("tests: none shipped"));
 
     // `check` validates mode-coherence for every declared mode in one
-    // pass (T1.3) — this is real schema/reference validation against
+    // pass — this is real schema/reference validation against
     // the actual installed file, not a hand-copied stand-in.
     let check = yunta_in(&repo, &home, &["check", "yunta/build-feature"]);
     assert!(check.status.success(), "{}", stderr(&check));
     assert!(stdout(&check).contains("OK"));
 }
 
-/// D57: uninstalling either pack leaves the engine's own capabilities
+/// Uninstalling either pack leaves the engine's own capabilities
 /// untouched — checked by structural test in
 /// `crates/cli/tests/factory_packs_structural.rs` (no crate source
 /// references these packs by name); this one checks the CLI-visible

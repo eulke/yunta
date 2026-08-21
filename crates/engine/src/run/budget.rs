@@ -1,7 +1,7 @@
-//! Run-level token budget (§8.3, DI-05): `limits.max_tokens_per_run`
+//! Run-level token budget: `limits.max_tokens_per_run`
 //! against the log-derived `total_tokens`, checked before every
 //! token-spending scheduler step. Exhaustion is never a silent pause —
-//! it's a §5.3 escalation (`continue`/`abort`) first, and only degrades
+//! it's an escalation (`continue`/`abort`) first, and only degrades
 //! to `run_paused { reason: budget… }` when no surface can answer.
 //!
 //! Authorization is **per invocation, in memory** — deliberately not
@@ -24,7 +24,7 @@ pub enum BudgetDecision {
     Pause { reason: String },
 }
 
-/// Escalates an exhausted run budget (§5.3). A resolution — either way —
+/// Escalates an exhausted run budget. A resolution — either way —
 /// is recorded as a run-level `gate_waiting`/`gate_resolved` pair; no
 /// resolution records nothing, so a resume re-asks (the same convention
 /// every node gate follows).
@@ -53,7 +53,7 @@ pub async fn authorize_over_budget(
     }
 }
 
-/// The §5.3 object: mechanical summary and evidence, options with their
+/// The escalation object: mechanical summary and evidence, options with their
 /// tradeoffs spelled out — never a bare "over budget, y/n?".
 fn escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> GateWaitingPayload {
     GateWaitingPayload {
@@ -83,12 +83,12 @@ fn escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> GateWaitingPayload {
     }
 }
 
-/// Escalates a loop that hit `limits.max_loop_iterations` (§8.3, the
-/// same continue/abort mechanism as the token cap — the only net under a
-/// ledger whose state oscillates forever). Node-scoped, unlike the run
-/// budget: the pair is recorded on the loop node (T7.2's synchronous
-/// internal-pair convention, invisible to derived state), and the same
-/// per-invocation rule applies — `Continue` lifts the cap only for the
+/// Escalates a loop that hit `limits.max_loop_iterations` — the
+/// same continue/abort mechanism as the token cap, and the only net under a
+/// ledger whose state oscillates forever. Node-scoped, unlike the run
+/// budget: the pair is recorded on the loop node as a synchronous internal
+/// pair invisible to derived state, and the same per-invocation rule
+/// applies — `Continue` lifts the cap only for the
 /// `execute_loop` call that asked.
 pub async fn authorize_loop_overrun(
     ctx: &RunCtx<'_>,
@@ -149,7 +149,7 @@ pub fn tokens_spent(totals: yunta_core::events::TokenUsage) -> u64 {
     totals.input + totals.output
 }
 
-/// §8.3/T3.3 session-budget policy (DI-05), pure: one agent session may
+/// Pure session-budget policy: one agent session may
 /// spend at most an equal share of the run cap, bounded by what actually
 /// remains — `min(remaining, cap / non_terminal_nodes)`. Deliberately
 /// simple: it never predicts which nodes are cheap, it only guarantees

@@ -1,5 +1,5 @@
-//! `render_events_jsonl` (T5.8, §8.3/§3.1) — pure rendering, plus the
-//! property test the Plan's own acceptance criterion names verbatim:
+//! `render_events_jsonl` — pure rendering, plus the
+//! property test the acceptance criterion names verbatim:
 //! "derivar estado desde el JSONL produce el mismo `RunState` que el
 //! replay desde la DB."
 

@@ -1,6 +1,6 @@
 # The canonical reference workflow (Notion: "Config y workflows de
-# referencia", Contrato v0.5) as a parse fixture — DI-13's T1.1
-# round-trip criterion, complete since T9.4 landed `runners:`.
+# referencia") as a parse fixture — exercises the full round-trip
+# criterion, including `runners:`.
 name: build-feature
 description: Feature completa con grill, ledger verificado, review multi-runner y PR
 yunta_schema: ">=1 <2"

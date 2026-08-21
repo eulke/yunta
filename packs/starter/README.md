@@ -2,7 +2,7 @@
 
 Two minimal workflows that teach Yunta's own shape — nothing more. This pack
 is a fixture as much as it is a teaching tool: it installs and removes like
-any third-party pack, with no special status the engine grants it (D57).
+any third-party pack, with no special status the engine grants it.
 
 ## `fix`
 

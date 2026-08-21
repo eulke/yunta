@@ -1,6 +1,6 @@
-//! Scope post-check by `git diff` (T5.3, Contrato §6): what a task
+//! Scope post-check by `git diff`: what a task
 //! actually touched, checked against what its `scope` globs declared it
-//! could touch. Unlike the ledger's overlap heuristic (T5.1, which
+//! could touch. Unlike the ledger's overlap heuristic (which
 //! compares two *patterns* to each other with no library that does
 //! that), this checks real *paths* against real globs — exactly what
 //! `globset` is for, so it's used here instead of a hand-rolled
@@ -69,7 +69,7 @@ pub async fn scope_check(
     let violations = diff
         .iter()
         // `.claude/skills/` is engine/adapter-staged session
-        // infrastructure (DI-13's skill mount), never agent work — the
+        // infrastructure (the skill mount), never agent work — the
         // one fixed path scope never charges to a task.
         .filter(|path| !path.starts_with(".claude/skills"))
         .filter(|path| !set.is_match(path))

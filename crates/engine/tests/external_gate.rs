@@ -1,7 +1,7 @@
-//! `kind: gate` with `external: {kind: pull_request}` (§5.6, D66, T7.7),
+//! `kind: gate` with `external: {kind: pull_request}`,
 //! exercised end-to-end against `MockForge` — never a real network call
-//! (A8 extended to forges). The core scenario D66 itself describes:
-//! person B approves the PR without Yunta installed at all (simulated by
+//! (the no-real-LLM-or-network-call-in-tests rule extended to forges). The
+//! core scenario: person B approves the PR without Yunta installed at all (simulated by
 //! driving `MockForgeState` directly, never through the `Forge` trait —
 //! exactly what "no Yunta on B's machine" means), and person A's
 //! machine picks up the approval on a completely separate `execute_run`
@@ -64,7 +64,7 @@ nodes:
 /// pauses rather than finishing), which is what keeps the run's own log
 /// free of `run_finished` long enough to exercise a *later* SHA-drift
 /// recheck: `execute_run` treats a genuinely finished run as an
-/// immutable no-op (I2/§2 — reopening anything after `run_finished`
+/// immutable no-op (reopening anything after `run_finished`
 /// would mean mutating a run the log already closed), so the drift
 /// recheck only ever matters, and only ever runs, while the run is
 /// still open.
@@ -178,8 +178,8 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "got {terminal:?}"
     );
-    // DI-03/§3.2: a published, unresolved gate derives `waiting` —
-    // never "absent" (the pre-DI-03 reading) and never running/failed.
+    // A published, unresolved gate derives `waiting` —
+    // never "absent" and never running/failed.
     assert!(
         matches!(
             state.nodes.get(&"approve".into()),
@@ -196,7 +196,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     );
 
     // Person B: reviews and approves directly on the forge — no Yunta
-    // involved on their end at all, exactly D66's own scenario.
+    // involved on their end at all.
     forge_state.approve(bench.run_id.as_str(), "person-b");
 
     // Person A's machine, a second, wholly separate `execute_run` call
@@ -219,7 +219,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     );
     assert!(
         resolved.and_then(|p| p.approved_sha.as_ref()).is_some(),
-        "gate_resolved must carry the approved SHA (§5.6's own 'usuario+timestamp+SHA')"
+        "gate_resolved must carry the approved SHA ('usuario+timestamp+SHA')"
     );
 }
 

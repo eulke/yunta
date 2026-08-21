@@ -1,4 +1,4 @@
-//! `command_violation` (T5.7, §6.1) — the pure half of runtime permission
+//! `command_violation` — the pure half of runtime permission
 //! enforcement: given a rendered command and the effective (already
 //! ceiling-merged) permissions, decide whether a rule blocks it and name
 //! the rule. IO-free by design; the imperative call sites live in

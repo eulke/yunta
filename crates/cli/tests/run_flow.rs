@@ -1,9 +1,9 @@
 //! End-to-end CLI flows: `yunta run` on a bash-only workflow (no agent
 //! adapter needed), `status` over its log, `resume` idempotence,
 //! `yunta test` driving a workflow with the mock adapter from a case
-//! file (the designed home for mock fixtures, §14), and `yunta run`
-//! actually spawning the real `claude-code` adapter (T7.3) against a
-//! scripted fake `claude` binary — no network, no cost (A8).
+//! file (the designed home for mock fixtures), and `yunta run`
+//! actually spawning the real `claude-code` adapter against a
+//! scripted fake `claude` binary — no network, no cost.
 
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -122,7 +122,7 @@ fn a_workflow_needing_agents_is_refused_before_creating_any_run() {
     // `adapter:` isn't a closed enum in the schema — any name `runners:`
     // declares that `real_adapters` doesn't recognize is exactly "an
     // adapter this binary can't run." Both real adapters this binary
-    // does build (`claude-code`, T7.3; `codex`, T7.4) are ruled out on
+    // does build (`claude-code`; `codex`) are ruled out on
     // purpose, so this can't accidentally start passing once a third
     // one lands.
     write(
@@ -575,11 +575,11 @@ nodes:
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains("pre-launch") && stderr.contains("warning"),
-        "expected a D100 warning naming the group, got: {stderr}"
+        "expected a scope-collision warning naming the group, got: {stderr}"
     );
 }
 
-// --- T1.5: `--input` (§2.3, D82) --------------------------------------------
+// --- `--input` ---------------------------------------------------------
 
 #[test]
 fn an_input_s_default_is_used_when_input_is_not_given_on_the_command_line() {
@@ -701,7 +701,7 @@ fn mode_is_refused_since_modes_have_no_schema_yet() {
     assert!(stderr.contains("mode"), "got: {stderr}");
 }
 
-// --- T7.1: list, doctor, gc, cancel -----------------------------------------
+// --- list, doctor, gc, cancel ------------------------------------------
 
 #[test]
 fn list_shows_workflows_under_the_repo_s_own_directory_with_their_inputs() {
@@ -906,7 +906,7 @@ nodes:
 
 #[test]
 fn a_gate_with_stdin_not_a_tty_pauses_instead_of_hanging() {
-    // T7.2/§4.1: "sin TTY... nunca cuelga" — a `yunta run` whose stdin
+    // "sin TTY... nunca cuelga" — a `yunta run` whose stdin
     // isn't a terminal (exactly `cargo test`'s own usual case, made
     // explicit here with `Stdio::null()` so this doesn't depend on
     // whatever stdin the test binary itself happened to inherit) must
@@ -1140,7 +1140,7 @@ fn ctrl_c_pauses_the_run_kills_the_process_tree_and_releases_the_none_lock() {
         &repo.join(".yunta/config.yaml"),
         "defaults:\n  isolation: none\n",
     );
-    // The child ignores SIGINT on purpose (the T3.3 pattern): only the
+    // The child ignores SIGINT on purpose: only the
     // engine's interrupt→kill escalation can take it down, which is
     // exactly what this proves.
     write(
@@ -1391,7 +1391,7 @@ nodes:
 
 #[test]
 fn resume_uses_the_worktree_frozen_in_the_manifest_after_a_paths_change() {
-    // The T2.4 acceptance criterion, executed: create a run, change
+    // Create a run, change
     // `paths.worktrees`, and `resume` completes in the worktree the run
     // was born with — not wherever the config points today.
     let root = tempfile::tempdir().unwrap();
@@ -1466,7 +1466,7 @@ nodes:
 
 #[test]
 fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
-    // Tolerant reader (D70): a pre-DI-07 manifest (no `paths:` block)
+    // Tolerant reader: a manifest with no `paths:` block
     // resumes exactly as before, from the current config's roots.
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
@@ -1516,7 +1516,7 @@ fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
 
 #[test]
 fn a_cancelled_run_resumes_by_restarting_the_orphaned_node() {
-    // DI-11/§8.1: a user cancellation leaves the interrupted node
+    // A user cancellation leaves the interrupted node
     // orphaned — no fabricated terminal — so `resume` re-treats it per
     // `on_interrupt` (restart_node) instead of dead-ending on a failed
     // node.
@@ -1746,7 +1746,7 @@ fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
     );
 }
 
-// --- T9.3: `kind: workflow` composition from the CLI -------------------------
+// --- `kind: workflow` composition from the CLI --------------------------
 
 #[test]
 fn a_composed_workflow_runs_from_the_cli_creating_a_linked_child_run() {
@@ -1839,7 +1839,7 @@ fn yunta_check_refuses_a_composition_cycle() {
     );
 }
 
-// --- M8/T8.1.2: `yunta run --detach` -----------------------------------------
+// --- `yunta run --detach` ------------------------------------------------
 
 #[test]
 fn yunta_run_detach_returns_immediately_and_the_workflow_finishes_in_a_detached_child() {
@@ -2001,7 +2001,7 @@ unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
     kill(pid, sig)
 }
 
-// --- M8/T8.1.3: `yunta resolve-gate` -----------------------------------------
+// --- `yunta resolve-gate` -------------------------------------------------
 
 #[test]
 fn yunta_resolve_gate_answers_an_exhausted_reroute_from_a_separate_process() {

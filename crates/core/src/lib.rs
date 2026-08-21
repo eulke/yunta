@@ -2,10 +2,10 @@
 
 //! Shared domain types for the Yunta workspace.
 //!
-//! `yunta-core` is the bottom of the dependency graph (T0.1): every other
+//! `yunta-core` is the bottom of the dependency graph: every other
 //! crate may depend on it, and it depends on nothing else in the workspace.
-//! Newtyped identifiers and the `Clock` trait land in later tasks; error
-//! types (T0.3) are here from the start since every other crate needs them.
+//! Newtyped identifiers, the `Clock` trait, and error
+//! types live here since every other crate needs them.
 
 mod capabilities;
 mod clock;
@@ -48,7 +48,7 @@ pub use workflow::{
     ScopeExpansion, Workflow, WorkflowIsolation,
 };
 
-/// The schema major this binary speaks (§2.1, DI-13) — what a
+/// The schema major this binary speaks — what a
 /// workflow's `yunta_schema:` range is checked against.
 pub const YUNTA_SCHEMA: u32 = 1;
 

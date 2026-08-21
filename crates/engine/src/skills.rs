@@ -1,9 +1,9 @@
-//! Skill-name resolution (DI-13, D47): `skills: [names]` on a node (or
+//! Skill-name resolution: `skills: [names]` on a node (or
 //! `node_defaults`) plus `skills.always` from config, resolved against
 //! `skills.paths` — repo first, the same layer order knowledge uses.
 //! Resolution is the engine's; *mounting* is the adapter's native
 //! mechanism (`SessionRequest.skills`), and an adapter without one
-//! degrades with `capability_degraded`, never a fatal error (A6) — a
+//! degrades with `capability_degraded`, never a fatal error — a
 //! skill is added instruction, not correctness.
 
 use std::path::{Path, PathBuf};
@@ -68,7 +68,7 @@ pub fn resolve_skills(
             .iter()
             .map(|root| root.join(name))
             .find(|candidate| candidate.is_dir())
-            // RFC-0002 §5, T11.3: repo/configured paths never find a
+            // Repo/configured paths never find a
             // namespaced name as a literal subdirectory in practice, so
             // this only ever fires for `publisher/skill` — a publisher's
             // vendored packs are the fallback layer, never the first one
@@ -93,7 +93,7 @@ pub fn resolve_skills(
     Ok(resolved)
 }
 
-/// `publisher/skill` (§5) — a publisher's installed packs share one
+/// `publisher/skill` — a publisher's installed packs share one
 /// flat skill namespace, same rule [`crate::catalog::resolve_workflow`]
 /// applies to workflows: a directory basename match against some pack's
 /// declared `contents.skills`, ambiguity between two packs left

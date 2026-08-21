@@ -1,20 +1,19 @@
-//! `yunta gc` (T7.1, §2.2/§8.3): removes `run.dir`/worktree pairs for
-//! terminal runs once `storage.retention_days` has passed since their
-//! last event.
+//! `yunta gc`: removes `run.dir`/worktree pairs for terminal runs once
+//! `storage.retention_days` has passed since their last event.
 //!
-//! §8.3 is explicit that a finished run's `run.dir` can be deleted
-//! without losing anything: `events.jsonl` already exported a
-//! self-contained copy at close, and worktree isolation deliberately
-//! leaves the git worktree on disk "for inspection" after a run
-//! finishes (`worktree.rs`'s own doc comment) rather than removing it —
-//! `gc` is the mechanism that eventually reclaims that disk, not
-//! `release_worktree` (a no-op for `Isolation::Worktree` by design).
+//! A finished run's `run.dir` can be deleted without losing anything:
+//! `events.jsonl` already exported a self-contained copy at close, and
+//! worktree isolation deliberately leaves the git worktree on disk "for
+//! inspection" after a run finishes (`worktree.rs`'s own doc comment)
+//! rather than removing it — `gc` is the mechanism that eventually
+//! reclaims that disk, not `release_worktree` (a no-op for
+//! `Isolation::Worktree` by design).
 //!
-//! Database retention (DI-14): the event-log rows have their own
-//! deadline per §8.3, with one explicit death order — run.dir (whose
-//! exported `events.jsonl` is the self-contained copy) dies first, rows
-//! die on a *later* gc pass, only for a run whose run.dir is already
-//! gone. The database is never the first copy of a run to die.
+//! Database retention: the event-log rows have their own deadline, with
+//! one explicit death order — run.dir (whose exported `events.jsonl` is
+//! the self-contained copy) dies first, rows die on a *later* gc pass,
+//! only for a run whose run.dir is already gone. The database is never
+//! the first copy of a run to die.
 
 use std::process::ExitCode;
 
@@ -93,10 +92,10 @@ pub fn gc(dry_run: bool) -> ExitCode {
             continue;
         }
 
-        // DI-14's death order: files first, rows on a later pass. A run
-        // whose run.dir is already gone (a previous gc, or a human) has
-        // its rows purged now; one whose files still exist loses only
-        // the files this pass.
+        // Death order: files first, rows on a later pass. A run whose
+        // run.dir is already gone (a previous gc, or a human) has its
+        // rows purged now; one whose files still exist loses only the
+        // files this pass.
         let run_dir = project.runs_root.join(run_id.as_str());
         if run_dir.exists() {
             if remove_run(&project, &run_id, dry_run) {

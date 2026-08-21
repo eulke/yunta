@@ -1,8 +1,8 @@
-//! `yunta/fragua` (T10.2, RFC-0001 §3/D57) runs its full reference
+//! `yunta/fragua` runs its full reference
 //! pipeline end to end with the `mock` adapter — the literal criterion
 //! ("corren end-to-end con mock") for the pack whose own `.yunta/tests/`
-//! can't express this: that case format has no `mode:` field yet (M-0
-//! cut), so any case necessarily runs the unfiltered graph and pauses at
+//! can't express this: that case format has no `mode:` field yet, so
+//! any case necessarily runs the unfiltered graph and pauses at
 //! the first internal gate (`approve-plan`) — a real, but partial,
 //! result. This test drives `mode: quick` directly through the engine
 //! (bypassing the CLI, which never exposes the mock adapter for `run`
@@ -12,8 +12,8 @@
 //!
 //! This is the first time the schema's own canonical reference workflow
 //! (`docs/referencia-schema.md`'s "build-feature.yaml", mirrored as a
-//! parse fixture at `crates/core/tests/fixtures/build-feature.yaml`
-//! since T1.1) has ever actually been executed — every other use of it
+//! parse fixture at `crates/core/tests/fixtures/build-feature.yaml`)
+//! has ever actually been executed — every other use of it
 //! so far only exercised parsing or static `check`.
 
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ impl Clock for FixedClock {
 }
 
 /// Always picks the escalation's first option — for `ship`'s
-/// `[approve]` (the default single option, §5.3), that's approval; the
+/// `[approve]` (the default single option), that's approval; the
 /// same stand-in `workflow_compose.rs`'s own release-cycle test uses.
 struct ApproveEverything;
 
@@ -254,8 +254,8 @@ sessions:
             report.state.nodes.get(&node.into())
         );
     }
-    // `fix-lint` is only in quick mode's node set as a re-route target
-    // (DI-29) — lint passed on the first try, so it must never have run.
+    // `fix-lint` is only in quick mode's node set as a re-route target —
+    // lint passed on the first try, so it must never have run.
     assert!(
         !report.state.nodes.contains_key(&"fix-lint".into()),
         "fix-lint ran despite lint passing on the first try: {:?}",

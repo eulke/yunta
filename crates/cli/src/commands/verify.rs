@@ -1,6 +1,6 @@
-//! `yunta verify <run_id>` (T2.5, I26): walks the run's event hash
-//! chain recomputing every link from the bytes as persisted. Integrity
-//! and order only — never authenticity (that's A-06, a separate layer).
+//! `yunta verify <run_id>`: walks the run's event hash chain
+//! recomputing every link from the bytes as persisted. Integrity and
+//! order only — never authenticity, which is a separate layer.
 
 use std::process::ExitCode;
 
@@ -39,7 +39,7 @@ pub fn verify(run_id: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(ChainVerification::Broken { seq, detail }) => {
-            // A broken chain is §8.1's `broken` reading of the run: the
+            // A broken chain is the `broken` reading of the run: the
             // log can no longer be trusted from this point on.
             eprintln!("run {run_id}: chain BROKEN at seq {seq} — {detail}");
             ExitCode::FAILURE

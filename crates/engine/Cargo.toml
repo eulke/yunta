@@ -8,35 +8,35 @@ description = "The Yunta workflow engine: scheduler, verification cycle, resumab
 
 [dependencies]
 # `version` must track [workspace.package].version — crates.io publish
-# (T12.4) rejects a path dependency with no version requirement.
+# rejects a path dependency with no version requirement.
 yunta-core = { path = "../core", version = "0.1.0" }
 yunta-storage = { path = "../storage", version = "0.1.0" }
 yunta-adapters = { path = "../adapters", version = "0.1.0" }
 thiserror = "2"
 futures = "0.3"
 globset = "0.4"
-# The engine interprets `kind: task-ledger` artifacts at node close
-# (Contrato §4.1) — runtime YAML parsing, not just test fixtures.
+# The engine interprets `kind: task-ledger` artifacts at node close —
+# runtime YAML parsing, not just test fixtures.
 serde_yaml = "0.9"
-# `kind: executor`'s stdin/stdout contract is JSON by definition (D47) —
+# `kind: executor`'s stdin/stdout contract is JSON by definition —
 # already a dependency of yunta-core/yunta-adapters/yunta-storage at the
 # same version, not a new one to the workspace.
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tokio = { version = "1", features = ["process", "rt", "macros", "time"] }
-# CancellationToken (T4.6, `join: any`'s interrupt→kill of the losing
+# CancellationToken (`join: any`'s interrupt→kill of the losing
 # siblings) — the propagated-cancellation primitive CLAUDE.md's own
 # "Concurrencia estructurada" section names, not a new idiom.
 tokio-util = "0.7"
-# `mcp:` context source (§9, T6.2) — an outbound streamable-HTTP MCP
-# client, the transport the reference config's own `mcp_servers:` shape
-# uses (a `url:` + bearer `auth_env:`, never stdio). Since T8.2 the
-# `server` + `transport-streamable-http-server` halves are real
-# dependencies too: the per-run MCP listener (§6.5, D103) is the engine
-# acting as an MCP *server* over loopback HTTP — a normative mechanism,
-# not a convenience, which is what justifies tower/hyper reaching the
-# release binary (hyper was already in it via `reqwest` below).
+# `mcp:` context source — an outbound streamable-HTTP MCP client, the
+# transport the reference config's own `mcp_servers:` shape uses (a
+# `url:` + bearer `auth_env:`, never stdio). The `server` +
+# `transport-streamable-http-server` halves are real dependencies too:
+# the per-run MCP listener is the engine acting as an MCP *server* over
+# loopback HTTP — a normative mechanism, not a convenience, which is
+# what justifies tower/hyper reaching the release binary (hyper was
+# already in it via `reqwest` below).
 rmcp = { version = "3", default-features = false, features = [
     "client",
     "transport-streamable-http-client-reqwest",
@@ -46,42 +46,40 @@ rmcp = { version = "3", default-features = false, features = [
 ] }
 # Binds the per-run listener's `StreamableHttpService` (a tower
 # `Service`) to a real `127.0.0.1:0` socket, plus the bearer-token
-# middleware in front of it (§6.5: "token bearer", D103) — promoted
-# from dev-only now that T8.2's listener is engine code, not just the
-# T6.2 test's toy server.
+# middleware in front of it — promoted from dev-only now that the
+# listener is engine code, not just a test's toy server.
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
-# The per-session bearer token (D103: "credencial de un solo uso, alta
-# entropía"). Already in the dependency tree via rmcp's own `server`
-# feature — `v4` adds the RNG-backed constructor, the one entropy this
-# crate uses, confined to `run_tools.rs` and never written to the log
-# (I12).
+# The per-session bearer token — a single-use, high-entropy credential.
+# Already in the dependency tree via rmcp's own `server` feature — `v4`
+# adds the RNG-backed constructor, the one entropy this crate uses,
+# confined to `run_tools.rs` and never written to the log.
 uuid = { version = "1", features = ["v4"] }
 # `reqwest::Client` is named directly in `context_resolve.rs` to build the
 # streamable-HTTP transport rmcp's own reqwest feature only wires
 # internally — rustls (not native-tls/OpenSSL), matching the TLS backend
 # the `reqwest` feature above already selects for rmcp's side.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-# `inputs:`'s `pattern:` validation (T1.5, §2.3, D82) — the one place the
-# workspace validates a user-supplied regex against a string; nothing
-# already in the dependency tree exposes that.
+# `inputs:`'s `pattern:` validation — the one place the workspace
+# validates a user-supplied regex against a string; nothing already in
+# the dependency tree exposes that.
 regex = "1"
-# `HumanInteraction` (T7.2, §5.3) needs a dyn-safe async trait method,
-# same reason `yunta-adapters`'s own `Adapter`/`AgentSession` already use
-# this — not a new idiom to the workspace, just the same one crossing
-# into engine because a gate's resolution surface (console today, MCP at
-# M8) is exactly this kind of boundary (CLAUDE.md's own "traits solo en
+# `HumanInteraction` needs a dyn-safe async trait method, same reason
+# `yunta-adapters`'s own `Adapter`/`AgentSession` already use this — not
+# a new idiom to the workspace, just the same one crossing into engine
+# because a gate's resolution surface (console today, MCP later) is
+# exactly this kind of boundary (CLAUDE.md's own "traits solo en
 # fronteras reales").
 async-trait = "0.1"
-# `kind: gate`'s `on:` mapping (DI-04) is the same ordered map the
-# schema itself uses (`yunta-core` already depends on it — no new node
-# in the workspace graph); named here because gate_exec's own signature
-# takes it.
+# `kind: gate`'s `on:` mapping is the same ordered map the schema itself
+# uses (`yunta-core` already depends on it — no new node in the
+# workspace graph); named here because gate_exec's own signature takes
+# it.
 indexmap = "2"
-# `stats::compute_run_stats` (T7.5, §8.4/§8.6) derives wall-clock and
-# blocked-time per node from `Event.timestamp` — already this exact
-# `chrono` version via `yunta-core`'s own dependency, promoted here from
-# dev-only now that production code (not just tests) needs to subtract
-# and format timestamps.
+# `stats::compute_run_stats` derives wall-clock and blocked-time per
+# node from `Event.timestamp` — already this exact `chrono` version via
+# `yunta-core`'s own dependency, promoted here from dev-only now that
+# production code (not just tests) needs to subtract and format
+# timestamps.
 chrono = "0.4"
 
 [dev-dependencies]

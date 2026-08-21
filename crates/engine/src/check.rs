@@ -1,22 +1,22 @@
-//! `yunta check` (T1.3).
+//! `yunta check`.
 //!
 //! [`check`] validates one workflow file against the merged config and
 //! **never reads other files**: node-id uniqueness (every `parallel`
-//! child included), `depends_on` references and acyclicity (I14: never
+//! child included), `depends_on` references and acyclicity (never
 //! relaxed by `on_failure.goto`, a separate edge set), goto/gate/mode
 //! reference integrity, runner resolution, scope disjointness for
-//! `parallel` and DAG fan-out (D100/DI-12), permission ceilings over
-//! literal commands (§6.1), input specs and references (§2.3),
-//! `yunta_schema` (§2.1), and T9.3/T9.4's workflow-node and fan-out
+//! `parallel` and DAG fan-out, permission ceilings over
+//! literal commands, input specs and references,
+//! `yunta_schema`, and workflow-node and fan-out
 //! declaration rules. [`check_workflow_refs`] is the deliberate
 //! exception that does read files: the composition reference graph
-//! (`use:` resolves, acyclic, within `limits.max_workflow_depth`, §12)
+//! (`use:` resolves, acyclic, within `limits.max_workflow_depth`)
 //! against the repo's `.yunta/workflows/` catalog — a separate entry
 //! point so `check`'s no-IO property stays intact, called alongside it
 //! by the CLI.
 //!
-//! Capability-aware checks ("existencia de agentes pedidos", required
-//! capabilities) wait for the `Adapter` trait (T3.1) to exist — there is
+//! Capability-aware checks (agent existence, required
+//! capabilities) wait for the `Adapter` trait to exist — there is
 //! nothing to probe yet.
 
 use std::collections::{HashMap, HashSet};
@@ -49,7 +49,7 @@ pub enum CheckError {
     )]
     RunnerHasNoCandidates { node: NodeId, runner: String },
 
-    /// D100/§5.8: `parallel`'s children share one worktree — a scope
+    /// `parallel`'s children share one worktree — a scope
     /// overlap between two of them is a verifiable-in-advance write
     /// collision, error rather than warning.
     #[error(
@@ -64,7 +64,7 @@ pub enum CheckError {
         glob_b: String,
     },
 
-    /// DI-13: `defaults.on_failure` values beyond `pause` (today's
+    /// `defaults.on_failure` values beyond `pause` (today's
     /// behavior) have no implementation — refused, never silently read
     /// as `pause`.
     #[error(
@@ -75,12 +75,12 @@ pub enum CheckError {
         on_failure: yunta_core::DefaultOnFailure,
     },
 
-    /// T9.4: `runner:` and `runners:` on one node is a contradiction,
+    /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
     #[error("node `{node}` declares both `runner:` and `runners:` — use exactly one")]
     BothRunnerAndRunners { node: NodeId },
 
-    /// T9.4: once `review` is many nodes there is no unambiguous
+    /// Once `review` is many nodes there is no unambiguous
     /// "return control to review" — a re-route, gate `on:` or context
     /// artifact reference must name a specific node.
     #[error(
@@ -89,7 +89,7 @@ pub enum CheckError {
     )]
     FanOutTarget { node: NodeId, target: NodeId },
 
-    /// DI-24: `on_finish.distill` names a path no node declares
+    /// `on_finish.distill` names a path no node declares
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
     #[error(
@@ -98,16 +98,16 @@ pub enum CheckError {
     )]
     DistillUnknownArtifact { path: String },
 
-    /// DI-13: `fresh_context: false` requires session resume (DI-23),
+    /// `fresh_context: false` requires session resume,
     /// which isn't built — refused up front instead of accepted and
-    /// silently ignored (A6).
+    /// silently ignored.
     #[error(
         "node `{node}` declares `fresh_context: false` but session resume is not supported \
          yet — remove the field (every session is fresh today) or wait for `resume_session`"
     )]
     FreshContextUnsupported { node: NodeId },
 
-    /// DI-13/§2.1: the workflow demands a schema this binary doesn't
+    /// The workflow demands a schema this binary doesn't
     /// speak, or a range the parser can't read.
     #[error("`yunta_schema: \"{range}\"` — {detail} (this binary speaks schema {binary})")]
     YuntaSchemaMismatch {
@@ -116,17 +116,18 @@ pub enum CheckError {
         binary: u32,
     },
 
-    /// DI-12: D100 extended to the DAG's *implicit* fan-out — two
-    /// top-level nodes with no dependency path between them can be
-    /// `ready` together, and with `max_parallel_nodes > 1` they share
-    /// one worktree at once, exactly the physical risk `parallel`
-    /// already errors on. Static approximation by design: "no relative
-    /// order declared" is the rule, never a simulation of what the
-    /// scheduler would actually interleave.
+    /// The same worktree-collision rule extended to the DAG's
+    /// *implicit* fan-out — two top-level nodes with no dependency path
+    /// between them can be `ready` together, and with
+    /// `max_parallel_nodes > 1` they share one worktree at once,
+    /// exactly the physical risk `parallel` already errors on. Static
+    /// approximation by design: "no relative order declared" is the
+    /// rule, never a simulation of what the scheduler would actually
+    /// interleave.
     #[error(
         "nodes `{a}` and `{b}` have no dependency path between them and declare overlapping \
          scope (`{glob_a}` / `{glob_b}`) — with `max_parallel_nodes` > 1 they can write the \
-         same paths at once (D100); chain them with `depends_on` or make their scopes disjoint"
+         same paths at once; chain them with `depends_on` or make their scopes disjoint"
     )]
     OverlappingFanOutScope {
         a: NodeId,
@@ -135,30 +136,30 @@ pub enum CheckError {
         glob_b: String,
     },
 
-    /// §6.1's first enforcement moment (T5.7): the command as written in
+    /// The first enforcement moment: the command as written in
     /// the YAML already violates the merged `permissions` model. The scan
     /// matches the *literal* text — a command assembled by template gets
     /// caught by the second moment, at runtime, right before execution.
     #[error("node `{node}`: {rule}")]
     CommandDenied { node: NodeId, rule: String },
 
-    /// §9/T6.1/DI-17: `context:` is resolved into a session's own
+    /// `context:` is resolved into a session's own
     /// prompt — `kind: prompt` (the node's one session) and `kind:
     /// loop` (once per task brief) are the kinds that open one; a
     /// `bash`/`check`/`executor`/`gate` node has no session to consume
     /// it. Declaring it there is caught here rather than silently
-    /// ignored at runtime (A6).
+    /// ignored at runtime.
     #[error(
         "node `{node}`: `context:` is only supported on `kind: prompt` and `kind: loop` nodes \
          — nothing else opens a session that could consume it"
     )]
     ContextOnUnsupportedNode { node: NodeId },
 
-    /// T1.5/§2.3/D82: the two fields are mutually exclusive by
+    /// The two fields are mutually exclusive by
     /// definition — a `default` is what makes an input optional at all.
     #[error(
         "input `{name}` declares both `required: true` and a `default` — \
-         §2.3 makes them mutually exclusive"
+         they are mutually exclusive by definition"
     )]
     InputRequiredWithDefault { name: String },
 
@@ -188,39 +189,39 @@ pub enum CheckError {
         detail: String,
     },
 
-    /// §2.3: "`check` verifica que todo `{{{{inputs.x}}}}` refiera a un
-    /// input declarado" — scanned wherever a template can appear inline
+    /// `check` verifies that every `{{{{inputs.x}}}}` refers to a
+    /// declared input — scanned wherever a template can appear inline
     /// in the workflow (prompt text, `bash`/hook commands, `context:`
     /// patterns and command/query text). A `prompt: {file: ...}` body
     /// isn't scanned: `check` never reads files (see this module's own
     /// doc comment), so an undeclared reference there still only
-    /// surfaces at run time, same as it did before T1.5.
+    /// surfaces at run time.
     #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
     UndeclaredInput { node: NodeId, name: String },
 
-    /// §5.6/D66/T7.7: a `kind: gate` with `external:` has nowhere to
+    /// A `kind: gate` with `external:` has nowhere to
     /// actually publish without a forge — refused here rather than at
-    /// runtime (A6), the same "check catches what a run would only
+    /// runtime, the same "check catches what a run would only
     /// discover after spending something" reasoning `UnknownRunner`
     /// already applies. This checks only that a forge is *configured*
     /// — a specific machine lacking the named credential env var at
-    /// *runtime* is a different, degrade-not-refuse case (D66's own
-    /// "sin credenciales... degrada a consola").
+    /// *runtime* is a different, degrade-not-refuse case (it degrades
+    /// to console instead of failing).
     #[error("node `{node}`: `kind: gate` with `external: {{kind: pull_request}}` needs `forge.github` configured")]
     ExternalGateWithoutForge { node: NodeId },
 
     /// A gate's resolution is a forge round-trip, one at a time — never
     /// scoped to a `parallel` group's shared worktree/join semantics
-    /// (T7.7 doesn't define what either would mean for a gate).
+    /// (neither concept is defined for a gate).
     #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
-    /// DI-04: `on:` may only map options the gate itself declares —
+    /// `on:` may only map options the gate itself declares —
     /// mapping an undeclared one is a choice no human can ever make.
     #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
     GateOnUndeclaredOption { node: NodeId, option: String },
 
-    /// DI-04: same broken-reference class as `UnknownGotoTarget`, for a
+    /// Same broken-reference class as `UnknownGotoTarget`, for a
     /// gate option's re-route target.
     #[error("gate `{node}`: `on.{option}` targets unknown node `{target}`")]
     UnknownGateOptionTarget {
@@ -229,22 +230,22 @@ pub enum CheckError {
         target: NodeId,
     },
 
-    /// §10.1/D44: same broken-reference class as `UnknownGotoTarget` —
+    /// Same broken-reference class as `UnknownGotoTarget` —
     /// catching it here means the run never starts with a mode that
     /// silently omits work its own author meant to include.
     #[error("mode `{mode}` includes unknown node `{node}`")]
     ModeReferencesUnknownNode { mode: String, node: NodeId },
 
-    /// §10.1: "un modo recorta deliberación, jamás verificación" — checked
-    /// independent of the mode's name or count, exactly D44's own text.
+    /// A mode trims deliberation, never verification — checked
+    /// independent of the mode's name or count.
     #[error("node `{node}` is `invariant: true` but mode `{mode}` doesn't include it")]
     InvariantNodeExcludedFromMode { node: NodeId, mode: String },
 
-    /// §10.1's own coherence rule, and its own reasoning for making it an
-    /// error rather than a warning: the same broken-goto class
+    /// A mode's own coherence rule, made an error rather than a warning
+    /// for the same reason: it's the same broken-goto class
     /// `UnknownGotoTarget` catches, just scoped to one mode's variant of
     /// the graph instead of the whole file. The message names both ways
-    /// out, per §10.1's own text ("nombra las dos salidas posibles").
+    /// out.
     #[error(
         "node `{node}` is in mode `{mode}`, but its on_failure.goto target `{goto}` isn't — \
          include `{goto}` in `{mode}`, or drop the re-route there"
@@ -255,66 +256,65 @@ pub enum CheckError {
         goto: NodeId,
     },
 
-    /// T9.3: a `kind: workflow` node never opens a session of its own —
+    /// A `kind: workflow` node never opens a session of its own —
     /// the child's nodes bind their own runners — so a runner binding
-    /// here would be accepted and ignored, exactly what A6 forbids.
+    /// here would be accepted and ignored, which the engine never
+    /// allows silently.
     #[error(
         "node `{node}`: `{field}` has no meaning on `kind: workflow` — the child workflow's \
          own nodes bind their runners"
     )]
     WorkflowNodeRunnerBinding { node: NodeId, field: &'static str },
 
-    /// §12: "hijos paralelos con `inherit` exigen scopes disjuntos,
-    /// validado en check" — an `inherit` child shares the parent's one
-    /// tree with every concurrent sibling, so an undeclared scope makes
-    /// disjointness unverifiable: refused, same rank as
+    /// A parallel child with `isolation: inherit` shares the parent's
+    /// one tree with every concurrent sibling, so an undeclared scope
+    /// makes disjointness unverifiable: refused, same rank as
     /// `OverlappingParallelScope` (which catches the declared-overlap
     /// half of the same rule).
     #[error(
         "parallel group `{group}`: child `{node}` is `kind: workflow` with `isolation: \
          inherit` and no `scope` — inherit children share the parent's tree, so each must \
-         declare a disjoint scope (§12)"
+         declare a disjoint scope"
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
-    /// D108: a mount reads a node of the parent's own graph — an
+    /// A mount reads a node of the parent's own graph — an
     /// unknown name is the same broken-reference class as
     /// `UnknownDependency`, named for the field the author actually
     /// wrote.
     #[error(
         "node `{node}`: `mounts` references node `{target}` which this workflow does not \
-         define — name a node of this same workflow (§12/D108)"
+         define — name a node of this same workflow"
     )]
     MountUnknownNode { node: NodeId, target: NodeId },
 
-    /// D108: mounting one's own artifact is a read of an outcome that
+    /// Mounting one's own artifact is a read of an outcome that
     /// cannot exist yet — the implied `depends_on` would be a self-cycle.
     #[error(
         "node `{node}`: `mounts` references the node itself — a mount reads a *finished* \
-         node's artifact, which this node cannot be for its own birth (§12/D108)"
+         node's artifact, which this node cannot be for its own birth"
     )]
     MountOnSelf { node: NodeId },
 
-    /// D108: same reasoning as `FanOutTarget` — once `runners:` expands
+    /// Same reasoning as `FanOutTarget` — once `runners:` expands
     /// a node into `<id>@<role>` siblings there is no "the" node to
     /// mount from.
     #[error(
         "node `{node}`: `mounts` references `{target}`, which `runners:` fans out into one \
-         node per role — mount a specific `{target}@<role>` sibling instead (§13.2/D108)"
+         node per role — mount a specific `{target}@<role>` sibling instead"
     )]
     MountOnFanOut { node: NodeId, target: NodeId },
 
-    /// D108: parallel children run concurrently — no DAG order exists
-    /// inside the group, so §12's "hermanos terminados" cannot hold
-    /// there and the implied `depends_on` would mean nothing.
+    /// Parallel children run concurrently — no DAG order exists
+    /// inside the group, so "the source node already finished" cannot
+    /// hold there and the implied `depends_on` would mean nothing.
     #[error(
         "parallel group `{group}`: child `{node}` declares `mounts` — parallel children have \
-         no order to guarantee a finished source; mount on a top-level workflow node instead \
-         (§12/D108)"
+         no order to guarantee a finished source; mount on a top-level workflow node instead"
     )]
     MountInsideParallel { group: NodeId, node: NodeId },
 
-    /// DI-23/D99: only `kind: prompt` opens a node-scoped session —
+    /// Only `kind: prompt` opens a node-scoped session —
     /// declaring `resume_session` anywhere else names a conversation
     /// that doesn't exist (a loop's per-task sessions re-run from the
     /// ledger; bash/check/executor/gate/workflow open none).
@@ -323,14 +323,14 @@ pub enum CheckError {
     )]
     ResumeSessionOnSessionlessNode { node: NodeId },
 
-    /// DI-20/§6.2: the node asks for a scope-expansion mode more
+    /// The node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
     /// ceiling allows — same only-narrowing model as every other
-    /// `permissions` group (§6.1); which *layer* set the binding ceiling
+    /// `permissions` group; which *layer* set the binding ceiling
     /// is `permission_layer_conflicts`' territory at config load.
     #[error(
         "node `{node}`: `scope_expansion.mode: {mode}` exceeds the merged permissions ceiling \
-         `scope_expansion.max_mode: {ceiling}` (§6.2/D73) — harden the node's mode, or raise \
+         `scope_expansion.max_mode: {ceiling}` — harden the node's mode, or raise \
          the ceiling in the layer that set it"
     )]
     ScopeExpansionModeOverCeiling {
@@ -339,16 +339,16 @@ pub enum CheckError {
         ceiling: &'static str,
     },
 
-    /// DI-18: a 0 would starve every ready node forever — a config
+    /// A 0 would starve every ready node forever — a config
     /// mistake surfaced here as a refusal (the scheduler's clamp to 1
-    /// stays as defense in depth for runs created before this rule).
+    /// stays as defense in depth).
     #[error(
         "`defaults.max_parallel_nodes: 0` would starve every node forever — declare 1 or more, \
          or drop the field (default: 1)"
     )]
     MaxParallelNodesZero,
 
-    /// T9.3: a composition reference that can't resolve today — the
+    /// A composition reference that can't resolve today — the
     /// same broken-reference class as `UnknownGotoTarget`, across
     /// files. Advisory about the *current* catalog by design: the child
     /// freezes its own file at birth, so a run only ever meets the file
@@ -360,7 +360,7 @@ pub enum CheckError {
         detail: String,
     },
 
-    /// §5: two packs installed under the same publisher each declare a
+    /// Two packs installed under the same publisher each declare a
     /// workflow with the same file basename — the flat
     /// `publisher/workflow` namespace can't tell them apart.
     #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
@@ -370,13 +370,13 @@ pub enum CheckError {
         detail: String,
     },
 
-    /// §5: "las referencias cross-pack quedan fuera de v1" — a workflow
+    /// Cross-pack references aren't supported — a workflow
     /// that lives inside a pack may only `use:` other workflows from
     /// that same pack, never the repo's own catalog or a different
-    /// pack (no transitive pack dependencies, §8).
+    /// pack (no transitive pack dependencies).
     #[error(
         "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
-         packs isn't supported (RFC-0002 §5/§8); copy what you need into your own pack instead"
+         packs isn't supported; copy what you need into your own pack instead"
     )]
     CrossPackWorkflowRef {
         node: NodeId,
@@ -390,11 +390,11 @@ pub enum CheckError {
         detail: String,
     },
 
-    /// §12: "el grafo de referencias entre workflows sea acíclico".
+    /// The graph of references between workflows must be acyclic.
     #[error("workflow composition cycle: {chain}")]
     WorkflowRefCycle { chain: String },
 
-    /// §12's "profundidad máxima configurable", checked statically over
+    /// The configurable maximum nesting depth, checked statically over
     /// the reference graph (the runtime guard at child birth enforces
     /// the same limit over what actually loads).
     #[error(
@@ -403,11 +403,11 @@ pub enum CheckError {
     )]
     WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
 
-    /// §3/§6: "`declares` es un techo, no una descripción" — a pack's
-    /// own `prompt`/`loop` node can never request a session profile
-    /// above what its manifest promises, even when the node's own YAML
-    /// asks for more (or asks for nothing and falls back to the
-    /// engine's own `edit` default).
+    /// A pack's `declares` field is a ceiling, not a description — a
+    /// pack's own `prompt`/`loop` node can never request a session
+    /// profile above what its manifest promises, even when the node's
+    /// own YAML asks for more (or asks for nothing and falls back to
+    /// the engine's own `edit` default).
     #[error(
         "node `{node}` requests permissions `{effective}` but pack `{pack}` declares a ceiling \
          of `{declared}` — lower the node's permissions or raise the pack's declared ceiling"
@@ -420,7 +420,7 @@ pub enum CheckError {
     },
 }
 
-/// A non-blocking finding — the run can still start (D100/§5.8: `check`
+/// A non-blocking finding — the run can still start (`check`
 /// warns, it doesn't refuse, when a collision can't be verified for lack
 /// of declared scope). Kept separate from `CheckError` rather than adding
 /// a severity field to it: every existing caller of `check()` keeps
@@ -430,53 +430,53 @@ pub enum CheckError {
 pub enum CheckWarning {
     #[error(
         "parallel group `{group}`: two or more children can write and don't declare scope as \
-         disjoint — the engine can't verify they won't collide (D100); declare `scope` on each \
+         disjoint — the engine can't verify they won't collide; declare `scope` on each \
          to make the check real"
     )]
     UndeclaredParallelScope { group: NodeId },
 
-    /// DI-12: the fan-out analogue of `UndeclaredParallelScope` — one
+    /// The fan-out analogue of `UndeclaredParallelScope` — one
     /// warning per connected component of mutually-independent,
     /// write-capable, scope-less top-level nodes (per pair would drown
     /// the signal in noise).
     #[error(
         "nodes {nodes} have no dependency paths between them and can all write without \
          declared scope — with `max_parallel_nodes` > 1 the engine can't verify they won't \
-         collide (D100); declare `scope` on each or chain them with `depends_on`"
+         collide; declare `scope` on each or chain them with `depends_on`"
     )]
     UndeclaredFanOutScope { nodes: String },
 
-    /// DI-18/D48: a literal `git push` aimed at the base branch with no
-    /// gate anywhere before it in the DAG — warning, not error (D48's
-    /// own rank): a team may genuinely want it, but nobody should
-    /// discover an ungated push to `main` from the push itself.
+    /// A literal `git push` aimed at the base branch with no
+    /// gate anywhere before it in the DAG — warning, not error: a team
+    /// may genuinely want it, but nobody should discover an ungated
+    /// push to `main` from the push itself.
     #[error(
         "node `{node}` pushes to the base branch (`{branch}`) with no gate anywhere before it \
-         in the DAG — D48: put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
+         in the DAG — put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
     )]
     PushToBaseWithoutGate { node: NodeId, branch: String },
 }
 
-/// Validates a workflow against the M-0 rule set. Every applicable rule is
+/// Validates a workflow against the full rule set. Every applicable rule is
 /// checked and every violation reported — not just the first one (same
-/// spirit as the ledger's T1.0 §4: whoever writes this by hand corrects
+/// spirit as the ledger: whoever writes this by hand corrects
 /// once, not once per `yunta check` run).
 pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
-    // §9: `context: [{ artifact }]` creates an implicit `depends_on` edge
+    // `context: [{ artifact }]` creates an implicit `depends_on` edge
     // — expanded here, on this function's own clone, so cycle detection
     // below sees exactly the graph a real run would build (`build_manifest`
     // expands the same way), never a narrower one that misses a cycle
     // formed only through context references.
     let mut workflow = workflow.clone();
     let mut errors = Vec::new();
-    // T9.4: fan-out declarations validate on the *original* shape (the
+    // Fan-out declarations validate on the *original* shape (the
     // rules are about the declaration itself), then the graph expands so
     // every later rule sees what will actually run.
     check_runner_fanout(&workflow, &mut errors);
-    // T9.3: workflow-node rules also validate the original shape
+    // Workflow-node rules also validate the original shape
     // (`runners:` on one is refused before expansion would multiply it).
     check_workflow_nodes(&workflow.nodes, None, &mut errors);
-    // D108: mount declarations too — expansion below turns each mount
+    // Mount declarations too — expansion below turns each mount
     // into an ordinary `depends_on` edge, so cycle detection sees them.
     check_mounts(&workflow, &mut errors);
     crate::manifest::expand_runner_fanout(&mut workflow);
@@ -484,7 +484,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     let workflow = &workflow;
 
     // Global, not per-group: replay derives node state from one flat
-    // NodeId -> NodeState map (I2), so a `parallel` child's id colliding
+    // NodeId -> NodeState map, so a `parallel` child's id colliding
     // with anything else — a sibling, a top-level node, another group's
     // child — would corrupt derivation, not just read oddly.
     let mut known_ids: HashSet<NodeId> = HashSet::new();
@@ -570,7 +570,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 
         check_gate(node, &known_ids, config, &mut errors);
 
-        // DI-20/§6.2: the loop's declared expansion mode against the
+        // The loop's declared expansion mode against the
         // merged ceiling. An absent block is `deny` — the strictest —
         // so only an explicit, too-permissive declaration can trip.
         if let NodeKind::Loop {
@@ -612,7 +612,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     errors
 }
 
-/// §10.1/D44: `modes:`'s own three invariants — independent of the
+/// `modes:`'s own three invariants — independent of the
 /// mode's name or count, checked once per declared mode. `include: all`
 /// is trivially coherent (everything's in it), so only the explicit
 /// node-list form has anything to check.
@@ -621,11 +621,11 @@ fn check_modes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
         return;
     };
 
-    // Mode `include:` only ever names *top-level* nodes (§10.1's own
-    // examples never reach into a `parallel` group's children) — a
-    // `parallel` group is included or excluded as a whole, so
-    // "known" here deliberately excludes nested child ids even though
-    // `check`'s other rules track them for global uniqueness.
+    // Mode `include:` only ever names *top-level* nodes, never reaching
+    // into a `parallel` group's children — a `parallel` group is
+    // included or excluded as a whole, so "known" here deliberately
+    // excludes nested child ids even though `check`'s other rules track
+    // them for global uniqueness.
     let top_level_ids: HashSet<&NodeId> = workflow.nodes.iter().map(|n| &n.id).collect();
     let invariant_ids: Vec<&NodeId> = workflow
         .nodes
@@ -667,9 +667,9 @@ fn check_modes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
                     });
                 }
             }
-            // T1.3's own full wording: "...cuyo `goto` u **opción de
-            // gate** apunta a un nodo excluido" — a gate's `on:` target
-            // is the same broken-reference class as a re-route's.
+            // A gate's `on:` target is the same broken-reference class
+            // as a re-route's — a node excluded from the mode by
+            // either its `goto` or a gate option is caught the same way.
             if let NodeKind::Gate { on, .. } = &node.kind {
                 for target in on.values() {
                     if !included.contains(target) {
@@ -685,7 +685,7 @@ fn check_modes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// T1.5/§2.3: each declared input's own fields are internally consistent
+/// Each declared input's own fields are internally consistent
 /// — independent of anything else in the workflow, so this runs once
 /// over `inputs:` rather than per reference site.
 fn check_input_specs(
@@ -736,8 +736,8 @@ fn check_input_specs(
     }
 }
 
-/// §2.3: every `{{inputs.x}}` appearing in an inline template must name
-/// a declared input. Scans exactly the text this recorte's runtime ever
+/// Every `{{inputs.x}}` appearing in an inline template must name
+/// a declared input. Scans exactly the text the runtime ever
 /// renders (`node_exec.rs`/`context_resolve.rs`'s own `render_template`
 /// call sites) — prompt text, bash/hook commands, and `context:`
 /// patterns/command/query — so a reference `check` accepts is guaranteed
@@ -827,14 +827,14 @@ fn check_template_text(
     }
 }
 
-/// Non-blocking findings — D100/§5.8's "can't verify, so warn" case.
+/// Non-blocking findings — the "can't verify, so warn" case.
 /// Separate entry point from [`check`] rather than a severity field on
 /// `CheckError`, so nothing that already treats `check()`'s output as
 /// "must be empty to proceed" has to learn to filter by severity.
 ///
-/// D100's real condition is "two or more children **with write
-/// permissions**" — and since T5.7 gave nodes `permissions:
-/// read-only|edit|full`, a child declaring `read-only` is out of the
+/// The real condition is "two or more children **with write
+/// permissions**" — nodes declare `permissions:
+/// read-only|edit|full`, so a child declaring `read-only` is out of the
 /// collision count by declaration. A child without the field stays
 /// implicitly write-capable (the engine's default profile is `edit`).
 pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWarning> {
@@ -845,7 +845,7 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     warnings
 }
 
-/// DI-18/D48: scans every literal `bash`/hook command for a `git push`
+/// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
 /// or the configured literal name as its own token (whitespace/refspec
 /// boundaries, so a branch named `main` never matches `domain`) — and
@@ -947,7 +947,7 @@ fn collect_push_to_base_warnings(
     }
 }
 
-/// Both halves of DI-12 need the same question answered: which pairs of
+/// Both the error and warning fan-out checks need the same question answered: which pairs of
 /// top-level nodes have no dependency path between them in either
 /// direction (transitive closure of `depends_on`, with a dependency on
 /// a `parallel` child counting as one on its enclosing group)?
@@ -1019,12 +1019,12 @@ fn independent_top_level_pairs(workflow: &Workflow) -> Vec<(usize, usize)> {
 }
 
 /// A top-level node that can write the shared worktree (same rule as
-/// `parallel`'s children, D100): anything not declared `read-only`.
+/// `parallel`'s children): anything not declared `read-only`.
 fn writes(node: &Node) -> bool {
     node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
 }
 
-/// DI-12's error half: overlapping *declared* scope on an unordered
+/// The error half: overlapping *declared* scope on an unordered
 /// pair — verifiable in advance, so an error, same rank as `parallel`.
 fn check_fanout_scopes(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     if config.resolved_max_parallel_nodes() <= 1 {
@@ -1052,7 +1052,7 @@ fn check_fanout_scopes(workflow: &Workflow, config: &ConfigLayer, errors: &mut V
     }
 }
 
-/// DI-12's warning half: connected components of mutually-independent,
+/// The warning half: connected components of mutually-independent,
 /// write-capable, scope-less top-level nodes — one warning per
 /// component, members named.
 fn collect_fanout_warnings(
@@ -1101,7 +1101,7 @@ fn collect_fanout_warnings(
     }
 }
 
-/// One `parallel` group's scope-collision status (D100): every pair of
+/// One `parallel` group's scope-collision status: every pair of
 /// children whose declared scopes might overlap — computed in one place
 /// so `check`'s error and `check_warnings`' warning can never disagree
 /// about what overlaps.
@@ -1126,10 +1126,11 @@ fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
     GroupScope { overlaps }
 }
 
-/// Static half of §6.1's runtime rule: every literal command in the
-/// workflow — bash `run`, hook steps — against the merged model, parallel
-/// children included. Criteria live in the runtime ledger and executors
-/// resolve through config, so both are runtime-moment territory.
+/// Static half of the runtime permissions rule: every literal command in
+/// the workflow — bash `run`, hook steps — against the merged model,
+/// parallel children included. Criteria live in the runtime ledger and
+/// executors resolve through config, so both are runtime-moment
+/// territory.
 fn check_commands(
     nodes: &[Node],
     permissions: &yunta_core::PermissionsConfig,
@@ -1187,7 +1188,7 @@ fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
     }
 }
 
-/// §5.6/D66/T7.7 + DI-04: a `kind: gate` with `external:` needs
+/// A `kind: gate` with `external:` needs
 /// `forge.github` configured (`external.kind` is a closed enum with one
 /// variant today, so this is a total match); an internal gate's own
 /// `on:` mapping must reference declared options and existing targets —
@@ -1239,7 +1240,7 @@ fn check_gate(
     }
 }
 
-/// §5.8/T4.6 vs. T7.7: a `parallel` group's children share a worktree
+/// A `parallel` group's children share a worktree
 /// and join semantics a forge round-trip has no defined relationship to
 /// — refused outright rather than guessing one.
 fn check_no_gate_in_parallel(
@@ -1271,7 +1272,7 @@ fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<CheckWarning>) {
             nodes: children, ..
         } = &node.kind
         {
-            // Only write-capable children can collide (D100): a child
+            // Only write-capable children can collide: a child
             // declaring `permissions: read-only` is out by declaration.
             let writers: Vec<&Node> = children
                 .iter()
@@ -1357,8 +1358,8 @@ fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
     None
 }
 
-/// DI-13: config values the schema parses but nothing implements yet
-/// must be refused, never accepted and ignored (A6). Today that is
+/// Config values the schema parses but nothing implements yet
+/// must be refused, never accepted and ignored. Today that is
 /// `defaults.on_failure` beyond `pause` (the built behavior), and a
 /// `defaults.runner` that `runners:` doesn't define.
 fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
@@ -1388,8 +1389,8 @@ fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// DI-13: `fresh_context: false` names a capability (session resume,
-/// DI-23) that doesn't exist — error, never silent acceptance (A6).
+/// `fresh_context: false` names a capability (session resume)
+/// that doesn't exist — error, never silent acceptance.
 fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         if node.fresh_context == Some(false) {
@@ -1397,7 +1398,7 @@ fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
                 node: node.id.clone(),
             });
         }
-        // DI-23: the explicit declaration is refused where no session
+        // The explicit declaration is refused where no session
         // exists; the *config default* stays legal (it applies where a
         // session exists and means restart everywhere else).
         if node.on_interrupt == Some(yunta_core::OnInterrupt::ResumeSession)
@@ -1410,7 +1411,7 @@ fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// DI-13/§2.1: `yunta_schema` is a space-separated list of comparators
+/// `yunta_schema` is a space-separated list of comparators
 /// over the schema major (`>=1 <2`, `=1`, `<3`…), all of which must
 /// hold for [`yunta_core::YUNTA_SCHEMA`]. Deliberately a ~20-line
 /// parser instead of a semver dependency: the schema version is one
@@ -1466,7 +1467,7 @@ fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
     Ok(true)
 }
 
-/// DI-24: every `on_finish.distill` path must be some node's declared
+/// Every `on_finish.distill` path must be some node's declared
 /// artifact. Template-bearing names (`findings-{{runner.role}}.yaml`)
 /// compare as written — the distill declaration must match the
 /// production declaration, both pre-render.
@@ -1494,9 +1495,9 @@ fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// T9.3's per-file workflow-node rules: no runner bindings (a workflow
+/// Per-file workflow-node rules: no runner bindings (a workflow
 /// node opens no session — the child's nodes bind their own), and an
-/// `inherit` child of a `parallel` group must declare scope so §12's
+/// `inherit` child of a `parallel` group must declare scope so the
 /// disjointness demand is verifiable at all.
 fn check_workflow_nodes(nodes: &[Node], group: Option<&Node>, errors: &mut Vec<CheckError>) {
     for node in nodes {
@@ -1531,12 +1532,12 @@ fn check_workflow_nodes(nodes: &[Node], group: Option<&Node>, errors: &mut Vec<C
     }
 }
 
-/// D108's declaration rules, on the original (pre-expansion) shape:
+/// Mount declaration rules, on the original (pre-expansion) shape:
 /// mounts live on top-level `kind: workflow` nodes, reference an
 /// existing node other than themselves, and never appear inside a
-/// `parallel` group (no order there — §12's "hermanos terminados"
-/// cannot hold). `MountOnFanOut` lives in [`check_runner_fanout`],
-/// next to the other fan-out target rules.
+/// `parallel` group (no order there — "the source node already
+/// finished" cannot hold). `MountOnFanOut` lives in
+/// [`check_runner_fanout`], next to the other fan-out target rules.
 fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let known: HashSet<&NodeId> = workflow.iter_nodes().map(|node| &node.id).collect();
     for node in &workflow.nodes {
@@ -1573,7 +1574,7 @@ fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// T9.3/§12: walks the composition reference graph as the repo's
+/// Walks the composition reference graph as the repo's
 /// catalog stands **today** — every `use:` resolves, no cycles, and
 /// nesting stays within `limits.max_workflow_depth`. A separate entry
 /// point from [`check`], deliberately: `check` never reads files (its
@@ -1615,7 +1616,7 @@ fn permission_rank(permissions: yunta_core::NodePermissions) -> u8 {
     }
 }
 
-/// T11.5/§3/§6: `declares.permissions` is a ceiling, checked against
+/// `declares.permissions` is a ceiling, checked against
 /// every `prompt`/`loop` node's own *effective* permission — the node's
 /// explicit `permissions:` if it has one, the engine's own `edit`
 /// default otherwise (a pack declaring `read-only` can't rely on a node
@@ -1735,7 +1736,7 @@ fn walk_workflow_refs(
             }
         };
 
-        // §5/§8: composing from inside a pack may only reach other
+        // Composing from inside a pack may only reach other
         // workflows in that *same* pack — never back out to the repo,
         // never sideways into a different pack (no transitive pack
         // dependencies).
@@ -1787,7 +1788,7 @@ fn walk_workflow_refs(
     }
 }
 
-/// T9.4's declaration rules, checked before expansion.
+/// Runner fan-out declaration rules, checked before expansion.
 fn check_runner_fanout(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let fanout_ids: HashSet<&NodeId> = workflow
         .nodes

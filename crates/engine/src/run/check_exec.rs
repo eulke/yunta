@@ -1,4 +1,4 @@
-//! `kind: check` execution (§7.1, §7.2, D85, T5.4) — split out of
+//! `kind: check` execution — split out of
 //! `node_exec.rs` once that file passed CLAUDE.md's ~500-line soft
 //! ceiling; kept as its own module since a check builtin's shape (run a
 //! command, parse or compare, never touch an agent) is distinct enough
@@ -16,7 +16,7 @@ use crate::replay::derive;
 use super::node_exec::{close_node, fail, NodeEnd};
 use super::{RunCtx, RunError};
 
-/// `kind: check` (§7.1, D85, T5.4): the engine evaluates its own data,
+/// `kind: check`: the engine evaluates its own data,
 /// never a person — no session, no tokens spent. Each builtin's config
 /// (`baseline:`/`coverage:`) is workflow-config, not node-level, so a node
 /// missing it fails with a diagnostic naming what to declare rather than
@@ -43,8 +43,8 @@ struct CommandOutput {
     stdout: String,
 }
 
-/// A check command's run: done with its output, or cut by cancellation
-/// (DI-11) — the caller turns the latter into the node's own fate.
+/// A check command's run: done with its output, or cut by cancellation —
+/// the caller turns the latter into the node's own fate.
 enum CommandRun {
     Done(CommandOutput),
     Cancelled,
@@ -53,7 +53,7 @@ enum CommandRun {
 /// Runs `cmd` to completion and captures its stdout — unlike a bash
 /// *node*, a check builtin's command is the engine's own verification
 /// step, not agent-visible work, so its stdout is data to parse, not a
-/// stream to relay. Cancel-aware (DI-11/A4): the command runs in its own
+/// stream to relay. Cancel-aware: the command runs in its own
 /// process group, registered in `engine.json`, and a fired token kills
 /// the whole tree.
 async fn run_command(
@@ -120,14 +120,13 @@ async fn run_command(
     }
 }
 
-/// `baseline_compare` (§7.2): capture is lazy, on this builtin's own first
+/// `baseline_compare`: capture is lazy, on this builtin's own first
 /// invocation in the run, instead of unconditionally at worktree creation
 /// as the Contrato's prose describes — capturing eagerly would make
 /// `create_run` async across its four call sites for a builtin most
-/// workflows never use. Documented deviation (`docs/m0-status.md`'s T5.4
-/// entry), not a silent gap: the first `baseline_compare` node always
-/// passes (it has nothing yet to compare against) and every later one
-/// compares against that first run's result.
+/// workflows never use. Documented deviation, not a silent gap: the first
+/// `baseline_compare` node always passes (it has nothing yet to compare
+/// against) and every later one compares against that first run's result.
 async fn execute_baseline_compare(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -206,7 +205,7 @@ async fn execute_baseline_compare(
     }
 }
 
-/// `coverage_gate` (§7.2): `coverage.cmd`'s stdout must contain a bare
+/// `coverage_gate`: `coverage.cmd`'s stdout must contain a bare
 /// `NN[.NN]%` — the last one found is taken as the measured coverage, per
 /// `CoverageConfig`'s own documented convention (the Contrato's prose
 /// doesn't specify a parsing contract).
@@ -296,8 +295,8 @@ fn parse_last_percentage(text: &str) -> Option<f64> {
     best
 }
 
-/// `findings_gate` (§4.1, D85): fails if any finding posted so far in this
-/// run — raw, not deduped (T5.12's `dedup_findings` is a reporting view;
+/// `findings_gate`: fails if any finding posted so far in this
+/// run — raw, not deduped (`dedup_findings` is a reporting view;
 /// a gate checking "does anything this severe exist" should not risk
 /// under-counting two distinct findings a dedup heuristic conflated) — is
 /// at or above `max_severity`. Ranked by declaration order

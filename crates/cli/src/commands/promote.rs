@@ -1,9 +1,9 @@
-//! Drives a `run`/`resume` call through a promotion chain (§10.2, D22,
-//! T9.2): `execute_run` itself only ever closes *one* run and hands back
+//! Drives a `run`/`resume` call through a promotion chain: `execute_run`
+//! itself only ever closes *one* run and hands back
 //! `RunTerminal::Promoted { suggested_mode }` — creating and starting
 //! the successor needs the original repo checkout (`cwd`) to prepare a
-//! worktree, which `execute_run` is never given (§7.3: it only ever
-//! receives an *already-prepared* one). `run`/`resume` call
+//! worktree, which `execute_run` is never given — it only ever receives
+//! an *already-prepared* one. `run`/`resume` call
 //! [`drive_promotions`] right after their own `execute_run`, and use
 //! its returned `(run_id, manifest, worktree, report)` — the *last*
 //! run in the chain — for everything after (release/report).
@@ -36,8 +36,8 @@ pub(crate) struct PromotionEnv<'a> {
 /// Runs the whole promotion chain to its end: while the latest
 /// `execute_run` call returned `Promoted`, creates and starts the
 /// successor, then checks *its* terminal in turn. Bounded automatically
-/// — `modes:` is a finite, strictly-forward-only ladder (§10.1), so this
-/// can run at most `len(modes) - 1` times before landing on a mode with
+/// — `modes:` is a finite, strictly-forward-only ladder, so this can
+/// run at most `len(modes) - 1` times before landing on a mode with
 /// nowhere further to promote to.
 pub(crate) async fn drive_promotions(
     env: &PromotionEnv<'_>,
@@ -48,7 +48,7 @@ pub(crate) async fn drive_promotions(
 ) -> Result<(RunId, Manifest, PathBuf, RunReport), String> {
     while let RunTerminal::Promoted { suggested_mode } = &report.terminal {
         let suggested_mode = suggested_mode.clone();
-        // DI-25: the creation mechanics live in the engine (shared with
+        // The creation mechanics live in the engine (shared with
         // `kind: workflow` children that promote); this loop keeps only
         // what's the CLI's — the console surface and the system clock.
         let successor = yunta_engine::create_promotion_successor(

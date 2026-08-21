@@ -1,10 +1,10 @@
-//! Integration tests for the real `codex` adapter (T7.4) against a fake
+//! Integration tests for the real `codex` adapter against a fake
 //! `codex` binary (`fixtures/codex_stub.sh`) — no network, no API cost,
-//! no real LLM in CI (A8). What this suite cannot cover — whether the
+//! no real LLM in CI. What this suite cannot cover — whether the
 //! real CLI's actual output matches what the stub scripts — has no
 //! manual smoke test to fall back on either: no `codex` binary or
 //! credentials exist in this environment. See `codex/mod.rs`'s own doc
-//! comment and `docs/m0-status.md`'s T7.4 entry.
+//! comment for the details.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -78,7 +78,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.resume_session);
     assert!(caps.permission_profiles);
     assert!(caps.usage_reporting);
-    // A6: never claim a capability that isn't wired end-to-end yet.
+    // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
     assert!(!caps.edit_hooks);
     assert!(!caps.run_tools);

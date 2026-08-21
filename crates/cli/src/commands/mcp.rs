@@ -1,23 +1,23 @@
-//! `yunta mcp` (M8/T8.1.4, §6.4): the control-plane MCP server, stdio.
-//! Five tools — `list_workflows`, `run_workflow`, `workflow_status`,
-//! `resume_run`, `resolve_gate` — none of which ever blocks for a run's
-//! own duration (I25): `run_workflow`/`resume_run` hand off to a
-//! detached `yunta resume` and return immediately; a caller tracks
-//! progress by polling `workflow_status` (pull, never push — D101's own
-//! "mismo modelo pull que los gates externos").
+//! `yunta mcp`: the control-plane MCP server, stdio. Five tools —
+//! `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`,
+//! `resolve_gate` — none of which ever blocks for a run's own
+//! duration: `run_workflow`/`resume_run` hand off to a detached
+//! `yunta resume` and return immediately; a caller tracks progress by
+//! polling `workflow_status` (pull, never push — the same model
+//! external gates already use).
 //!
 //! `list_workflows`/`workflow_status` reuse `yunta list`/`yunta status`
 //! verbatim by shelling out to this same binary — their rendering is
-//! already the D45-shaped structured text those commands produce, and a
-//! second copy of that rendering here would drift. `resume_run`/
+//! already the structured text those commands produce, and a second
+//! copy of that rendering here would drift. `resume_run`/
 //! `resolve_gate` call the already-factored, already-tested primitives
 //! directly in-process (`spawn_detached_resume`, `yunta_engine::
 //! resolve_gate`) rather than round-tripping through a subprocess for
 //! no reason.
 //!
-//! Tool descriptions are written to help a client *decide* (D74), not
-//! merely to describe — each names when reaching for a verified
-//! workflow beats implementing directly.
+//! Tool descriptions are written to help a client *decide*, not merely
+//! to describe — each names when reaching for a verified workflow
+//! beats implementing directly.
 
 use std::process::ExitCode;
 
@@ -127,7 +127,7 @@ fn tool_definitions() -> Vec<Tool> {
                     "workflow": {"type": "string", "description": "catalog name, as listed by list_workflows"},
                     "inputs": {"type": "object", "description": "declared input name -> value", "additionalProperties": {"type": "string"}},
                     "adapter": {"type": "string", "description": "override runners: resolution"},
-                    "mode": {"type": "string", "description": "workflow mode (§10.1); omit for the floor mode"},
+                    "mode": {"type": "string", "description": "workflow mode; omit for the floor mode"},
                 },
                 "required": ["workflow"],
             })
@@ -165,7 +165,7 @@ fn tool_definitions() -> Vec<Tool> {
         ),
         Tool::new(
             "resolve_gate",
-            "Answers a paused run's decision (§5.3) — call workflow_status first to read \
+            "Answers a paused run's decision — call workflow_status first to read \
              the run's own pause reason and menu of options. Covers exhausted re-routes \
              (retry/abort/promote) and unresolved gate nodes; the decision is recorded on \
              the run's log and a detached process applies it, so this returns \
@@ -188,8 +188,8 @@ fn tool_definitions() -> Vec<Tool> {
 }
 
 /// Shells out to this same binary's own `list`/`status` rendering
-/// (D45's own structured text) rather than a second copy of it —
-/// `current_exe()` falling back to the bare name matches
+/// rather than a second copy of it — `current_exe()` falling back to
+/// the bare name matches
 /// `spawn_detached_resume`'s own convention (PATH lookup is the worst
 /// case, not a silent failure).
 async fn run_self(cwd: &std::path::Path, args: &[&str]) -> Result<String, String> {

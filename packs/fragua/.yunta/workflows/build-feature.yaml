@@ -1,12 +1,10 @@
-# The full reference pipeline (yunta/fragua, T10.2) — a runnable copy of
-# the schema's own canonical example ("Config y workflows de referencia",
-# Contrato v0.5; also crates/core/tests/fixtures/build-feature.yaml,
-# T1.1's parse fixture). Two deliberate trims from that reference,
-# documented rather than silent (docs/m0-status.md's own T10.2 entry
-# has the rationale): the `mcp:` context source is dropped (it needs a
-# live MCP server, which a pack's own mock self-test has no reason to
-# stand up) and `node_defaults.hooks` is dropped (an ecosystem-specific
-# convenience, not part of what T10.2 asks this pack to demonstrate).
+# The full reference pipeline (yunta/fragua) — a runnable copy of the
+# schema's own canonical example (also crates/core/tests/fixtures/
+# build-feature.yaml, the parse fixture). Two deliberate trims from that
+# reference: the `mcp:` context source is dropped (it needs a live MCP
+# server, which a pack's own mock self-test has no reason to stand up)
+# and `node_defaults.hooks` is dropped (an ecosystem-specific
+# convenience, not something a reference pack needs to demonstrate).
 name: build-feature
 description: Full feature cycle — grill, verified ledger, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"

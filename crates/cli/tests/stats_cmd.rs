@@ -1,4 +1,4 @@
-//! `yunta stats` end-to-end (T7.5, §8.4/§8.6): the terminal view stays
+//! `yunta stats` end-to-end: the terminal view stays
 //! inside 80 columns and never emits ANSI color codes, and the prior
 //! estimation only appears once a workflow has at least three finished
 //! runs — both driven through the real compiled binary, same style

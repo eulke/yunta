@@ -119,7 +119,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         vec![cmd("test -f output.txt")],
     );
     // The mock reports Completed but its fixture never writes output.txt —
-    // this is exactly T5.2's acceptance criterion: the engine, not the
+    // this proves the engine, not the
     // agent's self-report, decides done.
     let adapter =
         MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
@@ -310,7 +310,7 @@ async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
         &["output.txt"],
         vec![cmd("test -f output.txt")],
     );
-    // Every retry is a fresh session (§5.2), so the fixture scripts one
+    // Every retry is a fresh session, so the fixture scripts one
     // session per expected attempt.
     let adapter = MockAdapter::from_yaml(
         r#"
@@ -412,7 +412,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
     // The execution marker lives outside the repo — a criterion is
-    // deterministic/read-only by definition (§5.1), so this only exists
+    // deterministic/read-only by definition, so this only exists
     // to observe whether the command actually ran without itself
     // dirtying the tree tree_hash is computed over (that would
     // self-invalidate the very cache entry it just wrote).
@@ -486,8 +486,8 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     };
 
     // The test itself times out (failing loudly) if run_task doesn't
-    // return promptly — T3.3's whole point is that a stuck session
-    // never blocks the engine forever.
+    // return promptly — a stuck session must
+    // never block the engine forever.
     let report = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         run_task(
@@ -579,7 +579,7 @@ outcome: { type: completed, summary: "should never be reached" }
     }
 }
 
-// --- DI-15: learned criterion ordering by historical duration ----------------
+// --- learned criterion ordering by historical duration ----------------
 
 #[tokio::test]
 async fn pre_check_orders_criteria_by_learned_median_duration() {
@@ -603,7 +603,7 @@ async fn pre_check_orders_criteria_by_learned_median_duration() {
     );
 
     // The tree changes (no memo reuse), and the learned medians reorder:
-    // the historically-fast criterion now runs first (D62's fail-fast).
+    // the historically-fast criterion now runs first to fail fast.
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
     let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
         .await
@@ -677,7 +677,7 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
 
 #[test]
 fn criterion_results_without_duration_still_parse() {
-    // D70: additive payload evolution — a pre-DI-15 event without
+    // Additive payload evolution — an older event without
     // `duration_ms` parses, and the field reads back `None`.
     let old = r#"{ "cmd": "cargo test", "exit_code": 0, "reused": false }"#;
     let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();

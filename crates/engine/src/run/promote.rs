@@ -1,9 +1,9 @@
-//! Creating a promotion successor (§10.2, D22 — extracted from the CLI
-//! by DI-25): a run that closed `run_finished: promoted` gets a fresh
-//! run in `suggested_mode`, `promoted_from` it, inheriting its
-//! `artifacts/` wholesale ("el contexto inicial incluye automáticamente
-//! artifacts, ledger y findings del antecesor" — all three are files
-//! under `artifacts/`, so one directory copy covers them). Lives in the
+//! Creating a promotion successor: a run that closed
+//! `run_finished: promoted` gets a fresh run in `suggested_mode`,
+//! `promoted_from` it, inheriting its `artifacts/` wholesale (the
+//! successor's initial context automatically includes the predecessor's
+//! artifacts, ledger, and findings — all three are files under
+//! `artifacts/`, so one directory copy covers them). Lives in the
 //! engine so both drivers of a chain use the identical mechanics: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
@@ -38,8 +38,8 @@ pub struct Predecessor<'a> {
 /// closed `Promoted` toward `suggested_mode`.
 ///
 /// `repo` is the checkout a fresh worktree branches from (the original
-/// `cwd` for a top-level chain; the parent run's own tree for a child's,
-/// §12). Under `Isolation::None` the successor reuses the predecessor's
+/// `cwd` for a top-level chain; the parent run's own tree for a child's).
+/// Under `Isolation::None` the successor reuses the predecessor's
 /// checkout — the lock (if any) is the caller's and only releases when
 /// the whole chain ends. `storage`/`clock` are trailing arguments, same
 /// convention as [`create_run`].
@@ -61,7 +61,7 @@ pub async fn create_promotion_successor(
     let successor_id = RunId::from(format!("{predecessor_id}-promoted"));
 
     let mut manifest = predecessor_manifest.clone();
-    // §7.3/§10.2: the successor builds on wherever the predecessor's own
+    // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
     manifest.base_commit = head_commit(predecessor_worktree)?;
 
@@ -106,10 +106,10 @@ pub async fn create_promotion_successor(
     })
 }
 
-/// §10.2's automatic inheritance, at the filesystem level: every file
+/// Automatic inheritance, at the filesystem level: every file
 /// directly under the predecessor's `artifacts/` copies into the
-/// successor's. Deliberately narrower than §12's general linked-run
-/// mounting (DI-26's own territory).
+/// successor's. Deliberately narrower than the general linked-run
+/// mounting a composed workflow run uses.
 fn copy_inherited_artifacts(from_run_dir: &Path, to_run_dir: &Path) -> std::io::Result<()> {
     let from = from_run_dir.join("artifacts");
     let to = to_run_dir.join("artifacts");

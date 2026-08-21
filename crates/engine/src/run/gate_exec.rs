@@ -1,4 +1,4 @@
-//! `kind: gate` dispatch (§5.6, D66, T7.7) — the imperative half of what
+//! `kind: gate` dispatch — the imperative half of what
 //! `schedule::ScheduleStep::PublishGate`/`PollGate` name. Reads the
 //! declared artifacts off disk, asks the forge to publish/poll, and
 //! translates its answer into the same event vocabulary every other
@@ -6,21 +6,19 @@
 //! `node_failed`) — so nothing downstream (`on_failure.goto`,
 //! `progress.md`, `yunta status`) needs to know a gate is different
 //! from any other node once it's resolved. Comments on a
-//! changes-requested review become `finding_posted` (§4.1's own
-//! schema), mounted for the corrective node the same way `node-output`
-//! already is — a reviewer's words reach the fixing session without an
-//! intermediate summary.
+//! changes-requested review become `finding_posted`, mounted for the
+//! corrective node the same way `node-output` already is — a reviewer's
+//! words reach the fixing session without an intermediate summary.
 //!
-//! **No forge, no credentials (D66's own "degrada a consola")**: both
-//! entry points fall back to the exact same `HumanInteraction`
-//! escalation `GateExhaustedReroutes` (T7.2) already uses — same
-//! object, same "`None` means pause, never guess" rule — building a
-//! synthetic PR-less decision instead of a forge round-trip. Nothing is
-//! ever recorded as published while degraded (no `gate_waiting` without
-//! a resolved answer alongside it, mirroring `GateExhaustedReroutes`'s
-//! own pattern exactly), so a still-unresolved degraded gate asks fresh
-//! on every wake rather than remembering a decision that was never
-//! really made.
+//! **No forge, no credentials: degrades to console.** Both entry points
+//! fall back to the exact same `HumanInteraction` escalation
+//! `GateExhaustedReroutes` already uses — same object, same "`None`
+//! means pause, never guess" rule — building a synthetic PR-less
+//! decision instead of a forge round-trip. Nothing is ever recorded as
+//! published while degraded (no `gate_waiting` without a resolved
+//! answer alongside it, mirroring `GateExhaustedReroutes`'s own pattern
+//! exactly), so a still-unresolved degraded gate asks fresh on every
+//! wake rather than remembering a decision that was never really made.
 
 use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
@@ -146,10 +144,10 @@ pub(super) async fn poll_gate(
     resolve_from_poll(ctx, node, &polled)
 }
 
-/// §5.6's own mapping, applied uniformly whether resolving a gate for
-/// the first time or re-checking one already `Finished` for SHA drift
-/// (T7.7's own unification — see this module's own doc comment): a
-/// review only counts if it covers the PR's *current* head; anything
+/// The review→outcome mapping, applied uniformly whether resolving a
+/// gate for the first time or re-checking one already `Finished` for
+/// SHA drift (see this module's own doc comment): a review only counts
+/// if it covers the PR's *current* head; anything
 /// else — no decisive review yet, or one that no longer covers the
 /// current commit — is "still waiting", not a decision.
 fn resolve_from_poll(
@@ -247,7 +245,8 @@ fn resolve_from_poll(
             Ok(GateStep::Resolved)
         }
         // Pending, or an approval that no longer covers the current
-        // head (§5.6: "el engine lo detecta por SHA") — not a decision.
+        // head — the engine detects that by comparing SHAs — not a
+        // decision.
         ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
             pause(
                 ctx,
@@ -261,8 +260,8 @@ fn resolve_from_poll(
 }
 
 /// Re-checks every already-`Finished` `kind: gate` node against its
-/// forge's current state (§5.6: "el engine lo detecta por SHA") — run
-/// once per `execute_run` invocation, before the scheduling loop, so
+/// forge's current state — detected by comparing SHAs — run once per
+/// `execute_run` invocation, before the scheduling loop, so
 /// "al despertar" (`resume`, `status`, a scheduled job) means once per
 /// wake, not once per scheduling iteration. A node whose approval no
 /// longer covers the PR's current head is re-opened (`node_started` at
@@ -273,7 +272,7 @@ fn resolve_from_poll(
 /// **Only reachable while the run is still open.** Its one caller
 /// (`run/mod.rs::execute_run`) places this after the "already
 /// `run_finished`" early return — a run the log already closed is
-/// immutable (I2/§2), so a stale approval discovered after the whole
+/// immutable, so a stale approval discovered after the whole
 /// run finished is a fact for the *next* run to know about, not a
 /// reason to reopen a closed one. A workflow whose gate is its very
 /// last node therefore never gets re-checked once approved; one with
@@ -339,16 +338,16 @@ fn last_external_ref(
     })
 }
 
-/// Resolves an internal gate (DI-04, `external: None`): builds the §5.3
+/// Resolves an internal gate (`external: None`): builds the escalation
 /// object from the node's own `message`/`options`/`on` and puts it to
 /// `HumanInteraction`. Semantics: an option mapped in `on` re-routes
-/// exactly like `on_failure.goto` (§11.2 — the gate fails retryable,
-/// control transfers, and once the target's subgraph completes the gate
-/// asks again); an unmapped option finishes the gate with that choice
-/// as its outcome; the engine-appended `abort` pauses the run (same
-/// convention as T7.2's escalation). No surface → `StillWaiting`, with
-/// nothing recorded, so a resume re-asks (T7.2's own rule for
-/// unresolved questions).
+/// exactly like `on_failure.goto` — the gate fails retryable, control
+/// transfers, and once the target's subgraph completes the gate asks
+/// again; an unmapped option finishes the gate with that choice as its
+/// outcome; the engine-appended `abort` pauses the run (same convention
+/// as every other escalation). No surface → `StillWaiting`, with
+/// nothing recorded, so a resume re-asks (the same rule every
+/// unresolved question follows).
 pub(super) async fn resolve_internal_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -357,17 +356,17 @@ pub(super) async fn resolve_internal_gate(
     options: &[String],
     on: &indexmap::IndexMap<String, yunta_core::NodeId>,
 ) -> Result<GateStep, RunError> {
-    // Shared with `current_escalation` (M8/T8.1) so a `resolve_gate`
+    // Shared with `current_escalation` so a `resolve_gate`
     // MCP call, running in a process that never paused this run,
     // reconstructs the identical object instead of a second copy that
     // could drift.
     let escalation =
         super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
-    // DI-27: a decision `resolve_gate` pre-seeded onto the log while
+    // A decision `resolve_gate` pre-seeded onto the log while
     // this run was parked is consumed here, by this same consequence
-    // code — never re-asked, and its §5.3 pair is already recorded so
-    // it is never re-emitted. Re-validated against the re-derived menu:
-    // a mismatch means ask normally.
+    // code — never re-asked, and its escalation pair is already
+    // recorded so it is never re-emitted. Re-validated against the
+    // re-derived menu: a mismatch means ask normally.
     let events = ctx.load_events()?;
     let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id).filter(|r| {
         r.chosen_option
@@ -396,9 +395,9 @@ pub(super) async fn resolve_internal_gate(
     // decide whether to append it in the first place.
     let engine_abort = !options.iter().any(|id| id == "abort");
     if engine_abort && chosen == "abort" {
-        // T7.2's convention exactly: record the interaction, pause the
-        // run, leave the node stateless so a resume re-asks if the
-        // human changes their mind.
+        // The usual escalation convention exactly: record the
+        // interaction, pause the run, leave the node stateless so a
+        // resume re-asks if the human changes their mind.
         if !already_recorded {
             ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
             ctx.emit(
@@ -429,10 +428,11 @@ pub(super) async fn resolve_internal_gate(
     }
     match on.get(&chosen) {
         Some(target) => {
-            // §11.2 shape: the gate fails (retryable — a human chose a
-            // correction lap, not a dead end) and control re-routes; the
-            // scheduler's ordinary reroute machinery brings it back to
-            // ask again when `target`'s subgraph completes.
+            // Same shape as any other reroute: the gate fails (retryable
+            // — a human chose a correction lap, not a dead end) and
+            // control re-routes; the scheduler's ordinary reroute
+            // machinery brings it back to ask again when `target`'s
+            // subgraph completes.
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFailed(NodeFailedPayload {
@@ -497,9 +497,9 @@ fn decode_ref(external_ref: &str) -> Result<PublishedGate, RunError> {
     })
 }
 
-/// §5.3's own escalation object, reused verbatim for the no-forge
-/// degradation — two options wide enough to cover every §5.6 mapping a
-/// human can decide from the console: approve (finishes the node) or
+/// The escalation object, reused verbatim for the no-forge
+/// degradation — two options wide enough to cover every review mapping
+/// a human can decide from the console: approve (finishes the node) or
 /// reject (fails it, retryable — so a declared `on_failure.goto` still
 /// gets a chance, same as a real "changes requested").
 async fn degrade_to_console(

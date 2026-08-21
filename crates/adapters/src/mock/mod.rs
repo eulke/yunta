@@ -1,10 +1,9 @@
-//! The `mock` adapter (T3.2) — a first-class adapter, not a test helper
-//! (Spec Adapter §6): it reproduces sessions from YAML fixtures (a script
-//! of events plus filesystem effects), with injectable failures and
-//! latency, so the engine's whole cycle — tasks, degradation,
-//! cancellation, resume, eventually paralelismo — is testable without an
-//! LLM (A8). A fixture scripts every session of a run in spawn order;
-//! see [`MockFixture`].
+//! The `mock` adapter — a first-class adapter, not a test helper: it
+//! reproduces sessions from YAML fixtures (a script of events plus
+//! filesystem effects), with injectable failures and latency, so the
+//! engine's whole cycle — tasks, degradation, cancellation, resume,
+//! eventually parallelism — is testable without an LLM. A fixture
+//! scripts every session of a run in spawn order; see [`MockFixture`].
 
 mod fixture;
 
@@ -29,27 +28,27 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 pub struct MockAdapter {
     fixture: MockFixture,
     /// One flag per `fixture.sessions` entry — `true` once `spawn()` has
-    /// claimed it. Replaces a bare atomic counter (T5.10: concurrent task
+    /// claimed it. Replaces a bare atomic counter: concurrent task
     /// dispatch races several `spawn()` calls at once, so "the next
     /// index" stops meaning "the right script" — see
-    /// `SessionScript::match_prompt_contains`).
+    /// `SessionScript::match_prompt_contains`.
     consumed: Mutex<Vec<bool>>,
-    /// Every `spawn()`'s `req.skills`, in claim order (DI-13/A8): the
-    /// mock's "native mount" is recording what it was asked to mount,
-    /// so engine tests assert the whole resolution chain without a CLI.
+    /// Every `spawn()`'s `req.skills`, in claim order: the mock's
+    /// "native mount" is recording what it was asked to mount, so
+    /// engine tests assert the whole resolution chain without a CLI.
     skills_seen: Mutex<Vec<Vec<std::path::PathBuf>>>,
-    /// Every `spawn()`'s `req.agent`, in claim order (T9.4/A8) — same
+    /// Every `spawn()`'s `req.agent`, in claim order — same
     /// record-the-mount principle as `skills_seen`.
     agents_seen: Mutex<Vec<Option<String>>>,
-    /// Every `resume()`'s session id, in call order (DI-23/A8): the
-    /// mock's "resume" is serving the next script under the SAME
-    /// session id — recording which one proves the engine handed back
-    /// the conversation it meant to continue.
+    /// Every `resume()`'s session id, in call order: the mock's
+    /// "resume" is serving the next script under the SAME session id —
+    /// recording which one proves the engine handed back the
+    /// conversation it meant to continue.
     resumes_seen: Mutex<Vec<SessionId>>,
-    /// Every session's `req.run_tools_endpoint`, in claim order
-    /// (T8.2/A8) — same record-the-mount principle as `skills_seen`:
-    /// engine tests prove the endpoint reached the session (or
-    /// deliberately didn't) without a real CLI.
+    /// Every session's `req.run_tools_endpoint`, in claim order — same
+    /// record-the-mount principle as `skills_seen`: engine tests prove
+    /// the endpoint reached the session (or deliberately didn't)
+    /// without a real CLI.
     endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
 }
 
@@ -103,10 +102,9 @@ impl MockAdapter {
     }
 
     /// Applies one session's filesystem effects under `cwd`, honoring
-    /// `blocked` + `edit_hooks` (O5: a hook-capable adapter installs the
+    /// `blocked` + `edit_hooks`: a hook-capable adapter installs the
     /// block before the edit ever lands; without the capability, the
-    /// engine's own post-check scope diff — T5.3 — is what catches it
-    /// instead).
+    /// engine's own post-check scope diff is what catches it instead.
     fn apply_effects(&self, script: &SessionScript, cwd: &std::path::Path) -> Result<()> {
         for effect in &script.effects {
             if effect.blocked && self.fixture.capabilities.edit_hooks {
@@ -152,9 +150,9 @@ impl Adapter for MockAdapter {
         self.spawn_scripted(req, None)
     }
 
-    /// DI-23: serves the next matching script exactly like `spawn`, but
-    /// under the session id being resumed — a real adapter continues
-    /// the same conversation, so the stream reports the same identity.
+    /// Serves the next matching script exactly like `spawn`, but under
+    /// the session id being resumed — a real adapter continues the
+    /// same conversation, so the stream reports the same identity.
     async fn resume(
         &self,
         session: &SessionId,
@@ -202,8 +200,8 @@ impl MockAdapter {
                 });
             // No script named this request explicitly — fall back to the
             // next unconsumed script that never opted into matching by
-            // prompt at all, in declaration order. This is the entire
-            // pre-T5.10 behavior for every fixture that doesn't use
+            // prompt at all, in declaration order. This is the whole
+            // behavior for every fixture that doesn't use
             // `match_prompt_contains`.
             let claim = claim.or_else(|| {
                 self.fixture
@@ -255,7 +253,7 @@ impl MockAdapter {
         let run_tools_endpoint = req.run_tools_endpoint.clone();
 
         tokio::spawn(async move {
-            // O1: SessionOpened is always the first event, unconditionally.
+            // SessionOpened is always the first event, unconditionally.
             if tx
                 .send(AgentEvent::SessionOpened { session_id, model })
                 .is_err()
@@ -304,10 +302,10 @@ impl MockAdapter {
                     fixture::MockStep::RunTool {
                         tool, arguments, ..
                     } => {
-                        // A real MCP call over the wire (T8.2/A8) — a
-                        // tool error fails the whole session loudly:
-                        // fixtures script intent, and an intent the
-                        // engine refuses is a test outcome, not noise.
+                        // A real MCP call over the wire — a tool error
+                        // fails the whole session loudly: fixtures
+                        // script intent, and an intent the engine
+                        // refuses is a test outcome, not noise.
                         match call_run_tool(run_tools_endpoint.as_ref(), &tool, arguments).await {
                             Ok(digest) => AgentEvent::ToolUse {
                                 name: tool,
@@ -340,11 +338,11 @@ impl MockAdapter {
                         retryable,
                     });
                 }
-                // Both end with no terminal event — a real crash (O2: the
+                // Both end with no terminal event — a real crash: the
                 // engine synthesizes Failed{retryable:true}, not the
-                // adapter). Hang additionally waits for interrupt/kill
+                // adapter. Hang additionally waits for interrupt/kill
                 // before ending, simulating a stuck session a timeout
-                // (T3.3) would have to act on.
+                // would have to act on.
                 MockOutcome::Crash => {}
                 MockOutcome::Hang => task_notify.notified().await,
             }
@@ -386,11 +384,11 @@ impl AgentSession for MockSession {
     }
 }
 
-/// The mock's own MCP client leg (T8.2/A8): one `tools/call` against
-/// the session's per-run endpoint, exactly as a real CLI would place
-/// it. Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content, I12/O3), or the
-/// error text that fails the session.
+/// The mock's own MCP client leg: one `tools/call` against the
+/// session's per-run endpoint, exactly as a real CLI would place it.
+/// Returns a short digest of the response for the audit stream
+/// (`ToolUse.target_digest` — never full content), or the error text
+/// that fails the session.
 async fn call_run_tool(
     endpoint: Option<&crate::RunToolsEndpoint>,
     tool: &str,

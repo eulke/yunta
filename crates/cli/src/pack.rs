@@ -1,6 +1,6 @@
-//! Support for `yunta pack add/remove/list/update` (RFC-0002 §4, T11.2):
-//! git-clone-and-vendor mechanics, the `yunta.lock` on-disk convention,
-//! and the vendored tree's content hash. The command functions
+//! Support for `yunta pack add/remove/list/update`: git-clone-and-vendor
+//! mechanics, the `yunta.lock` on-disk convention, and the vendored
+//! tree's content hash. The command functions
 //! (`commands::pack`) do the printing and argument handling; this
 //! module is where the actual filesystem/git work lives, kept separate
 //! so it stays testable without going through a CLI process.
@@ -33,7 +33,7 @@ pub enum PackError {
     NonUtf8Path { path: PathBuf },
 }
 
-/// `<source>[@<ref>]` (§4's own `github.com/acme/review-pack@v1.2.0`) —
+/// `<source>[@<ref>]` (e.g. `github.com/acme/review-pack@v1.2.0`) —
 /// split on the last `@` **only when it follows the source's last `/`**,
 /// so an SSH shorthand like `git@github.com:acme/repo.git` (whose `@`
 /// comes before any `/`) is never mistaken for a `source@ref` pin.
@@ -49,8 +49,8 @@ pub fn split_source_and_ref(spec: &str) -> (&str, Option<&str>) {
 
 /// A bare `host/path` shorthand (no scheme, no SSH `user@host:` prefix,
 /// not already a local filesystem path) gets `https://` prepended —
-/// §4's own example (`github.com/acme/review-pack`) is exactly this
-/// shorthand, never a literally clonable URL on its own. A local path
+/// `github.com/acme/review-pack` is exactly this shorthand, never a
+/// literally clonable URL on its own. A local path
 /// (starts with `.`, `/` or `~`) or anything already carrying a scheme
 /// or an `@` (SSH shorthand) passes through untouched.
 pub fn clone_url(source: &str) -> String {
@@ -85,8 +85,8 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
 
 /// Clones `url` into `dest` (a fresh, empty directory), checking out
 /// `ref_` when given — a full clone, not shallow: `--depth 1` would
-/// only work for a ref that's a branch tip, and §4 allows "a tag,
-/// branch or commit-ish" indifferently.
+/// only work for a ref that's a branch tip, and a ref here can just as
+/// well be a tag or a commit-ish.
 pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<(), PackError> {
     run_git(
         Path::new("."),

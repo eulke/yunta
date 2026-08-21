@@ -1,5 +1,5 @@
-# The canonical reference pack manifest (RFC-0002 §3) as a parse
-# fixture — T11.1's round-trip criterion.
+# The canonical reference pack manifest as a parse
+# fixture — exercises the full round-trip criterion.
 name: review-pack
 publisher: acme
 version: 1.2.0

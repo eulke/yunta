@@ -1,16 +1,16 @@
-//! The `Forge` trait (§5.6, D66, T7.7) — the multi-person substrate an
-//! external gate delegates to: publish artifacts + open a PR, then poll
-//! its state on each later wake (`resume`, `status`, a scheduled CI
-//! job). **Pull, never push** — no webhooks, no daemon, so the
-//! "sin infraestructura" model stays intact (D66's own rationale).
+//! The `Forge` trait — the multi-person substrate an external gate
+//! delegates to: publish artifacts + open a PR, then poll its state on
+//! each later wake (`resume`, `status`, a scheduled CI job). **Pull,
+//! never push** — no webhooks, no daemon, so no infrastructure needs to
+//! run anywhere for a gate to work.
 //!
 //! `GitHubForge` (v1's only real implementation) talks to GitHub's REST
 //! API directly — no local git needed, since GitHub's own Contents/Refs
 //! endpoints can create a branch and commit files over HTTP alone.
 //! `MockForge` is the fixture-driven double the engine's own tests
 //! exercise the whole gate state machine against — same "never a real
-//! network call in CI" stance A8 already takes for LLM adapters,
-//! extended here to forges.
+//! network call in CI" stance taken for LLM adapters, extended here to
+//! forges.
 
 mod github;
 mod mock;
@@ -36,8 +36,8 @@ pub struct PublishRequest {
     pub branch: String,
     pub base_branch: String,
     /// Carried in the PR body so a later `publish` call for the same
-    /// gate can find the existing PR instead of opening a duplicate
-    /// (idempotent across `resume` invocations, D66).
+    /// gate can find the existing PR instead of opening a duplicate —
+    /// idempotent across `resume` invocations.
     pub run_id: String,
     pub summary: String,
     /// (path relative to the repo root, raw content).
@@ -67,14 +67,15 @@ pub struct ReviewComment {
 /// engine (not this trait, and not either implementation) tell a review
 /// that still covers the current code from a stale one, uniformly for
 /// "resolve this gate for the first time" and "did an approved gate's
-/// approval survive a later push" (§5.6: "el engine lo detecta por SHA").
+/// approval survive a later push" — the engine detects that drift by SHA.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolledGate {
     pub head_sha: String,
     pub review: ReviewOutcome,
 }
 
-/// §5.6's own mapping: aprobado / cambios pedidos / cerrado / pendiente.
+/// Maps a review to one of: approved / changes requested / closed /
+/// pending.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReviewOutcome {
     Pending,

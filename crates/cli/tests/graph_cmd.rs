@@ -1,11 +1,11 @@
-//! `yunta graph` (T7.8 recorte, D75, Contrato §... derivación pura del DAG).
+//! `yunta graph`: a pure derivation of the DAG from the workflow definition.
 //!
-//! M-0's schema only has `prompt`/`bash`/`loop` nodes with `depends_on`
+//! The schema only has `prompt`/`bash`/`loop` nodes with `depends_on`
 //! and `on_failure.goto` — no `parallel`/`gate`/`workflow` composition
-//! (those wait for their own milestones), so this recorte covers exactly
+//! (those come later), so this covers exactly
 //! that: a Mermaid `graph TD` with `depends_on` edges, `on_failure.goto`
 //! edges visually differentiated from them, and — given a `--run <id>` —
-//! the same graph with each node's derived state (§8.5, T2.3's
+//! the same graph with each node's derived state (via
 //! `yunta_engine::derive`) annotated, no new events, no agent involved in
 //! producing the graph itself (pure derivation, same as `status`).
 
@@ -94,7 +94,7 @@ fn graph_renders_mermaid_with_depends_on_and_differentiated_reroute_edges() {
         "missing depends_on edge lint->tests in: {text}"
     );
     // on_failure.goto must be visually different from a plain depends_on
-    // edge (dashed `-.->`, per D75 "aristas de re-ruta diferenciadas") —
+    // edge (dashed `-.->`, a differentiated re-route edge) —
     // and never rendered as a plain `-->`.
     assert!(
         text.contains("lint -.-> fix-lint") || text.contains("lint-.->fix-lint"),
