@@ -17,18 +17,24 @@ workflow's `criteria` do, by running and exiting `0`.
 
 ## Install
 
-Yunta isn't published to crates.io or as a release binary yet (that's on the roadmap
-— see [M12](#roadmap) below). Until then, build it from source:
+Yunta isn't published to crates.io or as a prebuilt release binary yet (that's
+[M12](#roadmap) — GitHub releases with checksums, `cargo install`, Homebrew). Until
+then, [`install.sh`](install.sh) builds a static binary from source and installs it to
+`~/.local/bin`, no sudo:
 
 ```bash
-git clone https://github.com/eulke/yunta
-cd yunta
-cargo build --release
-# the binary is at target/release/yunta — put it on your PATH
+curl -fsSL https://raw.githubusercontent.com/eulke/yunta/main/install.sh | sh
 ```
 
-Requires a recent stable Rust toolchain. `cargo run -p yunta --` also works directly
-from the workspace root without installing anything.
+Or, from a clone already on disk, `./install.sh`. On Linux it links against `musl`
+for a real static binary (no glibc dependency at runtime) — `rustup target add
+x86_64-unknown-linux-musl` plus a musl C toolchain (`apt install musl-tools` on
+Debian/Ubuntu) if you don't have one already; the script installs the Rust target
+itself. Requires a recent stable Rust toolchain either way.
+
+For local development, plain `cargo build --release` (binary at
+`target/release/yunta`) or `cargo run -p yunta --` from the workspace root both work
+without installing anything.
 
 ## Quickstart: a three-node workflow from scratch
 

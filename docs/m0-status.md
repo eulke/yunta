@@ -3339,9 +3339,9 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
 
-## M10 — Empaquetado y docs (en progreso: T10.1)
+## M10 — Empaquetado y docs (completo: T10.1, T10.3; en progreso: nada — próximo: T10.2/T10.4/T10.5)
 
-- [~] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
+- [x] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
       escribe un workflow de tres nodos a mano antes de mencionar packs,
       tabla de comandos, ciclo de vida del run) y `docs/guide.md` (nodos,
       `context:`, permisos, hooks, modos, gates, MCP, y los dos patrones
@@ -3378,7 +3378,39 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
 - [ ] **T10.2 — Packs de fábrica** (`yunta/starter`, `yunta/fragua`) —
       pendiente; depende de mecanismo de pack (M11) para "instalable, no
       embebido" en sentido estricto — a scopear.
-- [ ] **T10.3 — Release** (binario musl, instalador, `doctor` primero) —
-      pendiente.
+- [x] **T10.3 — Release.** `install.sh` (raíz del repo, POSIX, `set -eu`):
+      detecta plataforma (`uname -s`/`-m` → target triple, mismos targets
+      que la matriz de RFC-0004 §4.1), instala el target de rustup si
+      falta, clona a un tmpdir cuando no corre ya desde un checkout
+      (soporta `curl | sh`), compila `-p yunta` para ese target, instala
+      en `~/.local/bin` (o `$YUNTA_INSTALL_DIR`) sin sudo, avisa si el
+      directorio no está en `PATH`, y cierra con `yunta --version` +
+      "run `yunta doctor`" — el contrato exacto de RFC-0004 §4.2 salvo un
+      paso: **compila desde fuente en vez de descargar un release
+      precompilado**, porque ese release todavía no existe (lo publica
+      T12.2). El script deja dicho en su propio comentario de cabecera
+      que T12.3 debe sumarle "si hay release, descargalo; si no, cae acá"
+      en vez de reemplazarlo. Linux usa `x86_64-unknown-linux-musl` — el
+      binario estático real que la RFC pide (sin dependencia de la glibc
+      del host).
+  - **CI**: job nuevo `musl-build` (paralelo a `ci`, no adentro — un
+    fallo de link estático es bloqueante de release, no un nit de
+    estilo): instala el target + `musl-tools`, compila `-p yunta` para
+    `x86_64-unknown-linux-musl`, y verifica con `file`+`ldd` que el
+    binario resultante es realmente estático (falla el job si `ldd`
+    lista alguna biblioteca dinámica).
+  - **✓ Criterios verificados**: build real (no solo `cargo check`) para
+    `x86_64-unknown-linux-musl` — `file`/`ldd` confirman "static-pie
+    linked"/"statically linked"; `rusqlite` ya usa la feature `bundled`
+    (SQLite compilado adentro, sin este paso el musl estático no cerraba
+    con la dependencia del sistema). Instalación limpia verificada de
+    punta a punta: `HOME`/`YUNTA_INSTALL_DIR` apuntando a un directorio
+    vacío (sin caché de cargo previa — la primera corrida re-descarga
+    el índice de crates.io entero, el escenario real de un contenedor
+    sin nada), `install.sh` corrido tal cual, `yunta --version` y
+    `yunta doctor` funcionan sobre el binario instalado. (Sin daemon de
+    Docker disponible en este sandbox para un contenedor literal — la
+    simulación con `HOME` vacío ejercita la misma superficie: cero
+    estado previo, sin sudo, PATH no seteado.)
 - [ ] **T10.4 — Verified Work Receipt** (`yunta receipt`) — pendiente.
 - [ ] **T10.5 — Workflow de referencia `promote-knowledge`** — pendiente.
