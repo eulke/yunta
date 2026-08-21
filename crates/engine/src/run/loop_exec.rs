@@ -21,7 +21,8 @@ use yunta_core::{Isolation, Ledger, Node, NodeKind, PromptSource, Task};
 use crate::replay::{derive, RunState};
 use crate::scope::scope_check;
 use crate::task_cycle::{
-    post_check, run_task, CriterionRun, Memo, RunTaskParams, TaskCycleReport, TaskOutcome,
+    post_check, run_task, AttemptEnv, CriterionRun, Memo, ScopeGovernance, TaskCycleReport,
+    TaskOutcome,
 };
 use crate::worktree::prepare_worktree;
 
@@ -241,23 +242,18 @@ pub(super) async fn execute_loop(
         // the atomic cap window every concurrent member's evaluation
         // commits through, so `max_per_run` holds exactly.
         let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
+        let batch_env = BatchDispatchEnv {
+            events: &events,
+            base_commit: &base_commit,
+            adapter: adapter.as_ref(),
+            scope_expansion,
+            grants: &grants,
+            cancel,
+            setup: &setup,
+        };
         let dispatches =
             futures::future::join_all(batch.iter().zip(&briefs).map(|(task, brief)| {
-                dispatch_task_in_isolation(
-                    ctx,
-                    node,
-                    TaskDispatch {
-                        task,
-                        events: &events,
-                        base_commit: &base_commit,
-                        instruction: brief,
-                        adapter: adapter.as_ref(),
-                        scope_expansion,
-                        grants: &grants,
-                        cancel,
-                        setup: &setup,
-                    },
-                )
+                dispatch_task_in_isolation(ctx, node, &batch_env, task, brief)
             }))
             .await;
 
@@ -690,14 +686,14 @@ fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<Stri
 /// `done`/`blocked` in the log itself; that's the caller's job once every
 /// batch member's dispatch has settled, so integration can stay strictly
 /// serial and in declaration order.
-/// Everything [`dispatch_task_in_isolation`] needs about the one task
-/// it's dispatching — `ctx`/`node` stay their own arguments, same as
-/// every other function in this module.
-struct TaskDispatch<'a> {
-    task: &'a Task,
+/// Everything every member of one batch dispatches with — identical
+/// across the whole `batch.iter().zip(&briefs).map(...)` fan-out that
+/// calls [`dispatch_task_in_isolation`]; only `task`/`instruction` vary
+/// per member, so those stay their own arguments instead of living here.
+#[derive(Clone, Copy)]
+struct BatchDispatchEnv<'a> {
     events: &'a [Event],
     base_commit: &'a str,
-    instruction: &'a str,
     adapter: &'a dyn yunta_adapters::Adapter,
     scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     grants: &'a crate::scope_expansion::GrantLedger,
@@ -708,19 +704,19 @@ struct TaskDispatch<'a> {
 async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
-    dispatch: TaskDispatch<'a>,
+    env: &BatchDispatchEnv<'_>,
+    task: &'a Task,
+    instruction: &str,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
-    let TaskDispatch {
-        task,
+    let BatchDispatchEnv {
         events,
         base_commit,
-        instruction,
         adapter,
         scope_expansion,
         grants,
         cancel,
         setup,
-    } = dispatch;
+    } = *env;
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
         .run_dir
@@ -752,23 +748,27 @@ async fn dispatch_task_in_isolation<'a>(
         }),
     )?;
 
-    let report = run_task(RunTaskParams {
+    let report = run_task(
         task,
         instruction,
-        adapter,
-        cwd: &task_worktree,
-        max_retries: ctx.max_task_retries,
-        budget: ctx.session_budget()?,
-        memo: &ctx.memo,
-        permissions: ctx.manifest.config.permissions.as_ref(),
-        profile: super::node_exec::session_profile(node),
-        scope_expansion,
-        grants,
-        already_granted_paths: &granted_paths_for(events, &task.id),
-        audit: Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        AttemptEnv {
+            adapter,
+            cwd: &task_worktree,
+            max_retries: ctx.max_task_retries,
+            budget: ctx.session_budget()?,
+            memo: &ctx.memo,
+        },
+        ScopeGovernance {
+            permissions: ctx.manifest.config.permissions.as_ref(),
+            profile: super::node_exec::session_profile(node),
+            scope_expansion,
+            grants,
+            already_granted_paths: &granted_paths_for(events, &task.id),
+        },
+        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
         setup,
-    })
+    )
     .await?;
 
     Ok((task, task_worktree, report))

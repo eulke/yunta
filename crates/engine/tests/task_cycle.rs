@@ -3,7 +3,9 @@ use std::path::Path;
 use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
 use yunta_core::events::Criterion;
 use yunta_core::Task;
-use yunta_engine::{run_task, DispatchOutcome, Memo, PreCheckOutcome, RunTaskParams, TaskOutcome};
+use yunta_engine::{
+    run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
+};
 
 fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
@@ -70,23 +72,27 @@ outcome: { type: completed, summary: "wrote it" }
     )
     .unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 2,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -119,23 +125,27 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
             .unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 0,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 0,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -154,23 +164,27 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 2,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -198,23 +212,27 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
     );
     let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 2,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -249,23 +267,27 @@ outcome: { type: completed, summary: "done" }
     )
     .unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 0,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 0,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -300,23 +322,27 @@ sessions:
     )
     .unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 2,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -333,23 +359,27 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 0,
-        budget: Budget::default(),
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 0,
+            budget: Budget::default(),
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 
@@ -460,23 +490,27 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     // never blocks the engine forever.
     let report = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        run_task(RunTaskParams {
-            task: &t,
-            instruction: "Implement your task.",
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 0,
-            budget,
-            memo: &memo,
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-            audit: None,
-            cancel: &tokio_util::sync::CancellationToken::new(),
-            setup: &yunta_engine::SessionSetup::default(),
-        }),
+        run_task(
+            &t,
+            "Implement your task.",
+            AttemptEnv {
+                adapter: &adapter,
+                cwd: dir.path(),
+                max_retries: 0,
+                budget,
+                memo: &memo,
+            },
+            ScopeGovernance {
+                permissions: None,
+                profile: PermissionProfile::Edit,
+                scope_expansion: None,
+                grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+                already_granted_paths: &[],
+            },
+            None,
+            &tokio_util::sync::CancellationToken::new(),
+            &yunta_engine::SessionSetup::default(),
+        ),
     )
     .await
     .expect("run_task must return once its own budget timeout elapses")
@@ -515,23 +549,27 @@ outcome: { type: completed, summary: "should never be reached" }
         ..Default::default()
     };
 
-    let report = run_task(RunTaskParams {
-        task: &t,
-        instruction: "Implement your task.",
-        adapter: &adapter,
-        cwd: dir.path(),
-        max_retries: 0,
-        budget,
-        memo: &memo,
-        permissions: None,
-        profile: PermissionProfile::Edit,
-        scope_expansion: None,
-        grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-        already_granted_paths: &[],
-        audit: None,
-        cancel: &tokio_util::sync::CancellationToken::new(),
-        setup: &yunta_engine::SessionSetup::default(),
-    })
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 0,
+            budget,
+            memo: &memo,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
     .await
     .unwrap();
 

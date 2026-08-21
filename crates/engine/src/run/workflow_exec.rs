@@ -584,16 +584,16 @@ async fn drive_child(
                     }),
                 )?;
                 let successor = match super::promote::create_promotion_successor(
-                    super::PromotionSuccessorParams {
-                        repo: ctx.worktree,
-                        predecessor_id: &current_id,
-                        predecessor_manifest: &current_manifest,
-                        predecessor_worktree: &current_tree,
-                        predecessor_run_dir: &current_run_dir,
-                        suggested_mode: &suggested_mode,
-                        runs_root: &runs_root(ctx),
-                        worktrees_root: &worktrees_root(ctx),
+                    super::Predecessor {
+                        id: &current_id,
+                        manifest: &current_manifest,
+                        worktree: &current_tree,
+                        run_dir: &current_run_dir,
                     },
+                    ctx.worktree,
+                    &suggested_mode,
+                    &runs_root(ctx),
+                    &worktrees_root(ctx),
                     ctx.storage,
                     ctx.clock,
                 )

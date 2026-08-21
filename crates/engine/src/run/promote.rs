@@ -25,44 +25,39 @@ pub struct PromotionSuccessor {
     pub worktree: PathBuf,
 }
 
-/// Everything [`create_promotion_successor`] needs to know about the
-/// predecessor and where the successor lands — `storage`/`clock` stay
-/// their own trailing arguments, same convention as [`create_run`].
-pub struct PromotionSuccessorParams<'a> {
-    /// The checkout a fresh worktree branches from (the original `cwd`
-    /// for a top-level chain; the parent run's own tree for a child's,
-    /// §12).
-    pub repo: &'a Path,
-    pub predecessor_id: &'a RunId,
-    pub predecessor_manifest: &'a Manifest,
-    pub predecessor_worktree: &'a Path,
-    pub predecessor_run_dir: &'a Path,
-    pub suggested_mode: &'a str,
-    pub runs_root: &'a Path,
-    pub worktrees_root: &'a Path,
+/// The run [`create_promotion_successor`] builds on top of — the
+/// input-side mirror of [`PromotionSuccessor`] itself.
+pub struct Predecessor<'a> {
+    pub id: &'a RunId,
+    pub manifest: &'a Manifest,
+    pub worktree: &'a Path,
+    pub run_dir: &'a Path,
 }
 
 /// Creates (never runs) the successor of `predecessor`, which just
 /// closed `Promoted` toward `suggested_mode`.
 ///
-/// Under `Isolation::None` the successor reuses the predecessor's
+/// `repo` is the checkout a fresh worktree branches from (the original
+/// `cwd` for a top-level chain; the parent run's own tree for a child's,
+/// §12). Under `Isolation::None` the successor reuses the predecessor's
 /// checkout — the lock (if any) is the caller's and only releases when
-/// the whole chain ends.
+/// the whole chain ends. `storage`/`clock` are trailing arguments, same
+/// convention as [`create_run`].
 pub async fn create_promotion_successor(
-    params: PromotionSuccessorParams<'_>,
+    predecessor: Predecessor<'_>,
+    repo: &Path,
+    suggested_mode: &str,
+    runs_root: &Path,
+    worktrees_root: &Path,
     storage: &Storage,
     clock: &dyn Clock,
 ) -> Result<PromotionSuccessor, RunError> {
-    let PromotionSuccessorParams {
-        repo,
-        predecessor_id,
-        predecessor_manifest,
-        predecessor_worktree,
-        predecessor_run_dir,
-        suggested_mode,
-        runs_root,
-        worktrees_root,
-    } = params;
+    let Predecessor {
+        id: predecessor_id,
+        manifest: predecessor_manifest,
+        worktree: predecessor_worktree,
+        run_dir: predecessor_run_dir,
+    } = predecessor;
     let successor_id = RunId::from(format!("{predecessor_id}-promoted"));
 
     let mut manifest = predecessor_manifest.clone();

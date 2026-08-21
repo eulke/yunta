@@ -56,7 +56,7 @@ use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
-pub use promote::{create_promotion_successor, PromotionSuccessor, PromotionSuccessorParams};
+pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor};
 pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
 

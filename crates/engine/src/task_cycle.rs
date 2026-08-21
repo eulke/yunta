@@ -633,6 +633,43 @@ pub(crate) async fn dispatch_session(
     Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
 }
 
+/// The permission/scope policy a task cycle enforces (§6.1/§6.2):
+/// `permissions` is the merged model every criterion command is checked
+/// against before anything runs — a violating criterion blocks the whole
+/// task citing the rule (a policy outcome in the report, never an engine
+/// abort), scanned here at the cycle's single entry point so the
+/// standalone [`pre_check`]/[`post_check`] helpers stay pure building
+/// blocks. `profile` is the node's own rung of the same permission
+/// ladder, forwarded to every session this cycle opens. `scope_expansion`
+/// carries the loop node's own §6.2 settings (absent means the schema's
+/// own default, `deny`); `grants` is the batch's shared
+/// [`crate::scope_expansion::GrantLedger`] (DI-16) — `max_per_run` is
+/// run-scoped, not task-scoped, and the ledger's atomic cap window is
+/// what makes the count exact when several batch members request at
+/// once. `already_granted_paths` (DI-01) are the paths every *prior*
+/// `scope_expansion_granted` on the log authorized for this task — a
+/// human grant lands between attempts, so the retry's effective scope
+/// must include them from the very first diff it evaluates.
+pub struct ScopeGovernance<'a> {
+    pub permissions: Option<&'a yunta_core::PermissionsConfig>,
+    pub profile: PermissionProfile,
+    pub scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
+    pub grants: &'a crate::scope_expansion::GrantLedger,
+    pub already_granted_paths: &'a [String],
+}
+
+/// The resources and retry policy one task's attempts run under —
+/// distinct from [`ScopeGovernance`] (what the session may touch) and
+/// from the cross-cutting `audit`/`cancel`/`setup` surfaces (who's
+/// watching and how it stops).
+pub struct AttemptEnv<'a> {
+    pub adapter: &'a dyn Adapter,
+    pub cwd: &'a Path,
+    pub max_retries: u32,
+    pub budget: Budget,
+    pub memo: &'a Memo,
+}
+
 /// Runs a task through the full cycle (§5.2): pre-check once, then
 /// dispatch → post-check → scope-check per attempt, retrying with a
 /// fresh session up to `max_retries` times before `Blocked`.
@@ -640,61 +677,29 @@ pub(crate) async fn dispatch_session(
 /// Never trusts the session's own outcome (I5): `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
 /// diff, regardless of whether the session reported `Completed`.
-///
-/// `permissions` is §6.1's runtime moment for criteria: every criterion
-/// command is checked against the merged model before anything runs — a
-/// violating criterion blocks the whole task citing the rule (a policy
-/// outcome in the report, never an engine abort). The scan happens here,
-/// at the cycle's single entry point, so the standalone
-/// [`pre_check`]/[`post_check`] helpers stay pure building blocks.
-/// `profile` is the node's own rung of the same ladder, forwarded to
-/// every session this cycle opens.
-/// `scope_expansion` carries the loop node's own §6.2 settings (absent
-/// means the schema's own default, `deny`); `grants` is the batch's
-/// shared [`crate::scope_expansion::GrantLedger`] (DI-16) — §6.2's
-/// `max_per_run` is run-scoped, not task-scoped, and the ledger's
-/// atomic cap window is what makes the count exact when several batch
-/// members request at once.
-/// `already_granted_paths` (DI-01) are the paths every *prior*
-/// `scope_expansion_granted` on the log authorized for this task — a
-/// human grant lands between attempts, so the retry's effective scope
-/// must include them from the very first diff it evaluates.
-pub struct RunTaskParams<'a> {
-    pub task: &'a Task,
-    pub instruction: &'a str,
-    pub adapter: &'a dyn Adapter,
-    pub cwd: &'a Path,
-    pub max_retries: u32,
-    pub budget: Budget,
-    pub memo: &'a Memo,
-    pub permissions: Option<&'a yunta_core::PermissionsConfig>,
-    pub profile: PermissionProfile,
-    pub scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
-    pub grants: &'a crate::scope_expansion::GrantLedger,
-    pub already_granted_paths: &'a [String],
-    pub audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
-    pub cancel: &'a CancellationToken,
-    pub setup: &'a SessionSetup,
-}
-
-pub async fn run_task(params: RunTaskParams<'_>) -> Result<TaskCycleReport, TaskCycleError> {
-    let RunTaskParams {
-        task,
-        instruction,
+pub async fn run_task(
+    task: &Task,
+    instruction: &str,
+    env: AttemptEnv<'_>,
+    governance: ScopeGovernance<'_>,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    cancel: &CancellationToken,
+    setup: &SessionSetup,
+) -> Result<TaskCycleReport, TaskCycleError> {
+    let AttemptEnv {
         adapter,
         cwd,
         max_retries,
         budget,
         memo,
+    } = env;
+    let ScopeGovernance {
         permissions,
         profile,
         scope_expansion,
         grants,
         already_granted_paths,
-        audit,
-        cancel,
-        setup,
-    } = params;
+    } = governance;
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
             return Ok(TaskCycleReport {
