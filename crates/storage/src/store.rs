@@ -132,15 +132,19 @@ impl Storage {
         };
 
         let conn = Connection::open(path).map_err(open_err)?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(open_err)?;
         // WAL admits exactly one writer at a time; a second handle onto
         // the same database (a status/follower reader, a per-session
         // run-tools listener, T8.2) must wait for a busy writer instead
         // of surfacing SQLITE_BUSY as a spurious append failure. Writes
         // here are all sub-millisecond appends — 5s of patience means
-        // something is truly wedged, not busy.
+        // something is truly wedged, not busy. Set before the journal
+        // pragma so even that first statement waits rather than fails
+        // when another connection happens to be mid-write (DI-30).
+        // Note the timeout alone is NOT enough for `append_event` — see
+        // the BEGIN IMMEDIATE note there.
         conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(open_err)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(open_err)?;
         conn.execute_batch(SCHEMA_V1).map_err(open_err)?;
 
@@ -185,7 +189,19 @@ impl Storage {
         };
 
         let mut conn = lock(&self.conn);
-        let tx = conn.transaction().map_err(append_err)?;
+        // BEGIN IMMEDIATE, not deferred (DI-30): this transaction reads
+        // (`MAX(seq)`, the previous hash) before it writes, and a
+        // deferred read→write upgrade against a concurrently-busy writer
+        // (another connection — the per-session run-tools listener,
+        // T8.2) returns SQLITE_BUSY *immediately*: SQLite refuses to
+        // invoke the busy handler on an upgrade, since waiting there can
+        // deadlock, so the connection's `busy_timeout` never applies.
+        // Taking the write lock up front puts the wait where the busy
+        // handler does work, and holds the lock across the read+insert —
+        // which is also what keeps `seq` correct across connections.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(append_err)?;
 
         let seq: i64 = tx
             .query_row(

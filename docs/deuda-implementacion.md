@@ -1379,7 +1379,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   del fix; `cargo test --workspace` completo queda verde después,
   sin tocar ningún test existente.
 
-### DI-30 — Flake intermitente en el property test de consolidación del blackboard
+### DI-30 — Flake intermitente en el property test de consolidación del blackboard `[x]`
 
 - **Origen:** M10/T10.4, corriendo `cargo test --workspace` repetidas
   veces como parte de la verificación de rutina (nada que ver con
@@ -1406,7 +1406,43 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   instrumentar el listener HTTP (T8.2b) para descartar una POST
   perdida/reordenada bajo contención de puerto/thread-pool antes de
   sospechar de `consolidate_blackboard`.
-- **Nota de cierre:** _pendiente._
+- **Nota de cierre:** reproducido, diagnosticado y corregido test-first.
+  Aislado nunca reprodujo (100/100 verde); bajo carga real (30 rondas ×
+  6 instancias concurrentes del binario de tests de blackboard, cada una
+  con muchos runtimes tokio y listeners en puertos efímeros) **59 de 180
+  instancias fallaron** — reproducción masiva, no flake ocasional. La
+  instrumentación agregada a los asserts (el estado del run en el
+  mensaje) reveló la causa real en una iteración:
+  `run_tool yunta_post_finding returned an error: failed to append an
+  event` y, en el otro test del mismo binario, un `unwrap` sobre
+  `SqliteFailure(DatabaseBusy, "database is locked")` directo del
+  engine. **La lógica de consolidación nunca estuvo mal** (la sospecha
+  original era correcta): el bug era de `yunta-storage::append_event` —
+  su transacción **deferred** lee (`MAX(seq)`, el hash previo) antes de
+  escribir, y SQLite se niega a invocar el busy handler en el upgrade
+  read→write de una transacción deferred (esperar ahí puede generar
+  deadlock), así que ante otro writer activo en una segunda conexión
+  (exactamente el listener per-sesión de T8.2, que escribe
+  `finding_posted` por su propio handle `reopen`ado mientras el engine
+  escribe eventos de sesión por el suyo) devolvía `SQLITE_BUSY`
+  inmediato — el `busy_timeout` de 5s que DI ya tenía configurado
+  **jamás aplicaba en ese camino**. Fix: `BEGIN IMMEDIATE`
+  (`transaction_with_behavior(TransactionBehavior::Immediate)`) — toma
+  el write lock al abrir, donde el busy handler sí funciona, y lo
+  retiene a través del read+insert (que además es lo que mantiene `seq`
+  correcto entre conexiones). De paso, `busy_timeout` se setea ahora
+  antes del pragma `journal_mode` en `open()` (mismo modo de falla en
+  la primera sentencia de una conexión nueva bajo contención). Test de
+  regresión: `concurrent_appends_across_reopened_handles_never_fail_busy`
+  (`storage/tests/store.rs`) — dos conexiones reales (open + reopen),
+  dos threads, 50 appends cada uno al mismo run; **rojo al primer
+  choque con el código anterior** (el test "concurrente" preexistente
+  compartía un solo handle, cuyo Mutex interno serializaba todo — nunca
+  dos conexiones SQLite compitiendo, que es la forma exacta de
+  producción). Verificación de cierre: la misma carga de 30×6 que
+  falló 59/180, **0/180 post-fix**. La instrumentación de los asserts
+  queda (un fallo futuro se auto-diagnostica en vez de perder la causa,
+  como le pasó a la observación original de T10.4).
 
 ### DI-31 — `knowledge: { layers: [org] }` sigue sin resolver pese a que M11 (packs) ya cerró
 

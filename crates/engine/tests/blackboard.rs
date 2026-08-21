@@ -187,11 +187,18 @@ sessions:
 async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     let (terminal, state, bench) = Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
 
-    assert_eq!(terminal, RunTerminal::Finished);
-    assert!(matches!(
-        state.nodes.get(&"review".into()),
-        Some(NodeState::Finished { .. })
-    ));
+    // DI-30: a failure here must self-diagnose — the terminal's own
+    // Paused reason only says "child rev-b failed", while the child's
+    // real error (e.g. a run_tool transport failure under load) lives
+    // in the node state this message carries.
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
+    assert!(
+        matches!(
+            state.nodes.get(&"review".into()),
+            Some(NodeState::Finished { .. })
+        ),
+        "state: {state:?}"
+    );
     // Each post is a finding_posted authored by the session's own node
     // (D26: mediated, logged, attributed).
     assert_eq!(bench.findings_by("rev-a"), vec!["from-a"]);
@@ -208,17 +215,39 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
-    let (terminal_1, _, bench_1) = Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
-    let (terminal_2, _, bench_2) =
+    let (terminal_1, state_1, bench_1) =
+        Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
+    let (terminal_2, state_2, bench_2) =
         Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(false)).await;
 
-    assert_eq!(terminal_1, RunTerminal::Finished);
-    assert_eq!(terminal_2, RunTerminal::Finished);
-    let output_1 = bench_1.group_output("review").unwrap();
-    let output_2 = bench_2.group_output("review").unwrap();
+    // DI-30: same self-diagnosis rule as above — the state names which
+    // child failed and why; the finding digests distinguish "a post
+    // never landed" from "posts landed but consolidation differed".
     assert_eq!(
-        output_1, output_2,
-        "the consolidated blackboard must not depend on arrival order (D98)"
+        terminal_1,
+        RunTerminal::Finished,
+        "run 1 (a first) state: {state_1:?}"
+    );
+    assert_eq!(
+        terminal_2,
+        RunTerminal::Finished,
+        "run 2 (b first) state: {state_2:?}"
+    );
+    let output_1 = bench_1
+        .group_output("review")
+        .expect("run 1 must consolidate into its node-output");
+    let output_2 = bench_2
+        .group_output("review")
+        .expect("run 2 must consolidate into its node-output");
+    assert_eq!(
+        output_1,
+        output_2,
+        "the consolidated blackboard must not depend on arrival order (D98)\n\
+         run 1 findings a/b: {:?}/{:?}\nrun 2 findings a/b: {:?}/{:?}",
+        bench_1.findings_by("rev-a"),
+        bench_1.findings_by("rev-b"),
+        bench_2.findings_by("rev-a"),
+        bench_2.findings_by("rev-b"),
     );
 }
 

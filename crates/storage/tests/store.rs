@@ -108,6 +108,55 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
     assert_eq!(stored_seqs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
 }
 
+/// DI-30: the production shape a shared-handle test can never exercise
+/// — the per-session run-tools listener (T8.2) appends `finding_posted`
+/// through its own `reopen`ed connection while the engine appends
+/// session/audit events through the original, both into the same run,
+/// at the same time. `append_event`'s transaction reads (`MAX(seq)`)
+/// before writing; under a deferred `BEGIN`, that read→write upgrade
+/// can't wait on a busy writer (SQLite refuses to invoke the busy
+/// handler on an upgrade — waiting could deadlock) and surfaces
+/// `SQLITE_BUSY` immediately, `busy_timeout` notwithstanding. `BEGIN
+/// IMMEDIATE` takes the write lock up front, where the busy handler
+/// does apply.
+#[test]
+fn concurrent_appends_across_reopened_handles_never_fail_busy() {
+    let (_dir, storage) = open_temp();
+    let storage = Arc::new(storage);
+    let second = Arc::new(storage.reopen().unwrap());
+    let run_id = RunId::from("run-two-conns");
+    storage
+        .append_event(&created_event("run-two-conns"))
+        .unwrap();
+
+    const PER_WRITER: usize = 50;
+    let handles: Vec<_> = [Arc::clone(&storage), Arc::clone(&second)]
+        .into_iter()
+        .enumerate()
+        .map(|(writer, handle)| {
+            thread::spawn(move || {
+                for i in 0..PER_WRITER {
+                    handle
+                        .append_event(&paused_event(
+                            "run-two-conns",
+                            &format!("writer-{writer}-{i}"),
+                        ))
+                        .unwrap();
+                }
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let events = storage.events_for_run(&run_id).unwrap();
+    assert_eq!(events.len(), 1 + 2 * PER_WRITER);
+    let seqs: Vec<u64> = events.iter().map(|e| e.seq).collect();
+    let expected: Vec<u64> = (1..=(1 + 2 * PER_WRITER) as u64).collect();
+    assert_eq!(seqs, expected, "no gaps, no duplicates, both connections");
+}
+
 #[test]
 fn list_run_ids_returns_every_distinct_run() {
     let (_dir, storage) = open_temp();
