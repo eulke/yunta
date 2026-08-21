@@ -133,14 +133,16 @@ impl Bench {
 async fn client_for(
     session: &RunToolsSession,
     token_override: Option<&str>,
-) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ()>, rmcp::service::ClientInitializeError>
-{
+) -> Result<
+    rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    Box<rmcp::service::ClientInitializeError>,
+> {
     let token = token_override.unwrap_or(&session.endpoint.token);
     // rmcp prepends `Bearer ` itself — pass the bare token.
     let config = StreamableHttpClientTransportConfig::with_uri(session.endpoint.url.clone())
         .auth_header(token.to_string());
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
-    ().serve(transport).await
+    ().serve(transport).await.map_err(Box::new)
 }
 
 fn text_of(result: &rmcp::model::CallToolResult) -> String {
