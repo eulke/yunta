@@ -6,7 +6,7 @@ la política de versionado aplicada y la política de
 `event_hash`. Precede a los tipos de Rust, igual que la spec del ledger precede
 al parser del ledger.
 
-> A diferencia de `docs/spec-ledger.md`, este documento **no es un mirror**: el
+> A diferencia de `internal/spec-ledger.md`, este documento **no es un mirror**: el
 > Contrato del Run da la tabla evento→emisor→payload-relevante y las políticas de
 > versionado/hashing, pero no el detalle campo por campo de cada payload. Ese
 > detalle se deriva acá, con cita de la fuente cuando existe y marcado

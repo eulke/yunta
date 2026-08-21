@@ -11,7 +11,7 @@ impone a sus agentes también te aplican a vos como implementador.
    engine, con sus invariantes.
 2. `docs/spec-adapter.md` — trait `Adapter`/`AgentSession`, capacidades y
    obligaciones de un adapter.
-3. `docs/spec-ledger.md` — schema formal del ledger de tareas; se escribe a mano,
+3. `internal/spec-ledger.md` — schema formal del ledger de tareas; se escribe a mano,
    así que precede leerla antes de tocar el ciclo de tareas.
 4. `docs/adrs.md` — decisiones con racionales y alternativas descartadas. **Fuente de
    desempate: ante cualquier ambigüedad, buscá acá antes de decidir.**

@@ -6,9 +6,10 @@ everything past that: the other node kinds, context, permissions, gates, modes, 
 two authoring patterns worth using from the start — criteria granularity and shared
 build caches across worktrees.
 
-Nothing here needs a pack installed. Packs (`yunta pack add`, on the roadmap) are a
+Nothing here needs a pack installed. Packs (`yunta pack add`) are a
 distribution mechanism for sharing workflows and knowledge across projects — every
-mechanism below works the same in a single, pack-free repo.
+mechanism below works the same in a single, pack-free repo. See [packs.md](packs.md)
+for installing, creating, or publishing one.
 
 ## Node kinds
 
@@ -22,7 +23,7 @@ Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`:
 - **`loop`** — drives a task ledger (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [ledger schema](spec-ledger.md) for what a task looks
+  `1`, sequential). See the [ledger schema](../internal/spec-ledger.md) for what a task looks
   like — it's written by an earlier `prompt` node as a `kind: task-ledger` artifact,
   or by hand while you're still designing the workflow.
 - **`check`** — automatic verification against data the engine already has: `builtin:
@@ -172,7 +173,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A ledger task's `criteria` (see the [ledger schema](spec-ledger.md#21-criteria)) run
+A ledger task's `criteria` (see the [ledger schema](../internal/spec-ledger.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire
@@ -214,114 +215,14 @@ cache instead of starting cold.
 
 ## Packs
 
-A pack is a distributable, versioned bundle of workflows, skills,
-knowledge and docs — never something that extends the engine itself, only content it
-already knows how to run. A pack **declares** the roles it needs (a role name plus a
-permissions ceiling, e.g. `reviewer` at `read-only`) and its own permissions ceiling
-(`declares:` in `pack.yaml`) — never a concrete adapter, model or secret; the
-installing team resolves those roles against its own `runners:`, so the same pack
-runs unedited on a team that's all Claude Code and one that's all Codex.
-
-This repo ships two example packs at [`packs/`](../packs/) — `yunta/starter`
-(two minimal workflows: a one-node `fix` and a fan-out `review`) and
-`yunta/fragua` (the full reference pipeline: grill, a verified task ledger,
-lint→fix, a baseline check, multi-runner review, PR). Both install and remove
-like any third-party pack; the engine treats them no differently.
-
-```bash
-yunta pack add github.com/acme/review-pack@v1.2.0
-yunta pack list
-yunta pack update acme/review-pack v1.3.0
-yunta pack remove acme/review-pack
-```
-
-`add` clones the ref, vendors it to `.yunta/packs/<publisher>/<name>/` (checked into
-the repo alongside the team's own code — a pack's contents are versioned with your
-history, not fetched fresh on every checkout), and records `{ref, commit, content
-hash}` in `.yunta/yunta.lock`. Nothing updates itself: `update` always names an exact
-target ref. `list` re-hashes what's actually vendored on disk against the lock and
-says so if they've drifted — an offline, no-network way to confirm the vendoring
-hasn't been tampered with or gone stale.
-
-Once installed, a pack's workflows and skills are addressable by
-`publisher/name` — the name after the slash is the workflow or skill's own file
-basename (as declared in `pack.yaml`'s `contents:`), not the pack's own `name`
-field, so a publisher's installed packs share one flat namespace:
-
-```bash
-yunta run acme/review
-yunta check acme/review
-```
-
-and the same form works inside a workflow (`use: acme/qa-review`) and a node's
-`skills:` list (`skills: [acme/review-rubric]`). Resolution always tries the
-repo's own `.yunta/workflows/` first — a repo file at the same
-`publisher/name` path always wins over the pack: a local workflow with the
-same name shadows the one from the pack. `yunta list` reflects the same
-two-layer view and the same shadowing.
-
-Composition is scoped to a pack's own contents: a workflow shipped inside a
-pack may freely `use:` another workflow from the *same* pack, but reaching
-into a different pack, or back out to the repo, is rejected by `check` —
-cross-pack composition is out of scope for v1.
-
-A pack is code from someone else, and it can be audited by reading it: `yunta
-pack audit acme/review-pack` prints a full static inventory of every workflow
-it ships — every `bash`/hook/loop command, every context source and exactly
-what it points at, permissions and required agent per node, `mcp` servers
-reached, executors flagged as code, and each workflow's **complete, untrimmed
-prompt text**. It's inventory, never a verdict: nothing here flags
-content as "suspicious" — that would be trivially evadible and would only
-give false confidence. It also reports whether the pack ships its own tests
-under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
-`add` runs the same audit automatically, before anything is vendored —
-nothing lands in your repo unseen.
-
-`declares:` in `pack.yaml` is a ceiling, not a description, and `yunta check`
-enforces it as one: a `prompt`/`loop` node inside a pack can never request a
-session permission above what that pack's manifest promises — including a
-node that declares no `permissions:` of its own, which still falls back to
-the engine's own `edit` default and can exceed a `read-only` ceiling just the
-same. Exceeding it fails `check` with an error naming the node, the pack and
-both the declared and requested level; the same rule follows composition, so
-a child workflow reached through `use:` from inside the pack is checked
-against that pack's ceiling too. Declaring any `executors:` raises the bar
-further, and how far is the installing team's own call:
-`permissions.packs.executors` in the config (an org-ceiling setting — lower
-layers only narrow it, never re-widen it) decides. `prompt`, the default, refuses to
-install or update a pack that ships executable code unless `--yes` confirms
-it, after the audit has shown exactly what the executors are; `deny` refuses
-outright — no flag overrides a permissions ceiling; `allow` installs without
-asking. `permissions.packs.publishers.allow`, when non-empty, additionally
-restricts which publishers can be installed or updated at all — a refusal
-names the config layer that declares the restriction. `update` enforces both
-the same way `add` does: a new ref is where new executor code first appears.
-
-`requires:` is the mirror image of `declares:` — a floor the *installing*
-team's own config must clear, not a ceiling the pack promises. `yunta doctor`
-validates every installed pack's `requires:` against the merged config
-alongside its usual adapter health check: a `roles:` entry that `runners:`
-doesn't define (or defines with zero candidates), an `mcp_servers:` name
-nothing declares, and a `commands:` binary that isn't on `PATH` are each
-reported with what to add, naming the pack. Nothing here blocks `pack add` or
-`check` — a pack can be installed and configured for later, same as an
-adapter that isn't set up yet doesn't stop `yunta init`.
-
-Starting a run from a pack's own workflow freezes exactly which pack version
-produced it — publisher, name, the pack's own semver, and the exact commit
-`yunta.lock` recorded, all in the run's manifest from the moment it's
-created. `yunta pack update` afterward changes nothing about a run already
-in flight: `resume` only ever re-reads that manifest, never the vendored
-pack on disk again, the same immutability every other frozen field
-(`workflow`, prompts, config) already has.
+Covered on its own page: [packs.md](packs.md) — installing one, and creating
+and publishing your own.
 
 ## Where the rest lives
 
-This guide covers what's needed to write and reason about a workflow. The full
-normative schema — every field, every validation rule `yunta check` enforces, the
-event log's exact payloads, and the rationale behind design choices — lives in the
-project's Notion workspace (the Contrato del Run, the Adapter trait spec, and
-Decisiones y racionales). `docs/` in this repo mirrors the subset that tracks
-day-to-day implementation status: [`spec-ledger.md`](spec-ledger.md) (the task ledger
-artifact this guide's `loop` section points at) and [`eventos.md`](eventos.md) (event
-payloads, for anyone building tooling against the log directly).
+This guide covers what's needed to write and reason about a workflow. See
+[the documentation index](README.md) for adapters, troubleshooting, and the
+compatibility policy. The full normative schema — every field, every
+validation rule `yunta check` enforces, the event log's exact payloads, and
+the rationale behind design choices — lives in the project's internal
+engineering specs, not in this guide.

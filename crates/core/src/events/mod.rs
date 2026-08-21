@@ -1,4 +1,4 @@
-//! Event log types — the full 31 `kind`s from `docs/eventos.md`,
+//! Event log types — the full 31 `kind`s from `internal/eventos.md`,
 //! covering every kind even though
 //! the current engine (only `prompt`/`bash`/`loop` nodes exist so far) won't
 //! emit most of them until gates, `parallel`,

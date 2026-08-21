@@ -546,7 +546,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
 - **Solución propuesta:**
   1. Emitter en `dispatch_session`: al abrir, `agent_session_opened
      { session_id, adapter, model, agent? }` (los campos ya
-     especificados por T2.0 en `docs/eventos.md` — implementarlos tal
+     especificados por T2.0 en `internal/eventos.md` — implementarlos tal
      cual, no rediseñarlos); al recibir eventos del adapter, un
      `agent_message` **acotado** (digest/kind + tamaño, jamás contenido
      completo — I12/O3: el payload no puede portar secretos ni contenido
@@ -942,7 +942,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   `run-stable` — un artifact es inmutable una vez escrito, I3 — y
   re-resuelve volátiles por brief) y `context_assembled.task_id:
   Option<TaskId>` aditivo (misma convención que `scope_checked`,
-  `docs/eventos.md` §5.8 actualizado). La resolución corre al armar el
+  `internal/eventos.md` §5.8 actualizado). La resolución corre al armar el
   lote, antes de despachar nada: una fuente que falla es fallo del nodo
   (§9) sin gastar sesión.
 
@@ -1063,7 +1063,7 @@ Contrato que el binario actual no cumple pudiendo cumplirla.
   corrida → actualizar la entrada correspondiente de `m0-status.md`.
 - **✓ Criterios:** ambas checklists corridas y sus entradas de deuda
   cerradas; cualquier corrección hecha con test de regresión.
-- **Estado:** la checklist existe — `docs/smoke-checklist.md`, con
+- **Estado:** la checklist existe — `internal/smoke-checklist.md`, con
   protocolo de corrección (cada divergencia = tarea propia + test de
   regresión) y registro de resultados en `m0-status.md`. Revisada por
   staleness al cerrar M8–M11: además de las secciones originales A
@@ -1624,7 +1624,7 @@ construir algo. Si alguna vez duelen de verdad, reabrirlos requiere ADR.
 ## Pendientes con dueño en el plan (referencia, sin duplicar)
 
 - **T2.5** — cadena de hashes del event log + `yunta verify` (política ya
-  escrita en `docs/eventos.md` §3). Prioridad alta de facto: T10.4
+  escrita en `internal/eventos.md` §3). Prioridad alta de facto: T10.4
   (recibo) la exige y cada evento nuevo que se emite sin hash agranda la
   migración. Recomendación: primera tarea del plan a retomar tras el
   Nivel 1 de este doc.

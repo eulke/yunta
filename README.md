@@ -133,9 +133,10 @@ the terminal that started it staying open.
 That's the whole loop. Real workflows add more node kinds (`loop` over a task ledger,
 `parallel` groups, `check` builtins, `gate` for human decisions, `workflow` to compose
 other workflows) and richer context sourcing — all covered in the
-[workflow guide](docs/guide.md). None of it requires a pack; packs (`yunta pack add`)
-are for sharing workflows and knowledge across projects, not a prerequisite for
-writing one.
+[workflow guide](docs/guide.md). None of it requires a pack; [packs](docs/packs.md)
+(`yunta pack add`) are for sharing workflows and knowledge across projects, not a
+prerequisite for writing one. See the [documentation index](docs/README.md) for
+everything else — concepts, adapters, and troubleshooting.
 
 Two example packs ship in this repo's own [`packs/`](packs/) directory as
 installable, removable third-party packs — the engine grants them no special
@@ -162,7 +163,7 @@ a verified task ledger, lint→fix, a baseline check, multi-runner review, PR).
 | `yunta verify <run_id>` | Recomputes and checks a run's event hash chain end to end. |
 | `yunta receipt <run_id> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory. |
 | `yunta doctor` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid — and every installed pack's `requires:` against your config: roles resolvable, mcp servers defined, commands on `PATH`. |
-| `yunta pack add <source>[@ref] [--yes]` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see the [workflow guide](docs/guide.md#packs). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
+| `yunta pack add <source>[@ref] [--yes]` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
 | `yunta pack audit <publisher>/<name>` | Prints a full static inventory of a pack's own workflows — every command, context source, per-node permission, agent, mcp server, executor and full untrimmed prompt — plus whether it ships tests and whether they pass. `add` runs this automatically before vendoring. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |

@@ -42,9 +42,9 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 
 ## Alcance mínimo de M-0 (tal como lo define el Plan)
 
-- [x] **T1.0** — spec del ledger → `docs/spec-ledger.md`
-- [x] **T2.0** — spec de eventos → `docs/eventos.md` (31 kinds, no 30 — discrepancia
-      del Contrato reportada, ver `docs/eventos.md` §0)
+- [x] **T1.0** — spec del ledger → `internal/spec-ledger.md`
+- [x] **T2.0** — spec de eventos → `internal/eventos.md` (31 kinds, no 30 — discrepancia
+      del Contrato reportada, ver `internal/eventos.md` §0)
 - [x] **T0.1** — workspace de Cargo
 - [x] **T0.3** — tipos de error (`YuntaError`) + `tracing`
 - [x] **T1.1** (recorte) — schema `prompt`/`bash`/`loop` en `yunta-core`.
@@ -63,7 +63,7 @@ del *qué* sigue siendo el Plan de implementación (Notion, sección M-0); esto 
 - [x] **T3.2** — adapter `mock`: fixtures YAML, sesión exitosa/fallida/colgada,
       ediciones fuera de scope con `edit_hooks`
 - [x] **T5.1** — parseo y registro del ledger: las 7 reglas de validación de
-      `docs/spec-ledger.md` §3, todos los errores juntos
+      `internal/spec-ledger.md` §3, todos los errores juntos
 - [x] **T5.2** — ciclo de la tarea: pre-check en rojo, dispatch, post-check,
       reintentos con sesión nueva, `blocked` (`yunta_engine::run_task`)
 - [x] **T5.3** — scope check por `git diff` con glob-matching real (`globset`)
@@ -712,7 +712,7 @@ que aparece.
         tipos tiene opcionalidad interna que fusionar campo a campo).
       - **`baseline_compare`, desviación documentada del texto literal del
         Contrato**: la prosa describe capturar la baseline "una vez al
-        abrir el run" (`docs/eventos.md` §5.3); acá la captura es **lazy**,
+        abrir el run" (`internal/eventos.md` §5.3); acá la captura es **lazy**,
         en la primera vez que un nodo `baseline_compare` se ejecuta dentro
         del run — capturar de forma incondicional en `create_run` hubiera
         exigido volverla async en sus cuatro call sites
@@ -3155,14 +3155,14 @@ que aparece.
   techos de `permissions`, warning de push a rama base — todo requiere schema fuera
   de alcance (modos, `parallel`, `context:`/templates, `permissions:`, composición).
 - **T2.0**: documenta 31 event kinds, no los "30" que dice la prosa del Contrato
-  (la tabla real tiene 31 — ver `docs/eventos.md` §0). Reportado; pendiente de que
+  (la tabla real tiene 31 — ver `internal/eventos.md` §0). Reportado; pendiente de que
   el usuario corrija Notion si coincide con la lectura.
 - **CLAUDE.md**: dice "I1–I22" en un lugar e "I1–I30" en otro, dentro de la misma
   página de Notion. El usuario va a corregirlo en Notion; mientras tanto se trabaja
   con I1–I30 (el rango real del Contrato).
 - **T2.2 corrección post-implementación**: varios payloads repetían `node_id` (o
   `from_node`/`author_node_id`) ya presente en el envelope del evento. Corregido en
-  `yunta_core::events` y en `docs/eventos.md` — ver commit `a488b06`.
+  `yunta_core::events` y en `internal/eventos.md` — ver commit `a488b06`.
 - **T2.3**: deriva nodos (lifecycle vía `node_started`/`finished`/`failed`), tareas
   (última `task_status_changed`) y tokens totales. No deriva gates ni presupuestos
   más allá del conteo de tokens — no hay `kind: gate` ni enforcement de `limits.*`
@@ -3257,7 +3257,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
    ("cuando algo necesite inputs reales") terminó siendo `--input` de T7.1,
    no el workflow de bootstrap.
 7. **`event_hash` (T2.5) ✓**: implementado según la política de
-   `docs/eventos.md` §3 — hash encadenado por evento (columna
+   `internal/eventos.md` §3 — hash encadenado por evento (columna
    `event_hash`, calculado en la misma transacción que asigna `seq`,
    campos length-prefixed en el orden fijo del schema), génesis
    `H0 = SHA-256(manifest_hash)` (el primer evento de un run DEBE ser
