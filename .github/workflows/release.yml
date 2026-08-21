@@ -1,0 +1,279 @@
+name: Release
+
+# RFC-0004 §4.1: the only human gesture is pushing a `vX.Y.Z` tag. The
+# GitHub release is the single source of truth — every other channel
+# (crates.io, the Homebrew tap, GHCR) consumes its artifacts and never
+# compiles anything itself, so a secondary channel failing never un-publishes
+# the release.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Gate: identical to `ci.yml`'s own checks, plus the factory packs. If
+  # this fails, nothing below it runs and no release is created.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+      - name: test (workspace)
+        run: cargo test --workspace --locked
+
+      - name: build (release binary, for the factory-pack checks below)
+        run: cargo build --release --locked -p yunta
+
+      - name: factory packs pass `check` and run end-to-end with mock
+        run: |
+          bin="$PWD/target/release/yunta"
+          for pack in packs/starter packs/fragua; do
+            for wf in "$pack"/.yunta/workflows/*.yaml; do
+              echo "::group::check $wf"
+              "$bin" check "$wf"
+              echo "::endgroup::"
+            done
+          done
+          echo "::group::pack self-tests (mock adapter)"
+          "$bin" test --dir packs/starter
+          "$bin" test --dir packs/fragua
+          echo "::endgroup::"
+
+  # Five-target matrix, all gated on `test`. musl via `cross` (a real
+  # static Linux binary, no glibc dependency); macOS and Windows compile
+  # natively on their own runner — cross-compiling to them costs more than
+  # it saves.
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+            docker_platform: linux/amd64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+            docker_platform: linux/arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: install cross
+        if: matrix.cross
+        run: cargo install cross --locked --git https://github.com/cross-rs/cross
+
+      - name: build (cross)
+        if: matrix.cross
+        run: cross build --release --locked --target ${{ matrix.target }} -p yunta
+
+      - name: build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --locked --target ${{ matrix.target }} -p yunta
+
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          stage="yunta-${version}-${{ matrix.target }}"
+          mkdir "$stage"
+          cp "target/${{ matrix.target }}/release/yunta" "$stage/"
+          cp LICENSE README.md "$stage/"
+          tar czf "${stage}.tar.gz" "$stage"
+
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          stage="yunta-${version}-${{ matrix.target }}"
+          mkdir "$stage"
+          cp "target/${{ matrix.target }}/release/yunta.exe" "$stage/"
+          cp LICENSE README.md "$stage/"
+          7z a "${stage}.zip" "$stage"
+
+      # RFC-0004 §4.4: verified install in a clean environment, per
+      # platform, is non-negotiable for a release to ship. Linux gets an
+      # actual clean container (proving the musl binary has no hidden
+      # glibc dependency); macOS/Windows use the runner itself, which is
+      # already a fresh, single-use VM.
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.docker_platform
+      - name: verify install (clean container)
+        if: matrix.docker_platform
+        run: |
+          docker run --rm --platform ${{ matrix.docker_platform }} \
+            -v "$PWD/target/${{ matrix.target }}/release/yunta:/yunta:ro" \
+            alpine:3.20 /yunta --version
+      - name: verify install (fresh runner)
+        if: ${{ !matrix.docker_platform }}
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            "target/${{ matrix.target }}/release/yunta.exe" --version
+          else
+            "target/${{ matrix.target }}/release/yunta" --version
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yunta-${{ matrix.target }}
+          path: |
+            yunta-*.tar.gz
+            yunta-*.zip
+          if-no-files-found: error
+
+  # Origin of truth: gathers the 5 packages, checksums them, writes notes
+  # from the conventional commits since the previous tag, publishes the
+  # GitHub release. Everything downstream only ever reads this release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        working-directory: dist
+        run: sha256sum yunta-* > checksums.txt
+
+      - name: changelog since the previous tag
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+          output: CHANGELOG.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          files: |
+            dist/yunta-*
+            dist/checksums.txt
+
+  # Secondary channels — parallel, each independent of the others. A
+  # failure here is a channel-specific problem to retry, never a reason to
+  # touch the release above (RFC-0004 §4).
+  publish-crates:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # crates.io rejects a crate whose path dependencies aren't yet
+      # indexed — dependency order and waiting for each to actually appear
+      # aren't optional (RFC-0004 §4.1).
+      - name: publish yunta-core
+        run: cargo publish -p yunta-core --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: wait for yunta-core to index
+        run: ./scripts/wait-for-crate-index.sh yunta-core "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-core") | .version')"
+      - name: publish yunta-storage
+        run: cargo publish -p yunta-storage --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: publish yunta-adapters
+        run: cargo publish -p yunta-adapters --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: wait for yunta-storage and yunta-adapters to index
+        run: |
+          ./scripts/wait-for-crate-index.sh yunta-storage "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-storage") | .version')"
+          ./scripts/wait-for-crate-index.sh yunta-adapters "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-adapters") | .version')"
+      - name: publish yunta-engine
+        run: cargo publish -p yunta-engine --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: wait for yunta-engine to index
+        run: ./scripts/wait-for-crate-index.sh yunta-engine "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-engine") | .version')"
+      - name: publish yunta (binary)
+        run: cargo publish -p yunta --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # `update-tap` (RFC-0004 §4.1's Homebrew formula render-and-push) isn't
+  # wired in yet: it needs `eulke/homebrew-tap` to exist first (T12.5), a
+  # decision — creating a new public repo — that's this workflow's author's
+  # to make explicitly, not something to stub in ahead of time.
+
+  publish-container:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: yunta-x86_64-unknown-linux-musl
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: yunta-aarch64-unknown-linux-musl
+          path: dist
+          merge-multiple: true
+      - name: extract binaries for the image build context
+        run: |
+          mkdir -p ctx/linux/amd64 ctx/linux/arm64
+          tar xzf dist/yunta-*-x86_64-unknown-linux-musl.tar.gz -C ctx/linux/amd64 --strip-components=1
+          tar xzf dist/yunta-*-aarch64-unknown-linux-musl.tar.gz -C ctx/linux/arm64 --strip-components=1
+
+      - name: compute image tags
+        id: tags
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          minor="${version%.*}"
+          {
+            echo "version=$version"
+            echo "minor=$minor"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: build and push (amd64 + arm64, tags latest/X.Y.Z/X.Y)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/eulke/yunta:latest
+            ghcr.io/eulke/yunta:${{ steps.tags.outputs.version }}
+            ghcr.io/eulke/yunta:${{ steps.tags.outputs.minor }}
