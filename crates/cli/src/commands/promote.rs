@@ -52,14 +52,16 @@ pub(crate) async fn drive_promotions(
         // `kind: workflow` children that promote); this loop keeps only
         // what's the CLI's — the console surface and the system clock.
         let successor = yunta_engine::create_promotion_successor(
-            env.cwd,
-            &run_id,
-            &manifest,
-            &worktree,
-            &env.project.runs_root.join(run_id.as_str()),
-            &suggested_mode,
-            &env.project.runs_root,
-            &env.project.worktrees_root,
+            yunta_engine::PromotionSuccessorParams {
+                repo: env.cwd,
+                predecessor_id: &run_id,
+                predecessor_manifest: &manifest,
+                predecessor_worktree: &worktree,
+                predecessor_run_dir: &env.project.runs_root.join(run_id.as_str()),
+                suggested_mode: &suggested_mode,
+                runs_root: &env.project.runs_root,
+                worktrees_root: &env.project.worktrees_root,
+            },
             env.storage,
             &SystemClock,
         )

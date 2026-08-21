@@ -25,27 +25,44 @@ pub struct PromotionSuccessor {
     pub worktree: PathBuf,
 }
 
+/// Everything [`create_promotion_successor`] needs to know about the
+/// predecessor and where the successor lands — `storage`/`clock` stay
+/// their own trailing arguments, same convention as [`create_run`].
+pub struct PromotionSuccessorParams<'a> {
+    /// The checkout a fresh worktree branches from (the original `cwd`
+    /// for a top-level chain; the parent run's own tree for a child's,
+    /// §12).
+    pub repo: &'a Path,
+    pub predecessor_id: &'a RunId,
+    pub predecessor_manifest: &'a Manifest,
+    pub predecessor_worktree: &'a Path,
+    pub predecessor_run_dir: &'a Path,
+    pub suggested_mode: &'a str,
+    pub runs_root: &'a Path,
+    pub worktrees_root: &'a Path,
+}
+
 /// Creates (never runs) the successor of `predecessor`, which just
 /// closed `Promoted` toward `suggested_mode`.
 ///
-/// `repo` is the checkout a fresh worktree branches from (the original
-/// `cwd` for a top-level chain; the parent run's own tree for a child's,
-/// §12). Under `Isolation::None` the successor reuses the
-/// predecessor's checkout — the lock (if any) is the caller's and only
-/// releases when the whole chain ends.
-#[allow(clippy::too_many_arguments)]
+/// Under `Isolation::None` the successor reuses the predecessor's
+/// checkout — the lock (if any) is the caller's and only releases when
+/// the whole chain ends.
 pub async fn create_promotion_successor(
-    repo: &Path,
-    predecessor_id: &RunId,
-    predecessor_manifest: &Manifest,
-    predecessor_worktree: &Path,
-    predecessor_run_dir: &Path,
-    suggested_mode: &str,
-    runs_root: &Path,
-    worktrees_root: &Path,
+    params: PromotionSuccessorParams<'_>,
     storage: &Storage,
     clock: &dyn Clock,
 ) -> Result<PromotionSuccessor, RunError> {
+    let PromotionSuccessorParams {
+        repo,
+        predecessor_id,
+        predecessor_manifest,
+        predecessor_worktree,
+        predecessor_run_dir,
+        suggested_mode,
+        runs_root,
+        worktrees_root,
+    } = params;
     let successor_id = RunId::from(format!("{predecessor_id}-promoted"));
 
     let mut manifest = predecessor_manifest.clone();

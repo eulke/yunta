@@ -20,7 +20,9 @@ use yunta_core::{Isolation, Ledger, Node, NodeKind, PromptSource, Task};
 
 use crate::replay::{derive, RunState};
 use crate::scope::scope_check;
-use crate::task_cycle::{post_check, run_task, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
+use crate::task_cycle::{
+    post_check, run_task, CriterionRun, Memo, RunTaskParams, TaskCycleReport, TaskOutcome,
+};
 use crate::worktree::prepare_worktree;
 
 use super::node_exec::{
@@ -244,15 +246,17 @@ pub(super) async fn execute_loop(
                 dispatch_task_in_isolation(
                     ctx,
                     node,
-                    task,
-                    &events,
-                    &base_commit,
-                    brief,
-                    adapter.as_ref(),
-                    scope_expansion,
-                    &grants,
-                    cancel,
-                    &setup,
+                    TaskDispatch {
+                        task,
+                        events: &events,
+                        base_commit: &base_commit,
+                        instruction: brief,
+                        adapter: adapter.as_ref(),
+                        scope_expansion,
+                        grants: &grants,
+                        cancel,
+                        setup: &setup,
+                    },
                 )
             }))
             .await;
@@ -686,20 +690,37 @@ fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<Stri
 /// `done`/`blocked` in the log itself; that's the caller's job once every
 /// batch member's dispatch has settled, so integration can stay strictly
 /// serial and in declaration order.
-#[allow(clippy::too_many_arguments)]
+/// Everything [`dispatch_task_in_isolation`] needs about the one task
+/// it's dispatching — `ctx`/`node` stay their own arguments, same as
+/// every other function in this module.
+struct TaskDispatch<'a> {
+    task: &'a Task,
+    events: &'a [Event],
+    base_commit: &'a str,
+    instruction: &'a str,
+    adapter: &'a dyn yunta_adapters::Adapter,
+    scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
+    grants: &'a crate::scope_expansion::GrantLedger,
+    cancel: &'a tokio_util::sync::CancellationToken,
+    setup: &'a crate::task_cycle::SessionSetup,
+}
+
 async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task: &'a Task,
-    events: &[Event],
-    base_commit: &str,
-    instruction: &str,
-    adapter: &dyn yunta_adapters::Adapter,
-    scope_expansion: Option<&yunta_core::ScopeExpansion>,
-    grants: &crate::scope_expansion::GrantLedger,
-    cancel: &tokio_util::sync::CancellationToken,
-    setup: &crate::task_cycle::SessionSetup,
+    dispatch: TaskDispatch<'a>,
 ) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
+    let TaskDispatch {
+        task,
+        events,
+        base_commit,
+        instruction,
+        adapter,
+        scope_expansion,
+        grants,
+        cancel,
+        setup,
+    } = dispatch;
     let attempt = attempt_number(events, &task.id);
     let task_worktree = ctx
         .run_dir
@@ -731,23 +752,23 @@ async fn dispatch_task_in_isolation<'a>(
         }),
     )?;
 
-    let report = run_task(
+    let report = run_task(RunTaskParams {
         task,
         instruction,
         adapter,
-        &task_worktree,
-        ctx.max_task_retries,
-        ctx.session_budget()?,
-        &ctx.memo,
-        ctx.manifest.config.permissions.as_ref(),
-        super::node_exec::session_profile(node),
+        cwd: &task_worktree,
+        max_retries: ctx.max_task_retries,
+        budget: ctx.session_budget()?,
+        memo: &ctx.memo,
+        permissions: ctx.manifest.config.permissions.as_ref(),
+        profile: super::node_exec::session_profile(node),
         scope_expansion,
         grants,
-        &granted_paths_for(events, &task.id),
-        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        already_granted_paths: &granted_paths_for(events, &task.id),
+        audit: Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
         setup,
-    )
+    })
     .await?;
 
     Ok((task, task_worktree, report))

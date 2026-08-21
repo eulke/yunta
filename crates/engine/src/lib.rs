@@ -65,8 +65,8 @@ pub use receipt::{
 pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, mode_included_nodes,
-    resolve_gate, session_token_budget, CreateRunParams, PromotionSuccessor, ResolveGateError,
-    RunEnv, RunError, RunReport, RunTerminal,
+    resolve_gate, session_token_budget, CreateRunParams, PromotionSuccessor,
+    PromotionSuccessorParams, ResolveGateError, RunEnv, RunError, RunReport, RunTerminal,
 };
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
@@ -77,8 +77,8 @@ pub use stats::{
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptRecord, CriterionRun, DispatchOutcome, Memo,
-    PreCheckOutcome, SessionObserver, SessionSetup, TaskCycleError, TaskCycleReport, TaskOutcome,
-    DEFAULT_MAX_RETRIES,
+    PreCheckOutcome, RunTaskParams, SessionObserver, SessionSetup, TaskCycleError, TaskCycleReport,
+    TaskOutcome, DEFAULT_MAX_RETRIES,
 };
 pub use template::{render_template, template_variables, TemplateError};
 pub use verification_effectiveness::{

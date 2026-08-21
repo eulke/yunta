@@ -659,24 +659,42 @@ pub(crate) async fn dispatch_session(
 /// `scope_expansion_granted` on the log authorized for this task — a
 /// human grant lands between attempts, so the retry's effective scope
 /// must include them from the very first diff it evaluates.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_task(
-    task: &Task,
-    instruction: &str,
-    adapter: &dyn Adapter,
-    cwd: &Path,
-    max_retries: u32,
-    budget: Budget,
-    memo: &Memo,
-    permissions: Option<&yunta_core::PermissionsConfig>,
-    profile: PermissionProfile,
-    scope_expansion: Option<&yunta_core::ScopeExpansion>,
-    grants: &crate::scope_expansion::GrantLedger,
-    already_granted_paths: &[String],
-    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
-    cancel: &CancellationToken,
-    setup: &SessionSetup,
-) -> Result<TaskCycleReport, TaskCycleError> {
+pub struct RunTaskParams<'a> {
+    pub task: &'a Task,
+    pub instruction: &'a str,
+    pub adapter: &'a dyn Adapter,
+    pub cwd: &'a Path,
+    pub max_retries: u32,
+    pub budget: Budget,
+    pub memo: &'a Memo,
+    pub permissions: Option<&'a yunta_core::PermissionsConfig>,
+    pub profile: PermissionProfile,
+    pub scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
+    pub grants: &'a crate::scope_expansion::GrantLedger,
+    pub already_granted_paths: &'a [String],
+    pub audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
+    pub cancel: &'a CancellationToken,
+    pub setup: &'a SessionSetup,
+}
+
+pub async fn run_task(params: RunTaskParams<'_>) -> Result<TaskCycleReport, TaskCycleError> {
+    let RunTaskParams {
+        task,
+        instruction,
+        adapter,
+        cwd,
+        max_retries,
+        budget,
+        memo,
+        permissions,
+        profile,
+        scope_expansion,
+        grants,
+        already_granted_paths,
+        audit,
+        cancel,
+        setup,
+    } = params;
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
             return Ok(TaskCycleReport {
