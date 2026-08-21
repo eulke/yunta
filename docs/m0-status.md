@@ -3971,3 +3971,57 @@ la config local vía `doctor`, y el manifest del run congela pack+versión de
 forma verificada end-to-end. M11 requería M1+M6 (plan de implementación) —
 ambos ya cerrados de antes; con M11 cerrado, M12 (distribución pública)
 puede arrancar en cuanto se decida iniciarlo.
+
+## M12 -- Distribucion publica (RFC-0004), en progreso
+
+Iniciado tras aprobacion explicita. Completos y verificados localmente
+(clippy/fmt/test/deny en verde, cada pieza ejercitada de forma directa, no
+solo leida):
+
+- **T12.1**: `NOTICE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
+  (canal de reporte privado via GitHub Security Advisories) y `deny.toml`
+  (`cargo deny check` -- licencias/advisories/bans/sources -- cableado al
+  gate de `ci.yml`). De paso, cada dependencia interna (`path = "../core"`,
+  etc.) quedo con `version` explicita: `cargo-deny` marco esas rutas como
+  wildcard, y es justo lo que `cargo publish` (T12.4) exige.
+- **T12.2**: `.github/workflows/release.yml` -- dispara con un tag
+  `vX.Y.Z`; gate `test` (mismos checks que `ci.yml` + `check`/mock
+  end-to-end de los packs de fabrica); matriz de 5 targets (`cross` para
+  musl x86_64/aarch64, nativo para macOS/Windows) con verificacion de
+  instalacion en contenedor limpio (Linux, via QEMU) o runner fresco
+  (macOS/Windows); `checksums.txt`; release de GitHub con notas generadas
+  por `git-cliff` desde los commits convencionales. `publish-crates`
+  (orden de dependencia, esperando indexacion real via
+  `scripts/wait-for-crate-index.sh`) y `publish-container` (GHCR,
+  multi-arch) estan cableados pero dormidos -- nunca se ejecutaron, porque
+  no se empujo ningun tag `v*` y no existen los secrets. `update-tap`
+  deliberadamente no esta: necesita el repo del tap creado primero (T12.5).
+- **T12.3**: `install.sh` ahora prioriza descargar un release real
+  (resuelve `$YUNTA_VERSION` o el ultimo tag, verifica SHA-256 contra
+  `checksums.txt` antes de extraer, aborta duro ante un mismatch) y cae a
+  compilar desde fuente solo si no hay release para esa version/target.
+  Verificado de punta a punta: el camino de descarga contra un release
+  falso servido localmente (match, mismatch, extraccion), y el fallback
+  contra este mismo repo sin ningun release publicado todavia.
+- **T12.7**: `Dockerfile` -- copia el binario ya compilado (nunca
+  recompila), arma la imagen via `ARG TARGETOS`/`TARGETARCH` desde el
+  build context que arma `publish-container`. No se pudo hacer un build
+  real aca (sin daemon de Docker en este entorno) -- validado por
+  inspeccion contra el patron estandar, no ejecutado.
+- **T12.9**: `docs/compatibility.md` -- semver del binario, `yunta_schema`
+  con soporte N/N-1, y la garantia de que un run en curso nunca se ve
+  afectado por un upgrade (manifest congelado, I3).
+
+Pendientes, cada uno bloqueado en una decision explicita porque implica una
+accion publica o dificil de revertir (crear un repo, publicar a un
+registro, empujar un tag real) -- no se van a ejecutar sin que se pida
+especificamente:
+
+- **T12.4**: publicar de verdad a crates.io (orden de dependencia).
+- **T12.5**: crear el repo del tap de Homebrew (`eulke/homebrew-tap`) y
+  completar `update-tap` en `release.yml`.
+- **T12.6**: crear el repo de la GitHub Action `setup-yunta` (accion
+  compuesta, sin JS) -- repo propio per RFC-0004 §4.3.
+- **T12.8**: sitio de documentacion publica y separar los packs de fabrica
+  (`packs/starter`, `packs/fragua`) a repos propios, distintos del engine.
+- Empujar el primer tag `vX.Y.Z` real, que dispara todo lo de arriba.
