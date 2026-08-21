@@ -269,8 +269,20 @@ under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
 `add` runs the same audit automatically, before anything is vendored —
 nothing lands in your repo unseen.
 
-**Not wired up yet**: the permissions ceiling actually being enforced by
-`check` (T11.5), and validating a pack's declared `requires:` against the
+`declares:` in `pack.yaml` is a ceiling, not a description, and `yunta check`
+enforces it as one: a `prompt`/`loop` node inside a pack can never request a
+session permission above what that pack's manifest promises — including a
+node that declares no `permissions:` of its own, which still falls back to
+the engine's own `edit` default and can exceed a `read-only` ceiling just the
+same. Exceeding it fails `check` with an error naming the node, the pack and
+both the declared and requested level; the same rule follows composition, so
+a child workflow reached through `use:` from inside the pack is checked
+against that pack's ceiling too. Declaring any `executors:` raises the bar
+further: `pack add` refuses to install a pack that ships executable code
+unless `--yes` confirms it, after the audit above has shown exactly what
+they are — no accidental install of code nobody reviewed.
+
+**Not wired up yet**: validating a pack's declared `requires:` against the
 local config (T11.6).
 
 ## Where the rest lives

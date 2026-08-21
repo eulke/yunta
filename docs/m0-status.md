@@ -3677,3 +3677,47 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     un prompt multilínea sin resumir) antes de vendorear; `audit` bajo
     demanda contra un pack ya instalado da el mismo inventario;
     auditar un pack no instalado se rechaza citando dónde se buscó.
+- [x] **T11.5 — `declares` como techo en check + confirmación de
+      executors en `add`.** `check_declares_ceiling` en
+      `crates/engine/src/check.rs`, no-op sobre `WorkflowOrigin::Repo`
+      (no hay manifest de pack contra qué comparar) y activo sobre
+      `WorkflowOrigin::Pack{publisher, pack_name}`: lee el `pack.yaml`
+      de ese pack, y por cada nodo `prompt`/`loop` del workflow
+      (`Workflow::iter_nodes()`, DI-19) compara su permiso **efectivo**
+      — el `permissions:` explícito del nodo, o el default del engine
+      (`edit`) cuando no lo declara — contra `declares.permissions` del
+      pack por rango (`read-only < edit < full`). Excederlo es
+      `CheckError::PackPermissionsCeilingExceeded`, citando nodo, pack,
+      techo declarado y nivel pedido. **El default importa**: un pack
+      que declara `read-only` y un nodo sin `permissions:` propio
+      igual excede el techo, porque el nodo hereda `edit` del engine,
+      no `read-only` del pack — el fixture de test cubre esto
+      explícitamente, no solo el caso con `permissions: edit` literal
+      en el YAML. Se engancha en los dos puntos donde
+      `check_workflow_refs` ya conoce el origen de un workflow: la
+      llamada de tope (el workflow que `yunta check`/`run` recibió
+      directamente) y cada hijo que resuelve por `use:` dentro del
+      mismo recorrido recursivo (`walk_workflow_refs`) — así un nodo
+      que excede el techo dentro de un hijo compuesto intra-pack
+      también se atrapa, sin lógica nueva de recorrido.
+  - **Confirmación de executors en `add`** (§6.3): `manifest.declares.
+    executors` no vacío y sin `--yes` refusa el install *después* de
+    mostrar el audit completo (T11.4) y *antes* de vendorear nada —
+    mismo punto donde T11.4 ya corría el audit, ahora con un `return
+    ExitCode::FAILURE` en vez de solo una nota informativa que nadie
+    tenía que reconocer. `PackAction::Add` en `main.rs` gana el flag
+    `--yes`; sin él, un pack 100% declarativo instala exactamente
+    igual que antes (sin cambio de comportamiento para el caso común).
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/
+    pack_permissions_ceiling.rs` (6 tests) — nodo que excede el techo
+    falla citando pack/techo/nivel pedido; nodo sin `permissions:`
+    propio también excede (default `edit` vs. techo `read-only`); nodo
+    igual o por debajo del techo pasa; un pack que declara un techo
+    más alto (`edit`) permite lo que uno `read-only` rechazaría;
+    workflow de origen repo no tiene techo que hacer cumplir; un nodo
+    que excede el techo dentro de un hijo compuesto intra-pack también
+    se atrapa. `crates/cli/tests/pack_ceiling_cmd.rs` (3 tests E2E
+    contra el binario real) — `add` sin `--yes` sobre un pack con
+    executors se rechaza sin vendorear nada; con `--yes` instala
+    normalmente; `yunta check acme/review` sobre un pack `read-only`
+    con un nodo `permissions: edit` falla citando el pack y el techo.

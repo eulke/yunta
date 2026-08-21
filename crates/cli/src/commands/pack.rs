@@ -1,11 +1,9 @@
 //! `yunta pack add/remove/list/update` (RFC-0002 §4, T11.2): the
 //! command layer — argument handling and printing — over
-//! `crate::pack`'s git/filesystem mechanics.
-//!
-//! **Deliberate cut, not silently skipped**: the executor-confirmation
-//! gate (T11.5) isn't wired in here yet — `add` today installs whatever
-//! the source contains once its audit has been shown; T11.5 tightens
-//! that further, it doesn't replace it.
+//! `crate::pack`'s git/filesystem mechanics. `add` also gates on
+//! executors (T11.5/§6.3): a pack that declares any is refused unless
+//! `--yes` confirms it, after the audit above has shown exactly what
+//! they are.
 
 use std::process::ExitCode;
 
@@ -18,7 +16,7 @@ use crate::pack::{
     packs_root, read_manifest, save_lock, split_source_and_ref, vendor_dir, vendor_tree,
 };
 
-pub async fn add(source: &str) -> ExitCode {
+pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -77,6 +75,19 @@ pub async fn add(source: &str) -> ExitCode {
         }
     }
     println!();
+
+    // T11.5/§6.3: executors are code, not declarative YAML — installing
+    // them needs an explicit, separate confirmation on top of the audit
+    // above, not just a note nobody has to acknowledge.
+    if !manifest.declares.executors.is_empty() && !confirmed_executors {
+        eprintln!(
+            "error: this pack declares {} executor(s) — executable code, not just declarative \
+             YAML. Review the inventory above, then re-run with `--yes` to confirm installing \
+             it.",
+            manifest.declares.executors.len()
+        );
+        return ExitCode::FAILURE;
+    }
 
     let commit = match head_commit(clone_dir.path()).await {
         Ok(commit) => commit,
@@ -143,14 +154,6 @@ pub async fn add(source: &str) -> ExitCode {
         &commit[..commit.len().min(12)],
         dest.display()
     );
-    if !manifest.declares.executors.is_empty() {
-        println!(
-            "note: this pack declares {} executor(s) — executable code, not just declarative \
-             YAML; review it like any other code dependency (full confirmation gate lands with \
-             T11.5)",
-            manifest.declares.executors.len()
-        );
-    }
     ExitCode::SUCCESS
 }
 

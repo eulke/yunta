@@ -203,7 +203,15 @@ enum PackAction {
     /// Clones, vendors to `.yunta/packs/<publisher>/<name>/`, and locks a
     /// pack. `<source>` is a git URL or `host/publisher/name` shorthand,
     /// optionally suffixed `@<ref>` (tag, branch or commit-ish).
-    Add { source: String },
+    Add {
+        source: String,
+        /// Confirms installing a pack that ships executors (executable
+        /// code, not just declarative YAML) — required whenever the
+        /// pack's `declares.executors` is non-empty; review the audit
+        /// this command prints first (T11.5/§6.3).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Re-clones an installed pack at a new ref and re-vendors it.
     Update {
         /// `publisher/name`.
@@ -295,7 +303,7 @@ async fn main() -> ExitCode {
         Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
         Some(Command::Receipt { run_id, json }) => commands::receipt::receipt(&run_id, json),
         Some(Command::Pack { action }) => match action {
-            PackAction::Add { source } => commands::pack::add(&source).await,
+            PackAction::Add { source, yes } => commands::pack::add(&source, yes).await,
             PackAction::Update {
                 publisher_name,
                 r#ref,

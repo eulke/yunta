@@ -402,6 +402,22 @@ pub enum CheckError {
          `limits.max_workflow_depth` is {max} — flatten the composition or raise the limit"
     )]
     WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
+
+    /// §3/§6: "`declares` es un techo, no una descripción" — a pack's
+    /// own `prompt`/`loop` node can never request a session profile
+    /// above what its manifest promises, even when the node's own YAML
+    /// asks for more (or asks for nothing and falls back to the
+    /// engine's own `edit` default).
+    #[error(
+        "node `{node}` requests permissions `{effective}` but pack `{pack}` declares a ceiling \
+         of `{declared}` — lower the node's permissions or raise the pack's declared ceiling"
+    )]
+    PackPermissionsCeilingExceeded {
+        node: NodeId,
+        pack: String,
+        declared: &'static str,
+        effective: &'static str,
+    },
 }
 
 /// A non-blocking finding — the run can still start (D100/§5.8: `check`
@@ -1569,7 +1585,7 @@ pub fn check_workflow_refs(
     repo_root: &std::path::Path,
     workflow_origin: &crate::catalog::WorkflowOrigin,
 ) -> Vec<CheckError> {
-    let mut errors = Vec::new();
+    let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
     walk_workflow_refs(
@@ -1581,6 +1597,75 @@ pub fn check_workflow_refs(
         &mut errors,
     );
     errors
+}
+
+fn permission_label(permissions: yunta_core::NodePermissions) -> &'static str {
+    match permissions {
+        yunta_core::NodePermissions::ReadOnly => "read-only",
+        yunta_core::NodePermissions::Edit => "edit",
+        yunta_core::NodePermissions::Full => "full",
+    }
+}
+
+fn permission_rank(permissions: yunta_core::NodePermissions) -> u8 {
+    match permissions {
+        yunta_core::NodePermissions::ReadOnly => 0,
+        yunta_core::NodePermissions::Edit => 1,
+        yunta_core::NodePermissions::Full => 2,
+    }
+}
+
+/// T11.5/§3/§6: `declares.permissions` is a ceiling, checked against
+/// every `prompt`/`loop` node's own *effective* permission — the node's
+/// explicit `permissions:` if it has one, the engine's own `edit`
+/// default otherwise (a pack declaring `read-only` can't rely on a node
+/// silently defaulting past it). A no-op for a repo-origin workflow:
+/// there is no pack manifest to hold a ceiling against.
+fn check_declares_ceiling(
+    workflow: &Workflow,
+    origin: &crate::catalog::WorkflowOrigin,
+    repo_root: &std::path::Path,
+) -> Vec<CheckError> {
+    let crate::catalog::WorkflowOrigin::Pack {
+        publisher,
+        pack_name,
+    } = origin
+    else {
+        return Vec::new();
+    };
+    let manifest_path = repo_root
+        .join(".yunta/packs")
+        .join(publisher)
+        .join(pack_name)
+        .join("pack.yaml");
+    let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+        return Vec::new();
+    };
+    let Ok(manifest) = serde_yaml::from_str::<yunta_core::PackManifest>(&text) else {
+        return Vec::new();
+    };
+    let ceiling = manifest.declares.permissions;
+
+    workflow
+        .iter_nodes()
+        .filter_map(|node| {
+            let effective = match &node.kind {
+                NodeKind::Prompt { .. } | NodeKind::Loop { .. } => node
+                    .permissions
+                    .unwrap_or(yunta_core::NodePermissions::Edit),
+                _ => return None,
+            };
+            if permission_rank(effective) <= permission_rank(ceiling) {
+                return None;
+            }
+            Some(CheckError::PackPermissionsCeilingExceeded {
+                node: node.id.clone(),
+                pack: format!("{publisher}/{pack_name}"),
+                declared: permission_label(ceiling),
+                effective: permission_label(effective),
+            })
+        })
+        .collect()
 }
 
 /// Every `(node, use-name)` reference, `parallel` children included.
@@ -1695,6 +1780,7 @@ fn walk_workflow_refs(
                 continue;
             }
         };
+        errors.extend(check_declares_ceiling(&child, &resolved.origin, repo_root));
         path.push(name);
         walk_workflow_refs(&child, repo_root, &resolved.origin, max_depth, path, errors);
         path.pop();
