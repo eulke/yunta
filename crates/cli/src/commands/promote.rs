@@ -19,24 +19,32 @@ use yunta_storage::Storage;
 
 use crate::project::Project;
 
+/// The CLI-side environment a promotion chain runs in — everything
+/// [`drive_promotions`] needs that stays fixed across every successor it
+/// creates, as opposed to the run-state it threads through the loop
+/// (`run_id`/`manifest`/`worktree`/`report`, which change every
+/// iteration and so stay their own arguments).
+pub(crate) struct PromotionEnv<'a> {
+    pub cwd: &'a Path,
+    pub project: &'a Project,
+    pub storage: &'a Storage,
+    pub adapters: &'a HashMap<String, Arc<dyn Adapter>>,
+    pub forge: Option<&'a dyn Forge>,
+    pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
+}
+
 /// Runs the whole promotion chain to its end: while the latest
 /// `execute_run` call returned `Promoted`, creates and starts the
 /// successor, then checks *its* terminal in turn. Bounded automatically
 /// — `modes:` is a finite, strictly-forward-only ladder (§10.1), so this
 /// can run at most `len(modes) - 1` times before landing on a mode with
 /// nowhere further to promote to.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_promotions(
-    cwd: &Path,
-    project: &Project,
-    storage: &Storage,
-    adapters: &HashMap<String, Arc<dyn Adapter>>,
-    forge: Option<&dyn Forge>,
+    env: &PromotionEnv<'_>,
     mut run_id: RunId,
     mut manifest: Manifest,
     mut worktree: PathBuf,
     mut report: RunReport,
-    cancel: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<(RunId, Manifest, PathBuf, RunReport), String> {
     while let RunTerminal::Promoted { suggested_mode } = &report.terminal {
         let suggested_mode = suggested_mode.clone();
@@ -44,15 +52,15 @@ pub(crate) async fn drive_promotions(
         // `kind: workflow` children that promote); this loop keeps only
         // what's the CLI's — the console surface and the system clock.
         let successor = yunta_engine::create_promotion_successor(
-            cwd,
+            env.cwd,
             &run_id,
             &manifest,
             &worktree,
-            &project.runs_root.join(run_id.as_str()),
+            &env.project.runs_root.join(run_id.as_str()),
             &suggested_mode,
-            &project.runs_root,
-            &project.worktrees_root,
-            storage,
+            &env.project.runs_root,
+            &env.project.worktrees_root,
+            env.storage,
             &SystemClock,
         )
         .await
@@ -62,19 +70,19 @@ pub(crate) async fn drive_promotions(
             successor.run_id
         );
 
-        let successor_report = yunta_engine::execute_run(
-            &successor.run_id,
-            &successor.manifest,
-            &successor.run_dir,
-            &successor.worktree,
-            adapters,
-            storage,
-            &SystemClock,
-            DEFAULT_MAX_RETRIES,
-            &crate::human_interaction::ConsoleInteraction,
-            forge,
-            cancel,
-        )
+        let successor_report = yunta_engine::execute_run(yunta_engine::RunEnv {
+            run_id: &successor.run_id,
+            manifest: &successor.manifest,
+            run_dir: &successor.run_dir,
+            worktree: &successor.worktree,
+            adapters: env.adapters,
+            storage: env.storage,
+            clock: &SystemClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: &crate::human_interaction::ConsoleInteraction,
+            forge: env.forge,
+            cancel: env.cancel,
+        })
         .await
         .map_err(|e| e.to_string())?;
 
@@ -93,7 +101,7 @@ mod tests {
     use yunta_core::events::{EventPayload, GateResolvedPayload, GateWaitingPayload};
     use yunta_core::{ConfigLayer, RunId, SystemClock, Workflow};
     use yunta_engine::{
-        build_manifest, create_run, execute_run, HumanInteraction, DEFAULT_MAX_RETRIES,
+        build_manifest, create_run, execute_run, HumanInteraction, RunEnv, DEFAULT_MAX_RETRIES,
     };
     use yunta_storage::Storage;
 
@@ -200,19 +208,19 @@ nodes:
         // `copy_inherited_artifacts` is supposed to carry forward.
         std::fs::write(run_dir.join("artifacts").join("plan.yaml"), "tasks: []\n").unwrap();
 
-        let report = execute_run(
-            &run_id,
-            &manifest,
-            &run_dir,
-            &worktree,
-            &adapters,
-            &storage,
-            &SystemClock,
-            DEFAULT_MAX_RETRIES,
-            &AlwaysPromote,
-            None,
-            None,
-        )
+        let report = execute_run(RunEnv {
+            run_id: &run_id,
+            manifest: &manifest,
+            run_dir: &run_dir,
+            worktree: &worktree,
+            adapters: &adapters,
+            storage: &storage,
+            clock: &SystemClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: &AlwaysPromote,
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
         assert!(matches!(
@@ -221,16 +229,18 @@ nodes:
         ));
 
         let (final_id, _final_manifest, _final_worktree, final_report) = drive_promotions(
-            &cwd,
-            &project,
-            &storage,
-            &adapters,
-            None,
+            &PromotionEnv {
+                cwd: &cwd,
+                project: &project,
+                storage: &storage,
+                adapters: &adapters,
+                forge: None,
+                cancel: None,
+            },
             run_id.clone(),
             manifest,
             worktree,
             report,
-            None,
         )
         .await
         .unwrap();

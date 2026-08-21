@@ -163,12 +163,8 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
         _ => None,
     };
 
-    let mut open: HashMap<NodeId, OpenAttempt> = HashMap::new();
+    let mut acc = AttemptAccumulators::default();
     let mut first_started: HashMap<NodeId, DateTime<Utc>> = HashMap::new();
-    let mut last_terminal: HashMap<NodeId, DateTime<Utc>> = HashMap::new();
-    let mut node_tokens: HashMap<NodeId, TokenUsage> = HashMap::new();
-    let mut rework_tokens = TokenUsage::default();
-    let mut node_active: HashMap<NodeId, Duration> = HashMap::new();
     let mut node_max_attempt: HashMap<NodeId, u32> = HashMap::new();
     let mut node_role: HashMap<NodeId, String> = HashMap::new();
 
@@ -185,7 +181,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
                     .entry(node_id.clone())
                     .and_modify(|a| *a = (*a).max(p.attempt))
                     .or_insert(p.attempt);
-                open.insert(
+                acc.open.insert(
                     node_id.clone(),
                     OpenAttempt {
                         attempt: p.attempt,
@@ -194,28 +190,10 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
                 );
             }
             EventPayload::NodeFinished(p) => {
-                close_attempt(
-                    &event.node_id,
-                    event.timestamp,
-                    p.tokens_used,
-                    &mut open,
-                    &mut node_tokens,
-                    &mut rework_tokens,
-                    &mut node_active,
-                    &mut last_terminal,
-                );
+                close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
             }
             EventPayload::NodeFailed(p) => {
-                close_attempt(
-                    &event.node_id,
-                    event.timestamp,
-                    p.tokens_used,
-                    &mut open,
-                    &mut node_tokens,
-                    &mut rework_tokens,
-                    &mut node_active,
-                    &mut last_terminal,
-                );
+                close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
             }
             EventPayload::RunnerResolved(p) => {
                 if let Some(node_id) = &event.node_id {
@@ -236,7 +214,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
         } else {
             depends_on[&node.id]
                 .iter()
-                .filter_map(|dep| last_terminal.get(dep))
+                .filter_map(|dep| acc.last_terminal.get(dep))
                 .max()
                 .copied()
                 .or(run_start)
@@ -250,15 +228,19 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
         nodes.push(NodeStat {
             node_id: node.id.clone(),
             role: node_role.get(&node.id).cloned(),
-            tokens: node_tokens.get(&node.id).copied().unwrap_or_default(),
+            tokens: acc.node_tokens.get(&node.id).copied().unwrap_or_default(),
             attempts,
-            active: node_active.get(&node.id).copied().unwrap_or(Duration::ZERO),
+            active: acc
+                .node_active
+                .get(&node.id)
+                .copied()
+                .unwrap_or(Duration::ZERO),
             blocked,
         });
     }
 
     let total = state.total_tokens.input + state.total_tokens.output;
-    let rework_total = rework_tokens.input + rework_tokens.output;
+    let rework_total = acc.rework_tokens.input + acc.rework_tokens.output;
     let rework_rate = if total == 0 {
         None
     } else {
@@ -285,28 +267,35 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The per-node accumulators [`close_attempt`] folds a `NodeFinished`/
+/// `NodeFailed` event into — grouped because every one of them is only
+/// ever touched together, one event at a time, while walking the log.
+#[derive(Default)]
+struct AttemptAccumulators {
+    open: HashMap<NodeId, OpenAttempt>,
+    node_tokens: HashMap<NodeId, TokenUsage>,
+    rework_tokens: TokenUsage,
+    node_active: HashMap<NodeId, Duration>,
+    last_terminal: HashMap<NodeId, DateTime<Utc>>,
+}
+
 fn close_attempt(
     node_id: &Option<NodeId>,
     at: DateTime<Utc>,
     tokens: TokenUsage,
-    open: &mut HashMap<NodeId, OpenAttempt>,
-    node_tokens: &mut HashMap<NodeId, TokenUsage>,
-    rework_tokens: &mut TokenUsage,
-    node_active: &mut HashMap<NodeId, Duration>,
-    last_terminal: &mut HashMap<NodeId, DateTime<Utc>>,
+    acc: &mut AttemptAccumulators,
 ) {
     let Some(node_id) = node_id else { return };
-    last_terminal.insert(node_id.clone(), at);
-    let entry = node_tokens.entry(node_id.clone()).or_default();
+    acc.last_terminal.insert(node_id.clone(), at);
+    let entry = acc.node_tokens.entry(node_id.clone()).or_default();
     *entry = sum_tokens(*entry, tokens);
-    let Some(opened) = open.remove(node_id) else {
+    let Some(opened) = acc.open.remove(node_id) else {
         return;
     };
     let duration = (at - opened.started_at).to_std().unwrap_or(Duration::ZERO);
-    *node_active.entry(node_id.clone()).or_default() += duration;
+    *acc.node_active.entry(node_id.clone()).or_default() += duration;
     if opened.attempt > 1 {
-        *rework_tokens = sum_tokens(*rework_tokens, tokens);
+        acc.rework_tokens = sum_tokens(acc.rework_tokens, tokens);
     }
 }
 

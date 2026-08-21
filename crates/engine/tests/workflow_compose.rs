@@ -15,7 +15,7 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{EventPayload, TerminalState};
 use yunta_core::{Clock, ConfigLayer, Manifest, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
@@ -101,7 +101,6 @@ impl Bench {
         git(&self.worktree, &["commit", "-q", "-m", "update catalog"]);
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn run(
         &self,
         run_id: &RunId,
@@ -153,19 +152,19 @@ impl Bench {
         let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), Arc::new(adapter));
         let run_dir = self.runs_root.join(run_id.as_str());
-        let report = execute_run(
+        let report = execute_run(RunEnv {
             run_id,
             manifest,
-            &run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
+            run_dir: &run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
-            None,
-            None,
-        )
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
         (report.terminal, report.state)

@@ -66,7 +66,7 @@ pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, mode_included_nodes,
     resolve_gate, session_token_budget, CreateRunParams, PromotionSuccessor, ResolveGateError,
-    RunError, RunReport, RunTerminal,
+    RunEnv, RunError, RunReport, RunTerminal,
 };
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};

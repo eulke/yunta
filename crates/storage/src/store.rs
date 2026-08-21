@@ -62,27 +62,30 @@ type StoredRow = (
 /// is ambiguous — computed over the bytes exactly as persisted, before
 /// any read-time normalization. An absent `node_id` hashes as the empty
 /// field; an empty node id is not constructible from any workflow.
-#[allow(clippy::too_many_arguments)]
-fn chain_hash(
-    prev_hash: &str,
-    run_id: &str,
+/// The structural fields hashed into one chain link, in the schema's own
+/// fixed order — see [`chain_hash`].
+struct ChainHashFields<'a> {
+    prev_hash: &'a str,
+    run_id: &'a str,
     seq: i64,
-    ts: &str,
-    node_id: Option<&str>,
-    kind: &str,
-    payload_json: &str,
+    ts: &'a str,
+    node_id: Option<&'a str>,
+    kind: &'a str,
+    payload_json: &'a str,
     schema_version: u32,
-) -> String {
+}
+
+fn chain_hash(fields: ChainHashFields) -> String {
     let mut input = Vec::new();
-    input.extend_from_slice(prev_hash.as_bytes());
+    input.extend_from_slice(fields.prev_hash.as_bytes());
     for field in [
-        run_id,
-        &seq.to_string(),
-        ts,
-        node_id.unwrap_or(""),
-        kind,
-        payload_json,
-        &schema_version.to_string(),
+        fields.run_id,
+        &fields.seq.to_string(),
+        fields.ts,
+        fields.node_id.unwrap_or(""),
+        fields.kind,
+        fields.payload_json,
+        &fields.schema_version.to_string(),
     ] {
         input.extend_from_slice(field.len().to_string().as_bytes());
         input.push(b':');
@@ -241,16 +244,16 @@ impl Storage {
         };
 
         let ts = event.timestamp.to_rfc3339();
-        let event_hash = chain_hash(
-            &prev_hash,
-            event.run_id.as_str(),
+        let event_hash = chain_hash(ChainHashFields {
+            prev_hash: &prev_hash,
+            run_id: event.run_id.as_str(),
             seq,
-            &ts,
-            event.node_id.as_ref().map(NodeId::as_str),
-            event.payload.kind_name(),
-            &payload_json,
-            event.payload.schema_version(),
-        );
+            ts: &ts,
+            node_id: event.node_id.as_ref().map(NodeId::as_str),
+            kind: event.payload.kind_name(),
+            payload_json: &payload_json,
+            schema_version: event.payload.schema_version(),
+        });
 
         tx.execute(
             "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
@@ -366,16 +369,16 @@ impl Storage {
                     genesis_hash(&manifest_hash)
                 }
             };
-            let recomputed = chain_hash(
-                &anchor,
-                run_id.as_str(),
-                *seq,
+            let recomputed = chain_hash(ChainHashFields {
+                prev_hash: &anchor,
+                run_id: run_id.as_str(),
+                seq: *seq,
                 ts,
-                node_id.as_deref(),
+                node_id: node_id.as_deref(),
                 kind,
                 payload_json,
-                *schema_version,
-            );
+                schema_version: *schema_version,
+            });
             if &recomputed != stored_hash {
                 return Ok(ChainVerification::Broken {
                     seq: *seq as u64,

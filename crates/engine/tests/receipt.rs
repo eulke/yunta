@@ -20,7 +20,7 @@ use yunta_core::{Clock, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
     render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry,
-    EventChainStatus, Receipt, ReceiptError, RunnerUsage, ScopeSummary,
+    EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
 };
 use yunta_storage::Storage;
 
@@ -349,19 +349,19 @@ impl Bench {
         let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), Arc::new(adapter));
 
-        execute_run(
-            &self.run_id,
-            &manifest,
-            &run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            yunta_engine::DEFAULT_MAX_RETRIES,
-            &yunta_engine::NoInteraction,
-            None,
-            None,
-        )
+        execute_run(RunEnv {
+            run_id: &self.run_id,
+            manifest: &manifest,
+            run_dir: &run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
+            human_interaction: &yunta_engine::NoInteraction,
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
 
@@ -451,19 +451,19 @@ nodes:
     )
     .unwrap();
     let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        yunta_engine::DEFAULT_MAX_RETRIES,
-        &yunta_engine::NoInteraction,
-        None,
-        None,
-    )
+    execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
+        human_interaction: &yunta_engine::NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 

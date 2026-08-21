@@ -23,7 +23,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{RunId, SystemClock, Workflow};
-use yunta_engine::{NodeState, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
 use super::status::task_status_label;
@@ -217,19 +217,19 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     .map_err(|e| e.to_string())?;
     // A test case's every session comes from a scripted fixture — a
     // gate here has no human to ask, same as it has no LLM to call.
-    let report = yunta_engine::execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &SystemClock,
-        DEFAULT_MAX_RETRIES,
-        &yunta_engine::NoInteraction,
-        None,
-        None,
-    )
+    let report = yunta_engine::execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &SystemClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &yunta_engine::NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .map_err(|e| e.to_string())?;
 

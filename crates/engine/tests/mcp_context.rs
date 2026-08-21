@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunTerminal,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
     DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
@@ -168,19 +168,19 @@ async fn run_with_config(
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
 
-    let report = execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 

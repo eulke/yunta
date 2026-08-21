@@ -133,7 +133,6 @@ fn resolve_mounts(
     Ok(resolved)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -533,17 +532,19 @@ async fn drive_child(
             let future: std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<super::RunReport, RunError>> + '_>,
             > = Box::pin(super::execute_run_at_depth(
-                &current_id,
-                &current_manifest,
-                &current_run_dir,
-                &current_tree,
-                ctx.adapters,
-                ctx.storage,
-                ctx.clock,
-                ctx.max_task_retries,
-                ctx.human_interaction,
-                ctx.forge,
-                Some(cancel),
+                super::RunEnv {
+                    run_id: &current_id,
+                    manifest: &current_manifest,
+                    run_dir: &current_run_dir,
+                    worktree: &current_tree,
+                    adapters: ctx.adapters,
+                    storage: ctx.storage,
+                    clock: ctx.clock,
+                    max_task_retries: ctx.max_task_retries,
+                    human_interaction: ctx.human_interaction,
+                    forge: ctx.forge,
+                    cancel: Some(cancel),
+                },
                 ctx.depth + 1,
             ));
             future.await?

@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunError,
-    RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
+    RunError, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -124,19 +124,19 @@ impl Bench {
         let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), Arc::new(adapter));
 
-        let report = execute_run(
-            &run_id,
-            &manifest,
-            &run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
-            &NoInteraction,
-            None,
-            None,
-        )
+        let report = execute_run(RunEnv {
+            run_id: &run_id,
+            manifest: &manifest,
+            run_dir: &run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: &NoInteraction,
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
         Ok((report.terminal, report.state))

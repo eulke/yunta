@@ -13,7 +13,7 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, check, create_run, execute_run, CreateRunParams, HumanInteraction,
-    NoInteraction, NodeState, RunTerminal, DEFAULT_MAX_RETRIES,
+    NoInteraction, NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -170,19 +170,19 @@ sessions:
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
 
-    let report = execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &ApproveEverything,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &ApproveEverything,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -250,19 +250,19 @@ sessions:
     // and headless CI use: a gate no one can answer must pause, never
     // guess, and everything behind it (here: the entire publish step)
     // must never run.
-    let report = execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 

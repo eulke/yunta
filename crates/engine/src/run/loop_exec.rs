@@ -945,7 +945,6 @@ async fn head_commit(repo: &Path) -> Result<String, RunError> {
 /// here — this recorte has no `kind: gate` (T7.2) for a person to decide
 /// through, so `ask` mode only ever reaches `Escalate`, never a rendered
 /// verdict.
-#[allow(clippy::too_many_arguments)]
 fn emit_scope_expansion_events(
     ctx: &RunCtx<'_>,
     node: &Node,

@@ -433,24 +433,41 @@ pub fn create_run(
     Ok(run_dir)
 }
 
+/// Everything [`execute_run`] needs from its caller, grouped: the run's
+/// own identity/manifest/paths, the environment it executes against
+/// (adapters, storage, clock), and the cross-cutting surfaces
+/// (human_interaction, forge, cancel) every deep execution path can
+/// reach through [`RunCtx`] once this is unpacked into one.
+pub struct RunEnv<'a> {
+    pub run_id: &'a RunId,
+    pub manifest: &'a Manifest,
+    pub run_dir: &'a Path,
+    pub worktree: &'a Path,
+    pub adapters: &'a HashMap<String, Arc<dyn Adapter>>,
+    pub storage: &'a Storage,
+    pub clock: &'a dyn Clock,
+    pub max_task_retries: u32,
+    pub human_interaction: &'a dyn HumanInteraction,
+    pub forge: Option<&'a dyn Forge>,
+    pub cancel: Option<&'a CancellationToken>,
+}
+
 /// Drives a run until it finishes or pauses. Serving `yunta run` and
 /// `yunta resume` with the same function is the point: the log decides
 /// what remains, never in-process state (I2).
-#[allow(clippy::too_many_arguments)]
-pub async fn execute_run(
-    run_id: &RunId,
-    manifest: &Manifest,
-    run_dir: &Path,
-    worktree: &Path,
-    adapters: &HashMap<String, Arc<dyn Adapter>>,
-    storage: &Storage,
-    clock: &dyn Clock,
-    max_task_retries: u32,
-    human_interaction: &dyn HumanInteraction,
-    forge: Option<&dyn Forge>,
-    cancel: Option<&CancellationToken>,
+pub async fn execute_run(env: RunEnv<'_>) -> Result<RunReport, RunError> {
+    execute_run_at_depth(env, 0).await
+}
+
+/// [`execute_run`] with an explicit composition depth (T9.3):
+/// `workflow_exec` re-enters here for each child run, one level deeper —
+/// the recursion the Contrato's "resume del padre retoma hijos
+/// huérfanos recursivamente" (§12) is made of.
+pub(crate) async fn execute_run_at_depth(
+    env: RunEnv<'_>,
+    depth: u32,
 ) -> Result<RunReport, RunError> {
-    execute_run_at_depth(
+    let RunEnv {
         run_id,
         manifest,
         run_dir,
@@ -462,30 +479,7 @@ pub async fn execute_run(
         human_interaction,
         forge,
         cancel,
-        0,
-    )
-    .await
-}
-
-/// [`execute_run`] with an explicit composition depth (T9.3):
-/// `workflow_exec` re-enters here for each child run, one level deeper —
-/// the recursion the Contrato's "resume del padre retoma hijos
-/// huérfanos recursivamente" (§12) is made of.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_run_at_depth(
-    run_id: &RunId,
-    manifest: &Manifest,
-    run_dir: &Path,
-    worktree: &Path,
-    adapters: &HashMap<String, Arc<dyn Adapter>>,
-    storage: &Storage,
-    clock: &dyn Clock,
-    max_task_retries: u32,
-    human_interaction: &dyn HumanInteraction,
-    forge: Option<&dyn Forge>,
-    cancel: Option<&CancellationToken>,
-    depth: u32,
-) -> Result<RunReport, RunError> {
+    } = env;
     // DI-08: the root of every per-node token this invocation hands out.
     // `None` (tests, callers with no signal source) gets a token nothing
     // ever fires — the pre-DI-08 behavior exactly.

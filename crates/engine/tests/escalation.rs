@@ -12,7 +12,7 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, current_escalation, execute_run, CreateRunParams, NoInteraction,
-    RunTerminal, DEFAULT_MAX_RETRIES,
+    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -87,19 +87,19 @@ async fn paused_manifest_and_events(
     let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
 
-    let report = execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert!(
@@ -273,19 +273,19 @@ impl GateBench {
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
         let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
-        let report = execute_run(
-            &self.run_id,
-            &self.manifest,
-            &self.run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
-            interaction,
-            None,
-            None,
-        )
+        let report = execute_run(RunEnv {
+            run_id: &self.run_id,
+            manifest: &self.manifest,
+            run_dir: &self.run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: interaction,
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
         (report.terminal, report.state)
@@ -409,19 +409,19 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
         let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
         let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
-        execute_run(
+        execute_run(RunEnv {
             run_id,
             manifest,
             run_dir,
             worktree,
-            &adapters,
+            adapters: &adapters,
             storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
-            &NoInteraction,
-            None,
-            None,
-        )
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: &NoInteraction,
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap()
     }

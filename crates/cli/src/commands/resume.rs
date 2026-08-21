@@ -10,7 +10,7 @@
 use std::process::ExitCode;
 
 use yunta_core::{Isolation, Manifest, RunId, SystemClock};
-use yunta_engine::{RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
 use crate::load_yaml;
@@ -80,34 +80,36 @@ pub async fn resume(run_id: &str) -> ExitCode {
     // never the project's current one.
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();
-    let outcome = yunta_engine::execute_run(
-        &run_id,
-        &manifest,
-        &run_dir,
-        &worktree,
-        &adapters,
-        &storage,
-        &SystemClock,
-        DEFAULT_MAX_RETRIES,
-        &crate::human_interaction::ConsoleInteraction,
-        forge.as_deref(),
-        Some(&root_cancel),
-    )
+    let outcome = yunta_engine::execute_run(RunEnv {
+        run_id: &run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &worktree,
+        adapters: &adapters,
+        storage: &storage,
+        clock: &SystemClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &crate::human_interaction::ConsoleInteraction,
+        forge: forge.as_deref(),
+        cancel: Some(&root_cancel),
+    })
     .await;
 
     match outcome {
         Ok(report) => {
             let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
-                &cwd,
-                &project,
-                &storage,
-                &adapters,
-                forge.as_deref(),
+                &super::promote::PromotionEnv {
+                    cwd: &cwd,
+                    project: &project,
+                    storage: &storage,
+                    adapters: &adapters,
+                    forge: forge.as_deref(),
+                    cancel: Some(&root_cancel),
+                },
                 run_id,
                 manifest,
                 worktree,
                 report,
-                Some(&root_cancel),
             )
             .await
             {

@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
@@ -156,19 +156,19 @@ impl Bench {
         let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".to_string(), Arc::new(adapter));
 
-        let report = execute_run(
-            &self.run_id,
-            &manifest,
-            &run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
+        let report = execute_run(RunEnv {
+            run_id: &self.run_id,
+            manifest: &manifest,
+            run_dir: &run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
-            None,
-            None,
-        )
+            forge: None,
+            cancel: None,
+        })
         .await
         .unwrap();
         (report.terminal, report.state)
@@ -490,19 +490,19 @@ nodes:
         &HashMap::new(),
     )
     .unwrap();
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &bench.run_dir(),
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &bench.run_dir(),
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
@@ -816,19 +816,19 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
     let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
-    let first_report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &first_adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let first_report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &first_adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     match &first_report.terminal {
@@ -840,19 +840,19 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
     let mut resume_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     resume_adapters.insert("mock".to_string(), Arc::new(empty_adapter));
-    let resumed_report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &resume_adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let resumed_report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &resume_adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -1005,19 +1005,19 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
     let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
-    let first = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &first_adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let first = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &first_adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert!(matches!(first.terminal, RunTerminal::Paused { .. }));
@@ -1039,19 +1039,19 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "production")],
     };
-    let resumed = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &resume_adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &interaction,
-        None,
-        None,
-    )
+    let resumed = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &resume_adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &interaction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -1154,19 +1154,19 @@ nodes:
     )
     .unwrap();
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
@@ -1216,19 +1216,19 @@ nodes:
     )
     .unwrap();
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
@@ -1292,19 +1292,19 @@ nodes:
 
     std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -1377,19 +1377,19 @@ nodes:
         })
         .unwrap();
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -1637,19 +1637,19 @@ nodes:
     std::fs::write(bench.worktree.join("docs.txt"), "original").unwrap();
     std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &HashMap::new(),
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -2794,19 +2794,19 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
 
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
 
@@ -4589,19 +4589,19 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         "mock".to_string(),
         Arc::new(MockAdapter::from_yaml("sessions: []").unwrap()) as Arc<dyn Adapter>,
     )]);
-    let first = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let first = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     match &first.terminal {
@@ -4615,19 +4615,19 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
 
     let interaction = SequencedInteraction::choosing(&["aprobar"]);
-    let resumed = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &interaction,
-        None,
-        None,
-    )
+    let resumed = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &interaction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(resumed.terminal, RunTerminal::Finished);
@@ -4821,19 +4821,19 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
 
-    let first = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let first = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     match &first.terminal {
@@ -4842,19 +4842,19 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     }
 
     let interaction = SequencedInteraction::choosing(&["continue"]);
-    let resumed = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &interaction,
-        None,
-        None,
-    )
+    let resumed = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &interaction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(resumed.terminal, RunTerminal::Finished);
@@ -5311,19 +5311,19 @@ async fn run_with_recording_mock(
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), adapter.clone());
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     (report.terminal, report.state, adapter)
@@ -5560,19 +5560,19 @@ sessions:
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
@@ -5686,19 +5686,19 @@ sessions:
     let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), Arc::new(adapter));
-    let report = execute_run(
-        &second_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &second_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     assert_eq!(
@@ -6002,19 +6002,19 @@ nodes:
         .unwrap();
 
     let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    let result = execute_run(
-        &bench.run_id,
-        &manifest,
-        &run_dir,
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let result = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await;
 
     assert!(
@@ -6101,19 +6101,19 @@ async fn resume_orphan_with_mock(
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
     let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".to_string(), adapter.clone());
-    let report = execute_run(
-        &bench.run_id,
-        &manifest,
-        &bench.runs_root.join(bench.run_id.as_str()),
-        &bench.worktree,
-        &adapters,
-        &bench.storage,
-        &FixedClock,
-        DEFAULT_MAX_RETRIES,
-        &NoInteraction,
-        None,
-        None,
-    )
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &bench.runs_root.join(bench.run_id.as_str()),
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage,
+        clock: &FixedClock,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+    })
     .await
     .unwrap();
     let _ = run_dir;

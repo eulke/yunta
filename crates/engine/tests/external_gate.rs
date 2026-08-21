@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockForge, MockForgeState};
 use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
@@ -147,19 +147,19 @@ impl Bench {
         forge: Option<&dyn yunta_adapters::Forge>,
     ) -> (RunTerminal, yunta_engine::RunState) {
         let adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        let report = execute_run(
-            &self.run_id,
-            &self.manifest,
-            &self.run_dir,
-            &self.worktree,
-            &adapters,
-            &self.storage,
-            &FixedClock,
-            DEFAULT_MAX_RETRIES,
-            &NoInteraction,
+        let report = execute_run(RunEnv {
+            run_id: &self.run_id,
+            manifest: &self.manifest,
+            run_dir: &self.run_dir,
+            worktree: &self.worktree,
+            adapters: &adapters,
+            storage: &self.storage,
+            clock: &FixedClock,
+            max_task_retries: DEFAULT_MAX_RETRIES,
+            human_interaction: &NoInteraction,
             forge,
-            None,
-        )
+            cancel: None,
+        })
         .await
         .unwrap();
         (report.terminal, report.state)
