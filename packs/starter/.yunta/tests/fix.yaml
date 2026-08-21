@@ -1,0 +1,7 @@
+workflow: fix
+fixture: fixtures/fix.yaml
+expect:
+  final_state: finished
+  nodes:
+    fix: finished
+    verify: finished

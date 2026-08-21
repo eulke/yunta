@@ -220,6 +220,12 @@ permissions ceiling, e.g. `reviewer` at `read-only`) and its own permissions cei
 installing team resolves those roles against its own `runners:`, so the same pack
 runs unedited on a team that's all Claude Code and one that's all Codex.
 
+This repo ships two example packs at [`packs/`](../packs/) — `yunta/starter`
+(two minimal workflows: a one-node `fix` and a fan-out `review`) and
+`yunta/fragua` (the full reference pipeline: grill, a verified task ledger,
+lint→fix, a baseline check, multi-runner review, PR). Both install and remove
+like any third-party pack; the engine treats them no differently (D57).
+
 ```bash
 yunta pack add github.com/acme/review-pack@v1.2.0
 yunta pack list

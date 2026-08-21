@@ -138,6 +138,12 @@ other workflows) and richer context sourcing — all covered in the
 are for sharing workflows and knowledge across projects, not a prerequisite for
 writing one.
 
+Two example packs ship in this repo's own [`packs/`](packs/) directory as
+installable, removable third-party packs — the engine grants them no special
+status: [`yunta/starter`](packs/starter) (two minimal workflows that teach the
+shape) and [`yunta/fragua`](packs/fragua) (the full reference pipeline — grill,
+a verified task ledger, lint→fix, a baseline check, multi-runner review, PR).
+
 ## Commands
 
 | Command | Does |

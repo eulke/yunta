@@ -1,0 +1,9 @@
+sessions:
+  - match_prompt_contains: "findings-reviewer.yaml"
+    effects:
+      - { path: "{{run.dir}}/artifacts/findings-reviewer.yaml", content: "findings: []\n" }
+    outcome: { type: completed, summary: "reviewed" }
+  - match_prompt_contains: "findings-reviewer-alt.yaml"
+    effects:
+      - { path: "{{run.dir}}/artifacts/findings-reviewer-alt.yaml", content: "findings: []\n" }
+    outcome: { type: completed, summary: "reviewed-alt" }

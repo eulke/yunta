@@ -1,0 +1,126 @@
+# The full reference pipeline (yunta/fragua, T10.2) — a runnable copy of
+# the schema's own canonical example ("Config y workflows de referencia",
+# Contrato v0.5; also crates/core/tests/fixtures/build-feature.yaml,
+# T1.1's parse fixture). Two deliberate trims from that reference,
+# documented rather than silent (docs/m0-status.md's own T10.2 entry
+# has the rationale): the `mcp:` context source is dropped (it needs a
+# live MCP server, which a pack's own mock self-test has no reason to
+# stand up) and `node_defaults.hooks` is dropped (an ecosystem-specific
+# convenience, not part of what T10.2 asks this pack to demonstrate).
+name: build-feature
+description: Full feature cycle — grill, verified ledger, lint/fix, baseline, multi-runner review, PR
+yunta_schema: ">=1 <2"
+inputs:
+  idea:
+    type: string
+    required: true
+    description: "What to build — becomes the brief"
+
+modes:
+  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
+  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  full:     { include: all }
+
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    interactive: true
+    prompt: |
+      Identify the ambiguities in "{{inputs.idea}}" and write the questions
+      you need as an artifact; don't converse. Once answered, write the brief.
+    artifacts:
+      produces:
+        - { name: questions.yaml, kind: questions }
+        - brief.md
+
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, name: brief.md }
+      - knowledge: {}
+      - files: ["docs/architecture.md"]
+      - command: "git log --oneline -20"
+    prompt: { file: prompts/plan.md }
+    artifacts:
+      produces: [{ name: plan.yaml, kind: task-ledger }]
+
+  - id: approve-plan
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Plan registered. Approve?"
+    options: [approve, adjust, abort]
+    on: { adjust: plan }
+
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [approve-plan]
+    fresh_context: true
+    until: all_tasks_complete
+    invariant: true
+    concurrency: 2
+    scope_expansion:
+      mode: ask
+      within: ["src/**"]
+      max_per_run: 3
+    prompt: |
+      Read your task from the ledger. Implement it inside its own scope.
+
+  - id: lint
+    kind: bash
+    invariant: true
+    depends_on: [implement]
+    run: "cargo clippy -- -D warnings"
+    on_failure: { goto: fix-lint, max_reroutes: 2 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    context: [{ node-output: { node: lint } }]
+    prompt: "Fix exclusively the errors in the report."
+    scope: ["src/**"]
+
+  - id: tests
+    kind: check
+    builtin: baseline_compare
+    invariant: true
+    depends_on: [lint]
+
+  - id: review
+    kind: prompt
+    depends_on: [tests]
+    runners: [reviewer, reviewer-alt]
+    permissions: read-only
+    prompt: "Audit the changes; findings to {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    artifacts:
+      produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review]
+    context:
+      - run-events: { filter: findings }
+    prompt: "Fix blocking findings; document discarded ones with a reason."
+
+  - id: ship
+    kind: gate
+    depends_on: [fix-findings]
+    assignee: lead
+    message: "Create the PR?"
+
+  - id: pr
+    kind: bash
+    depends_on: [ship]
+    run: |
+      git push -u origin {{run.branch}}
+      gh pr create --fill --base {{project.base_branch}}
+
+on_finish:
+  - cleanup: worktree
+  - distill: [plan.yaml]

@@ -1,0 +1,27 @@
+name: fragua
+publisher: yunta
+version: 0.1.0
+description: >-
+  The full reference pipeline: an ambiguity-resolving grill, a plan
+  registered as a verified task ledger, implementation checked task by
+  task, a lint→fix cycle, a baseline check, a two-runner review, a PR —
+  open modes throughout, and the plan distilled to knowledge on finish.
+  Installable and removable like any third-party pack (D57); the engine
+  never treats it specially.
+license: Apache-2.0
+declares:
+  permissions: edit
+  network: false
+  executors: []
+requires:
+  roles:
+    - name: planner
+    - name: executor
+    - name: mechanical
+    - name: reviewer
+    - name: reviewer-alt
+contents:
+  workflows:
+    - .yunta/workflows/build-feature.yaml
+  docs:
+    - README.md

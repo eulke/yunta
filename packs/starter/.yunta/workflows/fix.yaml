@@ -1,0 +1,29 @@
+name: fix
+description: >-
+  The smallest verified shape there is: one prompt node with its own
+  scope, checked by a bash node before the fix counts as done. Nothing
+  here is specific to this pack — copy the pattern into your own
+  workflow and drop the pack (yunta/starter, T10.2).
+inputs:
+  issue:
+    type: string
+    default: "describe what to fix here"
+    description: What to fix, in your own words
+nodes:
+  - id: fix
+    kind: prompt
+    runner: executor
+    scope: ["src/**"]
+    prompt: |
+      Fix the following issue. Edit only files under src/ — in a real
+      workflow, swap the marker file below for your own test suite:
+
+      {{inputs.issue}}
+
+      Once the fix is in place, create an empty file at src/.fix-applied.
+
+  - id: verify
+    kind: bash
+    invariant: true
+    depends_on: [fix]
+    run: "test -f src/.fix-applied"

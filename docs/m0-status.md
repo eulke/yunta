@@ -3339,7 +3339,7 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     con menos de 3 runs) está completo. Gatillo: el mismo que el ítem 8 —
     la tarea que introduzca `limits:` en la config.
 
-## M10 — Empaquetado y docs (completo: T10.1, T10.3, T10.4; T10.2/T10.5 diferidas a post-M11)
+## M10 — Empaquetado y docs (completo: T10.1, T10.2, T10.3, T10.4; T10.5 pendiente)
 
 - [x] **T10.1 — README + docs de usuario.** `README.md` (quickstart que
       escribe un workflow de tres nodos a mano antes de mencionar packs,
@@ -3375,9 +3375,88 @@ Las tres preguntas que estaban abiertas se cerraron con la misma directiva:
     lo nombra en el suyo (la señal real es "nodo aislado, fuera del
     camino principal" — no "sin `depends_on`", que también describe la
     raíz legítima del DAG). Detalle completo en `deuda-implementacion.md`.
-- [ ] **T10.2 — Packs de fábrica** (`yunta/starter`, `yunta/fragua`) —
-      pendiente; depende de mecanismo de pack (M11) para "instalable, no
-      embebido" en sentido estricto — a scopear.
+- [x] **T10.2 — Packs de fábrica** (`yunta/starter`, `yunta/fragua`,
+      RFC-0001 §3, D57). Diferida hasta que M11 (packs) cerrara, porque
+      "instalable, no embebido" en sentido estricto necesitaba el
+      mecanismo real de `pack add`/`check`/`audit` para significar algo
+      — sin M11 esto hubiera sido dos YAML sueltos, no packs de verdad.
+  - **Ubicación deliberada, no definitiva**: viven en `packs/starter/` y
+    `packs/fragua/` en la raíz de este mismo repo — fuera de `crates/`
+    (nunca embebidos en el binario, D57 lo exige), pero todavía no en
+    repos separados propios. Eso último es literalmente el criterio de
+    **T12.8** ("los packs de fábrica en repos separados del engine"),
+    una tarea de M12 que no bloquea M10; mover el contenido cuando
+    llegue esa tarea no cambia una línea de YAML, solo dónde vive.
+  - **`yunta/starter`** — dos workflows mínimos, cada uno el fixture de
+    un patrón, no un producto: `fix` (`prompt` con `scope:` propio +
+    `bash` que verifica antes de dar el trabajo por terminado — el
+    mismo esqueleto que `yunta new --shape one-node` ya escribe, D58) y
+    `review` (`runners: [reviewer, reviewer-alt]`, T9.4 — la misma
+    auditoría corriendo dos veces, sin que una lectura contamine la
+    otra). El comando de `verify` usa un archivo marcador
+    (`src/.fix-applied`) en vez de `cargo test` — a propósito, para que
+    el propio pack corra en cualquier sandbox sin nada más instalado
+    que Yunta; el README del pack aclara que en un repo real conviene
+    cambiarlo por la suite propia.
+  - **`yunta/fragua`** — copia ejecutable literal del workflow canónico
+    de referencia (`docs/referencia-schema.md`'s "build-feature.yaml",
+    también fixture de parseo desde T1.1 en
+    `crates/core/tests/fixtures/build-feature.yaml`) — grill → plan con
+    ledger verificado → `implement` (loop) → lint→fix-lint → `tests`
+    (`baseline_compare`) → review multi-runner → fix-findings → ship →
+    pr, con `modos: {quick, standard, full}` (D44) y `on_finish.distill`
+    al conocimiento (D56). **Es la primera vez que ese workflow de
+    referencia se ejecuta de verdad** — hasta ahora solo se había
+    parseado o pasado por `check`. Dos recortes deliberados y
+    documentados, no silenciosos, frente al texto canónico: se quita la
+    fuente de contexto `mcp:` de `plan` (necesita un server MCP real
+    corriendo, infraestructura que el propio self-test del pack no
+    tiene motivo para levantar) y se quita `node_defaults.hooks`
+    (`cargo fmt` tras cada nodo — conveniencia de un ecosistema
+    específico, no parte de lo que T10.2 pide demostrar). Todo lo
+    demás — incluidos los dos gates internos, el fan-out y el builtin
+    de baseline — se conserva íntegro.
+  - **"Recibo adjunto al PR" resuelto vía ADR, no inventado**: D54
+    dice explícitamente "certificado de cierre adjuntable al PR...
+    como check requerido del PR — decisión del equipo, no algo que
+    Yunta imponga." Además, `yunta receipt` se niega estructuralmente
+    a correr contra un run no terminado (`ReceiptError::NotFinished`,
+    T10.4) — y ningún nodo *dentro* del propio run puede invocarlo,
+    porque el run no puede estar "terminado" mientras uno de sus
+    propios nodos sigue corriendo. Por eso el nodo `pr` del pack no
+    intenta adjuntar nada él mismo; el README de `yunta/fragua`
+    documenta el patrón recomendado (paso posterior, en la propia CI
+    del equipo) en vez de fingir un mecanismo que la arquitectura no
+    permite.
+  - ✓ **Criterios cubiertos**: `crates/engine/tests/factory_packs.rs`
+    — el criterio literal "corren end-to-end con mock" para
+    `yunta/fragua`, probado contra el motor directamente (`build_manifest`
+    + `create_run` + `execute_run`, `mode: "quick"`, con `ApproveEverything`
+    para el gate `ship`) porque el formato de `.yunta/tests/` (T7.9,
+    recorte M-0) todavía no tiene campo `mode:` — cualquier caso ahí
+    corre el grafo entero sin filtrar y quedaría pausado en
+    `approve-plan`, un resultado real pero parcial. El test monta un
+    crate Rust mínimo de verdad (para que `cargo clippy -- -D warnings`
+    y `cargo test`/`baseline_compare` corran genuinamente, no
+    simulados), un remoto git bare local + un stub de `gh` en PATH
+    (para que `git push`/`gh pr create` del nodo `pr` corran de verdad
+    también) y confirma `Finished`, cada nodo esperado terminado, y que
+    `fix-lint` — target de re-ruta sin `depends_on` propio, DI-29 —
+    nunca corrió porque `lint` pasó a la primera. `yunta/starter` se
+    self-testea con `yunta test` normal (mode-less, sin gates que lo
+    bloqueen): `crates/cli/tests/factory_packs_cmd.rs` (3 tests E2E
+    contra el binario real, instalando ambos packs vía `pack add` real
+    desde una copia git de `packs/`) — `yunta/starter` instala,
+    self-testea (2/2 vía `pack audit`/`add`), y cada workflow pasa
+    `check`; `yunta/fragua` instala y pasa `check` (validación de
+    coherencia de los tres modos en un solo paso, T1.3) — su
+    `.yunta/tests/` está deliberadamente vacío por la razón de arriba,
+    reportado honestamente como "tests: none shipped"; remover
+    `yunta/starter` no afecta un workflow local del propio proyecto.
+    `crates/cli/tests/factory_packs_structural.rs` (1 test) — D57's
+    "borrable sin afectar capacidades del engine" verificado por texto:
+    ningún archivo bajo `crates/*/src` menciona `yunta/starter` ni
+    `yunta/fragua` por nombre.
 - [x] **T10.3 — Release.** `install.sh` (raíz del repo, POSIX, `set -eu`):
       detecta plataforma (`uname -s`/`-m` → target triple, mismos targets
       que la matriz de RFC-0004 §4.1), instala el target de rustup si
