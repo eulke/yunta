@@ -1,0 +1,127 @@
+# The canonical reference workflow (Notion: "Config y workflows de
+# referencia") as a parse fixture — exercises the full round-trip
+# criterion, including `runners:`.
+name: build-feature
+description: Feature completa con grill, ledger verificado, review multi-runner y PR
+yunta_schema: ">=1 <2"
+inputs:
+  idea:
+    type: string
+    required: true
+    description: "Qué construir — se convierte en el brief"
+
+modes:
+  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
+  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  full:     { include: all }
+
+node_defaults:
+  hooks:
+    after:
+      - run: "cargo fmt"
+
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    skills: [grill]
+    interactive: true
+    prompt: |
+      Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
+      necesarias como artifact; no converses. Con las respuestas, escribí el brief.
+    artifacts:
+      produces:
+        - { name: questions.yaml, kind: questions }
+        - brief.md
+
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, name: brief.md }
+      - knowledge: {}
+      - files: ["docs/architecture.md"]
+      - command: "git log --oneline -20"
+      - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
+    prompt: { file: prompts/plan.md }
+    artifacts:
+      produces: [{ name: plan.yaml, kind: task-ledger }]
+
+  - id: approve-plan
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Plan registrado. ¿Aprobás?"
+    options: [aprobar, ajustar, abortar]
+    on: { ajustar: plan }
+
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [approve-plan]
+    fresh_context: true
+    until: all_tasks_complete
+    invariant: true
+    concurrency: 2
+    scope_expansion:
+      mode: ask
+      within: ["src/**"]
+      max_per_run: 3
+    prompt: |
+      Leé tu tarea del ledger. Implementala dentro de su scope.
+
+  - id: lint
+    kind: bash
+    invariant: true
+    depends_on: [implement]
+    run: "cargo clippy -- -D warnings"
+    on_failure: { goto: fix-lint, max_reroutes: 2 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    context: [{ node-output: { node: lint } }]
+    prompt: "Corregí exclusivamente los errores del reporte."
+    scope: ["src/**"]
+
+  - id: tests
+    kind: check
+    builtin: baseline_compare
+    invariant: true
+    depends_on: [lint]
+
+  - id: review
+    kind: prompt
+    depends_on: [tests]
+    runners: [reviewer, reviewer-alt]
+    permissions: read-only
+    prompt: "Auditá los cambios; hallazgos a {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    artifacts:
+      produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review]
+    context:
+      - run-events: { filter: findings }
+    prompt: "Corregí hallazgos bloqueantes; documentá los descartados con motivo."
+
+  - id: ship
+    kind: gate
+    depends_on: [fix-findings]
+    assignee: lead
+    message: "¿Creo el PR?"
+
+  - id: pr
+    kind: bash
+    depends_on: [ship]
+    run: |
+      git push -u origin {{run.branch}}
+      gh pr create --fill --base {{project.base_branch}}
+
+on_finish:
+  - cleanup: worktree
+  - distill: [plan.yaml]

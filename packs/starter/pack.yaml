@@ -1,0 +1,24 @@
+name: starter
+publisher: yunta
+version: 0.1.0
+description: >-
+  Two minimal workflows that teach the shape of verified work — a one-node
+  fix with its own scope and a check, and a fan-out review — nothing more.
+  Installable and removable like any third-party pack; the engine
+  never treats it specially.
+license: Apache-2.0
+declares:
+  permissions: edit
+  network: false
+  executors: []
+requires:
+  roles:
+    - name: executor
+    - name: reviewer
+    - name: reviewer-alt
+contents:
+  workflows:
+    - .yunta/workflows/fix.yaml
+    - .yunta/workflows/review.yaml
+  docs:
+    - README.md

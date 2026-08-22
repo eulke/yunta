@@ -1,0 +1,63 @@
+# The reference `promote-knowledge` workflow:
+# "la promoción de conocimiento local a org no es automática y no la
+# hace el engine — es un workflow de Yunta como cualquier otro:
+# candidatos desde los `knowledge/` de los repos, gate con `assignee`
+# curador, nueva versión del pack." Runs inside the org knowledge
+# pack's own repository (the thing this workflow updates and re-tags);
+# gathering candidates *out of* the various source repos is a curator's
+# or a separate script's own job — not something one run, in one
+# worktree, can reach across repos to do itself.
+name: promote-knowledge
+description: >-
+  Curates locally-distilled knowledge into a new version of the org
+  knowledge pack. Never automatic: a curator reviews every candidate
+  and a gate must be explicitly approved before anything publishes.
+inputs:
+  candidates:
+    type: path
+    required: true
+    description: >-
+      A file listing the knowledge candidates proposed for promotion —
+      gathered from the source repos' own knowledge/ by whatever
+      process the team already uses to collect them (this workflow
+      only curates and publishes, it never fetches across repos itself)
+  new_version:
+    type: string
+    required: true
+    description: >-
+      The org pack's next version, e.g. "1.4.0" — the curator's own
+      explicit choice: a version bump is a decision, never computed
+
+nodes:
+  - id: review-candidates
+    kind: prompt
+    runner: curator
+    permissions: edit
+    context:
+      - files: ["{{inputs.candidates}}"]
+    prompt: |
+      Review each candidate against what this pack's knowledge/ already
+      has. For everything that belongs, copy it into knowledge/ verbatim
+      — promoted knowledge is never rewritten or summarized, the same
+      "inventory, never verdict" discipline `pack audit` applies to a
+      pack's own prompts. Note what you promoted and what
+      you left out, and why, in your own artifact.
+    artifacts:
+      produces: [promotion-notes.md]
+
+  - id: approve-promotion
+    kind: gate
+    depends_on: [review-candidates]
+    assignee: curator
+    message: "Promote the reviewed candidates as {{inputs.new_version}}?"
+    options: [approve]
+
+  - id: publish
+    kind: bash
+    depends_on: [approve-promotion]
+    invariant: true
+    run: |
+      sed -i "s/^version: .*/version: {{inputs.new_version}}/" pack.yaml
+      git add knowledge pack.yaml
+      git commit -q -m "knowledge: promote to {{inputs.new_version}}"
+      git tag "v{{inputs.new_version}}"

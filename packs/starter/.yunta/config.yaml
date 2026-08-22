@@ -1,0 +1,11 @@
+# Self-test config only — used when this pack's own .yunta/tests/ run in
+# isolation; never read once the pack is vendored into a project
+# (project::resolve only looks at the project's own root, never a nested
+# pack directory).
+runners:
+  executor:
+    - { adapter: mock, model: mock-model }
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }

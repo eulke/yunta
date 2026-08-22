@@ -1,0 +1,42 @@
+# The canonical composed reference workflow (Notion: "Config y
+# workflows de referencia") as a parse fixture — exercises the
+# `kind: workflow` schema.
+name: release-cycle
+inputs:
+  rfc:
+    type: path
+    required: true
+    description: "RFC a revisar"
+  feat_a:
+    type: string
+    required: true
+  feat_b:
+    type: string
+    required: true
+nodes:
+  - id: design
+    kind: workflow
+    use: design-review
+    inputs: { rfc: "{{inputs.rfc}}" }
+
+  - id: approve-design
+    kind: gate
+    depends_on: [design]
+    assignee: arquitectura
+
+  - id: build
+    kind: parallel
+    depends_on: [approve-design]
+    nodes:
+      - { id: feat-a, kind: workflow, use: build-feature, inputs: { idea: "{{inputs.feat_a}}" } }
+      - { id: feat-b, kind: workflow, use: build-feature, inputs: { idea: "{{inputs.feat_b}}" } }
+
+  - id: qa
+    kind: workflow
+    use: qa-review
+    depends_on: [build]
+
+  - id: ship
+    kind: gate
+    depends_on: [qa]
+    assignee: lead

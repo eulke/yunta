@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+      - name: build (workspace)
+        run: cargo build --workspace --locked
+
+      - name: test (workspace)
+        run: cargo test --workspace --locked
+
+      - name: check each crate in isolation
+        run: |
+          for crate in yunta-core yunta-storage yunta-adapters yunta-engine yunta; do
+            echo "::group::cargo check -p $crate"
+            cargo check -p "$crate" --locked
+            echo "::endgroup::"
+          done
+
+  # musl is what makes the Linux release binary a real static binary (no
+  # glibc dependency at runtime) — a link failure here is a
+  # release-blocking regression, not just a style nit, so it gets its own
+  # job rather than riding along inside `ci`.
+  musl-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: build (static musl)
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl -p yunta
+
+      - name: verify static linking
+        run: |
+          file target/x86_64-unknown-linux-musl/release/yunta
+          ! ldd target/x86_64-unknown-linux-musl/release/yunta 2>&1 | grep -q "=>" || {
+            echo "::error::yunta linked against shared libraries — not a static musl binary"
+            exit 1
+          }

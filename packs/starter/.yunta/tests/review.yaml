@@ -1,0 +1,4 @@
+workflow: review
+fixture: fixtures/review.yaml
+expect:
+  final_state: finished

@@ -1,0 +1,19 @@
+[package]
+name = "yunta-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Embedded event log storage for Yunta runs."
+
+[dependencies]
+# `version` must track [workspace.package].version — crates.io publish
+# rejects a path dependency with no version requirement.
+yunta-core = { path = "../core", version = "0.1.0" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+thiserror = "2"
+chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
