@@ -137,8 +137,9 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::NodeRerouted(NodeReroutedPayload {
             to_node: "fix-lint".into(),
             cause: "clippy failed".to_string(),
-            attempt: 1,
-            max_reroutes: 2,
+            attempt: Some(1),
+            max_reroutes: Some(2),
+            origin: yunta_core::events::RerouteOrigin::OnFailure,
         }),
         EventPayload::GateWaiting(GateWaitingPayload {
             summary: "Ready to open the PR?".to_string(),

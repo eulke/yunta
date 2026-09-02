@@ -167,8 +167,9 @@ fn fixture_events() -> Vec<StoredEvent> {
             EventPayload::NodeRerouted(NodeReroutedPayload {
                 to_node: "b".into(),
                 cause: "criteria still red".to_string(),
-                attempt: 2,
-                max_reroutes: 1,
+                attempt: Some(2),
+                max_reroutes: Some(1),
+                origin: yunta_core::events::RerouteOrigin::OnFailure,
             }),
         ),
         event(

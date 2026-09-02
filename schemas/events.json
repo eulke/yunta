@@ -1178,7 +1178,11 @@
       "type": "object",
       "properties": {
         "attempt": {
-          "type": "integer",
+          "description": "The retry count against the cap — present only for an\n`on_failure` reroute, absent for a gate's routing choice, which\nis not a retry and has no cap to count against.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0
         },
@@ -1186,9 +1190,17 @@
           "type": "string"
         },
         "max_reroutes": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0
+        },
+        "origin": {
+          "description": "Which mechanism rerouted. Old logs, written before the\ndistinction existed, carry no field and read as `OnFailure`.",
+          "$ref": "#/$defs/RerouteOrigin",
+          "default": "on_failure"
         },
         "to_node": {
           "$ref": "#/$defs/NodeId"
@@ -1196,9 +1208,7 @@
       },
       "required": [
         "to_node",
-        "cause",
-        "attempt",
-        "max_reroutes"
+        "cause"
       ]
     },
     "NodeStartedPayload": {
@@ -1299,6 +1309,14 @@
       "required": [
         "answers_hash",
         "channel"
+      ]
+    },
+    "RerouteOrigin": {
+      "description": "What caused a `node_rerouted`. The two mechanisms differ in kind: an\n`on_failure` reroute is a bounded retry (it carries counters); a\ngate's `on:` choice is a routing decision (it carries none).",
+      "type": "string",
+      "enum": [
+        "on_failure",
+        "gate_choice"
       ]
     },
     "ResumePolicy": {

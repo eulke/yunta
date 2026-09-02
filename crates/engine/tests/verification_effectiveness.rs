@@ -223,8 +223,9 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
             EventPayload::NodeRerouted(NodeReroutedPayload {
                 to_node: "fix".into(),
                 cause: "lint failed".to_string(),
-                attempt: 1,
-                max_reroutes: 2,
+                attempt: Some(1),
+                max_reroutes: Some(2),
+                origin: yunta_core::events::RerouteOrigin::OnFailure,
             }),
         ),
     ]);

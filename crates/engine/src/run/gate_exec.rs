@@ -486,8 +486,11 @@ pub(super) async fn resolve_internal_gate(
                 EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
                     to_node: target.clone(),
                     cause: format!("gate `{}` chose `{chosen}`", node.id),
-                    attempt: 1,
-                    max_reroutes: 0,
+                    // A gate choice is a routing decision, not a bounded
+                    // retry: it has no attempt or cap to report.
+                    attempt: None,
+                    max_reroutes: None,
+                    origin: yunta_core::events::RerouteOrigin::GateChoice,
                 }),
             )
             .await?;

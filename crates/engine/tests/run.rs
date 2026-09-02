@@ -4693,6 +4693,38 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
 }
 
 #[tokio::test]
+async fn gate_reroute_records_its_origin_without_fake_counters() {
+    // A gate's `on:` choice is a routing decision, not a bounded retry —
+    // its `node_rerouted` says so (`origin: gate_choice`) and carries no
+    // fabricated `attempt`/`max_reroutes`, unlike an `on_failure` reroute.
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let (terminal, _) = bench
+        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let reroute = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::NodeRerouted(p))
+                if e.node_id.as_ref().map(|n| n.as_str()) == Some("approve") =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("the gate's choice reroute is on the log");
+    assert_eq!(
+        reroute.origin,
+        yunta_core::events::RerouteOrigin::GateChoice
+    );
+    assert_eq!(reroute.attempt, None, "a gate choice has no retry count");
+    assert_eq!(reroute.max_reroutes, None, "a gate choice has no cap");
+}
+
+#[tokio::test]
 async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");

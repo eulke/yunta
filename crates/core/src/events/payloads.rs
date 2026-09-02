@@ -418,8 +418,30 @@ pub struct HookExecutedPayload {
 pub struct NodeReroutedPayload {
     pub to_node: NodeId,
     pub cause: String,
-    pub attempt: u32,
-    pub max_reroutes: u32,
+    /// The retry count against the cap — present only for an
+    /// `on_failure` reroute, absent for a gate's routing choice, which
+    /// is not a retry and has no cap to count against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_reroutes: Option<u32>,
+    /// Which mechanism rerouted. Old logs, written before the
+    /// distinction existed, carry no field and read as `OnFailure`.
+    #[serde(default)]
+    pub origin: RerouteOrigin,
+}
+
+/// What caused a `node_rerouted`. The two mechanisms differ in kind: an
+/// `on_failure` reroute is a bounded retry (it carries counters); a
+/// gate's `on:` choice is a routing decision (it carries none).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RerouteOrigin {
+    #[default]
+    OnFailure,
+    GateChoice,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

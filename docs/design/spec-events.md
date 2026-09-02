@@ -281,10 +281,11 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `to_node` | `NodeId` | sí | destino de `on_failure.goto` — el nodo que falló es el `node_id` del envelope |
+| `to_node` | `NodeId` | sí | destino — el nodo que reruteó es el `node_id` del envelope |
 | `cause` | string | sí | — |
-| `attempt` | `u32` | sí | N de `max_reroutes` (M) |
-| `max_reroutes` | `u32` | sí | — |
+| `origin` | enum `on_failure \| gate_choice` | no (default `on_failure`) | qué mecanismo reruteó; logs viejos sin el campo leen `on_failure` |
+| `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
+| `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
 
 ### 5.18 `gate_waiting` / `gate_resolved` — engine/adapter
 **Fuente:** opciones, elección, quién, feedback

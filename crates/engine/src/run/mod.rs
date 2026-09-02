@@ -43,8 +43,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge, ForgeError};
 use yunta_core::events::{
     EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeReroutedPayload,
-    PromotionSignaledPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
-    RunResumedPayload, StoredEvent, TerminalState,
+    PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics,
+    RunPausedPayload, RunResumedPayload, StoredEvent, TerminalState,
 };
 use yunta_core::{
     AdapterError, AdapterId, Clock, FindingId, IdSource, Manifest, ModeName, NodeId, Pid, RunId,
@@ -965,8 +965,9 @@ pub(crate) async fn execute_run_at_depth(
                     EventPayload::NodeRerouted(NodeReroutedPayload {
                         to_node: to,
                         cause,
-                        attempt,
-                        max_reroutes,
+                        attempt: Some(attempt),
+                        max_reroutes: Some(max_reroutes),
+                        origin: RerouteOrigin::OnFailure,
                     }),
                 )
                 .await?;
@@ -1040,8 +1041,9 @@ pub(crate) async fn execute_run_at_depth(
                         EventPayload::NodeRerouted(NodeReroutedPayload {
                             to_node: goto,
                             cause,
-                            attempt: max_reroutes + 1,
-                            max_reroutes,
+                            attempt: Some(max_reroutes + 1),
+                            max_reroutes: Some(max_reroutes),
+                            origin: RerouteOrigin::OnFailure,
                         }),
                     )
                     .await?;
