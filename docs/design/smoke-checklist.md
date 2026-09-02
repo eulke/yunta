@@ -11,9 +11,8 @@ y fuente real, y estas corridas son su ✓ de aceptación diferido.
 - Cada divergencia encontrada se corrige **en su propia tarea**, jamás
   "de paso" en otra — con un test de regresión que la hubiera atrapado.
 - El resultado de cada corrida (fecha, versión del binario, divergencias
-  o "limpio") se registra en la entrada correspondiente de
-  `internal/m0-status.md`, y al completar ambas se cierra este pendiente en
-  `internal/deuda-implementacion.md`.
+  o "limpio") se registra en `status.md`; al completar todas, el
+  pendiente se cierra ahí.
 
 ## A. `codex` real
 
@@ -25,9 +24,8 @@ autenticada (`codex login status`).
 2. **El workflow de 3 nodos plan→implement→verify, contra codex**: en un
    repo de juguete (git init + commit), `.yunta/config.yaml` con
    `runners: { executor: [{ adapter: codex, model: <modelo vigente> }] }`
-   y el workflow plan→implement→verify documentado en
-   `m0-status.md` (o el equivalente mínimo: un `prompt` que escribe un
-   archivo y un `bash` que lo verifica). Correr
+   y un workflow mínimo plan→implement→verify (un `prompt` que escribe
+   un archivo y un `bash` que lo verifica). Correr
    `yunta run wf.yaml --follow`.
    Verificar contra el log (`yunta status <run>`, `events.jsonl`):
    - `agent_session_opened` con `session_id` = el `thread_id` real y

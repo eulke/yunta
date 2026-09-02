@@ -6,10 +6,6 @@ por la misma razón que la spec de payloads de eventos precede a los tipos de Ru
 del event log — es el formato con el que se le da trabajo al sistema, y va a
 escribirse a mano desde el primer día.
 
-> Espejo local de la página de Notion "Spec — Schema del ledger de tareas"
-> (BD Docs, dentro de "Yunta"). La fuente canónica es Notion; este archivo se
-> actualiza si la spec evoluciona ahí.
-
 ## 1. Estructura
 
 Un ledger es un documento YAML con una única clave de nivel superior:

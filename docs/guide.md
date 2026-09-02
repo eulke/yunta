@@ -23,7 +23,7 @@ Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`:
 - **`loop`** — drives a task ledger (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [ledger schema](../internal/spec-ledger.md) for what a task looks
+  `1`, sequential). See the [ledger schema](design/spec-ledger.md) for what a task looks
   like — it's written by an earlier `prompt` node as a `kind: task-ledger` artifact,
   or by hand while you're still designing the workflow.
 - **`check`** — automatic verification against data the engine already has: `builtin:
@@ -173,7 +173,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A ledger task's `criteria` (see the [ledger schema](../internal/spec-ledger.md#21-criteria)) run
+A ledger task's `criteria` (see the [ledger schema](design/spec-ledger.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire

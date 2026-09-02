@@ -1,8 +1,5 @@
-//! Event log types — the full 31 `kind`s from `internal/eventos.md`,
-//! covering every kind even though
-//! the current engine (only `prompt`/`bash`/`loop` nodes exist so far) won't
-//! emit most of them until gates, `parallel`,
-//! composition and scope expansion land in the schema.
+//! Event log types: every `kind` the engine emits, as the event schema
+//! (`docs/design/spec-events.md`) defines them.
 //!
 //! Versioning: `schema_version` is
 //! per `kind`, not global. Every kind starts at v1 here — there is no

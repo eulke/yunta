@@ -13,6 +13,6 @@ end. Everything here goes deeper, organized by what you're trying to do:
 | Figure out why a check, a run, or a pack install refused to do something | [Troubleshooting](troubleshooting.md) |
 | Know what's safe to rely on across releases | [Compatibility](compatibility.md) |
 
-These documents describe current behavior only. Project history — what was
-decided, when, and why — isn't tracked here; this directory is a snapshot of
-what Yunta does today.
+These documents describe current behavior only. The normative design corpus —
+the run contract, the adapter and ledger specs, and the decision register —
+lives in [`design/`](design/README.md), in Spanish.

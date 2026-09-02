@@ -1,5 +1,5 @@
-# The canonical composed reference workflow (Notion: "Config y
-# workflows de referencia") as a parse fixture — exercises the
+# The canonical composed reference workflow
+# (docs/design/referencia-schema.md) as a parse fixture — exercises the
 # `kind: workflow` schema.
 name: release-cycle
 inputs:

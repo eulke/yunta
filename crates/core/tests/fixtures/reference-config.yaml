@@ -1,6 +1,6 @@
-# The canonical reference config (Notion: "Config y workflows de
-# referencia") as a parse fixture — exercises the full round-trip
-# criterion. Documented deltas from the Notion text:
+# The canonical reference config (docs/design/referencia-schema.md) as
+# a parse fixture — exercises the full round-trip criterion. Deltas
+# from the reference text:
 #   - limits use plain integers: YAML 1.2 resolves `2_000_000` as a
 #     string, so the canonical form drops the separators.
 version: 1

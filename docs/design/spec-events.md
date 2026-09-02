@@ -1,28 +1,21 @@
 # Spec — Payloads de eventos del event log
 
-**Estado:** normativo v0.1 (nuevo — no existía como documento separado en Notion) ·
-**Alcance:** especificación campo por campo de cada tipo de evento del event log,
-la política de versionado aplicada y la política de
-`event_hash`. Precede a los tipos de Rust, igual que la spec del ledger precede
-al parser del ledger.
+**Estado:** normativo v0.1 · **Alcance:** especificación campo por campo de cada
+tipo de evento del event log, la política de versionado aplicada y la política de
+`event_hash`. Precede a los tipos de Rust, igual que la spec del ledger precede al
+parser del ledger.
 
-> A diferencia de `internal/spec-ledger.md`, este documento **no es un mirror**: el
-> Contrato del Run da la tabla evento→emisor→payload-relevante y las políticas de
-> versionado/hashing, pero no el detalle campo por campo de cada payload. Ese
-> detalle se deriva acá, con cita de la fuente cuando existe y marcado
+> El Contrato del Run da la tabla evento→emisor→payload-relevante y las políticas de
+> versionado y hashing, pero no el detalle campo por campo de cada payload. Ese
+> detalle se fija acá, con cita de la fuente cuando existe y marcado
 > **[inferido]** cuando no hay texto normativo literal que lo respalde.
 
-## 0. Nota sobre el conteo de eventos
+## 0. Conteo de eventos
 
-El Contrato del Run dice textualmente *"Los 30 tipos de evento (24 filas; varias
-agrupan variantes emparentadas)"*. Se verificó la tabla real del documento (parseo
-del JSON fuente, no transcripción manual): tiene **25 filas y 31 `kind` distintos**
-(20 filas de 1 kind + 4 filas de 2 kinds + 1 fila de 3 kinds = 31). El "30 (24
-filas)" del texto introductorio no coincide con su propia tabla — probablemente un
-conteo desactualizado tras agregarse una fila. **Reportado al usuario; decisión: este
-documento especifica los 31 kinds tal como están enumerados en la tabla real**, que
-es el contenido normativo (la prosa que los cuenta no lo es). Si el corpus se
-corrige en Notion, este documento se actualiza en consecuencia.
+La tabla de eventos del Contrato del Run tiene 25 filas y **31 `kind` distintos**
+(20 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
+contenido normativo; este documento especifica esos 31 kinds tal como la tabla los
+enumera.
 
 ## 1. Envelope común
 
@@ -38,17 +31,15 @@ Todo evento comparte la misma tupla persistida:
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
-**Corrección post-implementación**: la primera versión de este documento repetía
-`node_id` (y en algunos casos `from_node`/`author_node_id`) dentro de varios
-payloads que ya corren en el contexto de un nodo — dato redundante con el `node_id`
-del envelope, que podía desincronizarse del real. Se corrigió en
-`NodeStartedPayload`, `ArtifactWrittenPayload`, `ContextAssembledPayload`,
-`ScopeCheckedPayload` (queda solo `task_id` opcional), `NodeFinishedPayload`,
-`NodeFailedPayload`, `HookExecutedPayload`, `NodeReroutedPayload` (queda solo
-`to_node`), `GateWaitingPayload`, `GateResolvedPayload`, `QuestionsAnsweredPayload`,
-`LoopIterationPayload`, `FindingPostedPayload`, `ChildRunCreatedPayload` y
-`ChildRunFinishedPayload`: ninguno de estos payloads vuelve a declarar `node_id`
-—se lee del envelope— y las tablas de campo de la sección 5 ya reflejan esto.
+**El `node_id` vive solo en el envelope.** Ningún payload que corre en el contexto
+de un nodo lo repite: `NodeStartedPayload`, `ArtifactWrittenPayload`,
+`ContextAssembledPayload`, `ScopeCheckedPayload` (lleva solo `task_id` opcional),
+`NodeFinishedPayload`, `NodeFailedPayload`, `HookExecutedPayload`,
+`NodeReroutedPayload` (lleva solo `to_node`), `GateWaitingPayload`,
+`GateResolvedPayload`, `QuestionsAnsweredPayload`, `LoopIterationPayload`,
+`FindingPostedPayload`, `ChildRunCreatedPayload` y `ChildRunFinishedPayload` leen el
+nodo del envelope. Un dato repetido en dos lugares puede desincronizarse; uno solo,
+no.
 
 Los siete campos de la tupla, **en este orden**, son también los que participan en
 `event_hash`.
