@@ -1,0 +1,16 @@
+# standard mode: grill and plan produce their artifacts, the ledger
+# registers, and the run pauses at `approve-plan` — its first human
+# decision — before any task runs. A gate with nobody to answer it
+# leaves the run paused with the gate named in the pause reason.
+workflow: build-feature
+mode: standard
+inputs: { idea: "add dark mode" }
+fixture: fixtures/plan.yaml
+expect:
+  final_state: paused
+  nodes:
+    grill: finished
+    plan: finished
+    implement: never ran
+  tasks:
+    T001: pending

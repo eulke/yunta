@@ -56,7 +56,8 @@ Per the release pipeline's `test` gate (`.github/workflows/release.yml`):
 - `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`,
   `cargo fmt --all --check`, `cargo deny check` — all green.
 - The factory packs (`packs/starter`, `packs/fragua`) pass `yunta check` and
-  run end-to-end against the `mock` adapter.
+  their own `.yunta/tests/` cases against the `mock` adapter
+  (`yunta test --dir <pack>`).
 - Each of the five published binaries installs and runs in a clean
   container for its target platform, and `yunta doctor` is the first
   command the installer suggests running.

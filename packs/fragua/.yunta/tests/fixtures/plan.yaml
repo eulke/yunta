@@ -1,0 +1,21 @@
+# The sandbox starts as an empty repository, so the grill session also
+# lays down the file `plan` reads through `files:`.
+sessions:
+  - match_prompt_contains: "ambiguities"
+    effects:
+      - { path: "{{run.dir}}/artifacts/questions.yaml", content: "questions: []\n" }
+      - { path: "{{run.dir}}/artifacts/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
+      - { path: "docs/architecture.md", content: "# Architecture\n\nA single library crate.\n" }
+    outcome: { type: completed, summary: "brief written" }
+  - match_prompt_contains: "task ledger"
+    effects:
+      - path: "{{run.dir}}/artifacts/plan.yaml"
+        content: |
+          tasks:
+            - id: T001
+              title: "Bootstrap the crate"
+              scope: ["Cargo.toml", "src/**"]
+              criteria:
+                - cmd: "test -f Cargo.toml"
+                - cmd: "test -f src/lib.rs"
+    outcome: { type: completed, summary: "ledger registered" }

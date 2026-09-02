@@ -140,12 +140,13 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
         &["pack", "add", pack_source.path().to_str().unwrap()],
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
-    // fragua's own end-to-end mock proof lives in
-    // crates/engine/tests/factory_packs.rs — its `.yunta/tests/` case
-    // format has no `mode:` field yet, so a case here could
-    // only assert "paused at approve-plan", strictly less than what
-    // that engine-level test already proves.
-    assert!(stdout(&add_out).contains("tests: none shipped"));
+    // fragua ships its own mode-specific cases; `add` runs them against
+    // the mock before vendoring anything.
+    assert!(
+        stdout(&add_out).contains("tests: 2 case(s), 0 failed"),
+        "{}",
+        stdout(&add_out)
+    );
 
     // `check` validates mode-coherence for every declared mode in one
     // pass — this is real schema/reference validation against

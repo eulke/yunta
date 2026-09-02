@@ -1,20 +1,10 @@
-//! `yunta/fragua` runs its full reference
-//! pipeline end to end with the `mock` adapter — the literal criterion
-//! ("corren end-to-end con mock") for the pack whose own `.yunta/tests/`
-//! can't express this: that case format has no `mode:` field yet, so
-//! any case necessarily runs the unfiltered graph and pauses at
-//! the first internal gate (`approve-plan`) — a real, but partial,
-//! result. This test drives `mode: quick` directly through the engine
-//! (bypassing the CLI, which never exposes the mock adapter for `run`
-//! — only `yunta test` does, and only in default mode), auto-approving
-//! the one gate quick mode keeps (`ship`) the same way an operator's
-//! own automation would.
-//!
-//! This is the first time the schema's own canonical reference workflow
-//! (`docs/referencia-schema.md`'s "build-feature.yaml", mirrored as a
-//! parse fixture at `crates/core/tests/fixtures/build-feature.yaml`)
-//! has ever actually been executed — every other use of it
-//! so far only exercised parsing or static `check`.
+//! `yunta/fragua` runs its full reference pipeline end to end with the
+//! `mock` adapter, `pr` included. The pack's own `.yunta/tests/` cases
+//! stop at the first gate: a case has no human to answer a gate and no
+//! `gh` to call. This test drives `mode: quick` directly through the
+//! engine, approving `ship` the way an operator's own automation would
+//! and stubbing `gh` so the `pr` node's real command has something to
+//! call.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -133,10 +123,9 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     // `pr`'s own `git push -u origin {{run.branch}}` needs a real
     // remote and a local branch of exactly that name — both of which a
     // real `isolation: worktree` run gets from `prepare_worktree`
-    // before any node executes. This test calls `execute_run` directly
-    // (the only way to select `mode: quick`, since the CLI never wires
-    // the mock adapter into `run`), so it recreates that same setup by
-    // hand instead of going through `prepare_worktree`.
+    // before any node executes. This test calls `execute_run` directly,
+    // so it recreates that same setup by hand instead of going through
+    // `prepare_worktree`.
     let bare = root.path().join("origin.git");
     std::fs::create_dir_all(&bare).unwrap();
     git(&bare, &["init", "-q", "--bare"]);

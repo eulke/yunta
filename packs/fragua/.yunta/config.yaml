@@ -1,0 +1,18 @@
+# Self-test config: read only when this pack's own .yunta/tests/ run in
+# isolation. A project that vendors the pack resolves its own root
+# config and never reads this file.
+project:
+  base_branch: main
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+  mechanical:
+    - { adapter: mock, model: mock-model }
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: "true"

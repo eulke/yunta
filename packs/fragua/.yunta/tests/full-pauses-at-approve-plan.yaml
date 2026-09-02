@@ -1,0 +1,14 @@
+# full mode: every node is in play and, as in standard, the run pauses
+# at `approve-plan` before any task runs.
+workflow: build-feature
+mode: full
+inputs: { idea: "add dark mode" }
+fixture: fixtures/plan.yaml
+expect:
+  final_state: paused
+  nodes:
+    grill: finished
+    plan: finished
+    implement: never ran
+  tasks:
+    T001: pending
