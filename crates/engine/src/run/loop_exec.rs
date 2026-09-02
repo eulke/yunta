@@ -37,19 +37,218 @@ pub(super) async fn execute_loop(
     prompt: &PromptSource,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
+    let prep = match prepare_loop(ctx, node, prompt).await? {
+        LoopReady::Go(prep) => *prep,
+        LoopReady::Ended(end) => return Ok(end),
+    };
+
+    let mut state = LoopState {
+        tokens: TokenUsage::default(),
+        iteration: 0,
+        iterations_lifted: false,
+        blocked_reasons: Vec::new(),
+    };
+    loop {
+        state.iteration += 1;
+        let events = ctx.load_events().await?;
+        let derived = derive(&events);
+        let batch = select_batch(&prep.ledger, &derived, prep.concurrency);
+
+        if batch.is_empty() {
+            let all_done = prep
+                .ledger
+                .tasks
+                .iter()
+                .all(|task| derived.tasks.get(&task.id) == Some(&TaskStatus::Done));
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::LoopIteration(LoopIterationPayload {
+                    iteration: state.iteration,
+                    until_result: all_done,
+                }),
+            )
+            .await?;
+            if all_done {
+                return close_node(
+                    ctx,
+                    node,
+                    format!("{} task(s) done", prep.ledger.tasks.len()),
+                    state.tokens,
+                )
+                .await;
+            }
+            let mut diagnostic = "no task is ready and not all are done — blocked or failed \
+                                  tasks need a decision"
+                .to_string();
+            for reason in &state.blocked_reasons {
+                diagnostic.push_str("; ");
+                diagnostic.push_str(reason);
+            }
+            return fail_with_tokens(ctx, node, diagnostic, false, state.tokens).await;
+        }
+
+        if state.iteration > prep.max_iterations && !state.iterations_lifted {
+            match super::budget::authorize_loop_overrun(
+                ctx,
+                &node.id,
+                state.iteration,
+                prep.max_iterations,
+            )
+            .await?
+            {
+                super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
+                super::budget::BudgetDecision::Pause { reason } => {
+                    return fail_with_tokens(ctx, node, reason, false, state.tokens).await;
+                }
+            }
+        }
+
+        // Every batch member's worktree branches from the same starting
+        // point — one worktree per task, derived from the current base
+        // commit — captured once so all N tasks work from an identical
+        // snapshot.
+        let base_commit = head_commit(ctx.worktree).await?;
+
+        // Each batch member's brief carries the loop's declared `context:` —
+        // resolved per task (volatile sources fresh, stable ones from the
+        // memo), audited as one `context_assembled` per task. A failing
+        // source is the node's failure, before any session is spent.
+        let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
+        for task in &batch {
+            match super::context_resolve::resolve_for_task(
+                ctx,
+                node,
+                &task.id,
+                &prep.context_memo,
+                cancel,
+            )
+            .await?
+            {
+                Ok(Some(block)) => briefs.push(format!("{block}\n\n{}", prep.instruction)),
+                Ok(None) => briefs.push(prep.instruction.clone()),
+                Err(end) => return Ok(end),
+            }
+        }
+
+        // One grant ledger per batch, seeded from the log — the atomic cap
+        // window every concurrent member's evaluation commits through, so
+        // `max_per_run` holds exactly.
+        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
+        let batch_env = BatchDispatchEnv {
+            events: &events,
+            base_commit: &base_commit,
+            adapter: prep.adapter.as_ref(),
+            scope_expansion: prep.scope_expansion,
+            grants: &grants,
+            cancel,
+            setup: &prep.setup,
+        };
+        let dispatches =
+            futures::future::join_all(batch.iter().zip(&briefs).map(|(task, brief)| {
+                dispatch_task_in_isolation(ctx, node, &batch_env, task, brief)
+            }))
+            .await;
+
+        // Cumulative grants this run, kept live across the integration and
+        // escalation phases below so each emitted `ScopeExpansionGranted`
+        // carries an accurate `count_this_run` — the cap *decision* already
+        // happened atomically in the batch's `GrantLedger`; this count only
+        // feeds the event payload.
+        let mut expansions_granted_this_run = granted_count(&events);
+        let pending = match integrate_batch(
+            ctx,
+            node,
+            dispatches,
+            prep.scope_expansion,
+            cancel,
+            &mut state,
+            &mut expansions_granted_this_run,
+        )
+        .await?
+        {
+            BatchIntegration::Cancelled(end) => return Ok(end),
+            BatchIntegration::Done(pending) => pending,
+        };
+
+        if !pending.is_empty() {
+            if let Some(end) = resolve_escalations(
+                ctx,
+                node,
+                pending,
+                prep.scope_expansion,
+                &mut expansions_granted_this_run,
+                state.tokens,
+            )
+            .await?
+            {
+                return Ok(end);
+            }
+            // Everything resolved — the next iteration re-dispatches the (now
+            // Pending again) tasks with the decisions on the log.
+        }
+    }
+}
+
+/// Everything one loop invocation resolves once, before its first iteration.
+struct LoopPrep<'a> {
+    instruction: String,
+    adapter: std::sync::Arc<dyn yunta_adapters::Adapter>,
+    setup: crate::task_cycle::SessionSetup,
+    ledger: Ledger,
+    concurrency: u32,
+    scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
+    context_memo: super::context_resolve::StableContextMemo,
+    max_iterations: u32,
+}
+
+/// The outcome of preparing a loop: ready to run, or already ended (a
+/// missing ledger, an unresolvable runner, a capability a blackboard needs).
+enum LoopReady<'a> {
+    Go(Box<LoopPrep<'a>>),
+    Ended(NodeEnd),
+}
+
+/// The mutable state a loop carries across its iterations.
+struct LoopState {
+    tokens: TokenUsage,
+    iteration: u32,
+    iterations_lifted: bool,
+    /// Blocked reasons gathered this invocation, so the loop's own failure
+    /// can cite them. A resume starts empty — the log carries each task's
+    /// status, and the empty-batch tail still names which tasks are blocked.
+    blocked_reasons: Vec<String>,
+}
+
+/// What integrating one batch produced: a cancellation that ends the node,
+/// or the escalations owed a human once the batch is on the log.
+enum BatchIntegration {
+    Cancelled(NodeEnd),
+    Done(Vec<PendingEscalation>),
+}
+
+/// Resolves everything a loop needs once, before any task runs: the rendered
+/// instruction, the adapter and the session setup every task shares (skills
+/// and run tools gated by the adapter's declared capabilities), the
+/// registered task ledger, and the loop's own knobs. A capability a
+/// blackboard group needs, a missing runner, or an unregistered ledger ends
+/// the node here, before a token is spent.
+async fn prepare_loop<'a>(
+    ctx: &RunCtx<'_>,
+    node: &'a Node,
+    prompt: &PromptSource,
+) -> Result<LoopReady<'a>, RunError> {
     let instruction = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Ok(rendered) => rendered,
-        Err(end) => return Ok(end),
+        Err(end) => return Ok(LoopReady::Ended(end)),
     };
     let chosen = match resolve_node_runner(ctx, node).await? {
         Ok(chosen) => chosen,
-        Err(end) => return Ok(end),
+        Err(end) => return Ok(LoopReady::Ended(end)),
     };
-    let adapter = &ctx.adapters[&chosen.adapter];
+    let adapter = ctx.adapters[&chosen.adapter].clone();
 
-    // One resolution for the whole loop — every task session
-    // mounts the same skills, and a missing name fails the node before
-    // any token is spent.
+    // One resolution for the whole loop — every task session mounts the same
+    // skills, and a missing name fails the node before any token is spent.
     let skills = match crate::skills::resolve_skills(
         &ctx.manifest.config,
         &ctx.manifest.workflow,
@@ -57,7 +256,11 @@ pub(super) async fn execute_loop(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+        Err(error) => {
+            return Ok(LoopReady::Ended(
+                fail(ctx, node, error.to_string(), false).await?,
+            ))
+        }
     };
     let skills = if !skills.is_empty() && !adapter.capabilities().skills {
         ctx.emit(
@@ -75,14 +278,14 @@ pub(super) async fn execute_loop(
     } else {
         skills
     };
-    // Same gating as a prompt session — the capability decides,
-    // and a blackboard-group loop on a capability-less adapter fails
-    // rather than silently dropping its declared coordination.
+    // Same gating as a prompt session — the capability decides, and a
+    // blackboard-group loop on a capability-less adapter fails rather than
+    // silently dropping its declared coordination.
     let run_tools = if adapter.capabilities().run_tools {
         Some((ctx.run_tools_host.clone(), node.id.clone()))
     } else {
         if ctx.run_tools_host.is_blackboard_member(&node.id) {
-            return fail(
+            let end = fail(
                 ctx,
                 node,
                 format!(
@@ -90,7 +293,9 @@ pub(super) async fn execute_loop(
                     node.id, chosen.adapter
                 ),
                 false,
-            ).await;
+            )
+            .await?;
+            return Ok(LoopReady::Ended(end));
         }
         None
     };
@@ -102,7 +307,7 @@ pub(super) async fn execute_loop(
     };
 
     let Some(ledger) = load_registered_ledger(ctx)? else {
-        return fail(
+        let end = fail(
             ctx,
             node,
             "no task ledger has been registered before this loop — a previous node must \
@@ -110,7 +315,8 @@ pub(super) async fn execute_loop(
                 .to_string(),
             false,
         )
-        .await;
+        .await?;
+        return Ok(LoopReady::Ended(end));
     };
 
     // Absent means the engine's own default, 1 — sequential, deliberately
@@ -120,8 +326,8 @@ pub(super) async fn execute_loop(
         NodeKind::Loop { concurrency, .. } => concurrency.unwrap_or(1).max(1),
         _ => 1,
     };
-    // Loop-scoped, never workflow/config-scoped: a request is
-    // task-specific, and only a loop node's own tasks can ever write one.
+    // Loop-scoped, never workflow/config-scoped: a request is task-specific,
+    // and only a loop node's own tasks can ever write one.
     let scope_expansion = match &node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -129,420 +335,322 @@ pub(super) async fn execute_loop(
         _ => None,
     };
 
-    // Stable/run-stable context resolved once and reused across
-    // every task brief this invocation builds; volatile sources
-    // re-resolve per brief.
-    let context_memo = super::context_resolve::StableContextMemo::default();
+    Ok(LoopReady::Go(Box::new(LoopPrep {
+        instruction,
+        adapter,
+        setup,
+        ledger,
+        concurrency,
+        scope_expansion,
+        // Stable/run-stable context resolved once and reused across every
+        // task brief this invocation builds; volatile sources re-resolve per
+        // brief.
+        context_memo: super::context_resolve::StableContextMemo::default(),
+        // The only net under a ledger whose state oscillates forever.
+        max_iterations: ctx.manifest.config.resolved_max_loop_iterations(),
+    })))
+}
 
-    let mut tokens = TokenUsage::default();
-    let mut iteration: u32 = 0;
-    // The only net under a ledger whose state oscillates
-    // forever. Checked only when a non-empty batch wants to run — the
-    // closing empty-batch pass never trips it. `continue` lifts the cap
-    // for this invocation only (same rule as the run token budget).
-    let max_iterations = ctx.manifest.config.resolved_max_loop_iterations();
-    let mut iterations_lifted = false;
-    // Blocked reasons gathered this invocation, so the loop's own failure
-    // can cite them (permission blocks included; useful for every block).
-    // A resume starts empty — the log carries each task's *status*, and
-    // the generic tail below still names which tasks are blocked.
-    let mut blocked_reasons: Vec<String> = Vec::new();
-    loop {
-        iteration += 1;
-        // A scope-expansion request left `Escalate`d (`ask` mode,
-        // or `max_per_run` exhausted) is a decision owed to a human —
-        // regardless of whether *this* attempt's own criteria happened
-        // to succeed without needing the grant. Collected per batch and
-        // resolved through `ctx.human_interaction` once the
-        // whole batch has integrated; only what stays unresolved (no
-        // live surface) pauses the run.
-        let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
-        let events = ctx.load_events().await?;
-        let state = derive(&events);
+/// Integrates one dispatched batch, serially and in ledger declaration order
+/// (never the order dispatch finished in): drains each task's attempts onto
+/// the log, rebases and fast-forwards a `Done` task onto the run's current
+/// tree, and marks each task's new status. A cancelled dispatch ends the
+/// whole node. Any `Escalate`d scope-expansion request is collected for the
+/// caller to resolve once the whole batch is on the log.
+async fn integrate_batch(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    dispatches: Vec<Result<(&Task, PathBuf, TaskCycleReport), RunError>>,
+    scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    cancel: &tokio_util::sync::CancellationToken,
+    state: &mut LoopState,
+    expansions_granted_this_run: &mut u32,
+) -> Result<BatchIntegration, RunError> {
+    let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
+    for dispatch in dispatches {
+        let (task, task_worktree, mut report) = dispatch?;
+        let needs_human_decision = report.needs_human_decision;
+        // The escalated request itself (paths, reason, criterion + its
+        // pre-check exit), captured off the attempt that raised it — what the
+        // escalation object is built from.
+        let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
 
-        let batch = select_batch(&ledger, &state, concurrency);
-
-        if batch.is_empty() {
-            let all_done = ledger
-                .tasks
-                .iter()
-                .all(|task| state.tasks.get(&task.id) == Some(&TaskStatus::Done));
-            ctx.emit(
+        let mut last_check_seq = ctx
+            .emit(
                 Some(&node.id),
-                EventPayload::LoopIteration(LoopIterationPayload {
-                    iteration,
-                    until_result: all_done,
+                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                    task_id: task.id.clone(),
+                    phase: Phase::Pre,
+                    results: to_results(&report.pre_check),
                 }),
             )
             .await?;
-            if all_done {
-                return close_node(
-                    ctx,
-                    node,
-                    format!("{} task(s) done", ledger.tasks.len()),
-                    tokens,
-                )
-                .await;
-            }
-            let mut diagnostic = "no task is ready and not all are done — blocked or failed \
-                                  tasks need a decision"
-                .to_string();
-            for reason in &blocked_reasons {
-                diagnostic.push_str("; ");
-                diagnostic.push_str(reason);
-            }
-            return fail_with_tokens(ctx, node, diagnostic, false, tokens).await;
-        };
 
-        if iteration > max_iterations && !iterations_lifted {
-            match super::budget::authorize_loop_overrun(ctx, &node.id, iteration, max_iterations)
-                .await?
-            {
-                super::budget::BudgetDecision::Continue => iterations_lifted = true,
-                super::budget::BudgetDecision::Pause { reason } => {
-                    return fail_with_tokens(ctx, node, reason, false, tokens).await;
-                }
-            }
-        }
-
-        // Every batch member's worktree branches from the same starting
-        // point — one worktree per task, derived from the current base
-        // commit — captured once so all N tasks work from an identical
-        // snapshot.
-        let base_commit = head_commit(ctx.worktree).await?;
-
-        // Each batch member's brief carries the loop's declared
-        // `context:` — resolved per task (volatile sources fresh, stable
-        // ones from the memo), audited as one `context_assembled` per
-        // task. A failing source is the node's failure, before any
-        // session is spent.
-        let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
-        for task in &batch {
-            match super::context_resolve::resolve_for_task(
-                ctx,
-                node,
-                &task.id,
-                &context_memo,
-                cancel,
-            )
-            .await?
-            {
-                Ok(Some(block)) => briefs.push(format!("{block}\n\n{instruction}")),
-                Ok(None) => briefs.push(instruction.clone()),
-                Err(end) => return Ok(end),
-            }
-        }
-
-        // One grant ledger per batch, seeded from the log —
-        // the atomic cap window every concurrent member's evaluation
-        // commits through, so `max_per_run` holds exactly.
-        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
-        let batch_env = BatchDispatchEnv {
-            events: &events,
-            base_commit: &base_commit,
-            adapter: adapter.as_ref(),
-            scope_expansion,
-            grants: &grants,
-            cancel,
-            setup: &setup,
-        };
-        let dispatches =
-            futures::future::join_all(batch.iter().zip(&briefs).map(|(task, brief)| {
-                dispatch_task_in_isolation(ctx, node, &batch_env, task, brief)
-            }))
-            .await;
-
-        // Cumulative grants this run, kept live across the integration
-        // loop below so each emitted `ScopeExpansionGranted` carries an
-        // accurate `count_this_run` — the cap *decision* already
-        // happened atomically in the batch's `GrantLedger`;
-        // this count only feeds the event payload.
-        let mut expansions_granted_this_run = granted_count(&events);
-
-        // Integration is serial and follows the batch's own order, which
-        // is ledger declaration order — the order tasks were declared
-        // in, never the order dispatch happened to finish in.
-        for dispatch in dispatches {
-            let (task, task_worktree, mut report) = dispatch?;
-            let needs_human_decision = report.needs_human_decision;
-            // The escalated request itself (paths, reason, criterion +
-            // its pre-check exit), captured off the attempt that raised
-            // it — what the escalation object below is built from.
-            let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
-
-            let mut last_check_seq = ctx
+        for attempt in report.attempts.drain(..) {
+            state.tokens += attempt.tokens;
+            last_check_seq = ctx
                 .emit(
                     Some(&node.id),
                     EventPayload::CriteriaChecked(CriteriaCheckedPayload {
                         task_id: task.id.clone(),
-                        phase: Phase::Pre,
-                        results: to_results(&report.pre_check),
+                        phase: Phase::Post,
+                        results: to_results(&attempt.post_check),
                     }),
                 )
                 .await?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::ScopeChecked(ScopeCheckedPayload {
+                    task_id: Some(task.id.clone()),
+                    diff: attempt.scope.diff,
+                    violations: attempt.scope.violations,
+                }),
+            )
+            .await?;
 
-            for attempt in report.attempts.drain(..) {
-                tokens += attempt.tokens;
-                last_check_seq = ctx
-                    .emit(
-                        Some(&node.id),
-                        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-                            task_id: task.id.clone(),
-                            phase: Phase::Post,
-                            results: to_results(&attempt.post_check),
-                        }),
-                    )
-                    .await?;
+            if let Some(outcome) = &attempt.scope_expansion {
+                emit_scope_expansion_events(
+                    ctx,
+                    node,
+                    &task.id,
+                    attempt.attempt,
+                    outcome,
+                    scope_expansion,
+                    expansions_granted_this_run,
+                )
+                .await?;
+                if outcome.decision == crate::scope_expansion::Decision::Escalate {
+                    escalated = Some((attempt.attempt, outcome.clone()));
+                }
+            }
+        }
+
+        // A cancelled dispatch ends the whole loop node without a verdict —
+        // the task stays `running` in the log (orphaned), which is exactly
+        // what makes a later resume re-execute it, and the node's own fate
+        // follows the same root-vs-sibling rule every other kind applies.
+        if matches!(report.outcome, TaskOutcome::Interrupted) {
+            return Ok(BatchIntegration::Cancelled(
+                super::node_exec::cancelled_end(ctx, node).await?,
+            ));
+        }
+        let blocked_reason = match report.outcome {
+            TaskOutcome::Blocked { reason } => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ScopeChecked(ScopeCheckedPayload {
-                        task_id: Some(task.id.clone()),
-                        diff: attempt.scope.diff,
-                        violations: attempt.scope.violations,
+                    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                        task_id: task.id.clone(),
+                        new_status: TaskStatus::Blocked,
+                        caused_by: last_check_seq,
                     }),
                 )
                 .await?;
-
-                if let Some(outcome) = &attempt.scope_expansion {
-                    emit_scope_expansion_events(
-                        ctx,
-                        node,
-                        &task.id,
-                        attempt.attempt,
-                        outcome,
-                        scope_expansion,
-                        &mut expansions_granted_this_run,
-                    )
-                    .await?;
-                    if outcome.decision == crate::scope_expansion::Decision::Escalate {
-                        escalated = Some((attempt.attempt, outcome.clone()));
-                    }
-                }
+                Some(reason)
             }
-
-            // A cancelled dispatch ends the whole loop node
-            // without a verdict — the task stays `running` in the log
-            // (orphaned), which is exactly what makes a later resume
-            // re-execute it — orphaned tasks always get re-run — and
-            // the node's own fate follows the same root-vs-sibling rule
-            // every other kind applies.
-            if matches!(report.outcome, TaskOutcome::Interrupted) {
-                return super::node_exec::cancelled_end(ctx, node).await;
-            }
-            let blocked_reason = match report.outcome {
-                TaskOutcome::Blocked { reason } => {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                            task_id: task.id.clone(),
-                            new_status: TaskStatus::Blocked,
-                            caused_by: last_check_seq,
-                        }),
-                    )
-                    .await?;
-                    Some(reason)
-                }
-                TaskOutcome::Done => {
-                    let outcome = integrate_task(
-                        ctx,
-                        node,
-                        VerifiedTask {
-                            task,
-                            worktree: &task_worktree,
-                            staged: &report.staged,
-                        },
-                        &ctx.memo,
-                        &mut last_check_seq,
-                        cancel,
-                    )
-                    .await?;
-                    // A rejected integration goes back to ready on the
-                    // new tree — back to `Pending`, so a future batch
-                    // retries it automatically. This is deliberately NOT
-                    // `Blocked`: green in isolation but broken by a
-                    // sibling's integration is a timing artifact of
-                    // concurrency, not evidence the task itself can't
-                    // succeed — that verdict only comes from `run_task`'s
-                    // own retry exhaustion, the branch above.
-                    // A rejection returns the task to `Pending`; the
-                    // `task_status_changed` emitted just below is the
-                    // log's record of it (with the rebase-conflict
-                    // `criteria_checked` that caused it), so no warning
-                    // duplicates that event.
-                    let new_status = match &outcome {
-                        IntegrationOutcome::Integrated => TaskStatus::Done,
-                        IntegrationOutcome::Rejected => TaskStatus::Pending,
-                    };
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                            task_id: task.id.clone(),
-                            new_status,
-                            caused_by: last_check_seq,
-                        }),
-                    )
-                    .await?;
-                    // Never counted toward the loop's own "no task ready"
-                    // diagnostic — a `Pending` task is retriable, not
-                    // stuck, so there's nothing to cite a human decision
-                    // for yet.
-                    None
-                }
-                // Unreachable: handled by the early return above.
-                TaskOutcome::Interrupted => None,
-            };
-            let was_blocked = blocked_reason.is_some();
-            if let Some(reason) = blocked_reason {
-                // An escalation-blocked task is the escalation flow's to
-                // report (resolved below, or the pause diagnostic) — its
-                // interim Blocked never feeds the generic tail.
-                if !needs_human_decision {
-                    blocked_reasons.push(format!("task `{}` blocked: {reason}", task.id));
-                }
-            }
-            if needs_human_decision {
-                if let Some((attempt_no, outcome)) = escalated {
-                    pending_escalations.push(PendingEscalation {
+            TaskOutcome::Done => {
+                let outcome = integrate_task(
+                    ctx,
+                    node,
+                    VerifiedTask {
+                        task,
+                        worktree: &task_worktree,
+                        staged: &report.staged,
+                    },
+                    &ctx.memo,
+                    &mut last_check_seq,
+                    cancel,
+                )
+                .await?;
+                // A rejected integration goes back to ready on the new tree —
+                // back to `Pending`, so a future batch retries it
+                // automatically. This is deliberately NOT `Blocked`: green in
+                // isolation but broken by a sibling's integration is a timing
+                // artifact of concurrency, not evidence the task itself can't
+                // succeed — that verdict only comes from `run_task`'s own
+                // retry exhaustion, the branch above. The `task_status_changed`
+                // emitted just below is the log's record of the rejection
+                // (with the rebase-conflict `criteria_checked` that caused
+                // it), so no warning duplicates that event.
+                let new_status = match &outcome {
+                    IntegrationOutcome::Integrated => TaskStatus::Done,
+                    IntegrationOutcome::Rejected => TaskStatus::Pending,
+                };
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                         task_id: task.id.clone(),
-                        attempt_no,
-                        outcome,
-                        was_blocked,
-                    });
-                }
+                        new_status,
+                        caused_by: last_check_seq,
+                    }),
+                )
+                .await?;
+                // Never counted toward the loop's own "no task ready"
+                // diagnostic — a `Pending` task is retriable, not stuck, so
+                // there's nothing to cite a human decision for yet.
+                None
+            }
+            // Handled by the early return above.
+            TaskOutcome::Interrupted => None,
+        };
+        let was_blocked = blocked_reason.is_some();
+        if let Some(reason) = blocked_reason {
+            // An escalation-blocked task is the escalation flow's to report
+            // (resolved by the caller, or the pause diagnostic) — its interim
+            // Blocked never feeds the generic tail.
+            if !needs_human_decision {
+                state
+                    .blocked_reasons
+                    .push(format!("task `{}` blocked: {reason}", task.id));
             }
         }
-
-        if !pending_escalations.is_empty() {
-            // The whole batch integrates before anything is asked (serial
-            // integration order still holds — this only stops the *next*
-            // batch from being dispatched while a decision is owed): a
-            // pending `ask`/exhausted-cap request must reach a human
-            // before the run spends any further budget, never be
-            // bypassed just because the task that raised it happened to
-            // succeed on its own declared scope. With a live
-            // surface the human decides right here; only what stays
-            // unresolved pauses the run, exactly as before.
-            let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
-            let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
-            let mut unresolved: Vec<yunta_core::TaskId> = Vec::new();
-            for pending in pending_escalations.drain(..) {
-                let escalation =
-                    expansion_escalation(&pending, mode, max_per_run, expansions_granted_this_run);
-                let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
-                    unresolved.push(pending.task_id);
-                    continue;
-                };
-                // Same convention as every other gate: waiting and
-                // resolved land together, only once actually resolved —
-                // an unresolved question re-asks on resume instead of
-                // remembering a decision nobody made.
-                ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-                    .await?;
-                let resolved_seq = ctx
-                    .emit(
-                        Some(&node.id),
-                        EventPayload::GateResolved(resolution.clone()),
-                    )
-                    .await?;
-                let decided_by = Decider::Person {
-                    id: resolution
-                        .resolved_by
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
-                };
-                if resolution.chosen_option.as_deref() == Some(ReservedOption::Grant.as_str()) {
-                    expansions_granted_this_run += 1;
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::ScopeExpansionGranted(ScopeExpansionGrantedPayload {
-                            task_id: pending.task_id.clone(),
-                            decided_by,
-                            mode,
-                            count_this_run: expansions_granted_this_run,
-                            paths: pending.outcome.request.paths.clone(),
-                        }),
-                    )
-                    .await?;
-                } else {
-                    // Anything that isn't an explicit grant denies — the
-                    // conservative reading of an ambiguous resolution,
-                    // and every denial converts to a finding, same
-                    // as the rule-mode path.
-                    let reason = resolution
-                        .free_text
-                        .clone()
-                        .unwrap_or_else(|| "denied by a human at the gate".to_string());
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
-                            task_id: pending.task_id.clone(),
-                            decided_by,
-                            mode,
-                            count_this_run: expansions_granted_this_run,
-                            denial_reason: Some(reason.clone()),
-                        }),
-                    )
-                    .await?;
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::FindingPosted(FindingPostedPayload {
-                            finding: Finding {
-                                id: FindingId::try_from(format!(
-                                    "scope-expansion-{}-{}",
-                                    pending.task_id, pending.attempt_no
-                                ))?,
-                                severity: FindingSeverity::Minor,
-                                title: format!(
-                                    "scope expansion denied for task `{}`",
-                                    pending.task_id
-                                ),
-                                location: pending.outcome.request.paths.join(", "),
-                                detail: format!(
-                                    "{reason} — agent's stated reason: {}",
-                                    pending.outcome.request.reason
-                                ),
-                                proposed_criterion: pending
-                                    .outcome
-                                    .request
-                                    .proposed_criterion
-                                    .clone()
-                                    .map(Into::into),
-                            },
-                        }),
-                    )
-                    .await?;
-                }
-                // Granted or denied, the task gets its retry: with the
-                // widened scope (from the log's own granted paths), or
-                // within the original one — a denial never kills
-                // the task, it re-runs inside what was declared.
-                if pending.was_blocked {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                            task_id: pending.task_id.clone(),
-                            new_status: TaskStatus::Pending,
-                            caused_by: resolved_seq,
-                        }),
-                    )
-                    .await?;
-                }
+        if needs_human_decision {
+            if let Some((attempt_no, outcome)) = escalated {
+                pending_escalations.push(PendingEscalation {
+                    task_id: task.id.clone(),
+                    attempt_no,
+                    outcome,
+                    was_blocked,
+                });
             }
-            if !unresolved.is_empty() {
-                let mut diagnostic =
-                    "a scope expansion request needs a human decision before this run can continue"
-                        .to_string();
-                for task_id in &unresolved {
-                    diagnostic.push_str(&format!(
-                        "; task `{task_id}` has a scope expansion request awaiting a human decision"
-                    ));
-                }
-                return fail_with_tokens(ctx, node, diagnostic, false, tokens).await;
-            }
-            // Everything resolved — the next iteration re-dispatches the
-            // (now Pending again) tasks with the decisions on the log.
         }
     }
+    Ok(BatchIntegration::Done(pending_escalations))
+}
+
+/// Resolves each escalated scope-expansion request through the run's human
+/// interaction surface, once the whole batch is on the log: a grant or a
+/// denial (with its finding) is recorded, and a `was_blocked` task returns to
+/// `Pending` for its retry. Returns the node's end when any request goes
+/// unresolved (no live surface) — the run pauses owing that decision.
+async fn resolve_escalations(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    pending_escalations: Vec<PendingEscalation>,
+    scope_expansion: Option<&yunta_core::ScopeExpansion>,
+    expansions_granted_this_run: &mut u32,
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    // The whole batch integrates before anything is asked (serial integration
+    // order still holds — this only stops the *next* batch from being
+    // dispatched while a decision is owed): a pending `ask`/exhausted-cap
+    // request must reach a human before the run spends any further budget,
+    // never be bypassed just because the task that raised it happened to
+    // succeed on its own declared scope. With a live surface the human
+    // decides right here; only what stays unresolved pauses the run.
+    let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
+    let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
+    let mut unresolved: Vec<yunta_core::TaskId> = Vec::new();
+    for pending in pending_escalations {
+        let escalation =
+            expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run);
+        let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
+            unresolved.push(pending.task_id);
+            continue;
+        };
+        // Same convention as every other gate: waiting and resolved land
+        // together, only once actually resolved — an unresolved question
+        // re-asks on resume instead of remembering a decision nobody made.
+        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
+            .await?;
+        let resolved_seq = ctx
+            .emit(
+                Some(&node.id),
+                EventPayload::GateResolved(resolution.clone()),
+            )
+            .await?;
+        let decided_by = Decider::Person {
+            id: resolution
+                .resolved_by
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+        };
+        if resolution.chosen_option.as_deref() == Some(ReservedOption::Grant.as_str()) {
+            *expansions_granted_this_run += 1;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::ScopeExpansionGranted(ScopeExpansionGrantedPayload {
+                    task_id: pending.task_id.clone(),
+                    decided_by,
+                    mode,
+                    count_this_run: *expansions_granted_this_run,
+                    paths: pending.outcome.request.paths.clone(),
+                }),
+            )
+            .await?;
+        } else {
+            // Anything that isn't an explicit grant denies — the conservative
+            // reading of an ambiguous resolution, and every denial converts to
+            // a finding, same as the rule-mode path.
+            let reason = resolution
+                .free_text
+                .clone()
+                .unwrap_or_else(|| "denied by a human at the gate".to_string());
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
+                    task_id: pending.task_id.clone(),
+                    decided_by,
+                    mode,
+                    count_this_run: *expansions_granted_this_run,
+                    denial_reason: Some(reason.clone()),
+                }),
+            )
+            .await?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::FindingPosted(FindingPostedPayload {
+                    finding: Finding {
+                        id: FindingId::try_from(format!(
+                            "scope-expansion-{}-{}",
+                            pending.task_id, pending.attempt_no
+                        ))?,
+                        severity: FindingSeverity::Minor,
+                        title: format!("scope expansion denied for task `{}`", pending.task_id),
+                        location: pending.outcome.request.paths.join(", "),
+                        detail: format!(
+                            "{reason} — agent's stated reason: {}",
+                            pending.outcome.request.reason
+                        ),
+                        proposed_criterion: pending
+                            .outcome
+                            .request
+                            .proposed_criterion
+                            .clone()
+                            .map(Into::into),
+                    },
+                }),
+            )
+            .await?;
+        }
+        // Granted or denied, the task gets its retry: with the widened scope
+        // (from the log's own granted paths), or within the original one — a
+        // denial never kills the task, it re-runs inside what was declared.
+        if pending.was_blocked {
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                    task_id: pending.task_id.clone(),
+                    new_status: TaskStatus::Pending,
+                    caused_by: resolved_seq,
+                }),
+            )
+            .await?;
+        }
+    }
+    if !unresolved.is_empty() {
+        let mut diagnostic =
+            "a scope expansion request needs a human decision before this run can continue"
+                .to_string();
+        for task_id in &unresolved {
+            diagnostic.push_str(&format!(
+                "; task `{task_id}` has a scope expansion request awaiting a human decision"
+            ));
+        }
+        return Ok(Some(
+            fail_with_tokens(ctx, node, diagnostic, false, tokens).await?,
+        ));
+    }
+    Ok(None)
 }
 
 /// One `Escalate`d request waiting for the human's verdict.
