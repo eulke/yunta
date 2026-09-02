@@ -27,6 +27,7 @@ mod findings;
 mod human_interaction;
 mod inputs;
 mod ledger;
+pub mod lock;
 mod manifest;
 mod modes;
 mod pack_audit;

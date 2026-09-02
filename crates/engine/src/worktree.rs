@@ -8,7 +8,10 @@
 //! inside an ephemeral container — but the engine **requires a clean
 //! tree** at the start (without that, scope-by-diff can't tell
 //! the agent's work from the user's) and refuses a second concurrent run
-//! on that same repo via a lock file next to git's own metadata.
+//! on that same repo via a lock file next to git's own metadata. Both
+//! locks this module takes — the `none` isolation lock and the
+//! worktree-mutation lock — are [`crate::lock`] files: one protocol,
+//! one owner record, one notion of a holder being gone.
 //!
 //! Cleanup: a prepared worktree is left on disk after the run for
 //! inspection by default; a workflow that declares
@@ -20,8 +23,10 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_adapters::signal::{liveness, Liveness};
-use yunta_core::{Isolation, Pid};
+use yunta_adapters::signal::Liveness;
+use yunta_core::{Isolation, Pid, SystemClock};
+
+use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -37,10 +42,23 @@ pub enum WorktreeError {
     )]
     DirtyTree { path: PathBuf },
     #[error(
-        "`{path}` already has a run in progress under isolation `none` — only one at a time \
-         is allowed on the same checkout; use isolation `worktree` to run concurrently"
+        "`{path}` already has a run in progress under isolation `none` (pid {pid}) — only one \
+         at a time is allowed on the same checkout; use isolation `worktree` to run concurrently"
     )]
-    Locked { path: PathBuf },
+    Locked { path: PathBuf, pid: Pid },
+    /// A lock whose holder this process cannot ask about — it runs as
+    /// another user. Whether it is still a run on this checkout cannot
+    /// be told from here, so the lock is never taken from it.
+    #[error(
+        "`{path}` has an isolation lock held by pid {pid}, a process this user cannot signal \
+         (`{lock_path}`) — if no run is active on this checkout, delete that file by hand and \
+         retry"
+    )]
+    LockedByAnotherUser {
+        path: PathBuf,
+        lock_path: PathBuf,
+        pid: Pid,
+    },
     /// A lock whose owner can't be verified — pre-owner-format
     /// (empty) or corrupted. Conservative on purpose: guessing that an
     /// unreadable lock is stale would break the old contract silently.
@@ -70,6 +88,10 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         owner_pid: Option<Pid>,
     },
+    /// The common git dir has no parent directory, so there is no
+    /// checkout to run `git worktree` from.
+    #[error("the git common dir `{common_dir}` has no parent directory to run `git worktree` in")]
+    NoMainRepo { common_dir: PathBuf },
 }
 
 /// Puts `repo` in the state a run needs before it starts: for
@@ -189,10 +211,7 @@ pub async fn cleanup_worktree(
     if git_dir.trim() == common_dir.trim() {
         return Ok(WorktreeCleanup::NotALinkedWorktree);
     }
-    let main_repo = PathBuf::from(common_dir.trim())
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("/"));
+    let main_repo = main_repo_of(Path::new(common_dir.trim()))?;
 
     // Removal rewrites the same `.git/worktrees/` metadata an
     // `add` scans — same lock, same reasoning.
@@ -267,131 +286,111 @@ impl Drop for WorktreeMutationGuard {
 /// and living inside this module's only mutation functions means no
 /// call site can forget it.
 ///
-/// Same owner model as the `none` lock: content is the holder's
-/// pid, liveness by `kill -0` at contention time. A dead holder's lock
-/// is stolen by *removing* it and retrying the atomic `create_new` —
-/// never by overwriting in place, which would let two stealers both
-/// think they won.
+/// Waits its patience out on a present holder; a gone holder's lock is
+/// taken over, and said so, since a crash mid-mutation is exactly what
+/// leaves one behind.
 async fn lock_worktree_mutations(
     common_dir: &Path,
 ) -> Result<WorktreeMutationGuard, WorktreeError> {
-    use std::io::Write;
-
     let lock_path = common_dir.join("yunta-worktree.lock");
-    let write_err = |source, lock_path| WorktreeError::Io {
-        action: "create the worktree-mutation lock".to_string(),
-        path: lock_path,
-        source,
+    let contention = Contention::Wait {
+        patience: MUTATION_LOCK_TIMEOUT,
+        poll: MUTATION_LOCK_POLL,
     };
-    let owner_json = serde_json::to_string(&LockOwner {
-        pid: Pid::current(),
-    })
-    .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
-
-    let deadline = std::time::Instant::now() + MUTATION_LOCK_TIMEOUT;
-    loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(mut file) => {
-                file.write_all(owner_json.as_bytes())
-                    .map_err(|source| write_err(source, lock_path.clone()))?;
-                return Ok(WorktreeMutationGuard { lock_path });
-            }
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                let owner: Option<LockOwner> = std::fs::read(&lock_path)
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-                match owner {
-                    Some(owner) if liveness(owner.pid) != Liveness::Alive => {
-                        // Dead holder: steal by remove-then-retry — the
-                        // atomic `create_new` above decides which of two
-                        // concurrent stealers actually wins.
-                        let _ = std::fs::remove_file(&lock_path);
-                        continue;
-                    }
-                    // Alive, or unreadable (a holder between its
-                    // `create_new` and its `write_all` — microseconds):
-                    // wait our turn.
-                    _ => {}
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(WorktreeError::MutationLockTimeout {
-                        lock_path,
-                        owner_pid: owner.map(|o| o.pid),
-                    });
-                }
-                tokio::time::sleep(MUTATION_LOCK_POLL).await;
-            }
-            Err(source) => return Err(write_err(source, lock_path)),
+    match lock::acquire(&lock_path, contention, &SystemProbe, &SystemClock).await {
+        Ok(Acquired::Fresh) => Ok(WorktreeMutationGuard { lock_path }),
+        Ok(Acquired::Stolen { dead }) => {
+            tracing::warn!(
+                pid = %dead.pid,
+                since = %dead.started_at,
+                "took over the worktree-mutation lock of a process that is gone"
+            );
+            Ok(WorktreeMutationGuard { lock_path })
         }
+        Err(LockError::Timeout { lock_path, owner }) => Err(WorktreeError::MutationLockTimeout {
+            lock_path,
+            owner_pid: owner.map(|owner| owner.pid),
+        }),
+        Err(LockError::Held {
+            lock_path, owner, ..
+        }) => Err(WorktreeError::MutationLockTimeout {
+            lock_path,
+            owner_pid: Some(owner.pid),
+        }),
+        Err(LockError::Unreadable { lock_path }) => Err(WorktreeError::MutationLockTimeout {
+            lock_path,
+            owner_pid: None,
+        }),
+        Err(LockError::Io {
+            action,
+            lock_path,
+            source,
+        }) => Err(WorktreeError::Io {
+            action: format!("{action} the worktree-mutation lock"),
+            path: lock_path,
+            source,
+        }),
     }
 }
 
-/// The lock's content: the owning `yunta` process. Liveness is
-/// decided by `kill -0` at contention time, never by age — which is why
-/// there is no timestamp here.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct LockOwner {
-    pid: Pid,
-}
-
+/// Refuses at once on a present holder — a second run on the same
+/// checkout is the thing this lock exists to prevent — and reports a
+/// takeover from a gone holder, never silently.
 async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
-    use std::io::Write;
-
     let lock_path = lock_path(repo).await?;
-    let write_err = |source, lock_path| WorktreeError::Io {
-        action: "create the isolation lock".to_string(),
-        path: lock_path,
-        source,
-    };
-    let owner_json = serde_json::to_string(&LockOwner {
-        pid: Pid::current(),
-    })
-    .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
-
-    // `create_new` makes the check-and-create atomic — two processes
-    // racing to lock the same repo can't both succeed.
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(mut file) => {
-            file.write_all(owner_json.as_bytes())
-                .map_err(|source| write_err(source, lock_path))?;
-            Ok(WorktreePrepared::Ready)
+    match lock::acquire(&lock_path, Contention::Refuse, &SystemProbe, &SystemClock).await {
+        Ok(Acquired::Fresh) => Ok(WorktreePrepared::Ready),
+        Ok(Acquired::Stolen { dead }) => {
+            Ok(WorktreePrepared::StoleStaleLock { dead_pid: dead.pid })
         }
-        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-            // The lock has an owner — is it still alive?
-            let owner: Option<LockOwner> = std::fs::read(&lock_path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-            match owner {
-                Some(owner) if liveness(owner.pid) == Liveness::Alive => {
-                    Err(WorktreeError::Locked {
-                        path: repo.to_path_buf(),
-                    })
-                }
-                Some(owner) => {
-                    // Dead owner: steal, reported to the caller so the
-                    // takeover is explicit, never silent.
-                    std::fs::write(&lock_path, owner_json.as_bytes())
-                        .map_err(|source| write_err(source, lock_path))?;
-                    Ok(WorktreePrepared::StoleStaleLock {
-                        dead_pid: owner.pid,
-                    })
-                }
-                None => Err(WorktreeError::LockedByUnknown {
-                    path: repo.to_path_buf(),
-                    lock_path,
-                }),
-            }
-        }
-        Err(source) => Err(write_err(source, lock_path)),
+        Err(LockError::Held {
+            lock_path,
+            owner,
+            liveness: Liveness::Unknown,
+        }) => Err(WorktreeError::LockedByAnotherUser {
+            path: repo.to_path_buf(),
+            lock_path,
+            pid: owner.pid,
+        }),
+        Err(LockError::Held { owner, .. }) => Err(WorktreeError::Locked {
+            path: repo.to_path_buf(),
+            pid: owner.pid,
+        }),
+        Err(LockError::Timeout { owner, .. }) => match owner {
+            Some(owner) => Err(WorktreeError::Locked {
+                path: repo.to_path_buf(),
+                pid: owner.pid,
+            }),
+            None => Err(WorktreeError::LockedByUnknown {
+                path: repo.to_path_buf(),
+                lock_path,
+            }),
+        },
+        Err(LockError::Unreadable { lock_path }) => Err(WorktreeError::LockedByUnknown {
+            path: repo.to_path_buf(),
+            lock_path,
+        }),
+        Err(LockError::Io {
+            action,
+            lock_path,
+            source,
+        }) => Err(WorktreeError::Io {
+            action: format!("{action} the isolation lock"),
+            path: lock_path,
+            source,
+        }),
     }
+}
+
+/// The main checkout of the repo whose common git dir is `common_dir`:
+/// the directory that contains it.
+fn main_repo_of(common_dir: &Path) -> Result<PathBuf, WorktreeError> {
+    common_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| WorktreeError::NoMainRepo {
+            common_dir: common_dir.to_path_buf(),
+        })
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
@@ -414,4 +413,22 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_common_dir_without_a_parent_names_no_main_repo() {
+        let err = main_repo_of(Path::new("/")).unwrap_err();
+        assert!(
+            matches!(err, WorktreeError::NoMainRepo { .. }),
+            "got: {err:?}"
+        );
+        assert_eq!(
+            main_repo_of(Path::new("/srv/repo/.git")).unwrap(),
+            PathBuf::from("/srv/repo")
+        );
+    }
 }

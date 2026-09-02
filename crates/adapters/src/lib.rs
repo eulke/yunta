@@ -9,6 +9,7 @@ mod claude_code;
 mod codex;
 mod forge;
 mod mock;
+pub mod process_start;
 mod session;
 pub mod signal;
 

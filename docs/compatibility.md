@@ -139,6 +139,13 @@ binary that would leave processes behind on cancellation. Windows becomes a
 target when a process layer with the same guarantees exists and its
 cancellation tests pass on a Windows runner.
 
+A lock's holder is asked about by signal on every platform, and a holder
+that cannot be asked about — a process of another user — keeps its lock.
+On Linux the holder's start time, read from `/proc`, also tells a reused
+pid from the holder, so a newcomer that got a dead holder's pid cannot keep
+its lock. macOS publishes no `/proc`: there liveness alone decides, and a
+pid reused while the lock stands keeps it until that process ends.
+
 ## What isn't covered here
 
 Individual adapters (CLI integrations like `claude-code`, `codex`) have
