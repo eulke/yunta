@@ -542,9 +542,13 @@ pub async fn create_run(
         node_id: None,
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
-            // The resolved inputs are frozen in the manifest; the
-            // event carries none.
-            inputs: std::collections::BTreeMap::new(),
+            // Every declared input as the manifest froze it — provided
+            // or defaulted, already validated: what the run used.
+            inputs: manifest
+                .inputs
+                .iter()
+                .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+                .collect(),
             mode: mode.clone(),
             promoted_from: promoted_from.cloned(),
             // Resolved once here — declared range as

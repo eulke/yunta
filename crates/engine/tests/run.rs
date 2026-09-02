@@ -6385,3 +6385,69 @@ async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log(
         "the birth is one run_created after the directory is complete"
     );
 }
+
+#[tokio::test]
+async fn run_created_freezes_resolved_inputs() {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_yaml::from_str(
+        r#"
+name: with-inputs
+inputs:
+  idea:
+    type: string
+    required: true
+  greeting:
+    type: string
+    default: hola
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#,
+    )
+    .unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let provided = HashMap::from([("idea".to_string(), "ship it".to_string())]);
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &provided,
+    )
+    .unwrap();
+    create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let created = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::RunCreated(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("run_created is the first event");
+    let frozen: std::collections::BTreeMap<String, serde_json::Value> = manifest
+        .inputs
+        .iter()
+        .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+        .collect();
+    assert_eq!(
+        created.inputs, frozen,
+        "run_created carries every input the manifest froze, the default included"
+    );
+    assert_eq!(created.inputs["greeting"], "hola");
+    assert_eq!(created.inputs["idea"], "ship it");
+}
