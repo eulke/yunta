@@ -13,6 +13,12 @@ use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Seq, Workflow};
 use super::schedule::{self, ScheduleStep};
 use crate::reserved::ReservedOption;
 
+/// Whether an event is the run-level `run_paused` marker — the one predicate
+/// the resolve-gate path reads a parked run's log by.
+fn is_run_paused(event: &StoredEvent) -> bool {
+    matches!(event.payload(), Some(EventPayload::RunPaused(_)))
+}
+
 /// The escalation object for a node whose re-routes are exhausted:
 /// retry once more, abort, or — when `modes:` has somewhere later to go
 /// — promote.
@@ -230,10 +236,7 @@ pub async fn resolve_gate(
     free_text: Option<String>,
 ) -> Result<(), ResolveGateError> {
     let events = storage.events_for_run(run_id.clone()).await?;
-    if !matches!(
-        events.last().and_then(StoredEvent::payload),
-        Some(EventPayload::RunPaused(_))
-    ) {
+    if !events.last().is_some_and(is_run_paused) {
         return Err(ResolveGateError::NotPaused);
     }
     let Some((node, escalation)) = current_escalation(manifest, &events) else {
@@ -309,7 +312,7 @@ pub(crate) fn pre_seeded_resolution(
             ) if event.node_id.as_ref() == Some(node) => {
                 blocker = blocker.max(Some(event.seq));
             }
-            Some(EventPayload::RunPaused(_)) => blocker = blocker.max(Some(event.seq)),
+            _ if is_run_paused(event) => blocker = blocker.max(Some(event.seq)),
             _ => {}
         }
     }

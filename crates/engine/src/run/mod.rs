@@ -657,6 +657,15 @@ pub async fn execute_run(env: RunEnv<'_>) -> Result<RunReport, RunError> {
 /// finds the engine already dead. The CLI never builds an `EventDraft`
 /// itself: event construction and its clock stamp live here, so every
 /// event on the log is emitted by the engine through one injected clock.
+/// The run-level `run_paused` event — built in one place so every path that
+/// stops a run (the scheduler's [`record_pause`], a crash's
+/// [`record_pause_after_crash`]) writes the same event.
+pub(super) fn run_paused(reason: &str) -> EventPayload {
+    EventPayload::RunPaused(RunPausedPayload {
+        reason: reason.to_string(),
+    })
+}
+
 pub async fn record_pause_after_crash(
     storage: &AsyncStorage,
     run_id: &RunId,
@@ -668,14 +677,32 @@ pub async fn record_pause_after_crash(
             EventDraft {
                 run_id: run_id.clone(),
                 node_id: None,
-                payload: EventPayload::RunPaused(RunPausedPayload {
-                    reason: reason.to_string(),
-                }),
+                payload: run_paused(reason),
             },
             clock.now(),
         )
         .await?;
     Ok(())
+}
+
+/// Records the run's pause, exports the forensic `events.jsonl`, and returns
+/// the paused report — the one place a run stops for a human to resume,
+/// whatever asked for it (a cancellation, an exhausted budget, an
+/// unanswered gate).
+async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {
+    record_pause(ctx, &reason).await?;
+    Ok(RunReport {
+        terminal: RunTerminal::Paused { reason },
+        state: derive(&ctx.load_events().await?),
+    })
+}
+
+/// Emits the run-level `run_paused` event and exports the forensic log — the
+/// one place the pause event is written, shared by the scheduler's own pause
+/// and the gate flow's.
+pub(super) async fn record_pause(ctx: &RunCtx<'_>, reason: &str) -> Result<(), RunError> {
+    ctx.emit(None, run_paused(reason)).await?;
+    ctx.export_events_jsonl().await
 }
 
 /// [`execute_run`] with an explicit composition depth:
@@ -834,20 +861,7 @@ pub(crate) async fn execute_run_at_depth(
         // per-node child tokens below, whose failed nodes land in the
         // log first and then reach this same check.
         if root_cancel.is_cancelled() {
-            ctx.emit(
-                None,
-                EventPayload::RunPaused(RunPausedPayload {
-                    reason: "cancelled by user".to_string(),
-                }),
-            )
-            .await?;
-            ctx.export_events_jsonl().await?;
-            return Ok(RunReport {
-                terminal: RunTerminal::Paused {
-                    reason: "cancelled by user".to_string(),
-                },
-                state: derive(&ctx.load_events().await?),
-            });
+            return pause(&ctx, "cancelled by user".to_string()).await;
         }
         let events = ctx.load_events().await?;
         match schedule::next_step(
@@ -942,20 +956,7 @@ pub(crate) async fn execute_run_at_depth(
                     state,
                 });
             }
-            ScheduleStep::Pause { reason } => {
-                ctx.emit(
-                    None,
-                    EventPayload::RunPaused(RunPausedPayload {
-                        reason: reason.clone(),
-                    }),
-                )
-                .await?;
-                ctx.export_events_jsonl().await?;
-                return Ok(RunReport {
-                    terminal: RunTerminal::Paused { reason },
-                    state: derive(&ctx.load_events().await?),
-                });
-            }
+            ScheduleStep::Pause { reason } => return pause(&ctx, reason).await,
             ScheduleStep::Reroute {
                 from,
                 to,
@@ -1017,20 +1018,7 @@ pub(crate) async fn execute_run_at_depth(
                     // No live surface to ask (headless, no TTY, `yunta
                     // test`): pause and let a later `yunta resume` (or a
                     // future MCP client) carry the decision instead.
-                    ctx.emit(
-                        None,
-                        EventPayload::RunPaused(RunPausedPayload {
-                            reason: escalation.summary.clone(),
-                        }),
-                    )
-                    .await?;
-                    ctx.export_events_jsonl().await?;
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Paused {
-                            reason: escalation.summary,
-                        },
-                        state: derive(&ctx.load_events().await?),
-                    });
+                    return pause(&ctx, escalation.summary).await;
                 };
                 if !already_recorded {
                     ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
@@ -1118,18 +1106,7 @@ pub(crate) async fn execute_run_at_depth(
                             .map(|text| format!(": {text}"))
                             .unwrap_or_default()
                     );
-                    ctx.emit(
-                        None,
-                        EventPayload::RunPaused(RunPausedPayload {
-                            reason: reason.clone(),
-                        }),
-                    )
-                    .await?;
-                    ctx.export_events_jsonl().await?;
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events().await?),
-                    });
+                    return pause(&ctx, reason).await;
                 }
             }
             ScheduleStep::Execute(batch) => {
@@ -1152,18 +1129,7 @@ pub(crate) async fn execute_run_at_depth(
                                     .budget_lifted
                                     .store(true, std::sync::atomic::Ordering::Relaxed),
                                 budget::BudgetDecision::Pause { reason } => {
-                                    ctx.emit(
-                                        None,
-                                        EventPayload::RunPaused(RunPausedPayload {
-                                            reason: reason.clone(),
-                                        }),
-                                    )
-                                    .await?;
-                                    ctx.export_events_jsonl().await?;
-                                    return Ok(RunReport {
-                                        terminal: RunTerminal::Paused { reason },
-                                        state: derive(&ctx.load_events().await?),
-                                    });
+                                    return pause(&ctx, reason).await;
                                 }
                             }
                         }
@@ -1211,18 +1177,7 @@ pub(crate) async fn execute_run_at_depth(
                 }
                 if let Some(reason) = child_paused {
                     if !root_cancel.is_cancelled() {
-                        ctx.emit(
-                            None,
-                            EventPayload::RunPaused(RunPausedPayload {
-                                reason: reason.clone(),
-                            }),
-                        )
-                        .await?;
-                        ctx.export_events_jsonl().await?;
-                        return Ok(RunReport {
-                            terminal: RunTerminal::Paused { reason },
-                            state: derive(&ctx.load_events().await?),
-                        });
+                        return pause(&ctx, reason).await;
                     }
                 }
             }
@@ -1296,18 +1251,7 @@ pub(crate) async fn execute_run_at_depth(
                 )
                 .await?;
                 if let gate_exec::GateStep::StillWaiting { reason } = step {
-                    ctx.emit(
-                        None,
-                        EventPayload::RunPaused(RunPausedPayload {
-                            reason: reason.clone(),
-                        }),
-                    )
-                    .await?;
-                    ctx.export_events_jsonl().await?;
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events().await?),
-                    });
+                    return pause(&ctx, reason).await;
                 }
             }
             ScheduleStep::AskQuestions { node } => {
@@ -1315,18 +1259,7 @@ pub(crate) async fn execute_run_at_depth(
                 match questions_exec::execute_ask(&ctx, node).await? {
                     questions_exec::AskOutcome::Answered => {}
                     questions_exec::AskOutcome::Pause { reason } => {
-                        ctx.emit(
-                            None,
-                            EventPayload::RunPaused(RunPausedPayload {
-                                reason: reason.clone(),
-                            }),
-                        )
-                        .await?;
-                        ctx.export_events_jsonl().await?;
-                        return Ok(RunReport {
-                            terminal: RunTerminal::Paused { reason },
-                            state: derive(&ctx.load_events().await?),
-                        });
+                        return pause(&ctx, reason).await;
                     }
                 }
             }

@@ -23,8 +23,7 @@
 use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
-    GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload,
-    RunPausedPayload, TokenUsage,
+    GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
 use yunta_core::{ExternalGate, FindingId, Node};
 
@@ -533,9 +532,7 @@ async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
 }
 
 async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
-    ctx.emit(None, EventPayload::RunPaused(RunPausedPayload { reason }))
-        .await?;
-    ctx.export_events_jsonl().await
+    super::record_pause(ctx, &reason).await
 }
 
 fn encode_ref(published: &PublishedGate) -> String {
