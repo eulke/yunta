@@ -162,18 +162,6 @@ pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
     child.id().and_then(|id| Pid::try_from(id).ok())
 }
 
-/// `kill -0 <pid>` — POSIX liveness without `libc` or unsafe (Windows
-/// is out of scope). Lives in the imperative shell only.
-pub fn process_alive(pid: Pid) -> bool {
-    std::process::Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
 fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EngineProcessFile> {
     state
         .lock()

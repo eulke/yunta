@@ -22,6 +22,7 @@ use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Pid, Re
 use crate::session::{
     write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
 };
+use crate::signal::{signal_group, Signal};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("claude-code");
@@ -253,11 +254,11 @@ impl AgentSession for ClaudeCodeSession {
     }
 
     async fn interrupt(&mut self) -> Result<()> {
-        signal_group(self.pid, "-INT").await
+        signal_group(self.pid, Signal::SIGINT).map_err(|e| e.into_adapter_error(&ID))
     }
 
     async fn kill(&mut self) -> Result<()> {
-        signal_group(self.pid, "-KILL").await
+        signal_group(self.pid, Signal::SIGKILL).map_err(|e| e.into_adapter_error(&ID))
     }
 
     fn pgid(&self) -> Option<Pid> {
@@ -298,28 +299,5 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
         std::os::unix::fs::symlink(skill, &dest)
             .map_err(|e| io_err(format!("stage skill at {}", dest.display()), e))?;
     }
-    Ok(())
-}
-
-/// Sends `signal` to the whole process group — a negative pid
-/// targets every descendant the CLI spawned, not just the CLI process
-/// itself. The `--` before the negative pid is load-bearing: procps-ng's
-/// `kill` (confirmed empirically) silently signals nothing and still
-/// exits 0 without it, parsing `-KILL -123` as two flags instead of a
-/// signal plus a process-group target. `kill` exiting nonzero because
-/// the group is already gone is the desired end state, not a failure
-/// worth reporting.
-async fn signal_group(pid: Pid, signal: &str) -> Result<()> {
-    let _ = tokio::process::Command::new("kill")
-        .arg(signal)
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .status()
-        .await
-        .map_err(|source| AdapterError::AdapterIo {
-            adapter: ID.clone(),
-            action: format!("send {signal} to the session's process group"),
-            source,
-        })?;
     Ok(())
 }

@@ -10,6 +10,7 @@ mod codex;
 mod forge;
 mod mock;
 mod session;
+pub mod signal;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};

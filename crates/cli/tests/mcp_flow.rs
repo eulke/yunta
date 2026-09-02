@@ -10,6 +10,8 @@ use rmcp::model::CallToolRequestParams;
 use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
 use serde_json::json;
+use yunta_adapters::signal::{signal_process, Signal};
+use yunta_core::Pid;
 
 fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
@@ -297,10 +299,11 @@ nodes:
         .to_string();
 
     // Kill `yunta mcp` outright — no graceful shutdown.
-    assert!(
-        signal(&mcp_pid.to_string(), "KILL"),
-        "`yunta mcp` must be alive to be killed"
-    );
+    signal_process(
+        Pid::try_from(mcp_pid).expect("a spawned child has a positive pid"),
+        Signal::SIGKILL,
+    )
+    .expect("`yunta mcp` must be alive to be killed");
     drop(client);
 
     // A brand new MCP session, sharing nothing with the killed one,
@@ -339,15 +342,4 @@ nodes:
         "done"
     );
     fresh_client.cancel().await.unwrap();
-}
-
-/// Sends `sig` to `target` — a pid, or `-<pgid>` for a whole process
-/// group — the way an operator does from a shell; `false` when nothing
-/// was left to signal.
-fn signal(target: &str, sig: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-s", sig, "--", target])
-        .status()
-        .expect("failed to run kill")
-        .success()
 }

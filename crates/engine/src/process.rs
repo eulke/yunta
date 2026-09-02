@@ -14,6 +14,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use yunta_adapters::signal::{signal_group, Signal, SignalError};
 use yunta_core::Pid;
 
 use crate::process_registry::{self, ProcessRegistry};
@@ -168,6 +169,12 @@ pub enum SpawnError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to kill the process group of `{command}`")]
+    Kill {
+        command: String,
+        #[source]
+        source: SignalError,
+    },
 }
 
 enum Waited {
@@ -246,7 +253,10 @@ pub async fn spawn_governed(
         })?),
     };
     if !matches!(waited, Waited::Exited(_)) {
-        kill_process_group(pgid).await;
+        signal_group(pgid, Signal::SIGKILL).map_err(|source| SpawnError::Kill {
+            command: described.clone(),
+            source,
+        })?;
         let _ = child.wait().await;
     }
     if let Some(task) = stdin_task {
@@ -271,18 +281,6 @@ pub async fn spawn_governed(
             stderr,
         },
     })
-}
-
-/// Sends `SIGKILL` to `pgid`'s whole process group — the `--` before
-/// the negative pid is load-bearing: procps-ng parses `-KILL -123` as
-/// two flags without it.
-pub async fn kill_process_group(pgid: Pid) {
-    let _ = tokio::process::Command::new("kill")
-        .arg("-KILL")
-        .arg("--")
-        .arg(format!("-{pgid}"))
-        .status()
-        .await;
 }
 
 fn stdio(capture: Capture) -> Stdio {

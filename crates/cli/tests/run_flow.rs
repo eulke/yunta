@@ -8,6 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
+use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
+use yunta_core::Pid;
+
 fn claude_code_stub() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
 }
@@ -1182,11 +1185,7 @@ nodes:
         .to_string();
 
     // Simulated Ctrl-C: SIGINT to the yunta process.
-    let killed = std::process::Command::new("kill")
-        .args(["-INT", &yunta.id().to_string()])
-        .status()
-        .unwrap();
-    assert!(killed.success());
+    signal_process(pid_of(&yunta), Signal::SIGINT).expect("yunta is alive to be interrupted");
 
     let output = yunta.wait_with_output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout);
@@ -1196,12 +1195,11 @@ nodes:
     );
 
     // Zero zombies: the SIGINT-ignoring child is dead anyway.
-    let alive = std::process::Command::new("kill")
-        .args(["-0", &child_pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap();
-    assert!(!alive.success(), "the stubborn child must be dead");
+    assert_eq!(
+        liveness(parse_pid(&child_pid)),
+        Liveness::Dead,
+        "the stubborn child must be dead"
+    );
 
     // The `none` lock is released, and engine.json is gone.
     assert!(!repo.join(".git/yunta-none.lock").exists());
@@ -1294,12 +1292,11 @@ nodes:
         .unwrap()
         .trim()
         .to_string();
-    let alive = std::process::Command::new("kill")
-        .args(["-0", &child_pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap();
-    assert!(!alive.success(), "the sleeping child must be dead");
+    assert_eq!(
+        liveness(parse_pid(&child_pid)),
+        Liveness::Dead,
+        "the sleeping child must be dead"
+    );
 
     let status = yunta_in(&repo, &home, &["status", &run_id]);
     assert!(
@@ -1339,11 +1336,7 @@ nodes:
 
     // Simulated crash: SIGKILL gives the engine no chance to clean up —
     // engine.json survives with the orphaned process group in it.
-    let killed = std::process::Command::new("kill")
-        .args(["-KILL", &yunta.id().to_string()])
-        .status()
-        .unwrap();
-    assert!(killed.success());
+    signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
     let _ = yunta.wait();
     let engine_json = home.join("runs").join(&run_id).join("scratch/engine.json");
     assert!(
@@ -1436,10 +1429,7 @@ nodes:
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
     let run_id = only_run_id(&home);
-    std::process::Command::new("kill")
-        .args(["-KILL", &yunta.id().to_string()])
-        .status()
-        .unwrap();
+    signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
     let _ = yunta.wait();
 
     // The condition the restarted node needs, in the ORIGINAL worktree —
@@ -1546,10 +1536,7 @@ nodes:
     let yunta = spawn_run_until(&repo, &home, &repo.join("started.txt"));
     let run_id = only_run_id(&home);
 
-    std::process::Command::new("kill")
-        .args(["-INT", &yunta.id().to_string()])
-        .status()
-        .unwrap();
+    signal_process(pid_of(&yunta), Signal::SIGINT).expect("yunta is alive to be interrupted");
     let output = yunta.wait_with_output().unwrap();
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("cancelled by user"),
@@ -1955,7 +1942,7 @@ nodes:
         .process_group(0)
         .spawn()
         .unwrap();
-    let launcher_pgid = launcher.id() as i32; // `process_group(0)`: pgid == its own pid
+    let launcher_pgid = pid_of(&launcher); // `process_group(0)`: pgid == its own pid
     let output = launcher.wait_with_output().unwrap();
     assert!(output.status.success());
     let run_id = stdout(&Output {
@@ -1973,7 +1960,7 @@ nodes:
 
     // The launcher itself has already exited — this signals whatever
     // else is still in its group, if anything is.
-    signal(&format!("-{launcher_pgid}"), "TERM");
+    signal_group(launcher_pgid, Signal::SIGTERM).expect("the launcher's group is ours to signal");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -1996,15 +1983,18 @@ nodes:
     );
 }
 
-/// Sends `sig` to `target` — a pid, or `-<pgid>` for a whole process
-/// group — the way an operator does from a shell; `false` when nothing
-/// was left to signal.
-fn signal(target: &str, sig: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-s", sig, "--", target])
-        .status()
-        .expect("failed to run kill")
-        .success()
+/// The pid of a child this test spawned.
+fn pid_of(child: &std::process::Child) -> Pid {
+    Pid::try_from(child.id()).expect("a spawned child has a positive pid")
+}
+
+/// A pid a run wrote for the test to read back.
+fn parse_pid(text: &str) -> Pid {
+    text.trim()
+        .parse::<u32>()
+        .ok()
+        .and_then(|raw| Pid::try_from(raw).ok())
+        .unwrap_or_else(|| panic!("`{text}` is not a pid"))
 }
 
 // --- `yunta resolve-gate` -------------------------------------------------

@@ -49,6 +49,7 @@ use yunta_core::{
 use crate::session::{
     write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
 };
+use crate::signal::{signal_group, Signal};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
@@ -289,11 +290,11 @@ impl AgentSession for CodexSession {
     }
 
     async fn interrupt(&mut self) -> Result<()> {
-        signal_group(self.pid, "-INT").await
+        signal_group(self.pid, Signal::SIGINT).map_err(|e| e.into_adapter_error(&ID))
     }
 
     async fn kill(&mut self) -> Result<()> {
-        signal_group(self.pid, "-KILL").await
+        signal_group(self.pid, Signal::SIGKILL).map_err(|e| e.into_adapter_error(&ID))
     }
 
     fn pgid(&self) -> Option<Pid> {
@@ -301,22 +302,4 @@ impl AgentSession for CodexSession {
         // process-group id.
         Some(self.pid)
     }
-}
-
-/// Sends `signal` to the whole process group — identical mechanism
-/// to `claude_code`'s own, see that module's doc comment for why the
-/// `--` before the negative pid is load-bearing.
-async fn signal_group(pid: Pid, signal: &str) -> Result<()> {
-    let _ = tokio::process::Command::new("kill")
-        .arg(signal)
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .status()
-        .await
-        .map_err(|source| AdapterError::AdapterIo {
-            adapter: ID.clone(),
-            action: format!("send {signal} to the session's process group"),
-            source,
-        })?;
-    Ok(())
 }

@@ -18,8 +18,8 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use yunta_core::{events::EventPayload, Clock, RunId, SystemClock};
-use yunta_engine::process::kill_process_group;
+use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
+use yunta_core::{describe, events::EventPayload, Clock, Pid, RunId, SystemClock};
 use yunta_engine::NodeState;
 use yunta_storage::AsyncStorage;
 
@@ -101,15 +101,16 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    if yunta_engine::process_alive(registry.engine_pid) {
+    if liveness(registry.engine_pid) == Liveness::Alive {
         // Case 1 — the engine handles the rest itself.
         println!(
             "run {run_id}: signalling the live engine (pid {})",
             registry.engine_pid
         );
-        let _ = std::process::Command::new("kill")
-            .args(["-INT", &registry.engine_pid.to_string()])
-            .status();
+        if let Err(e) = signal_process(registry.engine_pid, Signal::SIGINT) {
+            eprintln!("error: {} — retry `yunta cancel {run_id}`", describe(&e));
+            return ExitCode::FAILURE;
+        }
 
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
@@ -136,21 +137,19 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
                     "run {run_id}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
                      — escalating to SIGKILL on its process groups"
                 );
-                for pgid in &registry.process_groups {
-                    kill_process_group(*pgid).await;
+                kill_groups(&registry.process_groups);
+                if let Err(e) = signal_process(registry.engine_pid, Signal::SIGKILL) {
+                    if !e.is_gone() {
+                        eprintln!("warning: {}", describe(&e));
+                    }
                 }
-                let _ = std::process::Command::new("kill")
-                    .args(["-KILL", &registry.engine_pid.to_string()])
-                    .status();
                 return ExitCode::FAILURE;
             }
         }
     }
 
     // Case 2 — the engine crashed; its leftovers are ours to clean.
-    for pgid in &registry.process_groups {
-        kill_process_group(*pgid).await;
-    }
+    kill_groups(&registry.process_groups);
     let paused = storage
         .append(
             yunta_core::events::EventDraft {
@@ -179,4 +178,15 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         registry.process_groups.len()
     );
     ExitCode::SUCCESS
+}
+
+/// SIGKILL to every process group the engine registered. A group that
+/// is already gone is the end state wanted; any other refusal is
+/// printed, never hidden.
+fn kill_groups(groups: &[Pid]) {
+    for pgid in groups {
+        if let Err(e) = signal_group(*pgid, Signal::SIGKILL) {
+            eprintln!("warning: {}", describe(&e));
+        }
+    }
 }

@@ -20,6 +20,7 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use yunta_adapters::signal::{liveness, Liveness};
 use yunta_core::{Isolation, Pid};
 
 #[derive(Debug, Error)]
@@ -304,7 +305,7 @@ async fn lock_worktree_mutations(
                     .ok()
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok());
                 match owner {
-                    Some(owner) if !crate::process_registry::process_alive(owner.pid) => {
+                    Some(owner) if liveness(owner.pid) != Liveness::Alive => {
                         // Dead holder: steal by remove-then-retry — the
                         // atomic `create_new` above decides which of two
                         // concurrent stealers actually wins.
@@ -369,7 +370,7 @@ async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok());
             match owner {
-                Some(owner) if crate::process_registry::process_alive(owner.pid) => {
+                Some(owner) if liveness(owner.pid) == Liveness::Alive => {
                     Err(WorktreeError::Locked {
                         path: repo.to_path_buf(),
                     })

@@ -70,9 +70,7 @@ pub use pack_audit::{
 };
 pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
-pub use process_registry::{
-    process_alive, read_registry, registry_path, EngineProcessFile, ProcessRegistry,
-};
+pub use process_registry::{read_registry, registry_path, EngineProcessFile, ProcessRegistry};
 pub use progress::render_progress;
 pub use questions::{register as register_questions, QuestionsError};
 pub use receipt::{

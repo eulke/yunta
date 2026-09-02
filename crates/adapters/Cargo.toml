@@ -31,6 +31,10 @@ reqwest = { workspace = true, features = [
 # GitHub's Contents API takes file bodies base64-encoded — the one place
 # this crate needs to produce that encoding.
 base64.workspace = true
+# Signals to processes and process groups (`signal.rs`): the kernel's
+# own `errno` instead of a `kill` binary's exit status, with no unsafe
+# code of ours (D118). Already in the tree through `rmcp`.
+nix.workspace = true
 # The mock's `run_tool` fixture step: the mock acts as a real MCP client
 # against the engine's per-run listener, over the same streamable-HTTP
 # transport a real CLI would use — the whole per-run tool path stays

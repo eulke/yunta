@@ -191,6 +191,14 @@ fn a_pid_is_never_zero() {
 }
 
 #[test]
+fn a_pid_fits_a_signed_32_bit_integer() {
+    assert_eq!(Pid::try_from(7_u32).unwrap().as_i32(), 7);
+    assert_eq!(Pid::try_from(i32::MAX as u32).unwrap().as_i32(), i32::MAX);
+    assert!(Pid::try_from(i32::MAX as u32 + 1).is_err());
+    assert!(serde_json::from_str::<Pid>("4294967295").is_err());
+}
+
+#[test]
 fn deserializing_an_identifier_applies_its_rule_and_names_the_path() {
     let yaml = "\
 tasks:

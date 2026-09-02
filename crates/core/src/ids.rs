@@ -509,7 +509,7 @@ impl schemars::JsonSchema for PackRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pid(u32);
 
-const PID_RULE: &str = "a positive number";
+const PID_RULE: &str = "a positive number that fits a signed 32-bit integer";
 
 impl Pid {
     /// This process's own id. The kernel never runs a user process as
@@ -520,6 +520,12 @@ impl Pid {
 
     pub const fn as_u32(self) -> u32 {
         self.0
+    }
+
+    /// The id as the kernel's own type; the constructors guarantee it
+    /// fits.
+    pub const fn as_i32(self) -> i32 {
+        self.0 as i32
     }
 }
 
@@ -533,7 +539,7 @@ impl TryFrom<u32> for Pid {
     type Error = InvalidId;
 
     fn try_from(value: u32) -> Result<Self, InvalidId> {
-        if value == 0 {
+        if value == 0 || i32::try_from(value).is_err() {
             return Err(InvalidId {
                 what: "process id",
                 value: value.to_string(),
@@ -582,7 +588,7 @@ impl schemars::JsonSchema for Pid {
         schemars::json_schema!({
             "type": "integer",
             "minimum": 1,
-            "maximum": u32::MAX,
+            "maximum": i32::MAX,
             "description": format!("A process id: {}", PID_RULE),
         })
     }
