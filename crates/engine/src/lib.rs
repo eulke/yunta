@@ -54,7 +54,7 @@ mod worktree;
 pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
-    ResolvedWorkflow, WorkflowOrigin,
+    PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
 pub use check::{
     check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,

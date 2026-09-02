@@ -46,6 +46,19 @@ pub enum CatalogError {
          each one path segment: no further `/`, no `\\`, not `.` or `..`, not empty"
     )]
     InvalidName { name: String },
+    #[error("pack manifest `{path}` cannot be read: {detail}")]
+    Unreadable { path: PathBuf, detail: String },
+    #[error("pack manifest `{path}` is malformed: {detail}")]
+    Malformed { path: PathBuf, detail: String },
+}
+
+/// Every pack under a publisher: the ones whose `pack.yaml` parsed, and
+/// the ones that did not. A broken pack is named (as a
+/// [`CatalogError::Unreadable`] or [`CatalogError::Malformed`]), never
+/// silently dropped from the catalog a human is looking at.
+pub struct PublisherPacks {
+    pub installed: Vec<(PathBuf, PackManifest)>,
+    pub broken: Vec<CatalogError>,
 }
 
 /// Where a resolved workflow file actually came from — `check`'s
@@ -122,12 +135,28 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
         if !pack_dir.is_dir() {
             continue;
         }
-        let Ok(manifest_text) = std::fs::read_to_string(pack_dir.join("pack.yaml")) else {
-            continue;
+        // A broken pack in the search path is named, never skipped: it
+        // may be the very pack that declares `workflow`, so passing it by
+        // would resolve to `NotFound` and hide the real fault. A
+        // directory with no `pack.yaml` at all is not a pack, so that one
+        // case is skipped.
+        let manifest_path = pack_dir.join("pack.yaml");
+        let manifest_text = match std::fs::read_to_string(&manifest_path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(CatalogError::Unreadable {
+                    path: manifest_path,
+                    detail: e.to_string(),
+                })
+            }
         };
-        let Ok(manifest) = yunta_core::yaml::parse::<PackManifest>(&manifest_text) else {
-            continue;
-        };
+        let manifest = yunta_core::yaml::parse::<PackManifest>(&manifest_text).map_err(|e| {
+            CatalogError::Malformed {
+                path: manifest_path,
+                detail: e.to_string(),
+            }
+        })?;
         for declared in &manifest.contents.workflows {
             let stem_matches = Path::new(declared)
                 .file_stem()
@@ -174,24 +203,44 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
 /// parses — `yunta list`'s own catalog view walks every publisher
 /// directory and calls this per publisher, same resolver both surfaces
 /// share.
-pub fn packs_for_publisher(
-    repo_root: &Path,
-    publisher: &Publisher,
-) -> Vec<(PathBuf, PackManifest)> {
+pub fn packs_for_publisher(repo_root: &Path, publisher: &Publisher) -> PublisherPacks {
     let publisher_dir = repo_root.join(".yunta/packs").join(publisher.as_str());
-    let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
-        return Vec::new();
+    let mut packs = PublisherPacks {
+        installed: Vec::new(),
+        broken: Vec::new(),
     };
-    entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let pack_dir = entry.path();
-            let text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
-            let manifest: PackManifest = yunta_core::yaml::parse(&text).ok()?;
-            Some((pack_dir, manifest))
-        })
-        .collect()
+    let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
+        return packs;
+    };
+    for entry in entries.flatten() {
+        let pack_dir = entry.path();
+        if !pack_dir.is_dir() {
+            continue;
+        }
+        // A directory with no `pack.yaml` is not a pack; one whose
+        // manifest exists but cannot be read or parsed is a broken pack,
+        // named — never dropped from what `yunta list`/`doctor` show.
+        let manifest_path = pack_dir.join("pack.yaml");
+        let manifest_text = match std::fs::read_to_string(&manifest_path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                packs.broken.push(CatalogError::Unreadable {
+                    path: manifest_path,
+                    detail: e.to_string(),
+                });
+                continue;
+            }
+        };
+        match yunta_core::yaml::parse::<PackManifest>(&manifest_text) {
+            Ok(manifest) => packs.installed.push((pack_dir, manifest)),
+            Err(e) => packs.broken.push(CatalogError::Malformed {
+                path: manifest_path,
+                detail: e.to_string(),
+            }),
+        }
+    }
+    packs
 }
 
 /// Where `workflow_path` actually lives, relative to `repo_root` — the

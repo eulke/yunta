@@ -45,18 +45,25 @@ pub fn list_workflows() -> ExitCode {
     let mut entries = repo_catalog_entries(&cwd);
     let shadowed: std::collections::HashSet<String> =
         entries.iter().map(|e| e.display_name.clone()).collect();
+    let (pack_entries, broken_packs) = pack_catalog_entries(&cwd);
+    // A broken pack is named, never silently dropped from the listing.
+    for err in &broken_packs {
+        println!("{err}");
+    }
     entries.extend(
-        pack_catalog_entries(&cwd)
+        pack_entries
             .into_iter()
             .filter(|e| !shadowed.contains(&e.display_name)),
     );
 
     if entries.is_empty() {
-        println!(
-            "no workflows under {} or {}",
-            cwd.join(".yunta/workflows").display(),
-            cwd.join(".yunta/packs").display()
-        );
+        if broken_packs.is_empty() {
+            println!(
+                "no workflows under {} or {}",
+                cwd.join(".yunta/workflows").display(),
+                cwd.join(".yunta/packs").display()
+            );
+        }
         return ExitCode::SUCCESS;
     }
 
@@ -154,10 +161,14 @@ fn walk_yaml_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn pack_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
+fn pack_catalog_entries(
+    cwd: &std::path::Path,
+) -> (Vec<CatalogEntry>, Vec<yunta_engine::CatalogError>) {
     let mut entries = Vec::new();
+    let mut broken = Vec::new();
     for publisher in yunta_engine::installed_publishers(cwd) {
-        for (pack_dir, manifest) in yunta_engine::packs_for_publisher(cwd, &publisher) {
+        let packs = yunta_engine::packs_for_publisher(cwd, &publisher);
+        for (pack_dir, manifest) in packs.installed {
             for declared in &manifest.contents.workflows {
                 let Some(stem) = std::path::Path::new(declared)
                     .file_stem()
@@ -171,9 +182,10 @@ fn pack_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
                 });
             }
         }
+        broken.extend(packs.broken);
     }
     entries.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-    entries
+    (entries, broken)
 }
 
 fn input_type_label(spec: &InputSpec) -> &'static str {

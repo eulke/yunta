@@ -113,7 +113,8 @@ fn resolve_pack_skill(worktree: &Path, name: &str) -> Option<PathBuf> {
     let (publisher, skill) = name.split_once('/')?;
     let publisher = publisher.parse::<Publisher>().ok()?;
     let mut found: Option<PathBuf> = None;
-    for (pack_dir, manifest) in crate::catalog::packs_for_publisher(worktree, &publisher) {
+    for (pack_dir, manifest) in crate::catalog::packs_for_publisher(worktree, &publisher).installed
+    {
         for declared in &manifest.contents.skills {
             let trimmed = declared.trim_end_matches('/');
             let stem = Path::new(trimmed).file_name().and_then(|s| s.to_str());

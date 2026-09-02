@@ -613,7 +613,9 @@ fn org_knowledge_files(
     let mut by_name: std::collections::BTreeMap<std::ffi::OsString, (String, PathBuf)> =
         std::collections::BTreeMap::new();
     for publisher in crate::catalog::installed_publishers(ctx.worktree) {
-        for (pack_dir, manifest) in crate::catalog::packs_for_publisher(ctx.worktree, &publisher) {
+        for (pack_dir, manifest) in
+            crate::catalog::packs_for_publisher(ctx.worktree, &publisher).installed
+        {
             let pack_label = format!("{}/{}", manifest.publisher, manifest.name);
             for declared in &manifest.contents.knowledge {
                 let root = pack_dir.join(declared);

@@ -95,7 +95,14 @@ pub async fn doctor() -> ExitCode {
 fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::ConfigLayer) -> bool {
     let mut all_satisfied = true;
     for publisher in yunta_engine::installed_publishers(cwd) {
-        for (_, manifest) in yunta_engine::packs_for_publisher(cwd, &publisher) {
+        let packs = yunta_engine::packs_for_publisher(cwd, &publisher);
+        // A broken pack is a real gap: its manifest is the only place its
+        // requirements are declared, so it is named, never skipped.
+        for err in &packs.broken {
+            all_satisfied = false;
+            println!("{err}");
+        }
+        for (_, manifest) in packs.installed {
             let gap = yunta_engine::check_pack_requires(&manifest, config);
             let missing_commands: Vec<&String> = gap
                 .required_commands

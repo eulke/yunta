@@ -228,3 +228,69 @@ fn a_reference_that_is_not_a_name_or_publisher_name_is_refused_before_touching_t
     }
     assert!(resolve_workflow(root.path(), "review").is_ok());
 }
+
+#[test]
+fn a_malformed_pack_yaml_is_reported_by_path() {
+    // A pack.yaml that does not parse is named by path, never skipped
+    // into a misleading `NotFound`: it may be the very pack that declares
+    // the workflow being resolved.
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join(".yunta/packs/acme/review-pack/pack.yaml"),
+        "this is not a pack manifest\n",
+    );
+
+    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    match err {
+        CatalogError::Malformed { path, .. } => assert!(
+            path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),
+            "the finding names the broken manifest, got {path:?}"
+        ),
+        other => panic!("expected Malformed naming the path, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unreadable_pack_yaml_is_reported_by_path() {
+    // `pack.yaml` present but not a regular file (here, a directory) can't
+    // be read — a broken pack named, distinct from a directory that
+    // simply has no manifest.
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
+
+    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    match err {
+        CatalogError::Unreadable { path, .. } => assert!(
+            path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),
+            "the finding names the unreadable manifest, got {path:?}"
+        ),
+        other => panic!("expected Unreadable naming the path, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_malformed_pack_manifest_fails_the_ceiling_check() {
+    // A pack's `declares.permissions` ceiling is its only governance
+    // rule; a manifest that does not parse is a check error naming the
+    // file, never a silently disabled ceiling.
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join(".yunta/packs/acme/review-pack/pack.yaml"),
+        "this is not a pack manifest\n",
+    );
+    let workflow: Workflow = serde_yaml::from_str(LEAF).unwrap();
+    let origin = WorkflowOrigin::Pack {
+        publisher: "acme".parse().unwrap(),
+        pack_name: "review-pack".parse().unwrap(),
+    };
+
+    let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::PackManifestMalformed { path, .. }
+                if path.ends_with(".yunta/packs/acme/review-pack/pack.yaml")
+        )),
+        "a malformed pack manifest must fail the ceiling check by path, got {errors:?}"
+    );
+}

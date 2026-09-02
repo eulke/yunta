@@ -141,6 +141,24 @@ pub enum CheckError {
         source: SchemaRangeError,
     },
 
+    /// A pack-origin workflow's `pack.yaml` exists but cannot be read —
+    /// its `declares.permissions` ceiling is the pack's only governance
+    /// rule, so a manifest the check cannot read is a check error naming
+    /// the file, never a silently skipped ceiling.
+    #[error("pack manifest `{path}` cannot be read: {detail}")]
+    PackManifestUnreadable {
+        path: std::path::PathBuf,
+        detail: String,
+    },
+
+    /// A pack-origin workflow's `pack.yaml` does not parse — same
+    /// reasoning as [`CheckError::PackManifestUnreadable`].
+    #[error("pack manifest `{path}` is malformed: {detail}")]
+    PackManifestMalformed {
+        path: std::path::PathBuf,
+        detail: String,
+    },
+
     /// The same worktree-collision rule extended to the DAG's
     /// *implicit* fan-out — two top-level nodes with no dependency path
     /// between them can be `ready` together, and with
@@ -1656,11 +1674,26 @@ fn check_declares_ceiling(
         .join(publisher.as_str())
         .join(pack_name.as_str())
         .join("pack.yaml");
-    let Ok(text) = std::fs::read_to_string(&manifest_path) else {
-        return Vec::new();
+    // The manifest is this pack's only governance rule; a copy that
+    // cannot be read or parsed is a check error naming the file, never a
+    // ceiling silently switched off.
+    let text = match std::fs::read_to_string(&manifest_path) {
+        Ok(text) => text,
+        Err(e) => {
+            return vec![CheckError::PackManifestUnreadable {
+                path: manifest_path,
+                detail: e.to_string(),
+            }]
+        }
     };
-    let Ok(manifest) = yunta_core::yaml::parse::<yunta_core::PackManifest>(&text) else {
-        return Vec::new();
+    let manifest = match yunta_core::yaml::parse::<yunta_core::PackManifest>(&text) {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            return vec![CheckError::PackManifestMalformed {
+                path: manifest_path,
+                detail: e.to_string(),
+            }]
+        }
     };
     let ceiling = manifest.declares.permissions;
 
