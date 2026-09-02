@@ -100,7 +100,7 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
     let add_out = yunta_in(
         &repo,
         &home,
-        &["pack", "add", pack_source.path().to_str().unwrap()],
+        &["pack", "add", "--run-tests", pack_source.path().to_str().unwrap()],
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
     let add_text = stdout(&add_out);
@@ -137,11 +137,11 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     let add_out = yunta_in(
         &repo,
         &home,
-        &["pack", "add", pack_source.path().to_str().unwrap()],
+        &["pack", "add", "--run-tests", pack_source.path().to_str().unwrap()],
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
-    // fragua ships one case per declared mode; `add` runs them against
-    // the mock before vendoring anything.
+    // fragua ships one case per declared mode; `--run-tests` runs them
+    // against the mock once the pack is installed.
     assert!(
         stdout(&add_out).contains("tests: 3 case(s), 0 failed"),
         "{}",
@@ -187,7 +187,7 @@ fn removing_a_factory_pack_leaves_the_rest_of_the_project_working() {
     let add_out = yunta_in(
         &repo,
         &home,
-        &["pack", "add", pack_source.path().to_str().unwrap()],
+        &["pack", "add", "--run-tests", pack_source.path().to_str().unwrap()],
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 

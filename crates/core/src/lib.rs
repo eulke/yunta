@@ -37,7 +37,8 @@ pub use inputs::InputSpec;
 pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
 pub use pack::{
-    PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackRequires, RequiredRole,
+    is_path_segment, stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry,
+    PackManifest, PackManifestError, PackRequires, RequiredRole,
 };
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use workflow::{

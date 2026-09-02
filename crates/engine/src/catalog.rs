@@ -41,6 +41,11 @@ pub enum CatalogError {
         count: usize,
         candidates: String,
     },
+    #[error(
+        "`{name}` is not a workflow reference — a reference is a bare name or `publisher/name`, \
+         each one path segment: no further `/`, no `\\`, not `.` or `..`, not empty"
+    )]
+    InvalidName { name: String },
 }
 
 /// Where a resolved workflow file actually came from — `check`'s
@@ -66,6 +71,19 @@ pub struct ResolvedWorkflow {
 /// first, packs second (packs are the bottom
 /// layer, never shadowing something the repo already names).
 pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError> {
+    // Both forms are joined onto paths below: a segment that is not one
+    // would walk out of the catalog instead of naming something in it.
+    let well_formed = match name.split_once('/') {
+        Some((publisher, workflow)) => {
+            yunta_core::is_path_segment(publisher) && yunta_core::is_path_segment(workflow)
+        }
+        None => yunta_core::is_path_segment(name),
+    };
+    if !well_formed {
+        return Err(CatalogError::InvalidName {
+            name: name.to_string(),
+        });
+    }
     let repo_path = repo_root
         .join(".yunta/workflows")
         .join(format!("{name}.yaml"));

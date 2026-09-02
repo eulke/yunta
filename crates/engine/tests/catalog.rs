@@ -204,3 +204,27 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
         "got: {errors:?}"
     );
 }
+
+#[test]
+fn a_reference_that_is_not_a_name_or_publisher_name_is_refused_before_touching_the_catalog() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join(".yunta/workflows/review.yaml"),
+        "name: review\nnodes: []\n",
+    );
+    for name in [
+        "../review",
+        "acme/../review",
+        "acme/sub/review",
+        "/etc/passwd",
+        "",
+        "acme/",
+    ] {
+        let err = resolve_workflow(root.path(), name).unwrap_err();
+        assert!(
+            matches!(err, CatalogError::InvalidName { name: ref offending } if offending == name),
+            "`{name}` must be refused as a reference, got {err:?}"
+        );
+    }
+    assert!(resolve_workflow(root.path(), "review").is_ok());
+}

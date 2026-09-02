@@ -213,6 +213,11 @@ enum PackAction {
         /// this command prints first.
         #[arg(long)]
         yes: bool,
+        /// Runs the pack's own test cases (`.yunta/tests/`, against the
+        /// mock adapter) once it is installed. Without it nothing of the
+        /// pack executes during `add`: the audit is read, not run.
+        #[arg(long)]
+        run_tests: bool,
     },
     /// Re-clones an installed pack at a new ref and re-vendors it.
     Update {
@@ -307,7 +312,11 @@ async fn main() -> ExitCode {
         Command::Verify { run_id } => commands::verify::verify(&run_id),
         Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
         Command::Pack { action } => match action {
-            PackAction::Add { source, yes } => commands::pack::add(&source, yes).await,
+            PackAction::Add {
+                source,
+                yes,
+                run_tests,
+            } => commands::pack::add(&source, yes, run_tests).await,
             PackAction::Update {
                 publisher_name,
                 r#ref,

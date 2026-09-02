@@ -31,6 +31,13 @@ pub enum PackError {
     InvalidManifest { path: PathBuf, detail: String },
     #[error("`{path}` isn't valid UTF-8, can't be hashed as pack content")]
     NonUtf8Path { path: PathBuf },
+    #[error(
+        "`{path}` is a symlink — a pack ships regular files only, so vendoring never follows a \
+         link out of the pack or copies what one points at"
+    )]
+    Symlink { path: PathBuf },
+    #[error("pack.yaml: {detail}")]
+    Manifest { detail: String },
 }
 
 /// `<source>[@<ref>]` (e.g. `github.com/acme/review-pack@v1.2.0`) —
@@ -113,8 +120,26 @@ pub async fn current_branch(dest: &Path) -> Result<String, PackError> {
     run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"]).await
 }
 
-/// Reads and parses `<dir>/pack.yaml`.
+/// Reads, parses and validates `<dir>/pack.yaml`: a manifest whose
+/// names or paths would escape the pack is refused here, before any
+/// command acts on it.
 pub fn read_manifest(dir: &Path) -> Result<PackManifest, PackError> {
+    let manifest = parse_manifest(dir)?;
+    let violations = manifest.validate();
+    if violations.is_empty() {
+        Ok(manifest)
+    } else {
+        Err(PackError::Manifest {
+            detail: violations
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; "),
+        })
+    }
+}
+
+fn parse_manifest(dir: &Path) -> Result<PackManifest, PackError> {
     let path = dir.join("pack.yaml");
     let contents = std::fs::read_to_string(&path).map_err(|source| {
         if source.kind() == std::io::ErrorKind::NotFound {
@@ -163,6 +188,10 @@ pub fn hash_tree(dir: &Path) -> Result<String, PackError> {
     Ok(sha256_hex(digest_input.as_bytes()))
 }
 
+/// Every regular file under `dir`, relative to `root`, `.git` skipped.
+/// A symlink anywhere in the tree is an error, never followed: the
+/// entry's own metadata decides, so a link to a directory is refused
+/// the same as a link to a file.
 fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), PackError> {
     let entries = std::fs::read_dir(dir).map_err(|source| PackError::Read {
         path: dir.to_path_buf(),
@@ -177,10 +206,24 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), 
         if path.file_name().is_some_and(|n| n == ".git") {
             continue;
         }
-        if path.is_dir() {
+        let metadata = std::fs::symlink_metadata(&path).map_err(|source| PackError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| PackError::Read {
+                path: path.clone(),
+                source: std::io::Error::other("entry outside the tree being collected"),
+            })?
+            .to_path_buf();
+        if metadata.file_type().is_symlink() {
+            return Err(PackError::Symlink { path: relative });
+        }
+        if metadata.is_dir() {
             collect_files(root, &path, out)?;
         } else {
-            out.push(path.strip_prefix(root).unwrap().to_path_buf());
+            out.push(relative);
         }
     }
     Ok(())
@@ -216,6 +259,69 @@ pub fn vendor_dir(cwd: &Path, publisher: &str, name: &str) -> PathBuf {
     packs_root(cwd).join(publisher).join(name)
 }
 
+/// Where a pack is vendored before it is moved into place: a sibling of
+/// its final directory, so the final move is a rename on one
+/// filesystem, and a name no pack can have (`.staging-` is not a path
+/// segment `PackManifest::validate` lets through as a pack name's
+/// start — it would begin with a dot the catalog never lists).
+pub fn staging_dir(cwd: &Path, publisher: &str, name: &str) -> PathBuf {
+    packs_root(cwd)
+        .join(publisher)
+        .join(format!(".staging-{name}-{}", std::process::id()))
+}
+
+/// Vendors `src` into `dest` through a staging directory beside it:
+/// the whole tree is copied first and renamed into place last, so
+/// `dest` either does not exist or holds the complete pack. A failure
+/// leaves nothing behind; a `dest` that already exists is replaced only
+/// after the new tree is complete, and the old tree is dropped only
+/// once the new one is in place.
+pub fn vendor_into_place(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
+    let outcome = stage_and_swap(src, staging, dest);
+    if outcome.is_err() {
+        let _ = std::fs::remove_dir_all(staging);
+    }
+    outcome
+}
+
+fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
+    if let Some(parent) = staging.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    vendor_tree(src, staging)?;
+    let previous = dest.with_file_name(format!(
+        ".previous-{}-{}",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("pack"),
+        std::process::id()
+    ));
+    let had_previous = dest.exists();
+    if had_previous {
+        std::fs::rename(dest, &previous).map_err(|source| PackError::Write {
+            path: dest.to_path_buf(),
+            source,
+        })?;
+    }
+    if let Err(source) = std::fs::rename(staging, dest) {
+        if had_previous {
+            let _ = std::fs::rename(&previous, dest);
+        }
+        return Err(PackError::Write {
+            path: dest.to_path_buf(),
+            source,
+        });
+    }
+    if had_previous {
+        std::fs::remove_dir_all(&previous).map_err(|source| PackError::Write {
+            path: previous,
+            source,
+        })?;
+    }
+    Ok(())
+}
+
 pub fn lock_path(cwd: &Path) -> PathBuf {
     cwd.join(".yunta/yunta.lock")
 }
@@ -242,6 +348,18 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
             source,
         })?;
     }
-    let yaml = yunta_core::yaml::to_string(lock).expect("PackLock always serializes");
-    std::fs::write(&path, yaml).map_err(|source| PackError::Write { path, source })
+    let yaml = yunta_core::yaml::to_string(lock).map_err(|e| PackError::Manifest {
+        detail: format!("cannot serialize yunta.lock: {e}"),
+    })?;
+    // Written beside the lock and renamed over it: a reader never sees
+    // a half-written file, and a failed write leaves the old lock intact.
+    let staging = path.with_extension("lock.tmp");
+    std::fs::write(&staging, yaml).map_err(|source| PackError::Write {
+        path: staging.clone(),
+        source,
+    })?;
+    std::fs::rename(&staging, &path).map_err(|source| {
+        let _ = std::fs::remove_file(&staging);
+        PackError::Write { path, source }
+    })
 }

@@ -271,3 +271,266 @@ fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
             .unwrap();
     assert!(lock["packs"].as_mapping().unwrap().is_empty());
 }
+
+/// A pack whose repo ships a symlink — `add` refuses it before vendoring,
+/// naming the link: vendoring follows nothing, so nothing outside the
+/// pack can be copied in and nothing inside can point out.
+#[test]
+fn add_refuses_symlinks() {
+    let (_root, upstream, repo, home) = setup();
+    std::os::unix::fs::symlink("/etc/hostname", upstream.join("workflows/link.yaml")).unwrap();
+    commit_all(&upstream, "with a symlink");
+
+    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("symlink") && stderr(&out).contains("workflows/link.yaml"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
+    assert!(!repo.join(".yunta/yunta.lock").exists());
+}
+
+/// Writes a pack that ships an executor and a test case whose only node
+/// leaves a marker file in `$YUNTA_TEST_MARKER_DIR` when it runs — the
+/// one observable trace of the pack's tests having executed.
+fn write_pack_with_executor_and_tests(dir: &Path) {
+    std::fs::create_dir_all(dir.join(".yunta/workflows")).unwrap();
+    std::fs::create_dir_all(dir.join(".yunta/tests/fixtures")).unwrap();
+    std::fs::write(
+        dir.join("pack.yaml"),
+        "name: tool-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         declares:\n  permissions: edit\n  network: false\n  executors: [lint]\n\
+         contents:\n  workflows: [.yunta/workflows/mark.yaml]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".yunta/workflows/mark.yaml"),
+        "name: mark\nnodes:\n  - id: mark\n    kind: bash\n    run: \"touch \\\"$YUNTA_TEST_MARKER_DIR/ran\\\"\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".yunta/config.yaml"),
+        "project:\n  base_branch: master\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".yunta/tests/mark.yaml"),
+        "workflow: mark\nfixture: fixtures/mark.yaml\nexpect:\n  final_state: finished\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".yunta/tests/fixtures/mark.yaml"),
+        "sessions: []\n",
+    )
+    .unwrap();
+}
+
+fn yunta_with_marker(dir: &Path, home: &Path, marker_dir: &Path, args: &[&str]) -> Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(args)
+        .current_dir(dir)
+        .env("YUNTA_HOME", home)
+        .env("YUNTA_TEST_MARKER_DIR", marker_dir)
+        .output()
+        .expect("failed to run the yunta binary")
+}
+
+/// A pack that ships executors needs `--yes`; until it is given, nothing
+/// of the pack runs — its own test cases included.
+#[test]
+fn add_never_executes_before_confirmation() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = root.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    init_repo(&upstream);
+    write_pack_with_executor_and_tests(&upstream);
+    commit_all(&upstream, "v1");
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    std::fs::write(repo.join(".gitkeep"), "").unwrap();
+    commit_all(&repo, "initial");
+    let home = root.path().join("state");
+    let marker = root.path().join("marker");
+    std::fs::create_dir_all(&marker).unwrap();
+
+    let refused = yunta_with_marker(
+        &repo,
+        &home,
+        &marker,
+        &["pack", "add", "--run-tests", upstream.to_str().unwrap()],
+    );
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
+    assert!(
+        !marker.join("ran").exists(),
+        "the pack's tests ran before the executor confirmation"
+    );
+    assert!(!repo.join(".yunta/packs/acme/tool-pack").exists());
+
+    let confirmed = yunta_with_marker(
+        &repo,
+        &home,
+        &marker,
+        &[
+            "pack",
+            "add",
+            "--yes",
+            "--run-tests",
+            upstream.to_str().unwrap(),
+        ],
+    );
+    assert!(confirmed.status.success(), "{}", stderr(&confirmed));
+    assert!(
+        marker.join("ran").exists(),
+        "with `--yes --run-tests` the tests run: {}\n{}",
+        stdout(&confirmed),
+        stderr(&confirmed)
+    );
+    assert!(
+        stdout(&confirmed).contains("tests: 1 case(s), 0 failed"),
+        "{}",
+        stdout(&confirmed)
+    );
+}
+
+/// Without `--run-tests`, `add` vendors and locks without running a
+/// single node of the pack: the audit is read, not executed.
+#[test]
+fn add_runs_the_packs_tests_only_when_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = root.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    init_repo(&upstream);
+    write_pack_with_executor_and_tests(&upstream);
+    commit_all(&upstream, "v1");
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    std::fs::write(repo.join(".gitkeep"), "").unwrap();
+    commit_all(&repo, "initial");
+    let home = root.path().join("state");
+    let marker = root.path().join("marker");
+    std::fs::create_dir_all(&marker).unwrap();
+
+    let out = yunta_with_marker(
+        &repo,
+        &home,
+        &marker,
+        &["pack", "add", "--yes", upstream.to_str().unwrap()],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        !marker.join("ran").exists(),
+        "tests ran without `--run-tests`"
+    );
+    assert!(
+        stdout(&out).contains("tests: 1 case(s) shipped, not run (pass --run-tests)"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(repo.join(".yunta/packs/acme/tool-pack/pack.yaml").exists());
+}
+
+/// When the lock cannot be written, nothing of the install survives:
+/// no vendored tree, no half-written lock.
+#[test]
+fn add_is_atomic_when_lock_write_fails() {
+    let (_root, upstream, repo, home) = setup();
+    // A directory where the lock file goes makes every write to it fail.
+    std::fs::create_dir_all(repo.join(".yunta/yunta.lock")).unwrap();
+
+    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert!(stderr(&out).contains("yunta.lock"), "{}", stderr(&out));
+    assert!(
+        !repo.join(".yunta/packs/acme/review-pack").exists(),
+        "the vendored tree must be rolled back when the lock cannot be written"
+    );
+    assert!(
+        std::fs::read_dir(repo.join(".yunta/packs")).map_or(true, |mut d| d.next().is_none()),
+        "no staging directory may be left behind"
+    );
+}
+
+/// A manifest whose `contents` reach outside the pack, or whose
+/// publisher or name is not a single path segment, is refused before
+/// anything is vendored.
+#[test]
+fn add_refuses_a_manifest_whose_names_escape_the_pack() {
+    let (_root, upstream, repo, home) = setup();
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: review-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [../outside/review.yaml]\n",
+    )
+    .unwrap();
+    commit_all(&upstream, "escaping contents");
+    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("../outside/review.yaml")
+            && stderr(&out).contains("contents.workflows"),
+        "{}",
+        stderr(&out)
+    );
+
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: review-pack\n\
+         publisher: acme/../..\n\
+         version: 1.0.0\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/review.yaml]\n",
+    )
+    .unwrap();
+    commit_all(&upstream, "escaping publisher");
+    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("publisher"), "{}", stderr(&out));
+    assert!(
+        !repo.join(".yunta/packs").exists()
+            || std::fs::read_dir(repo.join(".yunta/packs"))
+                .unwrap()
+                .next()
+                .is_none()
+    );
+}
+
+/// `update` vendors the new ref beside the installed tree and only then
+/// swaps them: a ref that cannot be vendored leaves the installed pack
+/// untouched and the lock unchanged.
+#[test]
+fn update_keeps_the_installed_tree_when_the_new_ref_cannot_be_vendored() {
+    let (_root, upstream, repo, home) = setup();
+    let add = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add.status.success(), "{}", stderr(&add));
+    let lock_before = std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap();
+
+    std::os::unix::fs::symlink("/etc/hostname", upstream.join("workflows/link.yaml")).unwrap();
+    commit_all(&upstream, "v2 with a symlink");
+    git_ok(&upstream, &["tag", "v2.0.0"]);
+
+    let out = yunta_in(
+        &repo,
+        &home,
+        &["pack", "update", "acme/review-pack", "v2.0.0"],
+    );
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert!(
+        repo.join(".yunta/packs/acme/review-pack/workflows/review.yaml")
+            .exists(),
+        "the installed tree must survive a failed update"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap(),
+        lock_before
+    );
+}

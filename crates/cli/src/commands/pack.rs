@@ -7,17 +7,21 @@
 //! shown exactly what the executors are, `deny` refuses even with it,
 //! `allow` installs without asking. `update` gates too: a new ref is
 //! where new executor code first appears, so a gate on `add` alone
-//! would be governance theater.
+//! would be governance theater. Neither command runs anything of the
+//! pack on its own: its test cases run only behind `--run-tests`, after
+//! the install, and every write goes through a staging directory or a
+//! temporary file so a failure leaves the repository as it was.
 
 use std::process::ExitCode;
 
 use yunta_core::{ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest};
 use yunta_engine::audit_pack;
 
-use super::pack_audit::{print_report, run_pack_tests};
+use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
-    packs_root, read_manifest, save_lock, split_source_and_ref, vendor_dir, vendor_tree,
+    packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
+    vendor_into_place,
 };
 
 /// The merged `permissions.packs` verdicts, with the layers that
@@ -161,7 +165,13 @@ fn enforce_executor_policy(
     }
 }
 
-pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
+/// `yunta pack add`, in the order that keeps a person in charge:
+/// policy (publisher allow-list, executor policy) → audit → confirmation
+/// → vendor through a staging directory → lock, written atomically →
+/// the pack's own tests, only with `--run-tests`. Nothing of the pack
+/// executes before the confirmation, and a failure at any step leaves
+/// the repository exactly as it was.
+pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -206,8 +216,8 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // The publisher gate fires before the audit is even printed — a
-    // policy-refused publisher leaves no decision for a human to make.
+    // Policy first: a refused publisher or a denied executor leaves no
+    // decision for a person to make, so the audit is not even printed.
     let policy = match load_pack_policy(&cwd) {
         Ok(policy) => policy,
         Err(code) => return code,
@@ -215,25 +225,17 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     if let Err(code) = enforce_publisher_allowed(&policy, &manifest.publisher) {
         return code;
     }
+    if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
+        return enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")
+            .err()
+            .unwrap_or(ExitCode::FAILURE);
+    }
 
-    // The audit runs and prints before anything is vendored, let alone
-    // run — nothing executes until a human has seen the inventory.
+    // The audit is read, never run: the inventory a person confirms
+    // against, printed before anything is vendored.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
     print_report(&audit);
-    let tests = run_pack_tests(clone_dir.path()).await;
-    if !tests.has_tests {
-        println!("\ntests: none shipped");
-    } else {
-        println!("\ntests: {} case(s), {} failed", tests.total, tests.failed);
-        for line in &tests.failures {
-            println!("  {line}");
-        }
-    }
     println!();
-
-    // Executors are code, not declarative YAML — the configurable
-    // policy decides whether that needs confirmation (`prompt`, the
-    // default), is refused outright (`deny`), or passes (`allow`).
     if let Err(code) = enforce_executor_policy(&policy, &manifest, confirmed_executors, "install") {
         return code;
     }
@@ -256,7 +258,18 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         },
     };
 
-    if let Err(e) = vendor_tree(clone_dir.path(), &dest) {
+    // The lock is loaded before anything is written, so a lock that
+    // cannot be read stops the install before it starts.
+    let mut lock = match load_lock(&cwd) {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let staging = staging_dir(&cwd, &manifest.publisher, &manifest.name);
+    if let Err(e) = vendor_into_place(clone_dir.path(), &staging, &dest) {
         eprintln!(
             "error: could not vendor the pack into {}: {e}",
             dest.display()
@@ -267,17 +280,11 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         Ok(hash) => hash,
         Err(e) => {
             eprintln!("error: {e}");
+            roll_back_vendored(&dest);
             return ExitCode::FAILURE;
         }
     };
 
-    let mut lock = match load_lock(&cwd) {
-        Ok(lock) => lock,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
     let key = yunta_core::PackLock::key(&manifest.publisher, &manifest.name);
     lock.packs.insert(
         key,
@@ -292,6 +299,7 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
     );
     if let Err(e) = save_lock(&cwd, &lock) {
         eprintln!("error: {e}");
+        roll_back_vendored(&dest);
         return ExitCode::FAILURE;
     }
 
@@ -303,7 +311,29 @@ pub async fn add(source: &str, confirmed_executors: bool) -> ExitCode {
         &commit[..commit.len().min(12)],
         dest.display()
     );
+
+    // The pack's own cases run last, on the vendored copy, and only on
+    // request — after the confirmation, never as part of deciding it.
+    let tests = if run_tests {
+        run_pack_tests(&dest).await
+    } else {
+        count_pack_tests(&dest)
+    };
+    print_test_summary(&tests);
     ExitCode::SUCCESS
+}
+
+/// Removes a tree this command vendored moments ago, when a later step
+/// failed: an install that did not complete leaves nothing behind.
+fn roll_back_vendored(dest: &std::path::Path) {
+    if let Err(e) = std::fs::remove_dir_all(dest) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!(
+                "warning: could not remove the vendored tree at {} after the failed install: {e}",
+                dest.display()
+            );
+        }
+    }
 }
 
 pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bool) -> ExitCode {
@@ -393,17 +423,12 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
         }
     };
 
+    // The new ref is vendored beside the installed tree and swapped in
+    // only once it is complete: a ref that cannot be vendored leaves the
+    // installed pack, and the lock, exactly as they were.
     let dest = vendor_dir(&cwd, publisher, name);
-    if let Err(e) = std::fs::remove_dir_all(&dest) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!(
-                "error: could not clear {} before revendoring: {e}",
-                dest.display()
-            );
-            return ExitCode::FAILURE;
-        }
-    }
-    if let Err(e) = vendor_tree(clone_dir.path(), &dest) {
+    let staging = staging_dir(&cwd, publisher, name);
+    if let Err(e) = vendor_into_place(clone_dir.path(), &staging, &dest) {
         eprintln!(
             "error: could not vendor the pack into {}: {e}",
             dest.display()

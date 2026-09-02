@@ -69,8 +69,12 @@ untrimmed prompt text**. It's inventory, never a verdict: nothing here flags
 content as "suspicious" — that would be trivially evadible and would only
 give false confidence. It also reports whether the pack ships its own tests
 under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
-`add` runs the same audit automatically, before anything is vendored —
-nothing lands in your repo unseen.
+`add` prints the same inventory before anything is vendored — nothing lands
+in your repo unseen — and runs nothing of the pack on its own: the pack's
+cases run only with `--run-tests`, after the install, so reading the audit
+and confirming it never executes what is being audited. A pack that ships
+a symlink, or whose `pack.yaml` names a publisher, pack or content path that
+would reach outside the pack's own directory, is refused before vendoring.
 
 `declares:` in `pack.yaml` is a ceiling, not a description, and `yunta check`
 enforces it as one: a `prompt`/`loop` node inside a pack can never request a
@@ -245,7 +249,7 @@ This runs entirely against `mock` (see [adapters](adapters.md#mock-not-a-test-he
 — no LLM, no network, deterministic — the same way the engine's own test
 suite runs. `yunta pack audit` runs these same cases too and reports whether
 they pass, so a clean `yunta test` locally is exactly what a consumer sees
-during `add`.
+with `yunta pack add --run-tests`.
 
 To see the full audit inventory — and exercise the real install path — before
 publishing anywhere, `yunta pack add` accepts a local path (it's still a

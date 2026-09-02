@@ -98,6 +98,14 @@ pub enum CheckError {
     )]
     DistillUnknownArtifact { path: String },
 
+    /// An artifact is written under `run.dir/artifacts/`; a name that
+    /// is absolute or climbs with `..` would land somewhere else.
+    #[error(
+        "node `{node}` produces `{name}` — an artifact name is a relative path with no `..` \
+         component, so it stays under the run's `artifacts/`"
+    )]
+    ArtifactNameEscapes { node: NodeId, name: String },
+
     /// The workflow demands a schema this binary doesn't
     /// speak, or a range the parser can't read.
     #[error("`yunta_schema: \"{range}\"` — {detail} (this binary speaks schema {binary})")]
@@ -493,6 +501,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
+    check_artifact_names(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -1449,6 +1458,29 @@ fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
         return Err("the range is empty".to_string());
     }
     Ok(true)
+}
+
+/// Every declared artifact name stays under the run's `artifacts/`:
+/// relative, with no `..` component. Templates in a name
+/// (`findings-{{runner.role}}.yaml`) are checked as written.
+fn check_artifact_names(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        let Some(artifacts) = &node.artifacts else {
+            continue;
+        };
+        for spec in &artifacts.produces {
+            let name = match spec {
+                yunta_core::ArtifactSpec::Plain(name) => name,
+                yunta_core::ArtifactSpec::Typed { name, .. } => name,
+            };
+            if !yunta_core::stays_inside(name) {
+                errors.push(CheckError::ArtifactNameEscapes {
+                    node: node.id.clone(),
+                    name: name.clone(),
+                });
+            }
+        }
+    }
 }
 
 /// Every `on_finish.distill` path must be some node's declared

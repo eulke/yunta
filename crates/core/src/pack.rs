@@ -175,3 +175,69 @@ impl PackLock {
         format!("{publisher}/{name}")
     }
 }
+
+/// A manifest field whose value would reach outside the pack once it
+/// is vendored under `.yunta/packs/<publisher>/<name>/`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PackManifestError {
+    #[error(
+        "`{field}` is `{value}` — a publisher or pack name is one path segment: no `/`, no `\\`, \
+         not `.` or `..`, not empty"
+    )]
+    NotASegment { field: &'static str, value: String },
+    #[error("`{field}` names `{value}` — every path in `contents` stays inside the pack: relative, with no `..` component")]
+    PathEscapes { field: &'static str, value: String },
+}
+
+/// Whether `value` is a single path segment — what `publisher` and
+/// `name` must be to serve as directory names under `.yunta/packs/`.
+pub fn is_path_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains('/')
+        && !value.contains('\\')
+}
+
+/// Whether `path` stays inside the directory it is relative to: not
+/// absolute, and no `..` component anywhere.
+pub fn stays_inside(path: &str) -> bool {
+    let path = std::path::Path::new(path);
+    !path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+impl PackManifest {
+    /// Every name and path the manifest declares, checked against the
+    /// place the pack is vendored to — all violations at once.
+    pub fn validate(&self) -> Vec<PackManifestError> {
+        let mut errors = Vec::new();
+        for (field, value) in [("publisher", &self.publisher), ("name", &self.name)] {
+            if !is_path_segment(value) {
+                errors.push(PackManifestError::NotASegment {
+                    field,
+                    value: value.clone(),
+                });
+            }
+        }
+        let contents = &self.contents;
+        for (field, paths) in [
+            ("contents.workflows", &contents.workflows),
+            ("contents.skills", &contents.skills),
+            ("contents.knowledge", &contents.knowledge),
+            ("contents.docs", &contents.docs),
+        ] {
+            for path in paths {
+                if !stays_inside(path) {
+                    errors.push(PackManifestError::PathEscapes {
+                        field,
+                        value: path.clone(),
+                    });
+                }
+            }
+        }
+        errors
+    }
+}

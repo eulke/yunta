@@ -153,6 +153,22 @@ pub struct PackTestSummary {
     pub total: usize,
     pub failed: usize,
     pub failures: Vec<String>,
+    /// Whether the cases ran: `add` counts them without running them
+    /// unless asked, and says so.
+    pub ran: bool,
+}
+
+/// The pack's cases as a count only — what `add` reports when nothing
+/// of the pack is to run.
+pub fn count_pack_tests(pack_dir: &Path) -> PackTestSummary {
+    let total = discover_case_paths(pack_dir).map_or(0, |paths| paths.len());
+    PackTestSummary {
+        has_tests: total > 0,
+        total,
+        failed: 0,
+        failures: Vec::new(),
+        ran: false,
+    }
 }
 
 pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
@@ -161,6 +177,7 @@ pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
         total: 0,
         failed: 0,
         failures: Vec::new(),
+        ran: true,
     };
     let Some(case_paths) = discover_case_paths(pack_dir) else {
         return empty;
@@ -195,19 +212,25 @@ pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
         total: case_paths.len(),
         failed,
         failures,
+        ran: true,
     }
 }
 
-fn print_test_summary(summary: &PackTestSummary) {
+pub fn print_test_summary(summary: &PackTestSummary) {
     if !summary.has_tests {
         println!("\ntests: none shipped");
-        return;
-    }
-    println!(
-        "\ntests: {} case(s), {} failed",
-        summary.total, summary.failed
-    );
-    for line in &summary.failures {
-        println!("  {line}");
+    } else if !summary.ran {
+        println!(
+            "\ntests: {} case(s) shipped, not run (pass --run-tests)",
+            summary.total
+        );
+    } else {
+        println!(
+            "\ntests: {} case(s), {} failed",
+            summary.total, summary.failed
+        );
+        for line in &summary.failures {
+            println!("  {line}");
+        }
     }
 }

@@ -1728,3 +1728,37 @@ nodes:
         "got: {errors:?}"
     );
 }
+
+// --- artifact names stay under run.dir/artifacts/ ------------------------------
+
+#[test]
+fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
+    for name in ["../escape.md", "/tmp/escape.md", "notes/../../escape.md"] {
+        let mut node = bash("a", "true", &[]);
+        node.artifacts = Some(yunta_core::Artifacts {
+            produces: vec![yunta_core::ArtifactSpec::Plain(name.to_string())],
+        });
+        let errors = check(&workflow(vec![node]), &ConfigLayer::default());
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckError::ArtifactNameEscapes { node, name: offending }
+                    if node.as_str() == "a" && offending == name
+            )),
+            "`{name}` must be refused, got {errors:?}"
+        );
+    }
+
+    let mut node = bash("a", "true", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![yunta_core::ArtifactSpec::Plain(
+            "reports/findings-{{runner.role}}.yaml".to_string(),
+        )],
+    });
+    assert!(
+        !check(&workflow(vec![node]), &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::ArtifactNameEscapes { .. })),
+        "a relative name, subdirectory and template included, is fine"
+    );
+}
