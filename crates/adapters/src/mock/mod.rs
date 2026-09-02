@@ -7,7 +7,7 @@
 
 mod fixture;
 
-pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
+pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript};
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,8 +22,6 @@ use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, Result, Sessi
 use crate::session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, ProbeReport, SessionRequest,
 };
-
-static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("mock");
@@ -53,6 +51,9 @@ pub struct MockAdapter {
     /// the endpoint reached the session (or deliberately didn't)
     /// without a real CLI.
     endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
+    /// The next session id's number: every adapter counts from one, so
+    /// a fixture's ids never depend on what else ran in the process.
+    next_session: AtomicU64,
 }
 
 impl MockAdapter {
@@ -65,7 +66,22 @@ impl MockAdapter {
             agents_seen: Mutex::new(Vec::new()),
             resumes_seen: Mutex::new(Vec::new()),
             endpoints_seen: Mutex::new(Vec::new()),
+            next_session: AtomicU64::new(1),
         }
+    }
+
+    /// The scripts no `spawn()` claimed, by index in the fixture — what
+    /// a test asserts is empty once a run opened every session it
+    /// scripted.
+    pub fn unconsumed(&self) -> Vec<usize> {
+        self.consumed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .enumerate()
+            .filter(|(_, claimed)| !**claimed)
+            .map(|(index, _)| index)
+            .collect()
     }
 
     /// Every session id `resume()` was asked to continue, in call order.
@@ -199,18 +215,39 @@ impl MockAdapter {
             .push(req.agent.clone());
         let index = {
             let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
-            let claim = self
+            let matching: Vec<(usize, &str)> = self
                 .fixture
                 .sessions
                 .iter()
                 .enumerate()
-                .find_map(|(i, script)| {
-                    let matches = script
+                .filter(|(i, _)| !consumed[*i])
+                .filter_map(|(i, script)| {
+                    script
                         .match_prompt_contains
                         .as_deref()
-                        .is_some_and(|needle| req.prompt.contains(needle));
-                    (!consumed[i] && matches).then_some(i)
+                        .filter(|needle| req.prompt.contains(needle))
+                        .map(|needle| (i, needle))
+                })
+                .collect();
+            // Several scripts with one and the same needle are one
+            // request's attempts, served in declaration order. Scripts
+            // with different needles that both match cannot say which
+            // one the request gets: that fixture is wrong, not lucky.
+            let mut needles: Vec<&str> = matching.iter().map(|(_, needle)| *needle).collect();
+            needles.dedup();
+            if needles.len() > 1 {
+                return Err(AdapterError::Adapter {
+                    adapter: ID.clone(),
+                    message: format!(
+                        "fixture ambiguous: {} unconsumed scripts with different needles match \
+                         this request's prompt (`match_prompt_contains`: {}) — make the needles \
+                         tell them apart",
+                        matching.len(),
+                        needles.join(", ")
+                    ),
                 });
+            }
+            let claim = matching.first().map(|(i, _)| *i);
             // No script named this request explicitly — fall back to the
             // next unconsumed script that never opted into matching by
             // prompt at all, in declaration order. This is the whole
@@ -246,7 +283,7 @@ impl MockAdapter {
             Some(session_id) => session_id,
             None => SessionId::try_from(format!(
                 "mock-session-{}",
-                SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+                self.next_session.fetch_add(1, Ordering::Relaxed)
             ))
             .map_err(|error| AdapterError::Adapter {
                 adapter: ID.clone(),
@@ -262,12 +299,21 @@ impl MockAdapter {
             .collect();
 
         let (tx, rx) = mpsc::unbounded_channel();
-        let notify = Arc::new(Notify::new());
-        let task_notify = Arc::clone(&notify);
+        let interrupt = Arc::new(Notify::new());
+        let kill = Arc::new(Notify::new());
+        let (task_interrupt, task_kill) = (Arc::clone(&interrupt), Arc::clone(&kill));
 
         let model = script.model.clone();
         let steps = script.steps.clone();
         let outcome = script.outcome.clone();
+        // Every session honors an ordered stop except one scripted to
+        // ignore it; a forced stop ends any of them.
+        let ends_on_interrupt = !matches!(
+            outcome,
+            MockOutcome::Hang {
+                on_interrupt: fixture::OnInterrupt::Ignore
+            }
+        );
         let run_tools_endpoint = req.run_tools_endpoint.clone();
 
         tokio::spawn(async move {
@@ -298,7 +344,8 @@ impl MockAdapter {
                 let delay = Duration::from_millis(step.after_ms());
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {}
-                    _ = task_notify.notified() => return, // interrupted/killed mid-stream
+                    _ = task_kill.notified() => return,
+                    _ = task_interrupt.notified(), if ends_on_interrupt => return,
                 }
                 let event = match step {
                     fixture::MockStep::ToolUse {
@@ -363,24 +410,31 @@ impl MockAdapter {
                 }
                 // Both end with no terminal event — a real crash: the
                 // engine synthesizes Failed{retryable:true}, not the
-                // adapter. Hang additionally waits for interrupt/kill
-                // before ending, simulating a stuck session a timeout
-                // would have to act on.
+                // adapter. Hang additionally waits for a stop before
+                // ending, simulating a stuck session a timeout would
+                // have to act on.
                 MockOutcome::Crash => {}
-                MockOutcome::Hang => task_notify.notified().await,
+                MockOutcome::Hang { .. } => {
+                    tokio::select! {
+                        _ = task_kill.notified() => {}
+                        _ = task_interrupt.notified(), if ends_on_interrupt => {}
+                    }
+                }
             }
         });
 
         Ok(Box::new(MockSession {
             receiver: Some(rx),
-            notify,
+            interrupt,
+            kill,
         }))
     }
 }
 
 pub struct MockSession {
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
-    notify: Arc<Notify>,
+    interrupt: Arc<Notify>,
+    kill: Arc<Notify>,
 }
 
 #[async_trait]
@@ -397,12 +451,12 @@ impl AgentSession for MockSession {
     }
 
     async fn interrupt(&mut self) -> Result<()> {
-        self.notify.notify_one();
+        self.interrupt.notify_one();
         Ok(())
     }
 
     async fn kill(&mut self) -> Result<()> {
-        self.notify.notify_one();
+        self.kill.notify_one();
         Ok(())
     }
 }

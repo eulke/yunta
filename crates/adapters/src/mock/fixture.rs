@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use yunta_core::yaml::{self, Value};
-use yunta_core::{AgentName, Capabilities, ModelName};
+use yunta_core::{Capabilities, ModelName};
 
 /// A parsed fixture: adapter-level capabilities plus one script per
 /// expected `spawn()`, in order.
@@ -108,15 +108,15 @@ impl From<FixtureCapabilities> for Capabilities {
     }
 }
 
-/// What one spawned session does: its announced model/agent, the events
-/// it emits, the files it writes, and how its stream ends.
+/// What one spawned session does: the model it announces, the events
+/// it emits, the files it writes, and how its stream ends. The agent
+/// is the request's, never the script's: the mock records what the
+/// engine asked for and announces nothing of its own.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionScript {
     #[serde(default = "default_model")]
     pub model: ModelName,
-    #[serde(default)]
-    pub agent: Option<AgentName>,
     #[serde(default)]
     pub steps: Vec<MockStep>,
     #[serde(default)]
@@ -215,8 +215,23 @@ pub enum MockOutcome {
     },
     /// The stream ends with no terminal event at all — a real crash.
     Crash,
-    /// The stream never produces another item until `interrupt`/`kill`
-    /// is called, at which point it ends (still with no terminal event,
-    /// same as a forced kill would leave it).
-    Hang,
+    /// The stream never produces another item on its own; `kill` ends
+    /// it, and `interrupt` ends it or not as `on_interrupt` says (still
+    /// with no terminal event, as a forced kill leaves a real session).
+    Hang {
+        #[serde(default)]
+        on_interrupt: OnInterrupt,
+    },
+}
+
+/// What a hung session does with an ordered stop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnInterrupt {
+    /// Ends, as a CLI that honors SIGINT does.
+    #[default]
+    End,
+    /// Keeps hanging; only `kill` ends it — the case the engine's
+    /// interrupt-then-kill escalation exists for.
+    Ignore,
 }

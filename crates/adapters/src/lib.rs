@@ -22,7 +22,8 @@ pub use forge::{
     PublishedGate, ReviewComment, ReviewOutcome,
 };
 pub use mock::{
-    MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript, ID as MOCK_ID,
+    MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript,
+    ID as MOCK_ID,
 };
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,

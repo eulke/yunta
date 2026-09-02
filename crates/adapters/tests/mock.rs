@@ -516,3 +516,174 @@ async fn the_mock_forge_reports_a_merged_pr() {
         }
     );
 }
+
+// --- a mock that proves what it says it proves -------------------------
+
+#[tokio::test]
+async fn interrupt_and_kill_are_observably_different() {
+    let dir = tempfile::tempdir().unwrap();
+    // One scripted session per adapter: each stop is tried on a fresh one.
+    let stubborn =
+        || MockAdapter::from_yaml("outcome: { type: hang, on_interrupt: ignore }").unwrap();
+
+    // An ordered stop the session ignores: the stream stays open.
+    let mut session = stubborn()
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    session.interrupt().await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), drain(session))
+            .await
+            .is_err(),
+        "a session that ignores interrupt keeps its stream open"
+    );
+
+    // A forced stop ends it regardless.
+    let mut session = stubborn()
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    session.kill().await.unwrap();
+    let events = tokio::time::timeout(Duration::from_millis(200), drain(session))
+        .await
+        .expect("kill ends the stream promptly");
+    assert!(matches!(
+        events.as_slice(),
+        [AgentEvent::SessionOpened { .. }]
+    ));
+
+    // A session that honors the ordered stop ends on interrupt alone.
+    let obedient = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let mut session = obedient
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    session.interrupt().await.unwrap();
+    let events = tokio::time::timeout(Duration::from_millis(200), drain(session))
+        .await
+        .expect("interrupt ends a session that honors it");
+    assert!(matches!(
+        events.as_slice(),
+        [AgentEvent::SessionOpened { .. }]
+    ));
+}
+
+#[tokio::test]
+async fn an_ambiguous_prompt_match_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - match_prompt_contains: review
+    outcome: { type: completed, summary: "first" }
+  - match_prompt_contains: review this
+    outcome: { type: completed, summary: "second" }
+"#,
+    )
+    .unwrap();
+
+    let error = adapter
+        .spawn(prompt_request(
+            dir.path().to_path_buf(),
+            "please review this",
+        ))
+        .await
+        .err()
+        .expect("two differently named scripts claiming one prompt is a fixture error");
+    let message = error.to_string();
+    assert!(
+        message.contains("review this") && message.contains('2'),
+        "the error names the needles and how many scripts match: {message}"
+    );
+}
+
+#[tokio::test]
+async fn scripts_sharing_one_needle_serve_a_request_s_attempts_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - match_prompt_contains: review
+    outcome: { type: completed, summary: "first" }
+  - match_prompt_contains: review
+    outcome: { type: completed, summary: "second" }
+"#,
+    )
+    .unwrap();
+
+    for expected in ["first", "second"] {
+        let events = drain(
+            adapter
+                .spawn(prompt_request(dir.path().to_path_buf(), "please review"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            matches!(events.last(), Some(AgentEvent::Completed { result }) if result.summary == expected),
+            "got: {events:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn session_ids_count_per_adapter_not_per_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = "outcome: { type: completed, summary: \"done\" }";
+    for _ in 0..2 {
+        let adapter = MockAdapter::from_yaml(fixture).unwrap();
+        let events = drain(
+            adapter
+                .spawn(request(dir.path().to_path_buf()))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            matches!(
+                &events[0],
+                AgentEvent::SessionOpened { session_id, .. } if session_id.as_str() == "mock-session-1"
+            ),
+            "every adapter numbers its sessions from one: {events:?}"
+        );
+    }
+}
+
+#[test]
+fn a_script_naming_an_agent_is_refused() {
+    let error =
+        MockAdapter::from_yaml("agent: benito\noutcome: { type: completed, summary: \"done\" }")
+            .err()
+            .expect("`agent` is not a script's field: the request names the agent");
+    assert!(error.to_string().contains("agent"), "{error}");
+}
+
+#[tokio::test]
+async fn unconsumed_names_the_scripts_no_spawn_claimed() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: completed, summary: "first" }
+  - outcome: { type: completed, summary: "second" }
+  - outcome: { type: completed, summary: "third" }
+"#,
+    )
+    .unwrap();
+    assert_eq!(adapter.unconsumed(), vec![0, 1, 2]);
+
+    drain(
+        adapter
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        adapter.unconsumed(),
+        vec![1, 2],
+        "a run that opened one session leaves the other two scripts unclaimed"
+    );
+}
