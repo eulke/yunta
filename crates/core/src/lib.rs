@@ -51,6 +51,3 @@ pub use workflow::{
 /// The schema major this binary speaks — what a
 /// workflow's `yunta_schema:` range is checked against.
 pub const YUNTA_SCHEMA: u32 = 1;
-
-/// Identifies this crate to integration tests elsewhere in the workspace.
-pub const CRATE_NAME: &str = "yunta-core";

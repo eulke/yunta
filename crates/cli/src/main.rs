@@ -18,10 +18,10 @@ use yunta_core::{ConfigLayer, Workflow};
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
-#[command(name = "yunta", version, about)]
+#[command(name = "yunta", version, about, arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 }
 
 #[derive(Subcommand)]
@@ -258,19 +258,15 @@ async fn main() -> ExitCode {
     tracing::debug!("yunta starting");
 
     match cli.command {
-        None => {
-            println!("{}", yunta_engine::version_string());
-            ExitCode::SUCCESS
-        }
-        Some(Command::Check { workflow, config }) => run_check(&workflow, config.as_deref()),
-        Some(Command::Run {
+        Command::Check { workflow, config } => run_check(&workflow, config.as_deref()),
+        Command::Run {
             workflow,
             input,
             adapter,
             mode,
             follow,
             detach,
-        }) => {
+        } => {
             commands::run::run(
                 &workflow,
                 &input,
@@ -281,14 +277,14 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Some(Command::Status { run_id }) => commands::status::status(&run_id),
-        Some(Command::Resume { run_id }) => commands::resume::resume(&run_id).await,
-        Some(Command::ResolveGate {
+        Command::Status { run_id } => commands::status::status(&run_id),
+        Command::Resume { run_id } => commands::resume::resume(&run_id).await,
+        Command::ResolveGate {
             run_id,
             option,
             by,
             free_text,
-        }) => {
+        } => {
             commands::resolve_gate::resolve_gate(
                 &run_id,
                 &option,
@@ -297,22 +293,22 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Some(Command::Cancel { run_id }) => commands::cancel::cancel(&run_id).await,
-        Some(Command::List { runs }) => {
+        Command::Cancel { run_id } => commands::cancel::cancel(&run_id).await,
+        Command::List { runs } => {
             if runs {
                 commands::list::list_runs()
             } else {
                 commands::list::list_workflows()
             }
         }
-        Some(Command::Doctor) => commands::doctor::doctor().await,
-        Some(Command::Mcp) => commands::mcp::mcp().await,
-        Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
-        Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
-        Some(Command::Test { dir }) => commands::test::test(dir.as_deref()).await,
-        Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
-        Some(Command::Receipt { run_id, json }) => commands::receipt::receipt(&run_id, json),
-        Some(Command::Pack { action }) => match action {
+        Command::Doctor => commands::doctor::doctor().await,
+        Command::Mcp => commands::mcp::mcp().await,
+        Command::Gc { dry_run } => commands::gc::gc(dry_run),
+        Command::Graph { workflow, run } => graph::graph(&workflow, run.as_deref()),
+        Command::Test { dir } => commands::test::test(dir.as_deref()).await,
+        Command::Verify { run_id } => commands::verify::verify(&run_id),
+        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
+        Command::Pack { action } => match action {
             PackAction::Add { source, yes } => commands::pack::add(&source, yes).await,
             PackAction::Update {
                 publisher_name,
@@ -325,20 +321,18 @@ async fn main() -> ExitCode {
                 commands::pack_audit::audit(&publisher_name).await
             }
         },
-        Some(Command::Stats {
+        Command::Stats {
             run_id,
             workflow,
             json,
-        }) => commands::stats::stats(run_id.as_deref(), workflow.as_deref(), json),
-        Some(Command::Init { interactive, force }) => {
-            commands::init::init(interactive, force).await
-        }
-        Some(Command::New {
+        } => commands::stats::stats(run_id.as_deref(), workflow.as_deref(), json),
+        Command::Init { interactive, force } => commands::init::init(interactive, force).await,
+        Command::New {
             name,
             shape,
             interactive,
             force,
-        }) => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
+        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
     }
 }
 

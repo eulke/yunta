@@ -24,12 +24,3 @@ pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
     ProbeReport, RunToolsEndpoint, SessionRequest,
 };
-
-/// Identifies this crate to integration tests elsewhere in the workspace.
-pub const CRATE_NAME: &str = "yunta-adapters";
-
-/// Name of the crate this one depends on, used by an integration test
-/// to prove the `adapters → core` edge is wired and not just declared.
-pub fn depends_on() -> &'static str {
-    yunta_core::CRATE_NAME
-}

@@ -90,18 +90,3 @@ pub use worktree::{
     cleanup_worktree, prepare_worktree, release_worktree, WorktreeCleanup, WorktreeError,
     WorktreePrepared,
 };
-
-/// Identifies this crate to integration tests elsewhere in the workspace.
-pub const CRATE_NAME: &str = "yunta-engine";
-
-/// The crates this one depends on, in a fixed order, used by
-/// the integration test to prove the graph is wired and not just declared.
-pub fn depends_on() -> [&'static str; 2] {
-    [yunta_storage::CRATE_NAME, yunta_adapters::CRATE_NAME]
-}
-
-/// Version string exposed to the CLI, so `crates/cli` has something real
-/// to call across the `engine → cli` edge.
-pub fn version_string() -> String {
-    format!("yunta-engine {}", env!("CARGO_PKG_VERSION"))
-}

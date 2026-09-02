@@ -1,8 +1,3 @@
-#[test]
-fn exposes_crate_identity() {
-    assert_eq!(yunta_core::CRATE_NAME, "yunta-core");
-}
-
 // --- The reference YAMLs are real fixtures -----------------------------------
 
 #[test]
