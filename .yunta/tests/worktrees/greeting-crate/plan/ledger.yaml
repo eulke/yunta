@@ -1,0 +1,9 @@
+tasks:
+  - id: greeting
+    title: "Add the greeting module"
+    scope: ["src/**"]
+    criteria:
+      - cmd: "test -f src/greeting.rs"
+      - cmd: "grep -q 'pub mod greeting' src/lib.rs"
+      - cmd: "cargo check --quiet"
+        type: guard

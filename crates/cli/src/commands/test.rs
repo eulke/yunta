@@ -6,15 +6,20 @@
 //!
 //! Each case runs in its own sandbox: a fresh git worktree, a fresh runs
 //! root and a fresh event-log DB under a temp dir — a test run never
-//! touches the project's real state. The fixture file is rendered with
-//! `{{run.dir}}` and `{{worktree}}` before parsing, so a scripted
-//! session can place artifacts exactly where a real agent (told
-//! `{{run.dir}}` in its prompt) would.
+//! touches the project's real state. The worktree starts empty, or as a
+//! copy of the case's `worktree:` directory committed as the sandbox's
+//! initial commit, so a workflow that reads files, takes a `path` input
+//! or runs the project's own toolchain has what it needs before any
+//! session starts. The fixture file is rendered with `{{run.dir}}` and
+//! `{{worktree}}` before parsing, so a scripted session can place
+//! artifacts exactly where a real agent (told `{{run.dir}}` in its
+//! prompt) would.
 //!
 //! A case names the `workflow`, the `mode` it runs in (absent: the whole
 //! graph), the `inputs` it provides (absent: each input's own default),
-//! the `fixture`, and an `expect` block with `final_state` (`finished` |
-//! `paused`), `nodes` and `tasks`.
+//! the `worktree` seed (absent: an empty repository), the `fixture`, and
+//! an `expect` block with `final_state` (`finished` | `paused`), `nodes`
+//! and `tasks`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -44,6 +49,10 @@ struct TestCase {
     /// declaration, exactly as `yunta run --input` does.
     #[serde(default)]
     inputs: BTreeMap<String, String>,
+    /// Directory whose contents seed the sandbox worktree, relative to
+    /// the case file; absent, the sandbox is an empty repository.
+    #[serde(default)]
+    worktree: Option<PathBuf>,
     /// Fixture path, relative to the case file.
     fixture: PathBuf,
     expect: Expect,
@@ -172,6 +181,11 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let sandbox = tempfile::tempdir().map_err(|e| format!("cannot create sandbox: {e}"))?;
     let worktree = sandbox.path().join("worktree");
     std::fs::create_dir_all(&worktree).map_err(|e| e.to_string())?;
+    if let Some(seed) = &case.worktree {
+        let seed = case_path.parent().unwrap_or(Path::new(".")).join(seed);
+        copy_dir_all(&seed, &worktree)
+            .map_err(|e| format!("cannot seed the sandbox from `{}`: {e}", seed.display()))?;
+    }
     init_git(&worktree)?;
     let runs_root = sandbox.path().join("runs");
     let storage = Storage::open(&sandbox.path().join("events.db")).map_err(|e| e.to_string())?;
@@ -291,11 +305,32 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     Ok(problems)
 }
 
+/// Copies `from`'s tree into `into`, which already exists. Every entry
+/// is copied as a regular file or directory; the seed is repository
+/// content a case commits, never a place for symlinks.
+fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = into.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Turns the sandbox worktree into a repository whose initial commit
+/// holds the seed (or nothing), so a run's scope diff only ever shows
+/// what its sessions changed.
 fn init_git(dir: &Path) -> Result<(), String> {
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "yunta-test@localhost"],
         vec!["config", "user.name", "yunta test"],
+        vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {
         let status = std::process::Command::new("git")
@@ -331,6 +366,21 @@ mod tests {
     }
 
     #[test]
+    fn a_case_names_the_directory_that_seeds_its_sandbox() {
+        let case: TestCase = serde_yaml::from_str(
+            "workflow: ledger-task\n\
+             worktree: worktrees/greeting-crate\n\
+             fixture: fixtures/ledger-task.yaml\n\
+             expect:\n  final_state: finished\n",
+        )
+        .unwrap();
+        assert_eq!(
+            case.worktree.as_deref(),
+            Some(Path::new("worktrees/greeting-crate"))
+        );
+    }
+
+    #[test]
     fn a_case_without_mode_or_inputs_runs_the_whole_graph_on_input_defaults() {
         let case: TestCase = serde_yaml::from_str(
             "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: finished\n",
@@ -338,5 +388,6 @@ mod tests {
         .unwrap();
         assert_eq!(case.mode, None);
         assert!(case.inputs.is_empty());
+        assert_eq!(case.worktree, None);
     }
 }

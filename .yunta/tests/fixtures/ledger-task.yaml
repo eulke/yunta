@@ -1,0 +1,15 @@
+sessions:
+  - match_prompt_contains: "Read your task from the ledger"
+    effects:
+      - path: src/greeting.rs
+        content: |
+          /// The greeting the crate exists to give.
+          pub fn greet(name: &str) -> String {
+              format!("hello, {name}")
+          }
+      - path: src/lib.rs
+        content: |
+          //! A library with one greeting module.
+
+          pub mod greeting;
+    outcome: { type: completed, summary: "greeting module added" }

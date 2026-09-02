@@ -1,11 +1,11 @@
-# The sandbox starts as an empty repository, so the grill session also
-# lays down the file `plan` reads through `files:`.
+# One script per session the workflow spawns, selected by prompt: the
+# planner's two sessions and the executor's one task. A mode that never
+# reaches a session leaves its script unused.
 sessions:
   - match_prompt_contains: "ambiguities"
     effects:
       - { path: "{{run.dir}}/artifacts/questions.yaml", content: "questions: []\n" }
       - { path: "{{run.dir}}/artifacts/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
-      - { path: "docs/architecture.md", content: "# Architecture\n\nA single library crate.\n" }
     outcome: { type: completed, summary: "brief written" }
   - match_prompt_contains: "task ledger"
     effects:
@@ -19,3 +19,18 @@ sessions:
                 - cmd: "test -f Cargo.toml"
                 - cmd: "test -f src/lib.rs"
     outcome: { type: completed, summary: "ledger registered" }
+  - match_prompt_contains: "Read your task from the ledger"
+    effects:
+      - path: Cargo.toml
+        content: |
+          [package]
+          name = "sandbox"
+          version = "0.1.0"
+          edition = "2021"
+      - path: src/lib.rs
+        content: |
+          /// Whether the interface renders in dark mode.
+          pub fn dark_mode() -> bool {
+              true
+          }
+    outcome: { type: completed, summary: "crate bootstrapped" }

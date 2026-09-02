@@ -227,6 +227,12 @@ case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
 [`packs/fragua/.yunta/tests/`](../packs/fragua/.yunta/tests) for mode-specific
 cases.
 
+Every case runs in a fresh, empty repository. A workflow whose nodes read
+files (`files:`), take a `path` input or run the project's own toolchain
+declares `worktree: <directory>` (relative to the case file): the directory's
+contents become the sandbox's initial commit before any session starts, so
+a scope diff only ever shows what the sessions changed.
+
 Run them from inside the pack's own directory, or from anywhere with `--dir`:
 
 ```bash

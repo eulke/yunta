@@ -140,10 +140,10 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
         &["pack", "add", pack_source.path().to_str().unwrap()],
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
-    // fragua ships its own mode-specific cases; `add` runs them against
+    // fragua ships one case per declared mode; `add` runs them against
     // the mock before vendoring anything.
     assert!(
-        stdout(&add_out).contains("tests: 2 case(s), 0 failed"),
+        stdout(&add_out).contains("tests: 3 case(s), 0 failed"),
         "{}",
         stdout(&add_out)
     );

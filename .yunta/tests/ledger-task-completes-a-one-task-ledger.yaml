@@ -1,0 +1,16 @@
+# A hand-written ledger with one task runs end to end on a seeded crate:
+# the task's criteria are red before the executor's session and green
+# after it, its guard holds on both sides, and the workspace checks pass
+# on the result.
+workflow: ledger-task
+inputs: { ledger: plan/ledger.yaml }
+worktree: worktrees/greeting-crate
+fixture: fixtures/ledger-task.yaml
+expect:
+  final_state: finished
+  nodes:
+    register: finished
+    implement: finished
+    verify: finished
+  tasks:
+    greeting: done
