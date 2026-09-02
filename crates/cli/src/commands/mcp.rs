@@ -305,7 +305,7 @@ async fn tool_resolve_gate(
         .ok_or_else(|| format!("no run `{run_id}` under {}", project.runs_root.display()))?;
     let manifest: yunta_core::Manifest = std::fs::read_to_string(run_dir.join("manifest.yaml"))
         .map_err(|e| e.to_string())
-        .and_then(|text| serde_yaml::from_str(&text).map_err(|e| e.to_string()))?;
+        .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
     let storage = yunta_storage::Storage::open(&project.storage_path).map_err(|e| e.to_string())?;
 
     yunta_engine::resolve_gate(

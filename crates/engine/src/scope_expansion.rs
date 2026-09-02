@@ -113,10 +113,11 @@ pub fn load_request(
         path: path.display().to_string(),
         detail: source.to_string(),
     })?;
-    let request = serde_yaml::from_slice(&bytes).map_err(|e| ScopeExpansionError::Malformed {
-        path: path.display().to_string(),
-        detail: e.to_string(),
-    })?;
+    let request =
+        yunta_core::yaml::parse_bytes(&bytes).map_err(|e| ScopeExpansionError::Malformed {
+            path: path.display().to_string(),
+            detail: e.to_string(),
+        })?;
     std::fs::remove_file(&path).map_err(|source| ScopeExpansionError::Io {
         action: format!(
             "remove consumed scope expansion request `{}`",

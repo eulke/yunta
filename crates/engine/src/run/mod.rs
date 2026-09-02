@@ -395,7 +395,7 @@ pub fn create_run(
     }
 
     let manifest_path = run_dir.join("manifest.yaml");
-    let yaml = serde_yaml::to_string(manifest).map_err(|e| RunError::ManifestWrite {
+    let yaml = yunta_core::yaml::to_string(manifest).map_err(|e| RunError::ManifestWrite {
         path: manifest_path.clone(),
         detail: e.to_string(),
     })?;
@@ -806,9 +806,10 @@ pub(crate) async fn execute_run_at_depth(
                         let file = yunta_core::events::FindingsFile {
                             findings: inherited,
                         };
-                        let yaml = serde_yaml::to_string(&file).map_err(|e| RunError::Broken {
-                            diagnostic: format!("failed to serialize inherited findings: {e}"),
-                        })?;
+                        let yaml =
+                            yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
+                                diagnostic: format!("failed to serialize inherited findings: {e}"),
+                            })?;
                         let path = ctx.run_dir.join("artifacts/findings-inherited.yaml");
                         std::fs::write(&path, yaml).map_err(|source| RunError::Io {
                             context: format!("write `{}`", path.display()),

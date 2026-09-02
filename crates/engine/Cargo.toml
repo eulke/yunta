@@ -17,9 +17,6 @@ yunta-adapters.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 globset.workspace = true
-# The engine interprets `kind: task-ledger` artifacts at node close —
-# runtime YAML parsing, not just test fixtures.
-serde_yaml.workspace = true
 # `kind: executor`'s stdin/stdout contract is JSON by definition —
 # already a dependency of yunta-core/yunta-adapters/yunta-storage at the
 # same version, not a new one to the workspace.
@@ -85,5 +82,7 @@ indexmap.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+# Tests write their workflows and fixtures as YAML literals.
+serde_yaml.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }

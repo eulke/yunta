@@ -1089,7 +1089,7 @@ fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> 
                 source,
             })?;
             let ledger: Ledger =
-                serde_yaml::from_slice(&bytes).map_err(|e| RunError::CorruptLedger {
+                yunta_core::yaml::parse_bytes(&bytes).map_err(|e| RunError::CorruptLedger {
                     path: path.clone(),
                     detail: e.to_string(),
                 })?;

@@ -71,10 +71,11 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
             })
         }
     };
-    let layer: ConfigLayer = serde_yaml::from_str(&contents).map_err(|e| ProjectError::Parse {
-        path: path.to_path_buf(),
-        detail: e.to_string(),
-    })?;
+    let layer: ConfigLayer =
+        yunta_core::yaml::parse(&contents).map_err(|e| ProjectError::Parse {
+            path: path.to_path_buf(),
+            detail: e.to_string(),
+        })?;
     if let Some(declared) = layer.version {
         if declared != CONFIG_VERSION {
             return Err(ProjectError::UnsupportedVersion {

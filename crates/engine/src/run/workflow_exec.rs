@@ -215,7 +215,7 @@ pub(super) async fn execute_workflow(
             );
         }
     };
-    let child_workflow: Workflow = match serde_yaml::from_str(&text) {
+    let child_workflow: Workflow = match yunta_core::yaml::parse(&text) {
         Ok(workflow) => workflow,
         Err(e) => {
             return fail(
@@ -448,7 +448,7 @@ async fn resume_child(
     let manifest_path = child_run_dir.join("manifest.yaml");
     let child_manifest: Manifest = match std::fs::read_to_string(&manifest_path)
         .map_err(|e| e.to_string())
-        .and_then(|text| serde_yaml::from_str(&text).map_err(|e| e.to_string()))
+        .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))
     {
         Ok(manifest) => manifest,
         Err(detail) => {

@@ -1642,7 +1642,7 @@ fn check_declares_ceiling(
     let Ok(text) = std::fs::read_to_string(&manifest_path) else {
         return Vec::new();
     };
-    let Ok(manifest) = serde_yaml::from_str::<yunta_core::PackManifest>(&text) else {
+    let Ok(manifest) = yunta_core::yaml::parse::<yunta_core::PackManifest>(&text) else {
         return Vec::new();
     };
     let ceiling = manifest.declares.permissions;
@@ -1771,7 +1771,7 @@ fn walk_workflow_refs(
                 continue;
             }
         };
-        let child: Workflow = match serde_yaml::from_str(&text) {
+        let child: Workflow = match yunta_core::yaml::parse(&text) {
             Ok(child) => child,
             Err(e) => {
                 errors.push(CheckError::WorkflowRefUnparseable {

@@ -128,7 +128,7 @@ pub fn read_manifest(dir: &Path) -> Result<PackManifest, PackError> {
             }
         }
     })?;
-    serde_yaml::from_str(&contents).map_err(|e| PackError::InvalidManifest {
+    yunta_core::yaml::parse(&contents).map_err(|e| PackError::InvalidManifest {
         path,
         detail: e.to_string(),
     })
@@ -223,10 +223,12 @@ pub fn lock_path(cwd: &Path) -> PathBuf {
 pub fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
     let path = lock_path(cwd);
     match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_yaml::from_str(&contents).map_err(|e| PackError::InvalidManifest {
-            path,
-            detail: e.to_string(),
-        }),
+        Ok(contents) => {
+            yunta_core::yaml::parse(&contents).map_err(|e| PackError::InvalidManifest {
+                path,
+                detail: e.to_string(),
+            })
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PackLock::default()),
         Err(source) => Err(PackError::Read { path, source }),
     }
@@ -240,6 +242,6 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
             source,
         })?;
     }
-    let yaml = serde_yaml::to_string(lock).expect("PackLock always serializes");
+    let yaml = yunta_core::yaml::to_string(lock).expect("PackLock always serializes");
     std::fs::write(&path, yaml).map_err(|source| PackError::Write { path, source })
 }

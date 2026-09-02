@@ -128,7 +128,7 @@ pub fn consolidate_blackboard(events: &[Event], members: &[NodeId]) -> String {
             Value::Object(object)
         })
         .collect();
-    serde_yaml::to_string(&rendered).unwrap_or_default()
+    yunta_core::yaml::to_string(&rendered).unwrap_or_default()
 }
 
 /// One live listener, tied to one session attempt. Dropping it tears
@@ -347,7 +347,7 @@ impl SessionTools {
                     .to_string(),
             );
         }
-        let yaml = serde_yaml::to_string(&request).map_err(|e| e.to_string())?;
+        let yaml = yunta_core::yaml::to_string(&request).map_err(|e| e.to_string())?;
         std::fs::write(&path, yaml).map_err(|e| e.to_string())?;
         Ok(
             "request recorded — it is evaluated when this attempt ends (the engine \

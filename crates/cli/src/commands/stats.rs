@@ -167,7 +167,7 @@ pub(crate) fn collect_history(
             .join("manifest.yaml");
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
-            .and_then(|c| serde_yaml::from_str::<Manifest>(&c).ok())
+            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
         else {
             continue;
         };
@@ -219,7 +219,7 @@ pub(crate) fn collect_raw_history(
             .join("manifest.yaml");
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
-            .and_then(|c| serde_yaml::from_str::<Manifest>(&c).ok())
+            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
         else {
             continue;
         };

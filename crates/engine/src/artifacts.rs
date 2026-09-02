@@ -226,7 +226,7 @@ pub fn close_artifacts(
 
 fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding>, ArtifactError> {
     let file: FindingsFile =
-        serde_yaml::from_slice(bytes).map_err(|e| ArtifactError::MalformedFindings {
+        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedFindings {
             node: node.clone(),
             name: name.to_string(),
             detail: e.to_string(),
@@ -250,7 +250,7 @@ fn parse_questions(
     bytes: &[u8],
 ) -> Result<Vec<Question>, ArtifactError> {
     let file: QuestionsFile =
-        serde_yaml::from_slice(bytes).map_err(|e| ArtifactError::MalformedQuestions {
+        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedQuestions {
             node: node.clone(),
             name: name.to_string(),
             detail: e.to_string(),
@@ -270,7 +270,7 @@ fn parse_questions(
 
 fn parse_ledger(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Ledger, ArtifactError> {
     let ledger: Ledger =
-        serde_yaml::from_slice(bytes).map_err(|e| ArtifactError::MalformedLedger {
+        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedLedger {
             node: node.clone(),
             name: name.to_string(),
             detail: e.to_string(),

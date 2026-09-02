@@ -203,7 +203,7 @@ pub fn new_workflow(name: &str, shape: Option<&str>, interactive: bool, force: b
     }
     println!("wrote {} ({})", path.display(), shape.label());
 
-    let workflow: Workflow = match serde_yaml::from_str(&yaml) {
+    let workflow: Workflow = match yunta_core::yaml::parse(&yaml) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("error: the skeleton this command just wrote fails to parse: {e}");

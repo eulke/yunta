@@ -17,6 +17,7 @@ mod manifest;
 mod pack;
 mod questions;
 mod workflow;
+pub mod yaml;
 
 pub use capabilities::Capabilities;
 pub use clock::{Clock, SystemClock};

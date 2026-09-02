@@ -222,7 +222,7 @@ pub enum TelemetryProtocol {
 /// lives here and nowhere else. Budgets are advisory ceilings the engine
 /// enforces by escalation/diagnostic, never OS enforcement.
 ///
-/// Canonical integer form is `2000000` — serde_yaml (YAML 1.2) resolves
+/// Canonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves
 /// `2_000_000` as a *string*, which fails the parse loudly instead of
 /// silently becoming an unlimited run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

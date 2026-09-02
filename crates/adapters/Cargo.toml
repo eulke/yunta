@@ -19,7 +19,6 @@ tracing.workspace = true
 # spawning it, streaming its stdout, and reaping it on exit.
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "process", "io-util"] }
 serde = { workspace = true, features = ["derive"] }
-serde_yaml.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 # `GitHubForge`: the REST calls that publish artifacts, open a PR and

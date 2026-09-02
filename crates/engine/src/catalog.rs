@@ -102,7 +102,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
         let Ok(manifest_text) = std::fs::read_to_string(pack_dir.join("pack.yaml")) else {
             continue;
         };
-        let Ok(manifest) = serde_yaml::from_str::<PackManifest>(&manifest_text) else {
+        let Ok(manifest) = yunta_core::yaml::parse::<PackManifest>(&manifest_text) else {
             continue;
         };
         for declared in &manifest.contents.workflows {
@@ -162,7 +162,7 @@ pub fn packs_for_publisher(repo_root: &Path, publisher: &str) -> Vec<(PathBuf, P
         .filter_map(|entry| {
             let pack_dir = entry.path();
             let text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
-            let manifest: PackManifest = serde_yaml::from_str(&text).ok()?;
+            let manifest: PackManifest = yunta_core::yaml::parse(&text).ok()?;
             Some((pack_dir, manifest))
         })
         .collect()

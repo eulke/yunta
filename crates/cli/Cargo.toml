@@ -22,7 +22,6 @@ yunta-storage.workspace = true
 clap = { workspace = true, features = ["derive"] }
 chrono.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_yaml.workspace = true
 # `yunta stats --json` — already a transitive dependency of every crate
 # here via `yunta-engine`, made direct now that the CLI serializes its
 # own JSON DTOs rather than only ever deserializing YAML.
@@ -50,6 +49,8 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# Tests write their workflows and configs as YAML literals.
+serde_yaml.workspace = true
 # `yunta mcp`'s own end-to-end test: a real stdio JSON-RPC round trip
 # against the binary, spawned as a child process — the same combination
 # rmcp documents for testing a stdio server from the outside.

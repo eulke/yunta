@@ -41,7 +41,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                     source,
                 })?;
             let file: yunta_core::QuestionsFile =
-                serde_yaml::from_slice(&bytes).map_err(|e| RunError::CorruptLedger {
+                yunta_core::yaml::parse_bytes(&bytes).map_err(|e| RunError::CorruptLedger {
                     path: ctx.run_dir.join(&relative),
                     detail: e.to_string(),
                 })?;
@@ -113,7 +113,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         let answers_file = yunta_core::AnswersFile {
             answers: reply.answers,
         };
-        let bytes = serde_yaml::to_string(&answers_file)
+        let bytes = yunta_core::yaml::to_string(&answers_file)
             .map_err(|e| RunError::ManifestWrite {
                 path: answers_abs.clone(),
                 detail: e.to_string(),

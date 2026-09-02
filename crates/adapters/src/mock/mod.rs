@@ -97,8 +97,8 @@ impl MockAdapter {
             .clone()
     }
 
-    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, serde_yaml::Error> {
-        Ok(Self::new(serde_yaml::from_str(yaml)?))
+    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, yunta_core::yaml::YamlError> {
+        Ok(Self::new(yunta_core::yaml::parse(yaml)?))
     }
 
     /// Applies one session's filesystem effects under `cwd`, honoring

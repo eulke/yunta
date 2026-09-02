@@ -91,7 +91,7 @@ mod tests {
     use super::*;
 
     fn workflow() -> Workflow {
-        serde_yaml::from_str(
+        yunta_core::yaml::parse(
             r#"
 name: chain
 modes:

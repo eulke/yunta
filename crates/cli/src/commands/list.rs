@@ -69,7 +69,7 @@ pub fn list_workflows() -> ExitCode {
                 continue;
             }
         };
-        let workflow: Workflow = match serde_yaml::from_str(&contents) {
+        let workflow: Workflow = match yunta_core::yaml::parse(&contents) {
             Ok(w) => w,
             Err(e) => {
                 println!("{name}: fails to parse ({e})");
@@ -234,7 +234,7 @@ pub fn list_runs() -> ExitCode {
             .join("manifest.yaml");
         let manifest = match std::fs::read_to_string(&manifest_path)
             .ok()
-            .and_then(|c| serde_yaml::from_str::<Manifest>(&c).ok())
+            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
         {
             Some(manifest) => manifest,
             None => {

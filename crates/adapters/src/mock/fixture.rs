@@ -34,10 +34,10 @@ impl<'de> Deserialize<'de> for MockFixture {
 
         // The two forms are told apart structurally — by the presence of
         // a `sessions` key — never by guessing from what parses.
-        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let value = yunta_core::yaml::Value::deserialize(deserializer)?;
         let has_sessions = value
             .as_mapping()
-            .is_some_and(|m| m.contains_key(serde_yaml::Value::from("sessions")));
+            .is_some_and(|m| m.contains_key(yunta_core::yaml::Value::from("sessions")));
 
         if has_sessions {
             #[derive(Deserialize)]
@@ -46,7 +46,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 capabilities: Capabilities,
                 sessions: Vec<SessionScript>,
             }
-            let multi: Multi = serde_yaml::from_value(value).map_err(D::Error::custom)?;
+            let multi: Multi = yunta_core::yaml::from_value(value).map_err(D::Error::custom)?;
             Ok(MockFixture {
                 capabilities: multi.capabilities,
                 sessions: multi.sessions,
@@ -59,7 +59,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 #[serde(flatten)]
                 script: SessionScript,
             }
-            let single: Single = serde_yaml::from_value(value).map_err(D::Error::custom)?;
+            let single: Single = yunta_core::yaml::from_value(value).map_err(D::Error::custom)?;
             Ok(MockFixture {
                 capabilities: single.capabilities,
                 sessions: vec![single.script],

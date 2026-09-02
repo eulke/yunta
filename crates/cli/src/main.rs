@@ -342,7 +342,7 @@ pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
         eprintln!("error: failed to read {what} at {}: {e}", path.display());
         ExitCode::FAILURE
     })?;
-    serde_yaml::from_str(&contents).map_err(|e| {
+    yunta_core::yaml::parse(&contents).map_err(|e| {
         eprintln!("error: failed to parse {what} at {}: {e}", path.display());
         ExitCode::FAILURE
     })

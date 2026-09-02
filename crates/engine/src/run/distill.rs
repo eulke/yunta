@@ -212,7 +212,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &str) -> Result<(), RunE
         artifacts,
         verification: verification(&ctx.load_events()?),
     };
-    let yaml = serde_yaml::to_string(&provenance).map_err(|e| RunError::Broken {
+    let yaml = yunta_core::yaml::to_string(&provenance).map_err(|e| RunError::Broken {
         diagnostic: format!("failed to serialize distill provenance: {e}"),
     })?;
     let provenance_path = dest_dir.join("provenance.yaml");

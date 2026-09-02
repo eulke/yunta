@@ -108,11 +108,11 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
     };
     let pack_dir = repo.join(".yunta/packs").join(&publisher).join(&pack_name);
     let manifest_text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
-    let manifest: yunta_core::PackManifest = serde_yaml::from_str(&manifest_text).ok()?;
+    let manifest: yunta_core::PackManifest = yunta_core::yaml::parse(&manifest_text).ok()?;
 
     let commit = std::fs::read_to_string(repo.join(".yunta/yunta.lock"))
         .ok()
-        .and_then(|text| serde_yaml::from_str::<yunta_core::PackLock>(&text).ok())
+        .and_then(|text| yunta_core::yaml::parse::<yunta_core::PackLock>(&text).ok())
         .and_then(|lock| {
             lock.packs
                 .get(&yunta_core::PackLock::key(&publisher, &pack_name))

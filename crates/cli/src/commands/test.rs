@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn a_case_declares_its_mode_and_reads_every_input_scalar_as_text() {
-        let case: TestCase = serde_yaml::from_str(
+        let case: TestCase = yunta_core::yaml::parse(
             "workflow: build-feature\n\
              mode: quick\n\
              inputs: { idea: add dark mode, retries: 3, dry_run: true }\n\
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn a_case_names_the_directory_that_seeds_its_sandbox() {
-        let case: TestCase = serde_yaml::from_str(
+        let case: TestCase = yunta_core::yaml::parse(
             "workflow: ledger-task\n\
              worktree: worktrees/greeting-crate\n\
              fixture: fixtures/ledger-task.yaml\n\
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn a_case_without_mode_or_inputs_runs_the_whole_graph_on_input_defaults() {
-        let case: TestCase = serde_yaml::from_str(
+        let case: TestCase = yunta_core::yaml::parse(
             "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: finished\n",
         )
         .unwrap();

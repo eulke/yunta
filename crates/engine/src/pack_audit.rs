@@ -95,7 +95,7 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
             }
         }
     };
-    let workflow: Workflow = match serde_yaml::from_str(&text) {
+    let workflow: Workflow = match yunta_core::yaml::parse(&text) {
         Ok(workflow) => workflow,
         Err(e) => {
             return WorkflowAudit {

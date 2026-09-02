@@ -22,6 +22,10 @@ sha2.workspace = true
 # transitively (schemars, reqwest); making it direct here costs nothing
 # new and buys exactly the ordered-map-with-serde semantics needed.
 indexmap = { workspace = true, features = ["serde"] }
-
-[dev-dependencies]
+# YAML is the authoring format of every type in this crate; the parser
+# lives next to them so the whole workspace reads and writes YAML through
+# one module, and a document's parse error carries the failing key's path.
 serde_yaml.workspace = true
+# Names the path of a value that failed inside an already-buffered
+# `Value` — the one place the parser's own path tracking cannot reach.
+serde_path_to_error.workspace = true

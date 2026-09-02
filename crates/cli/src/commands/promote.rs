@@ -178,7 +178,7 @@ nodes:
         let storage = Storage::open(&project.storage_path).unwrap();
         let adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
 
-        let workflow: Workflow = serde_yaml::from_str(WORKFLOW).unwrap();
+        let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
         let manifest =
             build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new()).unwrap();
 
