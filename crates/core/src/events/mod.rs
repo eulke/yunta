@@ -8,9 +8,8 @@
 //! enum's existing variant — the log is append-only, so an existing
 //! variant's shape never changes underneath it.
 //!
-//! `event_hash` is deliberately **not** implemented here yet — the
-//! hash-chain policy is already decided, so building it is only a matter
-//! of wiring it in.
+//! The hash chain over persisted rows lives in `yunta-storage`; nothing
+//! here carries a hash.
 
 mod payloads;
 
@@ -23,24 +22,208 @@ pub use crate::Capabilities;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ModeName, NodeId, RunId};
+use crate::ids::{ModeName, NodeId, RunId, Seq};
 
-/// One event as persisted.
-/// `kind` and `schema_version` are not separate fields here: `payload`'s
-/// enum tag already carries the `kind` name (see [`EventPayload::kind_name`]),
-/// and every payload is currently at v1 so a `schema_version` field
-/// would be a constant — storage is where the literal `kind`
-/// string and `schema_version` column get written from
-/// [`EventPayload::kind_name`] and [`EventPayload::schema_version`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Event {
+/// What the engine hands to storage: what happened, in which run, for
+/// which node. Storage assigns the position (`seq`) and the timestamp
+/// (from the injected clock) — a draft carries neither, so no caller can
+/// invent them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventDraft {
     pub run_id: RunId,
-    pub seq: u64,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<NodeId>,
-    #[serde(flatten)]
     pub payload: EventPayload,
+}
+
+/// One event as persisted and read back. On the wire (`events.jsonl`,
+/// the database row) the envelope fields sit beside the body's own:
+/// `{run_id, seq, timestamp, node_id?, kind, ...payload}`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredEvent {
+    pub run_id: RunId,
+    pub seq: Seq,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub node_id: Option<NodeId>,
+    pub body: EventBody,
+}
+
+impl StoredEvent {
+    /// The payload when this binary knows the event's kind; `None` for a
+    /// kind it does not — the event still counts, replay just cannot
+    /// interpret it.
+    pub fn payload(&self) -> Option<&EventPayload> {
+        match &self.body {
+            EventBody::Known(payload) => Some(payload),
+            EventBody::Unknown(_) => None,
+        }
+    }
+}
+
+/// A stored event's content: a payload this binary knows, or one written
+/// under a `kind` it does not. The reader keeps the unknown one verbatim
+/// (the spec's rule: a run with an unknown kind is partially interpreted,
+/// never broken), and re-serializes it untouched.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventBody {
+    Known(EventPayload),
+    Unknown(UnknownEvent),
+}
+
+impl EventBody {
+    /// The persisted `kind` string, whether or not this binary knows it.
+    pub fn kind_name(&self) -> &str {
+        match self {
+            EventBody::Known(payload) => payload.kind_name(),
+            EventBody::Unknown(unknown) => &unknown.kind,
+        }
+    }
+
+    /// The version the event was written under.
+    pub fn schema_version(&self) -> u32 {
+        match self {
+            EventBody::Known(payload) => payload.schema_version(),
+            EventBody::Unknown(unknown) => unknown.schema_version,
+        }
+    }
+}
+
+/// An event under a `kind` this binary does not know, kept as written:
+/// the kind, the version it was written under, and every field of the
+/// object except the kind tag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnknownEvent {
+    pub kind: String,
+    pub schema_version: u32,
+    pub payload: serde_json::Map<String, serde_json::Value>,
+}
+
+impl UnknownEvent {
+    /// Reads an event object whose `kind` this binary does not know.
+    /// `object` holds the whole body — the kind tag and the fields beside
+    /// it; the tag is kept as `kind`, the rest as the payload.
+    pub fn from_object(
+        mut object: serde_json::Map<String, serde_json::Value>,
+        schema_version: u32,
+    ) -> Result<Self, String> {
+        let kind = match object.remove("kind") {
+            Some(serde_json::Value::String(kind)) => kind,
+            _ => return Err("an event names its `kind` as a string".to_string()),
+        };
+        Ok(UnknownEvent {
+            kind,
+            schema_version,
+            payload: object,
+        })
+    }
+
+    /// The body as one object, with the kind tag back in its place.
+    pub fn to_object(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut object = serde_json::Map::with_capacity(self.payload.len() + 1);
+        object.insert(
+            "kind".to_string(),
+            serde_json::Value::String(self.kind.clone()),
+        );
+        object.extend(self.payload.iter().map(|(k, v)| (k.clone(), v.clone())));
+        object
+    }
+}
+
+impl EventBody {
+    /// Reads a body from its JSON object: the payload when `kind` is
+    /// known (a known kind whose fields do not fit is an error, never an
+    /// unknown), the object kept verbatim otherwise.
+    pub fn from_object(
+        object: serde_json::Map<String, serde_json::Value>,
+        schema_version: u32,
+    ) -> Result<Self, String> {
+        let kind = object
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "an event names its `kind` as a string".to_string())?;
+        if EventPayload::KINDS.contains(&kind) {
+            serde_json::from_value(serde_json::Value::Object(object))
+                .map(EventBody::Known)
+                .map_err(|error| error.to_string())
+        } else {
+            UnknownEvent::from_object(object, schema_version).map(EventBody::Unknown)
+        }
+    }
+
+    /// The body as one JSON object, the kind tag included.
+    pub fn to_object(&self) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+        match self {
+            EventBody::Known(payload) => match serde_json::to_value(payload) {
+                Ok(serde_json::Value::Object(object)) => Ok(object),
+                Ok(_) => Err("a payload serializes as an object".to_string()),
+                Err(error) => Err(error.to_string()),
+            },
+            EventBody::Unknown(unknown) => Ok(unknown.to_object()),
+        }
+    }
+}
+
+/// The wire shape's envelope fields. Kept apart from [`StoredEvent`] so
+/// the body can be flattened beside them by hand: serde's own
+/// `flatten` cannot fall back to an unknown kind.
+#[derive(Serialize, Deserialize)]
+struct Envelope {
+    run_id: RunId,
+    seq: Seq,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    node_id: Option<NodeId>,
+    /// Present only for an unknown kind, whose version has no other
+    /// place to live on the wire; a known kind's version is its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema_version: Option<u32>,
+}
+
+impl Serialize for StoredEvent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::Error;
+
+        let envelope = Envelope {
+            run_id: self.run_id.clone(),
+            seq: self.seq,
+            timestamp: self.timestamp,
+            node_id: self.node_id.clone(),
+            schema_version: match &self.body {
+                EventBody::Known(_) => None,
+                EventBody::Unknown(unknown) => Some(unknown.schema_version),
+            },
+        };
+        let mut object = match serde_json::to_value(&envelope).map_err(S::Error::custom)? {
+            serde_json::Value::Object(object) => object,
+            _ => return Err(S::Error::custom("the envelope serializes as an object")),
+        };
+        object.extend(self.body.to_object().map_err(S::Error::custom)?);
+        serde_json::Value::Object(object).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StoredEvent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let mut object = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+        let mut envelope_fields = serde_json::Map::new();
+        for field in ["run_id", "seq", "timestamp", "node_id", "schema_version"] {
+            if let Some(value) = object.remove(field) {
+                envelope_fields.insert(field.to_string(), value);
+            }
+        }
+        let envelope: Envelope = serde_json::from_value(serde_json::Value::Object(envelope_fields))
+            .map_err(D::Error::custom)?;
+        let body = EventBody::from_object(object, envelope.schema_version.unwrap_or(1))
+            .map_err(D::Error::custom)?;
+        Ok(StoredEvent {
+            run_id: envelope.run_id,
+            seq: envelope.seq,
+            timestamp: envelope.timestamp,
+            node_id: envelope.node_id,
+            body,
+        })
+    }
 }
 
 /// All 31 event kinds, internally tagged by `kind`.
@@ -85,14 +268,50 @@ pub enum EventPayload {
 /// modes existed, or truncated). This is the one place that mode is
 /// derived: `execute_run`'s resume and the stats surfaces must never
 /// disagree about a run's mode.
-pub fn run_mode(events: &[Event]) -> ModeName {
-    match events.first().map(|event| &event.payload) {
+pub fn run_mode(events: &[StoredEvent]) -> ModeName {
+    match events.first().and_then(StoredEvent::payload) {
         Some(EventPayload::RunCreated(p)) => p.mode.clone(),
         _ => ModeName::default(),
     }
 }
 
 impl EventPayload {
+    /// Every kind this binary knows, as persisted — what the reader checks
+    /// a stored `kind` against before deciding it is unknown.
+    pub const KINDS: &'static [&'static str] = &[
+        "run_created",
+        "runner_resolved",
+        "baseline_captured",
+        "node_started",
+        "agent_session_opened",
+        "agent_message",
+        "artifact_written",
+        "context_assembled",
+        "task_registered",
+        "criteria_checked",
+        "task_status_changed",
+        "scope_checked",
+        "scope_expansion_requested",
+        "scope_expansion_granted",
+        "scope_expansion_denied",
+        "node_finished",
+        "node_failed",
+        "hook_executed",
+        "node_rerouted",
+        "gate_waiting",
+        "gate_resolved",
+        "questions_answered",
+        "loop_iteration",
+        "finding_posted",
+        "promotion_signaled",
+        "child_run_created",
+        "child_run_finished",
+        "capability_degraded",
+        "run_paused",
+        "run_resumed",
+        "run_finished",
+    ];
+
     /// The persisted `kind` string — what storage writes to its
     /// `kind` column, independent of re-serializing the whole payload.
     pub fn kind_name(&self) -> &'static str {

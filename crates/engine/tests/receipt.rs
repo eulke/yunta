@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{Event, TerminalState, TokenUsage};
+use yunta_core::events::{StoredEvent, TerminalState, TokenUsage};
 use yunta_core::{AdapterId, Clock, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
@@ -87,6 +87,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             reroutes: 2,
         },
         event_chain,
+        unknown_kinds: Vec::new(),
     }
 }
 
@@ -118,7 +119,7 @@ fn renders_the_markdown_receipt_byte_for_byte() {
 #[test]
 fn a_broken_event_chain_renders_as_a_visible_failure_not_a_silent_omission() {
     let receipt = sample_receipt(EventChainStatus::Broken {
-        seq: 88,
+        seq: 88.into(),
         detail: "payload hash mismatch".to_string(),
     });
     let markdown = render_receipt_markdown(&receipt);
@@ -321,7 +322,7 @@ impl Bench {
         &self,
         workflow_yaml: &str,
         fixture_yaml: &str,
-    ) -> (yunta_core::Manifest, Vec<Event>) {
+    ) -> (yunta_core::Manifest, Vec<StoredEvent>) {
         let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
         let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
         let manifest = build_manifest(

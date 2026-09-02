@@ -42,10 +42,11 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    Event, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
-    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
+    EventDraft, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
+    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, StoredEvent,
+    TerminalState,
 };
-use yunta_core::{AdapterId, Clock, Manifest, ModeName, NodeId, Pid, RunId, YuntaError};
+use yunta_core::{AdapterId, Clock, Manifest, ModeName, NodeId, Pid, RunId, Seq, YuntaError};
 use yunta_storage::{Storage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -185,18 +186,16 @@ impl RunCtx<'_> {
         &self,
         node_id: Option<&NodeId>,
         payload: EventPayload,
-    ) -> Result<u64, RunError> {
-        let event = Event {
+    ) -> Result<Seq, RunError> {
+        let draft = EventDraft {
             run_id: self.run_id.clone(),
-            seq: 0, // storage assigns the real monotonic seq
-            timestamp: self.clock.now(),
             node_id: node_id.cloned(),
             payload,
         };
-        Ok(self.storage.append_event(&event)?)
+        Ok(self.storage.append(&draft, self.clock)?)
     }
 
-    pub(crate) fn load_events(&self) -> Result<Vec<Event>, RunError> {
+    pub(crate) fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
         Ok(self.storage.events_for_run(self.run_id)?)
     }
 
@@ -417,10 +416,8 @@ pub fn create_run(
         source,
     })?;
 
-    let event = Event {
+    let event = EventDraft {
         run_id: run_id.clone(),
-        seq: 0,
-        timestamp: clock.now(),
         node_id: None,
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
@@ -441,7 +438,7 @@ pub fn create_run(
             base_commit: manifest.base_commit.clone(),
         }),
     };
-    storage.append_event(&event)?;
+    storage.append(&event, clock)?;
 
     Ok(run_dir)
 }
@@ -560,7 +557,7 @@ pub(crate) async fn execute_run_at_depth(
     }
     if events
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::RunFinished(_)))
+        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_))))
     {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.

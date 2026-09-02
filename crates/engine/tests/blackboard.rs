@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::EventPayload;
+use yunta_core::events::{EventBody, EventPayload};
 use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
@@ -128,8 +128,8 @@ impl Bench {
             .unwrap()
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
-            .filter_map(|e| match e.payload {
-                EventPayload::FindingPosted(p) => Some(p.finding.id.to_string()),
+            .filter_map(|e| match e.payload() {
+                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
                 _ => None,
             })
             .collect()
@@ -306,7 +306,7 @@ sessions:
         .events_for_run(&bench.run_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::CapabilityDegraded(_))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::CapabilityDegraded(_)))));
 }
 
 #[tokio::test]
@@ -369,7 +369,7 @@ sessions:
 
 #[test]
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {
-    use yunta_core::events::{Event, Finding, FindingPostedPayload, FindingSeverity};
+    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity, StoredEvent};
     let finding = |id: &str| Finding {
         id: id.into(),
         severity: FindingSeverity::Minor,
@@ -378,14 +378,14 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
         detail: "detail".to_string(),
         proposed_criterion: None,
     };
-    let event = |node: &str, id: &str, seq: u64| Event {
+    let event = |node: &str, id: &str, seq: u64| StoredEvent {
         run_id: RunId::from("run-x"),
-        seq,
+        seq: seq.into(),
         timestamp: chrono::Utc::now(),
         node_id: Some(node.into()),
-        payload: EventPayload::FindingPosted(FindingPostedPayload {
+        body: EventBody::Known(EventPayload::FindingPosted(FindingPostedPayload {
             finding: finding(id),
-        }),
+        })),
     };
     let members = vec!["a".into(), "b".into()];
     let forward = vec![

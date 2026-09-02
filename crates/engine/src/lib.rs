@@ -75,7 +75,9 @@ pub use receipt::{
     render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
     CriterionEntry, EventChainStatus, Receipt, ReceiptError, RunnerUsage, ScopeSummary,
 };
-pub use replay::{dedup_findings, derive, NodeState, RunState};
+pub use replay::{
+    dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
+};
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, resolve_gate,
     session_token_budget, CreateRunParams, Predecessor, PromotionSuccessor, ResolveGateError,

@@ -4,8 +4,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, Event, EventPayload, GateResolvedPayload,
-    NodeFailedPayload, NodeReroutedPayload, Phase,
+    CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, GateResolvedPayload,
+    NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
 use yunta_engine::{analyze_verification_effectiveness as analyze, VERIFICATION_MIN_SAMPLES};
@@ -85,13 +85,15 @@ fn base_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
 }
 
-fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> Event {
-    Event {
+/// `index` is the event's 0-based position in the synthetic log; storage
+/// numbers positions from 1.
+fn event(index: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
         run_id: "run-1".into(),
-        seq,
+        seq: (index + 1).into(),
         timestamp: base_time(),
         node_id: node_id.map(Into::into),
-        payload,
+        body: EventBody::Known(payload),
     }
 }
 
@@ -105,7 +107,7 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
     }
 }
 
-fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<Event> {
+fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<StoredEvent> {
     vec![event(
         0,
         None,
@@ -119,7 +121,7 @@ fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<Event> {
 
 #[test]
 fn a_criterion_never_red_across_enough_samples_is_flagged() {
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| pre_check_run("cargo test", 0))
         .collect();
     let findings = analyze(&workflow(vec![]), &history);
@@ -133,7 +135,7 @@ fn a_criterion_never_red_across_enough_samples_is_flagged() {
 
 #[test]
 fn fewer_than_min_samples_flags_nothing() {
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES - 1)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES - 1)
         .map(|_| pre_check_run("cargo test", 0))
         .collect();
     let findings = analyze(&workflow(vec![]), &history);
@@ -146,7 +148,7 @@ fn a_criterion_red_before_green_after_is_never_flagged() {
     // "never failed" — this criterion *did* go red at least once, in
     // pre-check, which is the metric that matters; that it later passed
     // (post-check) is irrelevant to this signal.
-    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| pre_check_run("cargo test", 0))
         .collect();
     history.push(pre_check_run("cargo test", 1)); // one red pre-check
@@ -164,7 +166,7 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
         max_reroutes: 2,
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,
@@ -191,7 +193,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
         max_reroutes: 2,
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
-    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,
@@ -240,7 +242,7 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
         max_reroutes: 2,
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,
@@ -263,7 +265,7 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
 #[test]
 fn a_gate_always_approved_without_adjustment_is_flagged() {
     let wf = workflow(vec![gate_node("approve")]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,
@@ -285,7 +287,7 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
 #[test]
 fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
     let wf = workflow(vec![gate_node("approve")]);
-    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,
@@ -313,7 +315,7 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
     assert!(findings.always_approved_gates.is_empty());
 }
 
-fn post_check_run(task_attempts: &[u32]) -> Vec<Event> {
+fn post_check_run(task_attempts: &[u32]) -> Vec<StoredEvent> {
     task_attempts
         .iter()
         .enumerate()
@@ -340,7 +342,7 @@ fn post_check_run(task_attempts: &[u32]) -> Vec<Event> {
 
 #[test]
 fn tasks_always_passing_on_the_first_try_is_flagged() {
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| post_check_run(&[1, 1]))
         .collect();
     let findings = analyze(&workflow(vec![]), &history);
@@ -349,7 +351,7 @@ fn tasks_always_passing_on_the_first_try_is_flagged() {
 
 #[test]
 fn a_task_that_ever_needed_a_retry_is_never_flagged() {
-    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| post_check_run(&[1, 1]))
         .collect();
     history.push(post_check_run(&[2]));
@@ -365,7 +367,7 @@ fn no_history_flags_nothing_at_all() {
 
 // --- signals tied to modes -----------
 
-fn run_created_in_mode(mode: &str) -> Vec<Event> {
+fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
     use std::collections::HashMap;
     vec![event(
         0,
@@ -403,7 +405,7 @@ fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
 #[test]
 fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
     let wf = moded_workflow(vec![], &["quick", "standard", "full"]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| run_created_in_mode("quick"))
         .collect();
     let findings = analyze(&wf, &history);
@@ -422,7 +424,7 @@ fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
 #[test]
 fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
     let wf = moded_workflow(vec![], &["quick", "full"]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES - 1)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES - 1)
         .map(|_| run_created_in_mode("quick"))
         .collect();
     let findings = analyze(&wf, &history);
@@ -432,7 +434,7 @@ fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
 #[test]
 fn a_mode_used_even_once_is_never_flagged() {
     let wf = moded_workflow(vec![], &["quick", "full"]);
-    let mut history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|_| run_created_in_mode("quick"))
         .collect();
     history.push(run_created_in_mode("full"));
@@ -456,7 +458,7 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
     );
     lint.invariant = true;
     let wf = workflow(vec![lint]);
-    let history: Vec<Vec<Event>> = (0..VERIFICATION_MIN_SAMPLES)
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
         .map(|i| {
             vec![event(
                 i as u64,

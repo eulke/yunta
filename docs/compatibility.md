@@ -95,6 +95,24 @@ A pack manifest names the runners it needs under `requires.runners`. The
 accepts `role`, the field's former name, so a log written under it still
 replays. `stats --json` and the JSON receipt name the same value `runner`.
 
+## The event log
+
+The engine hands storage a draft — what happened, in which run, for which
+node — and storage assigns the event's position (`seq`, from 1) and its
+timestamp from the injected clock; no caller invents either.
+
+A binary reads every log a newer binary wrote. An event under a `kind` this
+binary does not know is kept as written — its kind, the version it was
+written under and every field — and the run is interpreted up to what the
+binary understands: replay never breaks on it, `yunta status` and the
+receipt name the unknown kinds with their counts, `stats --json` lists them
+under `unknown_kinds`, and `events.jsonl` carries the event back out
+verbatim (with its `schema_version` beside the envelope fields). An event
+under a known kind whose payload is not that kind's shape is corrupt, and
+reading the run fails naming its position.
+
+`yunta list --runs` orders runs by the timestamp of their first event.
+
 ## Platforms
 
 Yunta builds and is published for Linux and macOS. The engine's process

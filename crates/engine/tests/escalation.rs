@@ -57,7 +57,7 @@ runners:
 async fn paused_manifest_and_events(
     workflow_yaml: &str,
     fixture_yaml: &str,
-) -> (yunta_core::Manifest, Vec<yunta_core::events::Event>) {
+) -> (yunta_core::Manifest, Vec<yunta_core::events::StoredEvent>) {
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
@@ -141,9 +141,10 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
 
     // Nothing was ever logged for this pause (no live surface) — the
     // whole point is that `current_escalation` rebuilds it without one.
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 
     let (node_id, escalation) = current_escalation(&manifest, &events)
         .expect("an exhausted re-route must reconstruct an escalation");
@@ -175,9 +176,10 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     let (manifest, events) =
         paused_manifest_and_events(INTERNAL_GATE_WORKFLOW, "sessions: []\n").await;
 
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 
     let (node_id, escalation) = current_escalation(&manifest, &events)
         .expect("an unresolved internal gate must reconstruct an escalation");
@@ -305,12 +307,15 @@ impl GateBench {
         )
     }
 
-    fn events(&self) -> Vec<yunta_core::events::Event> {
+    fn events(&self) -> Vec<yunta_core::events::StoredEvent> {
         self.storage.events_for_run(&self.run_id).unwrap()
     }
 
     fn count(&self, pred: impl Fn(&yunta_core::events::EventPayload) -> bool) -> usize {
-        self.events().iter().filter(|e| pred(&e.payload)).count()
+        self.events()
+            .iter()
+            .filter(|e| e.payload().is_some_and(&pred))
+            .count()
     }
 }
 
@@ -452,13 +457,12 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     );
     let events = storage.events_for_run(&run_id).unwrap();
     assert!(events.iter().any(|e| matches!(
-        e.payload,
-        yunta_core::events::EventPayload::PromotionSignaled(_)
+        e.payload(),
+        Some(yunta_core::events::EventPayload::PromotionSignaled(_))
     )));
     assert!(events.iter().any(|e| matches!(
-        &e.payload,
-        yunta_core::events::EventPayload::RunFinished(p)
-            if p.terminal_state == yunta_core::events::TerminalState::Promoted
+        e.payload(),
+        Some(yunta_core::events::EventPayload::RunFinished(p)) if p.terminal_state == yunta_core::events::TerminalState::Promoted
     )));
 }
 

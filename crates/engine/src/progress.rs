@@ -14,7 +14,7 @@ use crate::replay::{derive, NodeState, RunState};
 /// node with its one-line description and the artifacts it produced,
 /// every failed node, and everything still ahead. Pure — same workflow,
 /// same log, same markdown, always.
-pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Event]) -> String {
+pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::StoredEvent]) -> String {
     let state = derive(events);
     let nodes: Vec<&Node> = workflow.iter_nodes().collect();
 

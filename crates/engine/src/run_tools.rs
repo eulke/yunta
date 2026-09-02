@@ -46,7 +46,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::RunToolsEndpoint;
-use yunta_core::events::{Event, EventPayload, Finding, FindingPostedPayload};
+use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload, StoredEvent};
 use yunta_core::{Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
 use yunta_storage::Storage;
 
@@ -102,7 +102,7 @@ impl RunToolsHost {
 /// its close, consumable by a node after the `parallel`
 /// (`context: [{node-output: {node: <group_id>}}]`) — never between
 /// siblings hot.
-pub fn consolidate_blackboard(events: &[Event], members: &[NodeId]) -> String {
+pub fn consolidate_blackboard(events: &[StoredEvent], members: &[NodeId]) -> String {
     let mut entries: Vec<(String, Finding)> = events
         .iter()
         .filter_map(|event| {
@@ -110,8 +110,8 @@ pub fn consolidate_blackboard(events: &[Event], members: &[NodeId]) -> String {
             if !members.contains(node) {
                 return None;
             }
-            match &event.payload {
-                EventPayload::FindingPosted(p) => Some((node.to_string(), p.finding.clone())),
+            match event.payload() {
+                Some(EventPayload::FindingPosted(p)) => Some((node.to_string(), p.finding.clone())),
                 _ => None,
             }
         })
@@ -236,7 +236,7 @@ impl SessionTools {
         self.host.blackboard_members.contains_key(&self.node)
     }
 
-    fn events(&self) -> Result<Vec<Event>, String> {
+    fn events(&self) -> Result<Vec<StoredEvent>, String> {
         self.host
             .storage
             .events_for_run(&self.host.run_id)
@@ -253,13 +253,14 @@ impl SessionTools {
         let id = finding.id.clone();
         self.host
             .storage
-            .append_event(&Event {
-                run_id: self.host.run_id.clone(),
-                seq: 0,
-                timestamp: chrono::Utc::now(),
-                node_id: Some(self.node.clone()),
-                payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
-            })
+            .append(
+                &EventDraft {
+                    run_id: self.host.run_id.clone(),
+                    node_id: Some(self.node.clone()),
+                    payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
+                },
+                &yunta_core::SystemClock,
+            )
             .map_err(|e| e.to_string())?;
         Ok(format!("finding `{id}` recorded"))
     }
@@ -280,8 +281,8 @@ impl SessionTools {
             .events()?
             .into_iter()
             .filter(|event| event.node_id.as_ref() == Some(&self.node))
-            .filter_map(|event| match event.payload {
-                EventPayload::FindingPosted(p) => Some(p.finding),
+            .filter_map(|event| match event.payload() {
+                Some(EventPayload::FindingPosted(p)) => Some(p.finding.clone()),
                 _ => None,
             })
             .collect();

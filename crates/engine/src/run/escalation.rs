@@ -7,8 +7,8 @@
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
-use yunta_core::events::{Event, EventPayload, GateOption, GateWaitingPayload};
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Workflow};
+use yunta_core::events::{EventDraft, EventPayload, GateOption, GateWaitingPayload, StoredEvent};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 
@@ -135,7 +135,7 @@ pub(crate) fn build_internal_gate_escalation(
 /// used.
 pub fn current_escalation(
     manifest: &Manifest,
-    events: &[Event],
+    events: &[StoredEvent],
 ) -> Option<(NodeId, GateWaitingPayload)> {
     let mode_name = current_mode_name(events)?;
     match current_step(manifest, events)? {
@@ -175,8 +175,8 @@ pub fn current_escalation(
     }
 }
 
-fn current_mode_name(events: &[Event]) -> Option<ModeName> {
-    match events.first().map(|e| &e.payload) {
+fn current_mode_name(events: &[StoredEvent]) -> Option<ModeName> {
+    match events.first().and_then(StoredEvent::payload) {
         Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
         _ => None,
     }
@@ -184,7 +184,7 @@ fn current_mode_name(events: &[Event]) -> Option<ModeName> {
 
 /// The raw scheduler decision behind [`current_escalation`] — `None`
 /// for every step that isn't one of the two gate shapes.
-fn current_step(manifest: &Manifest, events: &[Event]) -> Option<ScheduleStep> {
+fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleStep> {
     let mode_name = current_mode_name(events)?;
     let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
     let step = schedule::next_step(
@@ -228,7 +228,7 @@ pub fn resolve_gate(
 ) -> Result<(), ResolveGateError> {
     let events = storage.events_for_run(run_id)?;
     if !matches!(
-        events.last().map(|e| &e.payload),
+        events.last().and_then(StoredEvent::payload),
         Some(EventPayload::RunPaused(_))
     ) {
         return Err(ResolveGateError::NotPaused);
@@ -253,20 +253,22 @@ pub fn resolve_gate(
         free_text,
         approved_sha: None,
     };
-    storage.append_event(&Event {
-        run_id: run_id.clone(),
-        seq: 0,
-        timestamp: clock.now(),
-        node_id: Some(node.clone()),
-        payload: EventPayload::GateWaiting(escalation),
-    })?;
-    storage.append_event(&Event {
-        run_id: run_id.clone(),
-        seq: 0,
-        timestamp: clock.now(),
-        node_id: Some(node),
-        payload: EventPayload::GateResolved(resolution),
-    })?;
+    storage.append(
+        &EventDraft {
+            run_id: run_id.clone(),
+            node_id: Some(node.clone()),
+            payload: EventPayload::GateWaiting(escalation),
+        },
+        clock,
+    )?;
+    storage.append(
+        &EventDraft {
+            run_id: run_id.clone(),
+            node_id: Some(node),
+            payload: EventPayload::GateResolved(resolution),
+        },
+        clock,
+    )?;
     Ok(())
 }
 
@@ -283,29 +285,29 @@ pub fn resolve_gate(
 /// failure. Callers still re-validate the chosen option against the
 /// re-derived menu — a mismatch means ask normally, never guess.
 pub(crate) fn pre_seeded_resolution(
-    events: &[Event],
+    events: &[StoredEvent],
     node: &NodeId,
 ) -> Option<yunta_core::events::GateResolvedPayload> {
-    let mut latest: Option<(u64, yunta_core::events::GateResolvedPayload)> = None;
-    let mut blocker = 0u64;
+    let mut latest: Option<(Seq, yunta_core::events::GateResolvedPayload)> = None;
+    let mut blocker: Option<Seq> = None;
     for event in events {
-        match &event.payload {
-            EventPayload::GateResolved(p) if event.node_id.as_ref() == Some(node) => {
+        match event.payload() {
+            Some(EventPayload::GateResolved(p)) if event.node_id.as_ref() == Some(node) => {
                 latest = Some((event.seq, p.clone()));
             }
-            EventPayload::NodeFailed(_)
-            | EventPayload::NodeRerouted(_)
-            | EventPayload::NodeFinished(_)
-                if event.node_id.as_ref() == Some(node) =>
-            {
-                blocker = blocker.max(event.seq);
+            Some(
+                EventPayload::NodeFailed(_)
+                | EventPayload::NodeRerouted(_)
+                | EventPayload::NodeFinished(_),
+            ) if event.node_id.as_ref() == Some(node) => {
+                blocker = blocker.max(Some(event.seq));
             }
-            EventPayload::RunPaused(_) => blocker = blocker.max(event.seq),
+            Some(EventPayload::RunPaused(_)) => blocker = blocker.max(Some(event.seq)),
             _ => {}
         }
     }
     latest
-        .filter(|(seq, _)| *seq > blocker)
+        .filter(|(seq, _)| Some(*seq) > blocker)
         .map(|(_, resolution)| resolution)
 }
 

@@ -136,7 +136,7 @@ async fn run_with_config(
     config: ConfigLayer,
 ) -> (
     RunTerminal,
-    Vec<yunta_core::events::Event>,
+    Vec<yunta_core::events::StoredEvent>,
     std::path::PathBuf,
     tempfile::TempDir,
 ) {
@@ -223,8 +223,8 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
 
     let sources: Vec<_> = events
         .iter()
-        .find_map(|e| match (&e.node_id, &e.payload) {
-            (Some(n), yunta_core::events::EventPayload::ContextAssembled(p))
+        .find_map(|e| match (&e.node_id, e.payload()) {
+            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
                 if n.as_str() == "ask" =>
             {
                 Some(p.sources.clone())

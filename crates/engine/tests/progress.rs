@@ -3,8 +3,8 @@
 //! full run.
 
 use yunta_core::events::{
-    ArtifactWrittenPayload, Event, EventPayload, NodeFailedPayload, NodeFinishedPayload,
-    NodeStartedPayload, TokenUsage,
+    ArtifactWrittenPayload, EventBody, EventPayload, NodeFailedPayload, NodeFinishedPayload,
+    NodeStartedPayload, StoredEvent, TokenUsage,
 };
 use yunta_core::{Node, NodeKind, PromptSource, Workflow};
 use yunta_engine::render_progress;
@@ -56,13 +56,13 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     }
 }
 
-fn event(seq: u64, node_id: &str, payload: EventPayload) -> Event {
-    Event {
+fn event(seq: u64, node_id: &str, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
         run_id: "run-1".into(),
-        seq,
+        seq: seq.into(),
         timestamp: chrono::Utc::now(),
         node_id: Some(node_id.into()),
-        payload,
+        body: EventBody::Known(payload),
     }
 }
 

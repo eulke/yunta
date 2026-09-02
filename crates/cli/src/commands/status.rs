@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use yunta_core::events::{Event, EventPayload, TaskStatus};
+use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
 use yunta_core::{Manifest, ModeName, NodeId, RunId};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
@@ -34,7 +34,7 @@ fn mode_included_ids(
 /// `yunta status` (one run, in detail) and `yunta list --runs`
 /// (every local run, one line each) so the two surfaces can never
 /// disagree about what a run's progress means.
-pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String {
+pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> String {
     let declared_nodes: Vec<NodeId> = manifest
         .workflow
         .iter_nodes()
@@ -45,21 +45,21 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
 
     let reroutes = events
         .iter()
-        .filter(|e| matches!(e.payload, EventPayload::NodeRerouted(_)))
+        .filter(|e| matches!(e.payload(), Some(EventPayload::NodeRerouted(_))))
         .count();
 
     let phase = if let Some(diagnostic) = &state.broken {
         format!("broken — {diagnostic}")
     } else {
-        match events.iter().rev().find_map(|e| match &e.payload {
-            EventPayload::RunFinished(_) => Some("finished".to_string()),
+        match events.iter().rev().find_map(|e| match e.payload() {
+            Some(EventPayload::RunFinished(_)) => Some("finished".to_string()),
             // A paused run is waiting on a person, not stuck — e.g.
             // "waiting on gate approve-plan" is what a `run_paused`
             // reason already reads like, so this reuses it verbatim
             // rather than inventing a second vocabulary for the same
             // fact.
-            EventPayload::RunPaused(p) => Some(format!("waiting — {}", p.reason)),
-            EventPayload::RunResumed(_) | EventPayload::NodeStarted(_) => {
+            Some(EventPayload::RunPaused(p)) => Some(format!("waiting — {}", p.reason)),
+            Some(EventPayload::RunResumed(_) | EventPayload::NodeStarted(_)) => {
                 Some("running".to_string())
             }
             _ => None,
@@ -85,8 +85,8 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
     // render as `skipped`, not omitted.
     let mode = events
         .iter()
-        .find_map(|e| match &e.payload {
-            EventPayload::RunCreated(p) => Some(p.mode.clone()),
+        .find_map(|e| match e.payload() {
+            Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
             _ => None,
         })
         .unwrap_or_default();
@@ -115,6 +115,17 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
         summary = format!("{tasks_done}/{} tasks · {summary}", state.tasks.len());
     }
     summary.push_str(&format!(" · {reroutes} reroutes · {phase}"));
+    let unknown = yunta_engine::unknown_kind_counts(&state);
+    if !unknown.is_empty() {
+        let kinds: Vec<String> = unknown
+            .iter()
+            .map(|count| format!("{} ×{}", count.kind, count.events))
+            .collect();
+        summary.push_str(&format!(
+            " · unknown event kind(s), interpreted partially: {}",
+            kinds.join(", ")
+        ));
+    }
     summary
 }
 

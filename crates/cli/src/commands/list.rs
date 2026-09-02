@@ -208,7 +208,10 @@ pub fn list_runs() -> ExitCode {
         }
     };
 
-    let run_ids = match storage.list_run_ids() {
+    let run_ids = match storage
+        .list_runs()
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())
+    {
         Ok(ids) => ids,
         Err(e) => {
             eprintln!("error: {e}");

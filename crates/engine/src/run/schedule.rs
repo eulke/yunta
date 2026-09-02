@@ -22,8 +22,8 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{Event, EventPayload};
-use yunta_core::{ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::events::{EventPayload, StoredEvent};
+use yunta_core::{ModeName, Node, NodeId, NodeKind, OnInterrupt, Seq, Workflow};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState};
@@ -157,9 +157,9 @@ fn declares_questions(node: &Node) -> bool {
 /// The `external_ref` (forge handle) from this node's last `gate_waiting`
 /// — `None` only if it was never published, which callers only reach
 /// this for after confirming otherwise.
-fn last_external_ref(events: &[Event], node_id: &NodeId) -> Option<String> {
-    events.iter().rev().find_map(|e| match &e.payload {
-        EventPayload::GateWaiting(p) if e.node_id.as_ref() == Some(node_id) => {
+fn last_external_ref(events: &[StoredEvent], node_id: &NodeId) -> Option<String> {
+    events.iter().rev().find_map(|e| match e.payload() {
+        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
             p.external_ref.clone()
         }
         _ => None,
@@ -171,16 +171,16 @@ fn last_external_ref(events: &[Event], node_id: &NodeId) -> Option<String> {
 #[derive(Debug, Default, Clone)]
 struct NodeHistory {
     starts: u32,
-    last_failed_seq: Option<u64>,
-    last_finished_seq: Option<u64>,
+    last_failed_seq: Option<Seq>,
+    last_finished_seq: Option<Seq>,
     reroutes: u32,
     /// seq and destination of the last `node_rerouted` this node emitted.
-    last_reroute: Option<(u64, NodeId)>,
+    last_reroute: Option<(Seq, NodeId)>,
 }
 
 pub fn next_step(
     workflow: &Workflow,
-    events: &[Event],
+    events: &[StoredEvent],
     max_parallel_nodes: u32,
     default_on_interrupt: OnInterrupt,
     mode_nodes: Option<&HashSet<NodeId>>,
@@ -261,11 +261,11 @@ pub fn next_step(
             continue;
         };
         let entry = history.entry(node_id.clone()).or_default();
-        match &event.payload {
-            EventPayload::NodeStarted(_) => entry.starts += 1,
-            EventPayload::NodeFailed(_) => entry.last_failed_seq = Some(event.seq),
-            EventPayload::NodeFinished(_) => entry.last_finished_seq = Some(event.seq),
-            EventPayload::NodeRerouted(p) => {
+        match event.payload() {
+            Some(EventPayload::NodeStarted(_)) => entry.starts += 1,
+            Some(EventPayload::NodeFailed(_)) => entry.last_failed_seq = Some(event.seq),
+            Some(EventPayload::NodeFinished(_)) => entry.last_finished_seq = Some(event.seq),
+            Some(EventPayload::NodeRerouted(p)) => {
                 entry.reroutes += 1;
                 entry.last_reroute = Some((event.seq, p.to_node.clone()));
             }
@@ -384,12 +384,12 @@ pub fn next_step(
             continue;
         };
         let h = hist(&node.id);
-        let failed_seq = h.last_failed_seq.unwrap_or(0);
+        let failed_seq = h.last_failed_seq;
 
         let rerouted_for_this_failure = h
             .last_reroute
             .as_ref()
-            .filter(|(seq, _)| *seq > failed_seq)
+            .filter(|(seq, _)| Some(*seq) > failed_seq)
             .cloned();
 
         match rerouted_for_this_failure {

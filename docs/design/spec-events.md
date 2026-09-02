@@ -60,7 +60,9 @@ Cuatro reglas, aplicadas desde el primer commit:
    bug del engine, no un warning.
 4. **`kind` desconocido → run parcialmente interpretado, nunca `broken`.** Ninguna
    degradación es silenciosa: el run sigue interpretándose hasta donde puede, con
-   el `kind` desconocido señalado explícitamente, nunca escondido.
+   el `kind` desconocido señalado explícitamente, nunca escondido. El lector
+   conserva el evento entero — `kind`, `schema_version` y todos sus campos — y
+   `status`, el recibo y `stats` cuentan los kinds desconocidos por nombre.
 
 El JSON Schema se **genera desde los tipos de Rust** (fuente de verdad = código) y
 se versiona en el repo; cualquier cambio de payload produce diff visible en PR. La

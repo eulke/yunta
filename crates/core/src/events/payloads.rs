@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
 use crate::ids::{
-    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, SessionId,
-    TaskId,
+    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, Seq,
+    SessionId, TaskId,
 };
 use crate::Capabilities;
 
@@ -336,7 +336,7 @@ pub struct TaskStatusChangedPayload {
     pub task_id: TaskId,
     pub new_status: TaskStatus,
     /// `seq` of the event that justifies this transition.
-    pub caused_by: u64,
+    pub caused_by: Seq,
 }
 
 /// `task_id` is present for a task's scope check within a loop node;

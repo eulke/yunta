@@ -5,7 +5,7 @@
 use yunta_core::events::{EventPayload, RunnerResolvedPayload};
 use yunta_core::{
     AdapterId, AgentName, ExecutorName, FindingId, InvalidId, Ledger, ModeName, ModelName, NodeId,
-    PackManifest, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, SessionId,
+    PackManifest, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
     TaskId, Workflow,
 };
 
@@ -293,4 +293,17 @@ fn a_static_identifier_is_checked_when_the_program_is_built() {
     static MOCK: AdapterId = AdapterId::from_static("mock");
     assert_eq!(MOCK.as_str(), "mock");
     assert_eq!(MOCK, "mock".parse::<AdapterId>().unwrap());
+}
+
+#[test]
+fn a_seq_starts_at_one_and_counts_up() {
+    assert!(Seq::try_from(0_i64).is_err());
+    assert!(Seq::try_from(-3_i64).is_err());
+    let first = Seq::try_from(1_i64).unwrap();
+    assert_eq!(first, Seq::FIRST);
+    assert_eq!(first.next().get(), 2);
+    assert_eq!(first.to_string(), "1");
+    assert_eq!(serde_json::to_string(&first).unwrap(), "1");
+    assert!(serde_json::from_str::<Seq>("0").is_err());
+    assert_eq!(serde_json::from_str::<Seq>("7").unwrap().get(), 7);
 }

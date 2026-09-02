@@ -315,11 +315,11 @@ pub(super) async fn recheck_approved_gates(
 }
 
 fn last_approved_sha(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     node_id: &yunta_core::NodeId,
 ) -> Option<String> {
-    events.iter().rev().find_map(|e| match &e.payload {
-        EventPayload::GateResolved(p) if e.node_id.as_ref() == Some(node_id) => {
+    events.iter().rev().find_map(|e| match e.payload() {
+        Some(EventPayload::GateResolved(p)) if e.node_id.as_ref() == Some(node_id) => {
             p.approved_sha.clone()
         }
         _ => None,
@@ -327,11 +327,11 @@ fn last_approved_sha(
 }
 
 fn last_external_ref(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     node_id: &yunta_core::NodeId,
 ) -> Option<String> {
-    events.iter().rev().find_map(|e| match &e.payload {
-        EventPayload::GateWaiting(p) if e.node_id.as_ref() == Some(node_id) => {
+    events.iter().rev().find_map(|e| match e.payload() {
+        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
             p.external_ref.clone()
         }
         _ => None,
@@ -471,7 +471,7 @@ fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
         .iter()
         .filter(|e| {
             e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload, EventPayload::NodeStarted(_))
+                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
         })
         .count() as u32
         + 1;

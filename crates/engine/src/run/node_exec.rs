@@ -697,8 +697,10 @@ pub(super) async fn close_node(
             > = ctx
                 .load_events()?
                 .into_iter()
-                .filter_map(|event| match event.payload {
-                    EventPayload::TaskRegistered(p) => Some((p.task_id, (p.criteria, p.scope))),
+                .filter_map(|event| match event.payload() {
+                    Some(EventPayload::TaskRegistered(p)) => {
+                        Some((p.task_id.clone(), (p.criteria.clone(), p.scope.clone())))
+                    }
                     _ => None,
                 })
                 .collect();
@@ -1314,15 +1316,16 @@ enum OrphanedSession {
 }
 
 fn orphaned_session(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     node_id: &yunta_core::NodeId,
 ) -> OrphanedSession {
-    let mine = |event: &&yunta_core::events::Event| event.node_id.as_ref() == Some(node_id);
+    let mine = |event: &&yunta_core::events::StoredEvent| event.node_id.as_ref() == Some(node_id);
     let starts: Vec<usize> = events
         .iter()
         .enumerate()
         .filter(|(_, e)| {
-            e.node_id.as_ref() == Some(node_id) && matches!(e.payload, EventPayload::NodeStarted(_))
+            e.node_id.as_ref() == Some(node_id)
+                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
         })
         .map(|(i, _)| i)
         .collect();
@@ -1337,8 +1340,8 @@ fn orphaned_session(
     let window = &events[previous..current];
     let had_verdict = window.iter().filter(mine).any(|e| {
         matches!(
-            e.payload,
-            EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)
+            e.payload(),
+            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
         )
     });
     if had_verdict {
@@ -1348,8 +1351,8 @@ fn orphaned_session(
         .iter()
         .filter(mine)
         .rev()
-        .find_map(|e| match &e.payload {
-            EventPayload::AgentSessionOpened(p) => Some(p.session_id.clone()),
+        .find_map(|e| match e.payload() {
+            Some(EventPayload::AgentSessionOpened(p)) => Some(p.session_id.clone()),
             _ => None,
         }) {
         Some(session_id) => OrphanedSession::Open(session_id),

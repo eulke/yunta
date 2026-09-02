@@ -1,8 +1,10 @@
 use yunta_core::events::{
-    Event, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
+    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
+use yunta_core::Seq;
 use yunta_engine::{dedup_findings, derive, NodeState};
 
 fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> Finding {
@@ -16,13 +18,13 @@ fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> 
     }
 }
 
-fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> Event {
-    Event {
+fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
         run_id: "run-1".into(),
-        seq,
+        seq: seq.into(),
         timestamp: chrono::Utc::now(),
         node_id: node_id.map(Into::into),
-        payload,
+        body: EventBody::Known(payload),
     }
 }
 
@@ -160,7 +162,7 @@ fn task_status_changed_without_task_registered_is_broken() {
         EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
-            caused_by: 0,
+            caused_by: 1.into(),
         }),
     )];
 
@@ -187,7 +189,7 @@ fn task_lifecycle_derives_its_latest_status() {
             EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Running,
-                caused_by: 1,
+                caused_by: 1.into(),
             }),
         ),
         event(
@@ -196,7 +198,7 @@ fn task_lifecycle_derives_its_latest_status() {
             EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Done,
-                caused_by: 2,
+                caused_by: 2.into(),
             }),
         ),
     ];
@@ -308,7 +310,7 @@ fn replay_stops_deriving_further_state_once_broken() {
 
 #[test]
 fn replay_is_deterministic_across_several_fixtures() {
-    let fixtures: Vec<Vec<Event>> = vec![
+    let fixtures: Vec<Vec<StoredEvent>> = vec![
         vec![
             event(
                 1,
@@ -360,4 +362,46 @@ fn replay_is_deterministic_across_several_fixtures() {
         let second = derive(&events);
         assert_eq!(first, second);
     }
+}
+
+#[test]
+fn an_unknown_kind_is_counted_and_never_breaks_replay() {
+    let unknown = StoredEvent {
+        run_id: "run-1".into(),
+        seq: 2.into(),
+        timestamp: chrono::Utc::now(),
+        node_id: Some("lint".into()),
+        body: EventBody::Unknown(UnknownEvent {
+            kind: "future_kind".to_string(),
+            schema_version: 1,
+            payload: serde_json::Map::new(),
+        }),
+    };
+    let events = vec![
+        event(
+            1,
+            Some("lint"),
+            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+        ),
+        unknown,
+        event(
+            3,
+            Some("lint"),
+            EventPayload::NodeFinished(NodeFinishedPayload {
+                outcome: "criteria green".to_string(),
+                tokens_used: tokens(10, 5),
+            }),
+        ),
+    ];
+
+    let state = derive(&events);
+    assert_eq!(state.broken, None);
+    assert!(matches!(
+        state.nodes.get("lint"),
+        Some(NodeState::Finished { .. })
+    ));
+    assert_eq!(
+        state.unknown_kinds,
+        vec![(Seq::try_from(2_i64).unwrap(), "future_kind".to_string())]
+    );
 }

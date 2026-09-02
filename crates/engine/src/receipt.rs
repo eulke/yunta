@@ -10,12 +10,14 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use yunta_core::events::{Event, EventPayload, Phase, TerminalState, TokenUsage};
+use yunta_core::events::{EventPayload, Phase, StoredEvent, TerminalState, TokenUsage};
 use yunta_core::{
     AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
+    Seq,
 };
 
 use crate::replay::{derive, NodeState};
+use crate::replay::{unknown_kind_counts, UnknownKindCount};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReceiptError {
@@ -90,7 +92,7 @@ pub struct CostSummary {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum EventChainStatus {
     Intact { events: usize },
-    Broken { seq: u64, detail: String },
+    Broken { seq: Seq, detail: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -105,6 +107,9 @@ pub struct Receipt {
     pub runners: Vec<RunnerUsage>,
     pub cost: CostSummary,
     pub event_chain: EventChainStatus,
+    /// Events this binary could not interpret, by kind — a run with any
+    /// is certified only for what the binary understood.
+    pub unknown_kinds: Vec<UnknownKindCount>,
 }
 
 /// Builds a [`Receipt`] purely from `manifest` + `events` (+ the chain
@@ -113,11 +118,11 @@ pub struct Receipt {
 pub fn build_receipt(
     run_id: &RunId,
     manifest: &Manifest,
-    events: &[Event],
+    events: &[StoredEvent],
     event_chain: EventChainStatus,
 ) -> Result<Receipt, ReceiptError> {
-    let Some((terminal_state, metrics)) = events.iter().find_map(|e| match &e.payload {
-        EventPayload::RunFinished(p) => Some((p.terminal_state, p.metrics.clone())),
+    let Some((terminal_state, metrics)) = events.iter().find_map(|e| match e.payload() {
+        Some(EventPayload::RunFinished(p)) => Some((p.terminal_state, p.metrics.clone())),
         _ => None,
     }) else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
@@ -127,9 +132,10 @@ pub fn build_receipt(
     let baseline = baseline_summary(manifest, events);
     let scope = scope_summary(events);
     let runners = runner_usage(events);
+    let unknown_kinds = unknown_kind_counts(&crate::replay::derive(events));
     let reroutes = events
         .iter()
-        .filter(|e| matches!(e.payload, EventPayload::NodeRerouted(_)))
+        .filter(|e| matches!(e.payload(), Some(EventPayload::NodeRerouted(_))))
         .count();
 
     Ok(Receipt {
@@ -147,17 +153,18 @@ pub fn build_receipt(
             reroutes,
         },
         event_chain,
+        unknown_kinds,
     })
 }
 
 /// The latest post-check `criteria_checked` per task — a retried task's
 /// earlier, superseded attempts don't get counted twice: the log keeps
 /// every attempt, but the receipt certifies only the final verdict.
-fn criteria_summary(events: &[Event]) -> CriteriaSummary {
+fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
     let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
         HashMap::new();
     for event in events {
-        if let EventPayload::CriteriaChecked(p) = &event.payload {
+        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
             if p.phase == Phase::Post {
                 latest_post.insert(p.task_id.to_string(), p);
             }
@@ -182,9 +189,9 @@ fn criteria_summary(events: &[Event]) -> CriteriaSummary {
     }
 }
 
-fn baseline_summary(manifest: &Manifest, events: &[Event]) -> Option<BaselineSummary> {
-    let captured = events.iter().find_map(|e| match &e.payload {
-        EventPayload::BaselineCaptured(p) => Some(p),
+fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
+    let captured = events.iter().find_map(|e| match e.payload() {
+        Some(EventPayload::BaselineCaptured(p)) => Some(p),
         _ => None,
     })?;
 
@@ -218,11 +225,11 @@ fn baseline_summary(manifest: &Manifest, events: &[Event]) -> Option<BaselineSum
     })
 }
 
-fn scope_summary(events: &[Event]) -> ScopeSummary {
+fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
     let mut files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
     for event in events {
-        if let EventPayload::ScopeChecked(p) = &event.payload {
+        if let Some(EventPayload::ScopeChecked(p)) = event.payload() {
             files.extend(p.diff.iter().cloned());
             violations.extend(p.violations.iter().cloned());
         }
@@ -233,11 +240,11 @@ fn scope_summary(events: &[Event]) -> ScopeSummary {
     }
 }
 
-fn runner_usage(events: &[Event]) -> Vec<RunnerUsage> {
+fn runner_usage(events: &[StoredEvent]) -> Vec<RunnerUsage> {
     events
         .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::RunnerResolved(p) => Some(RunnerUsage {
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::RunnerResolved(p)) => Some(RunnerUsage {
                 node_id: e.node_id.clone()?,
                 runner: p.runner.clone(),
                 adapter: p.chosen.adapter.clone(),
@@ -286,6 +293,18 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         receipt.criteria.green,
         receipt.criteria.total
     ));
+    if !receipt.unknown_kinds.is_empty() {
+        let kinds: Vec<String> = receipt
+            .unknown_kinds
+            .iter()
+            .map(|count| format!("`{}` ×{}", count.kind, count.events))
+            .collect();
+        out.push_str(&format!(
+            "- {} event kind(s) this binary does not know — interpreted partially: {}\n",
+            mark(false),
+            kinds.join(", ")
+        ));
+    }
     match &receipt.baseline {
         Some(b) => out.push_str(&format!(
             "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`)\n",

@@ -210,8 +210,8 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     ));
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let resolved = events.iter().find_map(|e| match &e.payload {
-        yunta_core::events::EventPayload::GateResolved(p) => Some(p),
+    let resolved = events.iter().find_map(|e| match e.payload() {
+        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
         _ => None,
     });
     assert_eq!(
@@ -264,7 +264,10 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
-                && matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_))
+                && matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                )
         })
         .count();
     assert_eq!(
@@ -313,8 +316,8 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     ));
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let finding = events.iter().find_map(|e| match &e.payload {
-        yunta_core::events::EventPayload::FindingPosted(p) => Some(&p.finding),
+    let finding = events.iter().find_map(|e| match e.payload() {
+        Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
         _ => None,
     });
     assert_eq!(
@@ -356,9 +359,10 @@ async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::GateWaiting(_))),
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::GateWaiting(_))
+        )),
         "an unresolved degraded gate must not be recorded as published"
     );
 }

@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use serde::Serialize;
-use yunta_core::events::Event;
+use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, ModeName, RunId};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
@@ -150,7 +150,10 @@ pub(crate) fn collect_history(
     storage: &Storage,
     workflow_name: &str,
 ) -> Vec<RunSummary> {
-    let run_ids = storage.list_run_ids().unwrap_or_default();
+    let run_ids: Vec<RunId> = storage
+        .list_runs()
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
+        .unwrap_or_default();
     let mut dated: Vec<(chrono::DateTime<chrono::Utc>, RunSummary)> = Vec::new();
     for run_id in run_ids {
         let Ok(events) = storage.events_for_run(&run_id) else {
@@ -200,8 +203,11 @@ pub(crate) fn collect_raw_history(
     project: &Project,
     storage: &Storage,
     workflow_name: &str,
-) -> (Vec<Vec<Event>>, Option<yunta_core::Workflow>) {
-    let run_ids = storage.list_run_ids().unwrap_or_default();
+) -> (Vec<Vec<StoredEvent>>, Option<yunta_core::Workflow>) {
+    let run_ids: Vec<RunId> = storage
+        .list_runs()
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
+        .unwrap_or_default();
     let mut logs = Vec::new();
     let mut latest_workflow = None;
     for run_id in run_ids {
@@ -308,6 +314,17 @@ fn render_run_stats(
     pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
 ) {
     println!("run {run_id} — mode {mode}");
+    if !stats.unknown_kinds.is_empty() {
+        let kinds: Vec<String> = stats
+            .unknown_kinds
+            .iter()
+            .map(|count| format!("{} ×{}", count.kind, count.events))
+            .collect();
+        println!(
+            "unknown event kind(s), interpreted partially: {}",
+            kinds.join(", ")
+        );
+    }
     match stats.cptv {
         Some(cptv) => println!(
             "CPTV: {cptv:.1} tokens/task done ({} done)",
@@ -581,6 +598,7 @@ struct RunStatsJson {
     wall_clock_secs: Option<f64>,
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
+    unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
 }
 
 impl RunStatsJson {
@@ -605,6 +623,7 @@ impl RunStatsJson {
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             currency_estimate: currency_line(total, pricing),
             nodes: stats.nodes.iter().map(NodeStatJson::from).collect(),
+            unknown_kinds: stats.unknown_kinds.clone(),
         }
     }
 }

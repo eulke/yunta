@@ -58,7 +58,10 @@ pub fn gc(dry_run: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let run_ids = match storage.list_run_ids() {
+    let run_ids = match storage
+        .list_runs()
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())
+    {
         Ok(ids) => ids,
         Err(e) => {
             eprintln!("error: {e}");
@@ -80,9 +83,12 @@ pub fn gc(dry_run: bool) -> ExitCode {
 
         let state = yunta_engine::derive(&events);
         let is_terminal = state.broken.is_some()
-            || events
-                .iter()
-                .any(|e| matches!(e.payload, yunta_core::events::EventPayload::RunFinished(_)));
+            || events.iter().any(|e| {
+                matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::RunFinished(_))
+                )
+            });
         if !is_terminal {
             continue;
         }
@@ -107,7 +113,7 @@ pub fn gc(dry_run: bool) -> ExitCode {
         } else {
             match storage.purge_run(&run_id) {
                 Ok(purged) => {
-                    println!("purged {purged} event(s) for run {run_id}");
+                    println!("purged {} event(s) for run {run_id}", purged.rows);
                     reclaimed += 1;
                 }
                 Err(e) => eprintln!("warning: run `{run_id}`: {e}"),

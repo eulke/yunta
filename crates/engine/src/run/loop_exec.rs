@@ -10,12 +10,12 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, CriterionType, Decider, Event, EventPayload, Finding,
+    CriteriaCheckedPayload, CriterionResult, CriterionType, Decider, EventPayload, Finding,
     FindingPostedPayload, FindingSeverity, LoopIterationPayload, Phase, ProposedCriterionPrecheck,
     ScopeCheckedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
-    ScopeExpansionRequestedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    ScopeExpansionRequestedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
-use yunta_core::{FindingId, Isolation, Ledger, Node, NodeKind, PromptSource, Task};
+use yunta_core::{FindingId, Isolation, Ledger, Node, NodeKind, PromptSource, Seq, Task};
 
 use crate::replay::{derive, RunState};
 use crate::scope::scope_check;
@@ -634,13 +634,13 @@ fn select_batch<'a>(ledger: &'a Ledger, state: &RunState, concurrency: u32) -> V
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
 /// never fed into retry-limit logic (that's `run_task`'s own
 /// `max_retries`, scoped to one dispatch).
-fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
+fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> u32 {
     events
         .iter()
         .filter(|event| {
             matches!(
-                &event.payload,
-                EventPayload::TaskStatusChanged(p)
+                event.payload(),
+                Some(EventPayload::TaskStatusChanged(p))
                     if p.task_id == *task_id && p.new_status == TaskStatus::Running
             )
         })
@@ -655,21 +655,26 @@ fn attempt_number(events: &[Event], task_id: &yunta_core::TaskId) -> u32 {
 /// completes before the next batch dispatches), and grants *within* the
 /// batch go through the ledger's atomic window — so the cap holds
 /// exactly, with dispatch itself still fully concurrent.
-fn granted_count(events: &[Event]) -> u32 {
+fn granted_count(events: &[StoredEvent]) -> u32 {
     events
         .iter()
-        .filter(|event| matches!(&event.payload, EventPayload::ScopeExpansionGranted(_)))
+        .filter(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::ScopeExpansionGranted(_))
+            )
+        })
         .count() as u32
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized
 /// for `task_id` — the retry after a human grant derives its
 /// widened scope from here, never from in-memory state.
-fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<String> {
+fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Vec<String> {
     events
         .iter()
-        .filter_map(|event| match &event.payload {
-            EventPayload::ScopeExpansionGranted(p) if &p.task_id == task_id => {
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::ScopeExpansionGranted(p)) if &p.task_id == task_id => {
                 Some(p.paths.iter().cloned())
             }
             _ => None,
@@ -692,7 +697,7 @@ fn granted_paths_for(events: &[Event], task_id: &yunta_core::TaskId) -> Vec<Stri
 /// per member, so those stay their own arguments instead of living here.
 #[derive(Clone, Copy)]
 struct BatchDispatchEnv<'a> {
-    events: &'a [Event],
+    events: &'a [StoredEvent],
     base_commit: &'a str,
     adapter: &'a dyn yunta_adapters::Adapter,
     scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
@@ -735,10 +740,18 @@ async fn dispatch_task_in_isolation<'a>(
     let registered_seq = events
         .iter()
         .find(|event| {
-            matches!(&event.payload, EventPayload::TaskRegistered(p) if p.task_id == task.id)
+            matches!(
+                event.payload(),
+                Some(EventPayload::TaskRegistered(p)) if p.task_id == task.id
+            )
         })
         .map(|event| event.seq)
-        .unwrap_or(0);
+        .ok_or_else(|| RunError::Broken {
+            diagnostic: format!(
+                "task `{}` is dispatched but the log has no task_registered for it",
+                task.id
+            ),
+        })?;
     ctx.emit(
         Some(&node.id),
         EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
@@ -795,7 +808,7 @@ async fn integrate_task(
     task: &Task,
     task_worktree: &Path,
     memo: &Memo,
-    last_check_seq: &mut u64,
+    last_check_seq: &mut Seq,
 ) -> Result<IntegrationOutcome, RunError> {
     commit_task_work(task_worktree, task).await?;
 

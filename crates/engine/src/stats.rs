@@ -38,10 +38,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{Event, EventPayload, TaskStatus, TokenUsage};
+use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
 
-use crate::replay::{derive, RunState};
+use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
 /// children flattened in place, same convention [`crate::progress`] uses).
@@ -109,6 +109,8 @@ pub struct RunStats {
     /// Every node that reached at least one `node_started`, in the
     /// workflow's own declaration order.
     pub nodes: Vec<NodeStat>,
+    /// Events this binary could not interpret, by kind.
+    pub unknown_kinds: Vec<UnknownKindCount>,
 }
 
 impl RunStats {
@@ -149,7 +151,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
 
 /// Derives one run's stats from its workflow and event log alone.
 /// Pure: same input, same output, always.
-pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
+pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStats {
     let state = derive(events);
     let flat: Vec<&Node> = workflow.iter_nodes().collect();
     let depends_on: HashMap<&NodeId, &[NodeId]> = flat
@@ -169,8 +171,8 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
     let mut node_runner: HashMap<NodeId, RunnerName> = HashMap::new();
 
     for event in events {
-        match &event.payload {
-            EventPayload::NodeStarted(p) => {
+        match event.payload() {
+            Some(EventPayload::NodeStarted(p)) => {
                 let Some(node_id) = &event.node_id else {
                     continue;
                 };
@@ -189,13 +191,13 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
                     },
                 );
             }
-            EventPayload::NodeFinished(p) => {
+            Some(EventPayload::NodeFinished(p)) => {
                 close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
             }
-            EventPayload::NodeFailed(p) => {
+            Some(EventPayload::NodeFailed(p)) => {
                 close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
             }
-            EventPayload::RunnerResolved(p) => {
+            Some(EventPayload::RunnerResolved(p)) => {
                 if let Some(node_id) = &event.node_id {
                     node_runner.insert(node_id.clone(), p.runner.clone());
                 }
@@ -252,6 +254,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
         .map(|cached| cached as f64 / state.total_tokens.input.max(1) as f64);
 
     RunStats {
+        unknown_kinds: unknown_kind_counts(&state),
         cptv: cptv(&state),
         rework_rate,
         cache_rate,
@@ -339,7 +342,7 @@ pub fn run_summary(
     mode: ModeName,
     workflow_hash: String,
     workflow: &Workflow,
-    events: &[Event],
+    events: &[StoredEvent],
 ) -> RunSummary {
     let stats = compute_run_stats(workflow, events);
     RunSummary {

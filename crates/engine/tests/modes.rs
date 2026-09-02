@@ -208,7 +208,7 @@ async fn an_unknown_mode_name_is_refused_before_the_run_is_created() {
     let err = bench.run("run-bogus", "nonexistent").await.unwrap_err();
     assert!(matches!(err, RunError::UnknownMode { .. }), "got: {err:?}");
     // Refused before anything was written — no run directory, no event.
-    assert!(bench.storage.list_run_ids().unwrap().is_empty());
+    assert!(bench.storage.list_runs().unwrap().is_empty());
 }
 
 /// Declared so that the dependent of the excluded node comes *first* in
@@ -254,15 +254,19 @@ nodes:
 "#;
 
 fn seq_of(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     node: &str,
     pick: impl Fn(&yunta_core::events::EventPayload) -> bool,
 ) -> u64 {
     events
         .iter()
-        .find(|e| e.node_id.as_ref().is_some_and(|id| id.as_str() == node) && pick(&e.payload))
+        .find(|e| {
+            e.node_id.as_ref().is_some_and(|id| id.as_str() == node)
+                && e.payload().is_some_and(&pick)
+        })
         .unwrap_or_else(|| panic!("no matching event for node `{node}`"))
         .seq
+        .get()
 }
 
 #[tokio::test]

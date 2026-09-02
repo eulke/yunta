@@ -10,7 +10,7 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use serde_json::json;
-use yunta_core::events::{Event, EventPayload};
+use yunta_core::events::{EventDraft, EventPayload};
 use yunta_core::{NodeId, RunId, TaskId, Workflow};
 use yunta_engine::{open_session_listener, RunToolsHost, RunToolsSession};
 use yunta_storage::Storage;
@@ -55,21 +55,22 @@ impl Bench {
         // Every log opens with run_created — the listener's own
         // appends land on an already-born run in production too.
         storage
-            .append_event(&Event {
-                run_id: run_id.clone(),
-                seq: 0,
-                timestamp: chrono::Utc::now(),
-                node_id: None,
-                payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
-                    manifest_hash: "test-manifest".to_string(),
-                    inputs: Default::default(),
-                    mode: "default".into(),
-                    promoted_from: None,
-                    yunta_schema: None,
-                    base_branch: "main".to_string(),
-                    base_commit: "0000".to_string(),
-                }),
-            })
+            .append(
+                &EventDraft {
+                    run_id: run_id.clone(),
+                    node_id: None,
+                    payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
+                        manifest_hash: "test-manifest".to_string(),
+                        inputs: Default::default(),
+                        mode: "default".into(),
+                        promoted_from: None,
+                        yunta_schema: None,
+                        base_branch: "main".to_string(),
+                        base_commit: "0000".to_string(),
+                    }),
+                },
+                &yunta_core::SystemClock,
+            )
             .unwrap();
         let host = Arc::new(RunToolsHost::new(
             storage.reopen().unwrap(),
@@ -97,22 +98,25 @@ impl Bench {
 
     fn seed_finding(&self, node: &str, id: &str) {
         self.storage
-            .append_event(&Event {
-                run_id: self.run_id.clone(),
-                seq: 0,
-                timestamp: chrono::Utc::now(),
-                node_id: Some(NodeId::from(node)),
-                payload: EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                    finding: yunta_core::events::Finding {
-                        id: id.into(),
-                        severity: yunta_core::events::FindingSeverity::Minor,
-                        title: format!("seeded {id}"),
-                        location: "src/lib.rs".to_string(),
-                        detail: "seeded directly".to_string(),
-                        proposed_criterion: None,
-                    },
-                }),
-            })
+            .append(
+                &EventDraft {
+                    run_id: self.run_id.clone(),
+                    node_id: Some(NodeId::from(node)),
+                    payload: EventPayload::FindingPosted(
+                        yunta_core::events::FindingPostedPayload {
+                            finding: yunta_core::events::Finding {
+                                id: id.into(),
+                                severity: yunta_core::events::FindingSeverity::Minor,
+                                title: format!("seeded {id}"),
+                                location: "src/lib.rs".to_string(),
+                                detail: "seeded directly".to_string(),
+                                proposed_criterion: None,
+                            },
+                        },
+                    ),
+                },
+                &yunta_core::SystemClock,
+            )
             .unwrap();
     }
 
@@ -122,8 +126,8 @@ impl Bench {
             .unwrap()
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
-            .filter_map(|e| match e.payload {
-                EventPayload::FindingPosted(p) => Some(p.finding.id.to_string()),
+            .filter_map(|e| match e.payload() {
+                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
                 _ => None,
             })
             .collect()
@@ -289,18 +293,19 @@ async fn task_status_reflects_the_ledger_derived_from_the_log() {
     let bench = Bench::new();
     bench
         .storage
-        .append_event(&Event {
-            run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: chrono::Utc::now(),
-            node_id: Some(NodeId::from("implement")),
-            payload: EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
-                task_id: TaskId::from("T001"),
-                criteria: Vec::new(),
-                scope: Vec::new(),
-                depends_on: Vec::new(),
-            }),
-        })
+        .append(
+            &EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some(NodeId::from("implement")),
+                payload: EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
+                    task_id: TaskId::from("T001"),
+                    criteria: Vec::new(),
+                    scope: Vec::new(),
+                    depends_on: Vec::new(),
+                }),
+            },
+            &yunta_core::SystemClock,
+        )
         .unwrap();
 
     let session = bench.listener("solo", None).await;

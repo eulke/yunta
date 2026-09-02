@@ -66,12 +66,12 @@ pub fn register(file: &FindingsFile) -> Vec<FindingsError> {
 /// promotion close serializes exactly this into
 /// `artifacts/findings-inherited.yaml`.
 pub fn inherited_findings(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
 ) -> Vec<yunta_core::events::Finding> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut inherited = Vec::new();
     for event in events {
-        let yunta_core::events::EventPayload::FindingPosted(p) = &event.payload else {
+        let Some(yunta_core::events::EventPayload::FindingPosted(p)) = event.payload() else {
             continue;
         };
         let key = (

@@ -80,7 +80,7 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
 /// pairs, or the diagnostic to fail the node with.
 fn resolve_mounts(
     ctx: &RunCtx<'_>,
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     mounts: &[MountSpec],
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut resolved = Vec::new();
@@ -94,8 +94,10 @@ fn resolve_mounts(
             .find(|candidate| candidate.id == m.node);
         let source_dir = match target.map(|candidate| &candidate.kind) {
             Some(NodeKind::Workflow { .. }) => {
-                let child = events.iter().rev().find_map(|e| match &e.payload {
-                    EventPayload::ChildRunFinished(p) if e.node_id.as_ref() == Some(&m.node) => {
+                let child = events.iter().rev().find_map(|e| match e.payload() {
+                    Some(EventPayload::ChildRunFinished(p))
+                        if e.node_id.as_ref() == Some(&m.node) =>
+                    {
                         Some(p.child_run_id.clone())
                     }
                     _ => None,
@@ -168,16 +170,16 @@ pub(super) async fn execute_workflow(
     let created: Vec<RunId> = events
         .iter()
         .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match &e.payload {
-            EventPayload::ChildRunCreated(p) => Some(p.child_run_id.clone()),
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::ChildRunCreated(p)) => Some(p.child_run_id.clone()),
             _ => None,
         })
         .collect();
     let finished: Vec<RunId> = events
         .iter()
         .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match &e.payload {
-            EventPayload::ChildRunFinished(p) => Some(p.child_run_id.clone()),
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::ChildRunFinished(p)) => Some(p.child_run_id.clone()),
             _ => None,
         })
         .collect();

@@ -146,8 +146,8 @@ async fn execute_baseline_compare(
     let already_captured = ctx
         .load_events()?
         .into_iter()
-        .find_map(|event| match event.payload {
-            EventPayload::BaselineCaptured(payload) => Some(payload),
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::BaselineCaptured(payload)) => Some(payload.clone()),
             _ => None,
         });
 

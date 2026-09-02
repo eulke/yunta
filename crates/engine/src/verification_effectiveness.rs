@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use yunta_core::events::{Event, EventPayload, Phase};
+use yunta_core::events::{EventPayload, Phase, StoredEvent};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 /// Below this many independent samples, a signal says nothing — a
@@ -88,7 +88,7 @@ impl VerificationFindings {
 
 /// `history` is every past run's own full event log — the caller's job
 /// (imperative shell) is gathering those; this function only reads them.
-pub fn analyze(workflow: &Workflow, history: &[Vec<Event>]) -> VerificationFindings {
+pub fn analyze(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> VerificationFindings {
     VerificationFindings {
         never_red_criteria: never_red_criteria(history),
         never_triggered_reroutes: never_triggered_reroutes(workflow, history),
@@ -100,7 +100,7 @@ pub fn analyze(workflow: &Workflow, history: &[Vec<Event>]) -> VerificationFindi
 
 /// "modo sin uso": every declared mode against the mode
 /// each historical run actually recorded in its own `run_created`.
-fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> {
+fn unused_modes(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Vec<UnusedMode> {
     let Some(modes) = &workflow.modes else {
         return Vec::new();
     };
@@ -110,8 +110,8 @@ fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> 
     let used: std::collections::HashSet<&ModeName> = history
         .iter()
         .filter_map(|events| {
-            events.iter().find_map(|e| match &e.payload {
-                EventPayload::RunCreated(p) => Some(&p.mode),
+            events.iter().find_map(|e| match e.payload() {
+                Some(EventPayload::RunCreated(p)) => Some(&p.mode),
                 _ => None,
             })
         })
@@ -134,11 +134,11 @@ fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> 
 /// (memoized) results count too: a reused verdict is still a real
 /// exit code for that command, not a different answer standing in for
 /// one.
-fn never_red_criteria(history: &[Vec<Event>]) -> Vec<NeverRedCriterion> {
+fn never_red_criteria(history: &[Vec<StoredEvent>]) -> Vec<NeverRedCriterion> {
     let mut samples: HashMap<String, (usize, usize)> = HashMap::new(); // cmd -> (total, red)
     for events in history {
         for event in events {
-            let EventPayload::CriteriaChecked(p) = &event.payload else {
+            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
                 continue;
             };
             if p.phase != Phase::Pre {
@@ -175,7 +175,7 @@ fn never_red_criteria(history: &[Vec<Event>]) -> Vec<NeverRedCriterion> {
 /// a sample.
 fn never_triggered_reroutes(
     workflow: &Workflow,
-    history: &[Vec<Event>],
+    history: &[Vec<StoredEvent>],
 ) -> Vec<NeverTriggeredReroute> {
     let mut findings = Vec::new();
     for node in workflow.iter_nodes() {
@@ -193,8 +193,8 @@ fn never_triggered_reroutes(
         for events in history {
             let ran = events.iter().any(|e| {
                 matches!(
-                    e.payload,
-                    EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)
+                    e.payload(),
+                    Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
                 ) && e.node_id.as_ref() == Some(&node.id)
             });
             if !ran {
@@ -202,8 +202,10 @@ fn never_triggered_reroutes(
             }
             eligible += 1;
             let rerouted = events.iter().any(|e| {
-                matches!(&e.payload, EventPayload::NodeRerouted(p) if p.to_node == on_failure.goto)
-                    && e.node_id.as_ref() == Some(&node.id)
+                matches!(
+                    e.payload(),
+                    Some(EventPayload::NodeRerouted(p)) if p.to_node == on_failure.goto
+                ) && e.node_id.as_ref() == Some(&node.id)
             });
             if rerouted {
                 triggered += 1;
@@ -225,7 +227,10 @@ fn never_triggered_reroutes(
 /// as `gate_resolved.chosen_option: Some("retry")` or a `node_failed`
 /// right after it) rather than letting the node finish clean. One
 /// sample per `gate_resolved` this node ever emitted, across history.
-fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<AlwaysApprovedGate> {
+fn always_approved_gates(
+    workflow: &Workflow,
+    history: &[Vec<StoredEvent>],
+) -> Vec<AlwaysApprovedGate> {
     let gate_node_ids: Vec<NodeId> = workflow
         .iter_nodes()
         .filter(|n| matches!(n.kind, yunta_core::NodeKind::Gate { .. }) && !n.invariant)
@@ -246,7 +251,7 @@ fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<Alw
         let mut needed_adjustment = 0usize;
         for events in history {
             for event in events {
-                let EventPayload::GateResolved(p) = &event.payload else {
+                let Some(EventPayload::GateResolved(p)) = event.payload() else {
                     continue;
                 };
                 if event.node_id.as_ref() != Some(&node_id) {
@@ -277,13 +282,13 @@ fn always_approved_gates(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<Alw
 /// "this exact task always passes first try" isn't a claim the log can
 /// support across runs — whether *any* task anywhere needed a retry is.
 /// One sample per task instance across every historical run's ledger.
-fn always_first_try_tasks(history: &[Vec<Event>]) -> Option<AlwaysFirstTryTasks> {
+fn always_first_try_tasks(history: &[Vec<StoredEvent>]) -> Option<AlwaysFirstTryTasks> {
     let mut total = 0usize;
     let mut needed_retry = 0usize;
     for events in history {
         let mut post_checks: HashMap<yunta_core::TaskId, usize> = HashMap::new();
         for event in events {
-            let EventPayload::CriteriaChecked(p) = &event.payload else {
+            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
                 continue;
             };
             if p.phase == Phase::Post {

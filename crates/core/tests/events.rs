@@ -84,7 +84,7 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
-            caused_by: 42,
+            caused_by: 42.into(),
         }),
         EventPayload::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
@@ -279,16 +279,16 @@ fn kind_names_match_the_spec_exactly() {
 
 #[test]
 fn the_envelope_flattens_kind_and_payload_fields_together() {
-    let event = Event {
+    let event = StoredEvent {
         run_id: RunId::from("run-1"),
-        seq: 1,
+        seq: 1.into(),
         timestamp: chrono::DateTime::parse_from_rfc3339("2026-08-18T00:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc),
         node_id: None,
-        payload: EventPayload::RunPaused(RunPausedPayload {
+        body: EventBody::Known(EventPayload::RunPaused(RunPausedPayload {
             reason: "gate waiting".to_string(),
-        }),
+        })),
     };
 
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
@@ -298,7 +298,7 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
     assert_eq!(json["reason"], "gate waiting");
     assert!(json.get("node_id").is_none());
 
-    let round_tripped: Event = serde_json::from_value(json).unwrap();
+    let round_tripped: StoredEvent = serde_json::from_value(json).unwrap();
     assert_eq!(event, round_tripped);
 }
 
@@ -312,4 +312,68 @@ fn finding_severity_uses_the_contrato_wire_values() {
     ] {
         assert_eq!(serde_json::to_string(&severity).unwrap(), expected);
     }
+}
+
+#[test]
+fn an_unknown_kind_reads_as_unknown_and_writes_back_verbatim() {
+    let json = serde_json::json!({
+        "run_id": "run-1",
+        "seq": 4,
+        "timestamp": "2026-09-02T10:00:00Z",
+        "node_id": "plan",
+        "kind": "future_kind",
+        "novel": { "nested": [1, 2, 3] }
+    });
+    let event: StoredEvent = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(event.seq.get(), 4);
+    assert_eq!(event.node_id.as_ref().map(|id| id.as_str()), Some("plan"));
+    assert!(event.payload().is_none());
+    let EventBody::Unknown(unknown) = &event.body else {
+        panic!("expected an unknown body, got {:?}", event.body);
+    };
+    assert_eq!(unknown.kind, "future_kind");
+    assert_eq!(event.body.kind_name(), "future_kind");
+    assert_eq!(unknown.payload["novel"]["nested"][2], 3);
+
+    // Written back: the body verbatim, plus the version the unknown kind
+    // was stored under — the one envelope field an unknown body needs.
+    let written = serde_json::to_value(&event).unwrap();
+    assert_eq!(written["kind"], json["kind"]);
+    assert_eq!(written["novel"], json["novel"]);
+    assert_eq!(written["run_id"], json["run_id"]);
+    assert_eq!(written["seq"], json["seq"]);
+    assert_eq!(written["node_id"], json["node_id"]);
+    assert_eq!(written["schema_version"], 1);
+    let again: StoredEvent = serde_json::from_value(written).unwrap();
+    assert_eq!(again, event);
+}
+
+#[test]
+fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
+    let json = serde_json::json!({
+        "run_id": "run-1",
+        "seq": 1,
+        "timestamp": "2026-09-02T10:00:00Z",
+        "kind": "run_paused",
+        "reason": "waiting on gate approve",
+        "added_by_a_newer_binary": true
+    });
+    let event: StoredEvent = serde_json::from_value(json).unwrap();
+    match event.payload() {
+        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "waiting on gate approve"),
+        other => panic!("expected run_paused, got {other:?}"),
+    }
+    assert_eq!(event.body.kind_name(), "run_paused");
+}
+
+#[test]
+fn a_draft_names_what_happened_and_nothing_storage_assigns() {
+    let draft = EventDraft {
+        run_id: RunId::from("run-1"),
+        node_id: None,
+        payload: EventPayload::RunPaused(RunPausedPayload {
+            reason: "budget".to_string(),
+        }),
+    };
+    assert_eq!(draft.payload.kind_name(), "run_paused");
 }

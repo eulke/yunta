@@ -255,8 +255,8 @@ nodes:
         // Chain audited on the successor's own log: run_created carries
         // promoted_from back to the exact parent run_id.
         let successor_events = storage.events_for_run(&final_id).unwrap();
-        let created = successor_events.iter().find_map(|e| match &e.payload {
-            EventPayload::RunCreated(p) => Some(p),
+        let created = successor_events.iter().find_map(|e| match e.payload() {
+            Some(EventPayload::RunCreated(p)) => Some(p),
             _ => None,
         });
         assert_eq!(created.unwrap().promoted_from, Some(run_id.clone()));
@@ -268,7 +268,7 @@ nodes:
         let parent_events = storage.events_for_run(&run_id).unwrap();
         assert!(parent_events
             .iter()
-            .any(|e| matches!(e.payload, EventPayload::PromotionSignaled(_))));
+            .any(|e| matches!(e.payload(), Some(EventPayload::PromotionSignaled(_)))));
 
         // Inherited artifact actually landed in the successor's own dir.
         let successor_run_dir = project.runs_root.join(final_id.as_str());

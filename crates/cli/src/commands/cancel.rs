@@ -70,8 +70,8 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
     let state = yunta_engine::derive(&events);
     let has_terminal_run_event = events.iter().any(|e| {
         matches!(
-            e.payload,
-            EventPayload::RunFinished(_) | EventPayload::RunPaused(_)
+            e.payload(),
+            Some(EventPayload::RunFinished(_) | EventPayload::RunPaused(_))
         )
     });
 
@@ -123,8 +123,8 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
             };
             let terminal = events.iter().any(|e| {
                 matches!(
-                    e.payload,
-                    EventPayload::RunFinished(_) | EventPayload::RunPaused(_)
+                    e.payload(),
+                    Some(EventPayload::RunFinished(_) | EventPayload::RunPaused(_))
                 )
             });
             if terminal {
@@ -151,15 +151,16 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
     for pgid in &registry.process_groups {
         kill_group(*pgid);
     }
-    let paused = storage.append_event(&yunta_core::events::Event {
-        run_id: run_id.clone(),
-        seq: 0,
-        timestamp: chrono::Utc::now(),
-        node_id: None,
-        payload: EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
-            reason: "cancelled after crash".to_string(),
-        }),
-    });
+    let paused = storage.append(
+        &yunta_core::events::EventDraft {
+            run_id: run_id.clone(),
+            node_id: None,
+            payload: EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
+                reason: "cancelled after crash".to_string(),
+            }),
+        },
+        &yunta_core::SystemClock,
+    );
     if let Err(e) = paused {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;

@@ -509,7 +509,12 @@ nodes:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let starts = events
         .iter()
-        .filter(|e| matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_)))
+        .filter(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::NodeStarted(_))
+            )
+        })
         .count();
     assert_eq!(starts, 1, "the finished node must not have re-run");
 }
@@ -764,16 +769,15 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::ArtifactWritten(p)
-                if p.path.to_string_lossy().contains("questions.yaml")
+            e.payload(),
+            Some(yunta_core::events::EventPayload::ArtifactWritten(p)) if p.path.to_string_lossy().contains("questions.yaml")
         )),
         "the questions artifact must still be recorded as written"
     );
     assert!(
         !events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::NodeFinished(_)
+            e.payload(),
+            Some(yunta_core::events::EventPayload::NodeFinished(_))
         )),
         "a node with unanswered questions must never reach node_finished"
     );
@@ -926,8 +930,8 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let answered = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::QuestionsAnswered(p) => Some(p),
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::QuestionsAnswered(p)) => Some(p),
             _ => None,
         })
         .expect("questions_answered must be on the log");
@@ -965,8 +969,8 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         !events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::QuestionsAnswered(_)
+            e.payload(),
+            Some(yunta_core::events::EventPayload::QuestionsAnswered(_))
         )),
         "an invalid reply must never be recorded as answered"
     );
@@ -1284,15 +1288,16 @@ nodes:
     // terminal event — exactly what a killed engine leaves behind.
     bench
         .storage
-        .append_event(&yunta_core::events::Event {
-            run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
-            node_id: Some("only".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        })
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some("only".into()),
+                payload: yunta_core::events::EventPayload::NodeStarted(
+                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
         .unwrap();
 
     std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
@@ -1317,16 +1322,17 @@ nodes:
     assert_eq!(report.terminal, RunTerminal::Finished);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::RunResumed(_))),
+        events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::RunResumed(_))
+        )),
         "resume must be recorded in the log"
     );
     // The orphan restarted as attempt 2.
     let last_start = events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::NodeStarted(p) => Some(p.attempt),
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::NodeStarted(p)) => Some(p.attempt),
             _ => None,
         })
         .next_back();
@@ -1372,15 +1378,16 @@ nodes:
     // terminal event.
     bench
         .storage
-        .append_event(&yunta_core::events::Event {
-            run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
-            node_id: Some("only".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        })
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some("only".into()),
+                payload: yunta_core::events::EventPayload::NodeStarted(
+                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
         .unwrap();
 
     let report = execute_run(RunEnv {
@@ -1408,7 +1415,12 @@ nodes:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let starts = events
         .iter()
-        .filter(|e| matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_)))
+        .filter(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::NodeStarted(_))
+            )
+        })
         .count();
     assert_eq!(starts, 1, "fail_if_uncertain must never blindly restart");
 }
@@ -1603,28 +1615,22 @@ nodes:
     // Simulate a crash mid-group: the parallel node and one child
     // (write-docs) finished; the other child (load-test) never started.
     for event in [
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("pre-launch".into()),
             payload: yunta_core::events::EventPayload::NodeStarted(
                 yunta_core::events::NodeStartedPayload { attempt: 1 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("write-docs".into()),
             payload: yunta_core::events::EventPayload::NodeStarted(
                 yunta_core::events::NodeStartedPayload { attempt: 1 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("write-docs".into()),
             payload: yunta_core::events::EventPayload::NodeFinished(
                 yunta_core::events::NodeFinishedPayload {
@@ -1634,7 +1640,10 @@ nodes:
             ),
         },
     ] {
-        bench.storage.append_event(&event).unwrap();
+        bench
+            .storage
+            .append(&event, &yunta_core::SystemClock)
+            .unwrap();
     }
     // If write-docs re-ran, it would overwrite this — instead assert it
     // survives untouched, since a second `touch` would only prove nothing.
@@ -1664,7 +1673,10 @@ nodes:
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("write-docs")
-                && matches!(e.payload, yunta_core::events::EventPayload::NodeStarted(_))
+                && matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                )
         })
         .count();
     assert_eq!(
@@ -2277,7 +2289,7 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 
     let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
-    let round_tripped: Vec<yunta_core::events::Event> = jsonl
+    let round_tripped: Vec<yunta_core::events::StoredEvent> = jsonl
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
@@ -2518,8 +2530,8 @@ nodes:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let a_statuses: Vec<_> = events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::TaskStatusChanged(p)
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
                 if p.task_id.as_str() == "task-a" =>
             {
                 Some(p.new_status)
@@ -2538,8 +2550,8 @@ nodes:
 
     let b_statuses: Vec<_> = events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::TaskStatusChanged(p)
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
                 if p.task_id.as_str() == "task-b" =>
             {
                 Some(p.new_status)
@@ -2610,7 +2622,7 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     for (task, forbidden) in [("task-x", "y.txt"), ("task-y", "x.txt")] {
         for event in &events {
-            if let yunta_core::events::EventPayload::ScopeChecked(p) = &event.payload {
+            if let Some(yunta_core::events::EventPayload::ScopeChecked(p)) = event.payload() {
                 if p.task_id.as_ref().map(|id| id.as_str()) == Some(task) {
                     assert!(
                         !p.diff
@@ -2675,19 +2687,15 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     );
 
     for event in [
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::NodeStarted(
                 yunta_core::events::NodeStartedPayload { attempt: 1 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::ArtifactWritten(
                 yunta_core::events::ArtifactWrittenPayload {
@@ -2697,10 +2705,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::TaskRegistered(
                 yunta_core::events::TaskRegisteredPayload {
@@ -2711,10 +2717,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::TaskRegistered(
                 yunta_core::events::TaskRegisteredPayload {
@@ -2725,10 +2729,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::NodeFinished(
                 yunta_core::events::NodeFinishedPayload {
@@ -2737,58 +2739,53 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::NodeStarted(
                 yunta_core::events::NodeStartedPayload { attempt: 1 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::TaskStatusChanged(
                 yunta_core::events::TaskStatusChangedPayload {
                     task_id: "task-p".into(),
                     new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 0,
+                    caused_by: 1.into(),
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::TaskStatusChanged(
                 yunta_core::events::TaskStatusChangedPayload {
                     task_id: "task-q".into(),
                     new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 0,
+                    caused_by: 1.into(),
                 },
             ),
         },
-        yunta_core::events::Event {
+        yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::TaskStatusChanged(
                 yunta_core::events::TaskStatusChangedPayload {
                     task_id: "task-p".into(),
                     new_status: yunta_core::events::TaskStatus::Done,
-                    caused_by: 0,
+                    caused_by: 1.into(),
                 },
             ),
         },
         // task-q never got a follow-up — orphaned Running, no p.txt-style
         // commit ever landed for it.
     ] {
-        bench.storage.append_event(&event).unwrap();
+        bench
+            .storage
+            .append(&event, &yunta_core::SystemClock)
+            .unwrap();
     }
 
     let fixture = "sessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
@@ -2818,11 +2815,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let p_running_count = events
         .iter()
         .filter(|e| {
-            matches!(
-                &e.payload,
-                yunta_core::events::EventPayload::TaskStatusChanged(p)
-                    if p.task_id.as_str() == "task-p" && p.new_status == yunta_core::events::TaskStatus::Running
-            )
+            matches!(e.payload(), Some(yunta_core::events::EventPayload::TaskStatusChanged(p)) if p.task_id.as_str() == "task-p" && p.new_status == yunta_core::events::TaskStatus::Running)
         })
         .count();
     assert_eq!(
@@ -2911,11 +2904,13 @@ fn plan_session(artifacts_dir: &std::path::Path, ledger: &str) -> String {
     )
 }
 
-fn findings_posted(events: &[yunta_core::events::Event]) -> Vec<&yunta_core::events::Finding> {
+fn findings_posted(
+    events: &[yunta_core::events::StoredEvent],
+) -> Vec<&yunta_core::events::Finding> {
     events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::FindingPosted(p) => Some(&p.finding),
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
             _ => None,
         })
         .collect()
@@ -2960,9 +2955,8 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         !events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::ScopeExpansionRequested(p)
-                if p.task_id.as_str() == "task-s"
+            e.payload(),
+            Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p)) if p.task_id.as_str() == "task-s"
         )),
         "no scope_expansion_* event may fire when the agent never wrote a request"
     );
@@ -3005,8 +2999,8 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
                 if p.task_id.as_str() == "task-p" =>
             {
                 Some(p)
@@ -3063,8 +3057,8 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
                 if p.task_id.as_str() == "task-d" =>
             {
                 Some(p)
@@ -3171,8 +3165,8 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         let events = bench.storage.events_for_run(&bench.run_id).unwrap();
         let requested = events
             .iter()
-            .find_map(|e| match &e.payload {
-                yunta_core::events::EventPayload::ScopeExpansionRequested(p)
+            .find_map(|e| match e.payload() {
+                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p))
                     if p.task_id.as_str() == "task-g" =>
                 {
                     Some(p.clone())
@@ -3259,8 +3253,8 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let granted = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::ScopeExpansionGranted(p)
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ScopeExpansionGranted(p))
                 if p.task_id.as_str() == "task-h" =>
             {
                 Some(p)
@@ -3281,14 +3275,13 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     );
     // The interaction itself is on the log, same vocabulary as every
     // other gate: waiting + resolved, together.
-    assert!(events.iter().any(
-        |e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(p)
-            if p.summary.contains("task-h"))
-    ));
     assert!(events.iter().any(|e| matches!(
-        &e.payload,
-        yunta_core::events::EventPayload::GateResolved(p)
-            if p.chosen_option.as_deref() == Some("grant")
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(p)) if p.summary.contains("task-h")
+    )));
+    assert!(events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_deref() == Some("grant")
     )));
 }
 
@@ -3331,8 +3324,8 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::ScopeExpansionDenied(p)
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
                 if p.task_id.as_str() == "task-n" =>
             {
                 Some(p)
@@ -3390,9 +3383,10 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     }
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))),
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::GateWaiting(_))
+        )),
         "an unresolved escalation must not be recorded as a published gate"
     );
 }
@@ -3488,8 +3482,8 @@ nodes:
     let statuses_of = |task: &str| -> Vec<yunta_core::events::TaskStatus> {
         events
             .iter()
-            .filter_map(|e| match &e.payload {
-                yunta_core::events::EventPayload::TaskStatusChanged(p)
+            .filter_map(|e| match e.payload() {
+                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
                     if p.task_id.as_str() == task =>
                 {
                     Some(p.new_status)
@@ -3523,10 +3517,7 @@ nodes:
     let registered_count = events
         .iter()
         .filter(|e| {
-            matches!(
-                &e.payload,
-                yunta_core::events::EventPayload::TaskRegistered(p) if p.task_id.as_str() == "task-c"
-            )
+            matches!(e.payload(), Some(yunta_core::events::EventPayload::TaskRegistered(p)) if p.task_id.as_str() == "task-c")
         })
         .count();
     assert_eq!(
@@ -3554,13 +3545,13 @@ fn context_workflow(context_yaml: &str) -> String {
 
 /// The one `context_assembled` event's `sources`, for the given node.
 fn context_sources(
-    events: &[yunta_core::events::Event],
+    events: &[yunta_core::events::StoredEvent],
     node: &str,
 ) -> Vec<yunta_core::events::ContextSourceRef> {
     events
         .iter()
-        .find_map(|e| match (&e.node_id, &e.payload) {
-            (Some(n), yunta_core::events::EventPayload::ContextAssembled(p))
+        .find_map(|e| match (&e.node_id, e.payload()) {
+            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
                 if n.as_str() == node =>
             {
                 Some(p.sources.clone())
@@ -3928,8 +3919,8 @@ async fn run_stable_first(
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let payload = events
         .iter()
-        .find_map(|e| match (&e.node_id, &e.payload) {
-            (Some(n), yunta_core::events::EventPayload::ContextAssembled(p))
+        .find_map(|e| match (&e.node_id, e.payload()) {
+            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
                 if n.as_str() == "plan" =>
             {
                 Some(p.clone())
@@ -4360,20 +4351,26 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let reroutes = events
         .iter()
-        .filter(|e| matches!(e.payload, yunta_core::events::EventPayload::NodeRerouted(_)))
+        .filter(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::NodeRerouted(_))
+            )
+        })
         .count();
     assert_eq!(
         reroutes, 2,
         "the automatic reroute plus the gate-authorized one"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::GateWaiting(_))),
+        events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::GateWaiting(_))
+        )),
         "the escalation itself must be on the log, not just its resolution"
     );
-    let resolved = events.iter().find_map(|e| match &e.payload {
-        yunta_core::events::EventPayload::GateResolved(p) => Some(p),
+    let resolved = events.iter().find_map(|e| match e.payload() {
+        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
         _ => None,
     });
     assert_eq!(
@@ -4518,8 +4515,8 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let waiting = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::GateWaiting(p) => Some(p),
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::GateWaiting(p)) => Some(p),
             _ => None,
         })
         .expect("the resolved interaction must be on the log");
@@ -4552,11 +4549,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(events.iter().any(|e| matches!(
-        &e.payload,
-        yunta_core::events::EventPayload::NodeRerouted(p)
-            if p.to_node.as_str() == "plan" && e.node_id.as_ref().map(|n| n.as_str()) == Some("approve")
-    )));
+    assert!(events.iter().any(|e| matches!(e.payload(), Some(yunta_core::events::EventPayload::NodeRerouted(p)) if p.to_node.as_str() == "plan" && e.node_id.as_ref().map(|n| n.as_str()) == Some("approve"))));
 }
 
 #[tokio::test]
@@ -4613,9 +4606,10 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     }
     // Unresolved: nothing recorded (re-asks on resume, same gate convention).
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(!events
-        .iter()
-        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 
     let interaction = SequencedInteraction::choosing(&["aprobar"]);
     let resumed = execute_run(RunEnv {
@@ -4702,9 +4696,10 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
     // Unresolved: nothing recorded (resume re-asks, same convention as
     // every other gate).
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(!events
-        .iter()
-        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 }
 
 #[tokio::test]
@@ -4729,7 +4724,12 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let waiting = events
         .iter()
-        .find(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_)))
+        .find(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::GateWaiting(_))
+            )
+        })
         .expect("the budget escalation must be recorded");
     assert_eq!(
         waiting.node_id, None,
@@ -4737,8 +4737,8 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
     );
     let resolved = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::GateResolved(p) => Some((e.node_id.clone(), p)),
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some((e.node_id.clone(), p)),
             _ => None,
         })
         .expect("the authorization must be recorded");
@@ -4762,9 +4762,8 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::GateResolved(p)
-                if p.chosen_option.as_deref() == Some("abort")
+            e.payload(),
+            Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_deref() == Some("abort")
         )),
         "the abort decision must be auditable in the log"
     );
@@ -4785,9 +4784,10 @@ limits:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(!events
-        .iter()
-        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 }
 
 #[tokio::test]
@@ -4977,8 +4977,8 @@ async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
         .iter()
         .filter(|e| {
             matches!(
-                &e.payload,
-                yunta_core::events::EventPayload::GateResolved(_)
+                e.payload(),
+                Some(yunta_core::events::EventPayload::GateResolved(_))
             )
         })
         .count();
@@ -4994,9 +4994,10 @@ async fn a_ledger_within_the_default_iteration_cap_runs_unasked() {
     let (terminal, _) = bench.run(LOOP_CAP_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(!events
-        .iter()
-        .any(|e| matches!(&e.payload, yunta_core::events::EventPayload::GateWaiting(_))));
+    assert!(!events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::GateWaiting(_))
+    )));
 }
 
 // --- limits.inline_context_bytes -------------------------
@@ -5076,8 +5077,8 @@ sessions:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let opened = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::AgentSessionOpened(p) => {
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::AgentSessionOpened(p)) => {
                 Some((e.node_id.clone(), p.clone()))
             }
             _ => None,
@@ -5105,8 +5106,8 @@ sessions:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::AgentMessage(p) => Some(p),
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::AgentMessage(p)) => Some(p),
             _ => None,
         })
         .collect();
@@ -5411,8 +5412,8 @@ sessions:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let degraded = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::CapabilityDegraded(p) => Some(p),
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) => Some(p),
             _ => None,
         })
         .expect("the degradation must be an event, never silence");
@@ -5592,8 +5593,8 @@ sessions:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let finding = events
         .iter()
-        .find_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::FindingPosted(p) => Some(&p.finding),
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
             _ => None,
         })
         .expect("the missing path must become a finding, never be lost");
@@ -5858,8 +5859,8 @@ nodes:
         .iter()
         .filter(|e| {
             matches!(
-                &e.payload,
-                yunta_core::events::EventPayload::ScopeExpansionRequested(_)
+                e.payload(),
+                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(_))
             )
         })
         .count();
@@ -5867,8 +5868,8 @@ nodes:
         .iter()
         .filter(|e| {
             matches!(
-                &e.payload,
-                yunta_core::events::EventPayload::ScopeExpansionGranted(_)
+                e.payload(),
+                Some(yunta_core::events::EventPayload::ScopeExpansionGranted(_))
             )
         })
         .count();
@@ -5933,8 +5934,8 @@ nodes:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let assembled_tasks: Vec<String> = events
         .iter()
-        .filter_map(|e| match &e.payload {
-            yunta_core::events::EventPayload::ContextAssembled(p) => Some(
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ContextAssembled(p)) => Some(
                 p.task_id
                     .as_ref()
                     .map(|t| t.to_string())
@@ -5990,18 +5991,19 @@ nodes:
     .unwrap();
     bench
         .storage
-        .append_event(&yunta_core::events::Event {
-            run_id: bench.run_id.clone(),
-            seq: 0,
-            timestamp: FixedClock.now(),
-            node_id: Some("ghost".into()),
-            payload: yunta_core::events::EventPayload::NodeFinished(
-                yunta_core::events::NodeFinishedPayload {
-                    outcome: "??".to_string(),
-                    tokens_used: yunta_core::events::TokenUsage::default(),
-                },
-            ),
-        })
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some("ghost".into()),
+                payload: yunta_core::events::EventPayload::NodeFinished(
+                    yunta_core::events::NodeFinishedPayload {
+                        outcome: "??".to_string(),
+                        tokens_used: yunta_core::events::TokenUsage::default(),
+                    },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
         .unwrap();
 
     let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -6044,7 +6046,7 @@ async fn resume_orphan_with_mock(
     orphan_session: Option<&str>,
 ) -> (
     RunTerminal,
-    Vec<yunta_core::events::Event>,
+    Vec<yunta_core::events::StoredEvent>,
     Arc<MockAdapter>,
 ) {
     let bench = Bench::new();
@@ -6073,13 +6075,14 @@ async fn resume_orphan_with_mock(
     let emit = |node: &str, payload: yunta_core::events::EventPayload| {
         bench
             .storage
-            .append_event(&yunta_core::events::Event {
-                run_id: bench.run_id.clone(),
-                seq: 0,
-                timestamp: FixedClock.now(),
-                node_id: Some(node.into()),
-                payload,
-            })
+            .append(
+                &yunta_core::events::EventDraft {
+                    run_id: bench.run_id.clone(),
+                    node_id: Some(node.into()),
+                    payload,
+                },
+                &yunta_core::SystemClock,
+            )
             .unwrap();
     };
     emit(
@@ -6154,9 +6157,8 @@ sessions:
     );
     assert!(
         !events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::CapabilityDegraded(p)
-                if p.capability == "resume_session"
+            e.payload(),
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
         )),
         "a successful resume degrades nothing"
     );
@@ -6175,9 +6177,8 @@ sessions:
     assert!(adapter.resumes_seen().is_empty());
     assert!(
         events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::CapabilityDegraded(p)
-                if p.capability == "resume_session"
+            e.payload(),
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
                     && p.policy_applied.contains("restart_node")
         )),
         "degrading to a fresh session must be an event, never a silence"
@@ -6197,9 +6198,8 @@ sessions:
     assert!(adapter.resumes_seen().is_empty());
     assert!(
         events.iter().any(|e| matches!(
-            &e.payload,
-            yunta_core::events::EventPayload::CapabilityDegraded(p)
-                if p.capability == "resume_session"
+            e.payload(),
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
                     && p.policy_applied.contains("no session")
         )),
         "a crash before the session opened restarts WITH an explicit event"
@@ -6220,7 +6220,7 @@ sessions:
     assert!(adapter.resumes_seen().is_empty());
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
-        &e.payload,
-        yunta_core::events::EventPayload::CapabilityDegraded(_)
+        e.payload(),
+        Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
     )));
 }

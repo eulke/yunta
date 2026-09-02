@@ -1,5 +1,9 @@
 use thiserror::Error;
-use yunta_core::{InvalidId, RunId};
+use yunta_core::{InvalidId, RunId, Seq};
+
+/// The backend's own failure, kept as the cause of a [`StorageError`]
+/// without naming the backend in this crate's API.
+pub type Cause = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -7,14 +11,14 @@ pub enum StorageError {
     Open {
         path: std::path::PathBuf,
         #[source]
-        source: rusqlite::Error,
+        source: Cause,
     },
 
     #[error("failed to append an event for run `{run_id}`")]
     Append {
         run_id: RunId,
         #[source]
-        source: rusqlite::Error,
+        source: Cause,
     },
 
     #[error("failed to serialize the payload for run `{run_id}`")]
@@ -28,21 +32,23 @@ pub enum StorageError {
     Read {
         run_id: RunId,
         #[source]
-        source: rusqlite::Error,
+        source: Cause,
     },
 
-    #[error("stored payload for run `{run_id}` seq {seq} is not valid JSON")]
+    /// A row whose `kind` this binary knows but whose payload is not that
+    /// kind's shape — or is not JSON at all. An unknown kind is not this:
+    /// the reader keeps it as [`yunta_core::events::EventBody::Unknown`].
+    #[error("stored payload for run `{run_id}` seq {seq} is not valid: {detail}")]
     CorruptPayload {
         run_id: RunId,
-        seq: u64,
-        #[source]
-        source: serde_json::Error,
+        seq: Seq,
+        detail: String,
     },
 
     #[error("stored timestamp for run `{run_id}` seq {seq} is not valid RFC3339")]
     CorruptTimestamp {
         run_id: RunId,
-        seq: u64,
+        seq: Seq,
         #[source]
         source: chrono::ParseError,
     },
@@ -50,7 +56,14 @@ pub enum StorageError {
     #[error("stored node id for run `{run_id}` seq {seq} is not a node id")]
     CorruptNodeId {
         run_id: RunId,
-        seq: u64,
+        seq: Seq,
+        #[source]
+        source: InvalidId,
+    },
+
+    #[error("a stored seq for run `{run_id}` is not a position")]
+    CorruptSeq {
+        run_id: RunId,
         #[source]
         source: InvalidId,
     },
@@ -64,7 +77,7 @@ pub enum StorageError {
     #[error("failed to list runs")]
     ListRuns {
         #[source]
-        source: rusqlite::Error,
+        source: Cause,
     },
 
     /// The hash chain's genesis is `SHA-256(manifest_hash)`, and only
@@ -79,6 +92,11 @@ pub enum StorageError {
 
     #[error("run `{run_id}` has no events to verify")]
     VerifyUnknownRun { run_id: RunId },
+
+    /// A blocking storage call could not be joined from the async
+    /// runtime — the task that ran it was cancelled or panicked.
+    #[error("the storage task for run `{run_id}` did not complete: {detail}")]
+    Join { run_id: RunId, detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;

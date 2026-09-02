@@ -484,7 +484,7 @@ async fn resolve_run_events(
         None => events.iter().map(|e| format!("{e:?}")).collect(),
         Some("failed") => events
             .iter()
-            .filter(|e| matches!(&e.payload, EventPayload::NodeFailed(_)))
+            .filter(|e| matches!(e.payload(), Some(EventPayload::NodeFailed(_))))
             .map(|e| format!("{e:?}"))
             .collect(),
         Some(other) => {

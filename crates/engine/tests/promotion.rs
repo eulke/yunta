@@ -126,7 +126,7 @@ async fn run_with_mode(
     workflow_yaml: &str,
     mode: &str,
     interaction: &dyn HumanInteraction,
-) -> (RunTerminal, Vec<yunta_core::events::Event>) {
+) -> (RunTerminal, Vec<yunta_core::events::StoredEvent>) {
     let (terminal, events, _run_dir, _root) =
         run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
     (terminal, events)
@@ -142,7 +142,7 @@ async fn run_with_mode_and_findings(
     findings: &[yunta_core::events::Finding],
 ) -> (
     RunTerminal,
-    Vec<yunta_core::events::Event>,
+    Vec<yunta_core::events::StoredEvent>,
     std::path::PathBuf,
     tempfile::TempDir,
 ) {
@@ -173,15 +173,18 @@ async fn run_with_mode_and_findings(
 
     for finding in findings {
         storage
-            .append_event(&yunta_core::events::Event {
-                run_id: run_id.clone(),
-                seq: 0,
-                timestamp: FixedClock.now(),
-                node_id: None,
-                payload: EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                    finding: finding.clone(),
-                }),
-            })
+            .append(
+                &yunta_core::events::EventDraft {
+                    run_id: run_id.clone(),
+                    node_id: None,
+                    payload: EventPayload::FindingPosted(
+                        yunta_core::events::FindingPostedPayload {
+                            finding: finding.clone(),
+                        },
+                    ),
+                },
+                &yunta_core::SystemClock,
+            )
             .unwrap();
     }
 
@@ -220,16 +223,16 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
         other => panic!("expected Promoted, got {other:?}"),
     }
 
-    let signaled = events.iter().find_map(|e| match &e.payload {
-        EventPayload::PromotionSignaled(p) => Some(p),
+    let signaled = events.iter().find_map(|e| match e.payload() {
+        Some(EventPayload::PromotionSignaled(p)) => Some(p),
         _ => None,
     });
     let signaled = signaled.expect("promotion_signaled must be on the parent's own log");
     assert_eq!(signaled.suggested_mode, "full");
     assert!(!signaled.reason.is_empty());
 
-    let finished = events.iter().find_map(|e| match &e.payload {
-        EventPayload::RunFinished(p) => Some(p),
+    let finished = events.iter().find_map(|e| match e.payload() {
+        Some(EventPayload::RunFinished(p)) => Some(p),
         _ => None,
     });
     assert_eq!(
@@ -240,7 +243,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     // Promoting closes the run for good — no further events after
     // run_finished (nothing reopens a finished run).
     let last = events.last().unwrap();
-    assert!(matches!(last.payload, EventPayload::RunFinished(_)));
+    assert!(matches!(last.payload(), Some(EventPayload::RunFinished(_))));
 
     // The offered options actually included "promote" — proving the
     // escalation added it, not that this test just got lucky with a
@@ -272,7 +275,7 @@ async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e.payload, EventPayload::PromotionSignaled(_))),
+            .any(|e| matches!(e.payload(), Some(EventPayload::PromotionSignaled(_)))),
         "no live surface to choose promote from — must never happen on its own"
     );
 }

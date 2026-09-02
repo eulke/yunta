@@ -22,8 +22,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use yunta_core::events::{Event, EventPayload, Finding, TaskStatus, TokenUsage};
-use yunta_core::{NodeId, TaskId};
+use yunta_core::events::{EventPayload, Finding, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::{NodeId, Seq, TaskId};
 
 /// One node's derived lifecycle state. An enum, not booleans (CLAUDE.md):
 /// there is no combination of flags to get wrong.
@@ -70,6 +70,10 @@ pub struct RunState {
     /// further state — the point where a `yunta resume`/`status` would
     /// report the run as `broken`.
     pub broken: Option<String>,
+    /// Every event under a `kind` this binary does not know, by position
+    /// and kind name, in log order: the run is interpreted up to what
+    /// this binary understands, and what it skipped is named.
+    pub unknown_kinds: Vec<(Seq, String)>,
 }
 
 /// Bookkeeping `derive` needs across events without exposing it on
@@ -85,10 +89,35 @@ struct Aux {
     pending_questions: std::collections::HashSet<NodeId>,
 }
 
+/// How many events a log carries under one `kind` this binary does not
+/// know — what `status`, the receipt and `stats` show so a partially
+/// interpreted run is never mistaken for a fully interpreted one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UnknownKindCount {
+    pub kind: String,
+    pub events: usize,
+}
+
+/// The unknown kinds a derived state skipped, grouped by kind and sorted
+/// by name; empty for a log this binary interprets in full.
+pub fn unknown_kind_counts(state: &RunState) -> Vec<UnknownKindCount> {
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, kind) in &state.unknown_kinds {
+        *counts.entry(kind.as_str()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(kind, events)| UnknownKindCount {
+            kind: kind.to_string(),
+            events,
+        })
+        .collect()
+}
+
 /// Derives run state from its event log, in `seq` order. Pure: same
 /// input, same output, always — a property test relies on exactly
 /// this.
-pub fn derive(events: &[Event]) -> RunState {
+pub fn derive(events: &[StoredEvent]) -> RunState {
     let mut state = RunState::default();
     let mut aux = Aux::default();
 
@@ -102,8 +131,16 @@ pub fn derive(events: &[Event]) -> RunState {
     state
 }
 
-fn apply(state: &mut RunState, aux: &mut Aux, event: &Event) -> Result<(), String> {
-    match &event.payload {
+fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(), String> {
+    let Some(payload) = event.payload() else {
+        // A kind this binary does not know: counted, named, never a
+        // reason to stop deriving what it does know.
+        state
+            .unknown_kinds
+            .push((event.seq, event.body.kind_name().to_string()));
+        return Ok(());
+    };
+    match payload {
         EventPayload::NodeStarted(p) => {
             let node_id = require_node_id(event)?;
             // Any prior state is a legal starting point: a `Failed` node
@@ -298,12 +335,12 @@ pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
     deduped
 }
 
-fn require_node_id(event: &Event) -> Result<NodeId, String> {
+fn require_node_id(event: &StoredEvent) -> Result<NodeId, String> {
     event.node_id.clone().ok_or_else(|| {
         format!(
             "seq {}: `{}` is missing node_id",
             event.seq,
-            event.payload.kind_name()
+            event.body.kind_name()
         )
     })
 }

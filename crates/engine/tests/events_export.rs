@@ -4,21 +4,22 @@
 //! replay desde la DB."
 
 use yunta_core::events::{
-    Event, EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, TokenUsage,
+    EventBody, EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload,
+    StoredEvent, TokenUsage,
 };
 use yunta_engine::{derive, render_events_jsonl};
 
-fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> Event {
-    Event {
+fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
         run_id: "run-1".into(),
-        seq,
+        seq: seq.into(),
         timestamp: chrono::Utc::now(),
         node_id: node_id.map(Into::into),
-        payload,
+        body: EventBody::Known(payload),
     }
 }
 
-fn sample_events() -> Vec<Event> {
+fn sample_events() -> Vec<StoredEvent> {
     vec![
         event(
             1,
@@ -80,7 +81,7 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
     // fixtures covering different event kinds, the same hand-fixture
     // style `replay_is_deterministic_across_several_fixtures` already
     // uses (no proptest/quickcheck dependency in this workspace).
-    let fixtures: Vec<Vec<Event>> = vec![
+    let fixtures: Vec<Vec<StoredEvent>> = vec![
         sample_events(),
         vec![event(
             1,
@@ -95,7 +96,7 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
 
     for original in fixtures {
         let jsonl = render_events_jsonl(&original).unwrap();
-        let round_tripped: Vec<Event> = jsonl
+        let round_tripped: Vec<StoredEvent> = jsonl
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();

@@ -99,7 +99,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         .iter()
         .filter(|e| {
             e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload, EventPayload::NodeStarted(_))
+                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
         })
         .count() as u32
         + 1;

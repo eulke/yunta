@@ -116,11 +116,14 @@ fn spawn_follower(
 /// hold a slot (they expect a `resume`), finished ones never do.
 fn count_non_terminal_runs(storage: &Storage) -> Result<usize, yunta_storage::StorageError> {
     let mut active = 0;
-    for run_id in storage.list_run_ids()? {
+    for run_id in storage.list_runs()?.into_iter().map(|run| run.run_id) {
         let events = storage.events_for_run(&run_id)?;
-        let finished = events
-            .iter()
-            .any(|e| matches!(e.payload, yunta_core::events::EventPayload::RunFinished(_)));
+        let finished = events.iter().any(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::RunFinished(_))
+            )
+        });
         if !events.is_empty() && !finished {
             active += 1;
         }

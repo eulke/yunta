@@ -31,7 +31,9 @@
 use std::path::Path;
 
 use serde::Serialize;
-use yunta_core::events::{Event, EventPayload, Finding, FindingPostedPayload, FindingSeverity};
+use yunta_core::events::{
+    EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
+};
 use yunta_core::{sha256_hex, FindingId, Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
@@ -83,7 +85,7 @@ struct FindingCounts {
 }
 
 /// Log-derived verification evidence — pure over the event slice.
-fn verification(events: &[Event]) -> ProvenanceVerification {
+fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
     let mut criteria = CriteriaCounts {
         executed: 0,
         green: 0,
@@ -96,8 +98,8 @@ fn verification(events: &[Event]) -> ProvenanceVerification {
         note: 0,
     };
     for event in events {
-        match &event.payload {
-            EventPayload::CriteriaChecked(p) => {
+        match event.payload() {
+            Some(EventPayload::CriteriaChecked(p)) => {
                 for result in &p.results {
                     criteria.executed += 1;
                     if result.exit_code == 0 {
@@ -108,7 +110,7 @@ fn verification(events: &[Event]) -> ProvenanceVerification {
                     }
                 }
             }
-            EventPayload::FindingPosted(p) => match p.finding.severity {
+            Some(EventPayload::FindingPosted(p)) => match p.finding.severity {
                 FindingSeverity::Blocking => findings.blocking += 1,
                 FindingSeverity::Major => findings.major += 1,
                 FindingSeverity::Minor => findings.minor += 1,

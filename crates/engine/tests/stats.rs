@@ -5,9 +5,9 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    Event, EventPayload, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
-    NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    EventBody, EventPayload, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
+    NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent,
+    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{Node, NodeKind, RunnerCandidate, Workflow};
 use yunta_engine::{compute_run_stats, prior_estimation, run_summary, RunSummary};
@@ -54,13 +54,20 @@ fn base_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
 }
 
-fn event(seq: u64, offset_secs: i64, node_id: Option<&str>, payload: EventPayload) -> Event {
-    Event {
+/// `index` is the event's 0-based position in the synthetic log; storage
+/// numbers positions from 1.
+fn event(
+    index: u64,
+    offset_secs: i64,
+    node_id: Option<&str>,
+    payload: EventPayload,
+) -> StoredEvent {
+    StoredEvent {
         run_id: "run-1".into(),
-        seq,
+        seq: (index + 1).into(),
         timestamp: base_time() + chrono::Duration::seconds(offset_secs),
         node_id: node_id.map(Into::into),
-        payload,
+        body: EventBody::Known(payload),
     }
 }
 
@@ -84,7 +91,7 @@ fn tokens(input: u64, output: u64, cached: Option<u64>) -> TokenUsage {
 /// after `a` finishes (blocked time), fails on attempt 1, re-routes, and
 /// finishes on attempt 2 — a retry's tokens count as rework, and the
 /// second `RunnerResolved` re-affirms the same role.
-fn fixture_events() -> Vec<Event> {
+fn fixture_events() -> Vec<StoredEvent> {
     vec![
         event(
             0,
@@ -207,7 +214,7 @@ fn fixture_events() -> Vec<Event> {
             EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                 task_id: "t1".into(),
                 new_status: TaskStatus::Done,
-                caused_by: 10,
+                caused_by: 10.into(),
             }),
         ),
     ]
@@ -243,11 +250,11 @@ fn cache_rate_is_none_unless_some_attempt_reported_it() {
     assert_eq!(stats.cache_rate, Some(20.0 / 240.0));
 
     let wf_solo = workflow(vec![node("a", &[])]);
-    let no_cache_events: Vec<Event> = fixture_events()
+    let no_cache_events: Vec<StoredEvent> = fixture_events()
         .into_iter()
         .take(4)
         .map(|mut e| {
-            if let EventPayload::NodeFinished(p) = &mut e.payload {
+            if let EventBody::Known(EventPayload::NodeFinished(p)) = &mut e.body {
                 p.tokens_used.cached = None;
             }
             e

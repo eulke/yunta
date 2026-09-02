@@ -178,8 +178,10 @@ impl Bench {
             .events_for_run(run_id)
             .unwrap()
             .into_iter()
-            .filter_map(|e| match e.payload {
-                EventPayload::ChildRunCreated(p) => Some((p.child_run_id, p.child_workflow_hash)),
+            .filter_map(|e| match e.payload() {
+                Some(EventPayload::ChildRunCreated(p)) => {
+                    Some((p.child_run_id.clone(), p.child_workflow_hash.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -190,8 +192,10 @@ impl Bench {
             .events_for_run(run_id)
             .unwrap()
             .into_iter()
-            .filter_map(|e| match e.payload {
-                EventPayload::ChildRunFinished(p) => Some((p.child_run_id, p.terminal_state)),
+            .filter_map(|e| match e.payload() {
+                Some(EventPayload::ChildRunFinished(p)) => {
+                    Some((p.child_run_id.clone(), p.terminal_state))
+                }
                 _ => None,
             })
             .collect()
@@ -264,12 +268,12 @@ nodes:
     // frozen manifest with the parent-rendered inputs.
     let child_events = bench.storage.events_for_run(child_id).unwrap();
     assert!(matches!(
-        child_events.first().map(|e| &e.payload),
+        child_events.first().and_then(|e| e.payload()),
         Some(EventPayload::RunCreated(_))
     ));
     assert!(child_events
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::RunFinished(_))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_)))));
     let child_manifest = bench.child_manifest(child_id);
     assert_eq!(child_manifest.workflow.name, "child-wf");
     assert_eq!(&child_manifest.workflow_hash, recorded_hash);
@@ -350,8 +354,8 @@ sessions:
     let events = bench.storage.events_for_run(&run_id).unwrap();
     let recorded = events
         .iter()
-        .find_map(|e| match &e.payload {
-            EventPayload::ChildRunFinished(p) => Some(p.tokens),
+        .find_map(|e| match e.payload() {
+            Some(EventPayload::ChildRunFinished(p)) => Some(p.tokens),
             _ => None,
         })
         .expect("child_run_finished must carry the child's spend");
@@ -413,7 +417,7 @@ nodes:
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::RunPaused(_))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::RunPaused(_)))));
 
     // Resume the parent with a surface that answers: the SAME child run
     // resumes (no second child_run_created), its gate resolves, and
@@ -436,7 +440,7 @@ nodes:
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::RunResumed(_))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::RunResumed(_)))));
     assert_eq!(
         std::fs::read_to_string(bench.worktree.join("child-out.txt"))
             .unwrap()
@@ -828,8 +832,8 @@ nodes:
         .events_for_run(&successor)
         .unwrap()
         .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::RunCreated(p) => Some(p),
+        .find_map(|e| match e.payload() {
+            Some(EventPayload::RunCreated(p)) => Some(p.clone()),
             _ => None,
         })
         .unwrap();

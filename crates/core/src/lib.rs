@@ -38,7 +38,8 @@ pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName,
-    NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, SessionId, TaskId,
+    NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
+    TaskId,
 };
 pub use inputs::InputSpec;
 pub use ledger::{Criterion, Ledger, Task};
