@@ -41,9 +41,13 @@ pub struct ScopeCheckResult {
     pub violations: Vec<PathBuf>,
 }
 
+/// `staged` is what the adapter that ran declared it wrote for its own
+/// mechanics (`Adapter::staged_paths`): a change at or under one of
+/// those paths is never a violation, and nothing else is left out.
 pub async fn scope_check(
     cwd: &Path,
     scope: &[String],
+    staged: &[PathBuf],
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
     let set = yunta_core::scope_globset(scope)
         .map_err(|(glob, source)| ScopeCheckError::InvalidGlob { glob, source })?;
@@ -55,10 +59,7 @@ pub async fn scope_check(
 
     let violations = diff
         .iter()
-        // `.claude/skills/` is engine/adapter-staged session
-        // infrastructure (the skill mount), never agent work — the
-        // one fixed path scope never charges to a task.
-        .filter(|path| !path.starts_with(".claude/skills"))
+        .filter(|path| !staged.iter().any(|mount| path.starts_with(mount)))
         .filter(|path| !set.is_match(path))
         .cloned()
         .collect();

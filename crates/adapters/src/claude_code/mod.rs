@@ -10,7 +10,7 @@ mod parse;
 mod permissions;
 mod settings;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
@@ -105,6 +105,13 @@ impl Adapter for ClaudeCodeAdapter {
         &ID
     }
 
+    fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf> {
+        skill_mounts(req)
+            .into_iter()
+            .map(|(mount, _)| mount)
+            .collect()
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
@@ -147,13 +154,32 @@ impl Adapter for ClaudeCodeAdapter {
     }
 }
 
-/// The CLI's native skills discovery is `.claude/skills/` under
-/// its working directory — mounting is staging a symlink per resolved
-/// skill directory there, named after the directory itself. Re-staging
-/// (a retry, a resume) replaces the link; the engine's scope check
-/// ignores this engine-staged path, so it never reads as agent work.
+/// The CLI's native skills discovery directory, relative to the
+/// session's working directory.
+const SKILLS_MOUNT: &str = ".claude/skills";
+
+/// Where each resolved skill directory is mounted: a link under
+/// [`SKILLS_MOUNT`] named after the directory itself. Computed once,
+/// for [`stage_skills`] to create and [`Adapter::staged_paths`] to
+/// declare, so what scope leaves out is exactly what was written.
+fn skill_mounts(req: &SessionRequest) -> Vec<(PathBuf, &Path)> {
+    req.skills
+        .iter()
+        .filter_map(|skill| {
+            let name = skill.file_name()?;
+            Some((Path::new(SKILLS_MOUNT).join(name), skill.as_path()))
+        })
+        .collect()
+}
+
+/// Mounting is staging a symlink per resolved skill directory under
+/// the CLI's discovery directory. Re-staging (a retry, a resume)
+/// replaces the link; the adapter declares every link it makes
+/// through `staged_paths`, so the engine's scope check never reads
+/// one as agent work.
 fn stage_skills(req: &SessionRequest) -> Result<()> {
-    if req.skills.is_empty() {
+    let mounts = skill_mounts(req);
+    if mounts.is_empty() {
         return Ok(());
     }
     let io_err = |action: String, source: std::io::Error| AdapterError::AdapterIo {
@@ -161,14 +187,11 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
         action,
         source,
     };
-    let skills_root = req.cwd.join(".claude").join("skills");
+    let skills_root = req.cwd.join(SKILLS_MOUNT);
     std::fs::create_dir_all(&skills_root)
         .map_err(|e| io_err(format!("create {}", skills_root.display()), e))?;
-    for skill in &req.skills {
-        let Some(name) = skill.file_name() else {
-            continue;
-        };
-        let dest = skills_root.join(name);
+    for (mount, skill) in mounts {
+        let dest = req.cwd.join(mount);
         match std::fs::remove_file(&dest) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

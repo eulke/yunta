@@ -571,11 +571,26 @@ fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, Template
 /// Runs after-hooks, then verifies scope and artifacts — the close
 /// sequence every successful node body goes through (session → after →
 /// verification).
+/// Closes a node whose session staged nothing in the worktree — every
+/// kind but an agent session.
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
     tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
+    close_node_staged(ctx, node, outcome, tokens, &[]).await
+}
+
+/// Closes a node: its `after` hooks run, its scope is checked over the
+/// whole diff — hook edits included, `staged` paths (what the adapter
+/// declared it wrote for itself) left out — and it finishes.
+pub(super) async fn close_node_staged(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    outcome: String,
+    tokens: TokenUsage,
+    staged: &[std::path::PathBuf],
 ) -> Result<NodeEnd, RunError> {
     for step in &effective_hooks(ctx, node).after {
         match run_hook(ctx, node, HookPhase::After, step).await? {
@@ -596,9 +611,8 @@ pub(super) async fn close_node(
         }
     }
 
-    // Scope check over the node's whole diff — hook edits included.
     if !node.scope.is_empty() {
-        let result = scope_check(ctx.worktree, &node.scope).await?;
+        let result = scope_check(ctx.worktree, &node.scope, staged).await?;
         ctx.emit(
             Some(&node.id),
             EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
@@ -1193,6 +1207,7 @@ async fn execute_prompt(
         }
     }
 
+    let staged = adapter.staged_paths(&request);
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),
         request,
@@ -1207,7 +1222,9 @@ async fn execute_prompt(
     })?;
 
     match outcome {
-        DispatchOutcome::Completed { summary } => close_node(ctx, node, summary, tokens).await,
+        DispatchOutcome::Completed { summary } => {
+            close_node_staged(ctx, node, summary, tokens, &staged).await
+        }
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await
         }

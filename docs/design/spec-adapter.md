@@ -112,6 +112,12 @@ pub trait Adapter: Send + Sync {
     /// autenticación válida. Corre en `yunta doctor` y al crear runs.
     async fn probe(&self) -> Result<ProbeReport>;
 
+    /// Rutas del worktree (relativas) que una sesión abierta para `req`
+    /// escribe por su propia mecánica — un mount, un archivo de settings —,
+    /// nunca trabajo del agente. El scope del engine excluye exactamente
+    /// esas rutas y ninguna otra. Default: ninguna.
+    fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf>;
+
     /// Abre una sesión nueva. Contrato de eventos en §4.
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
 

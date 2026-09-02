@@ -216,6 +216,14 @@ pub trait Adapter: Send + Sync {
 
     async fn probe(&self) -> Result<ProbeReport>;
 
+    /// The worktree-relative paths a session opened for `req` writes
+    /// for the adapter's own mechanics — a mount, a settings file —
+    /// never the agent's work. The engine's scope check leaves exactly
+    /// these out. Default: nothing.
+    fn staged_paths(&self, _req: &SessionRequest) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
 
     /// Default: unsupported. Only called if `capabilities().resume_session`.

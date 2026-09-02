@@ -266,6 +266,11 @@ pub struct TaskCycleReport {
     /// `HumanInteraction` — pausing only when no live surface answers —
     /// rather than burning further sessions while one is owed.
     pub needs_human_decision: bool,
+    /// What the adapter declared it wrote into the task's worktree for
+    /// its own mechanics during the last attempt — what the scope
+    /// check at integration leaves out, exactly as the cycle's own
+    /// check did.
+    pub staged: Vec<PathBuf>,
 }
 
 /// Default retry cap ("cap configurable, default 2").
@@ -710,6 +715,9 @@ pub async fn run_task(
     cancel: &CancellationToken,
     setup: &SessionSetup,
 ) -> Result<TaskCycleReport, TaskCycleError> {
+    // What the adapter declares it stages, per attempt; nothing before
+    // a session opens.
+    let mut last_staged: Vec<PathBuf> = Vec::new();
     let AttemptEnv {
         adapter,
         cwd,
@@ -733,6 +741,7 @@ pub async fn run_task(
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
             return Ok(TaskCycleReport {
                 task_id: task.id.clone(),
+                staged: last_staged.clone(),
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
                 outcome: TaskOutcome::Blocked { reason: rule },
@@ -755,6 +764,7 @@ pub async fn run_task(
         };
         return Ok(TaskCycleReport {
             task_id: task.id.clone(),
+            staged: last_staged.clone(),
             pre_check: pre_runs,
             attempts: Vec::new(),
             outcome: TaskOutcome::Blocked { reason },
@@ -803,6 +813,7 @@ pub async fn run_task(
             skills: setup.skills.clone(),
             run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
         };
+        last_staged = adapter.staged_paths(&request);
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
             .await
             .map_err(|source| TaskCycleError::Spawn {
@@ -826,6 +837,7 @@ pub async fn run_task(
             });
             return Ok(TaskCycleReport {
                 task_id: task.id.clone(),
+                staged: last_staged.clone(),
                 pre_check: pre_runs,
                 attempts,
                 outcome: TaskOutcome::Interrupted,
@@ -888,7 +900,7 @@ pub async fn run_task(
         // "el diff final se evalúa contra scope declarado más
         // ampliaciones autorizadas" — never against a denied or escalated
         // request's paths.
-        let scope = scope_check(cwd, &effective_scope).await?;
+        let scope = scope_check(cwd, &effective_scope, &last_staged).await?;
 
         let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
         let succeeded = criteria_green && scope.violations.is_empty();
@@ -910,6 +922,7 @@ pub async fn run_task(
         if succeeded {
             return Ok(TaskCycleReport {
                 task_id: task.id.clone(),
+                staged: last_staged.clone(),
                 pre_check: pre_runs,
                 attempts,
                 outcome: TaskOutcome::Done,
@@ -921,6 +934,7 @@ pub async fn run_task(
         if escalated {
             return Ok(TaskCycleReport {
                 task_id: task.id.clone(),
+                staged: last_staged.clone(),
                 pre_check: pre_runs,
                 attempts,
                 outcome: TaskOutcome::Blocked {
@@ -933,6 +947,7 @@ pub async fn run_task(
 
     Ok(TaskCycleReport {
         task_id: task.id.clone(),
+        staged: last_staged.clone(),
         pre_check: pre_runs,
         attempts,
         needs_human_decision: false,

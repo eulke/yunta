@@ -345,8 +345,11 @@ pub(super) async fn execute_loop(
                     let outcome = integrate_task(
                         ctx,
                         node,
-                        task,
-                        &task_worktree,
+                        VerifiedTask {
+                            task,
+                            worktree: &task_worktree,
+                            staged: &report.staged,
+                        },
                         &ctx.memo,
                         &mut last_check_seq,
                         cancel,
@@ -804,6 +807,15 @@ enum IntegrationOutcome {
     Rejected(String),
 }
 
+/// A task the cycle verified `Done` in its own worktree, as the
+/// integration receives it: the task, where its work sits, and what
+/// its adapter declared it staged there.
+struct VerifiedTask<'a> {
+    task: &'a Task,
+    worktree: &'a Path,
+    staged: &'a [PathBuf],
+}
+
 /// Integrates one task verified `Done` in isolation: rebase
 /// its branch onto the run's *current* integration HEAD (which may have
 /// moved since this batch started, if an earlier-declared sibling
@@ -817,12 +829,16 @@ enum IntegrationOutcome {
 async fn integrate_task(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task: &Task,
-    task_worktree: &Path,
+    verified: VerifiedTask<'_>,
     memo: &Memo,
     last_check_seq: &mut Seq,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<IntegrationOutcome, RunError> {
+    let VerifiedTask {
+        task,
+        worktree: task_worktree,
+        staged,
+    } = verified;
     commit_task_work(task_worktree, task).await?;
 
     let integration_head = head_commit(ctx.worktree).await?;
@@ -866,7 +882,7 @@ async fn integrate_task(
             }),
         )
         .await?;
-    let scope = scope_check(task_worktree, &task.scope).await?;
+    let scope = scope_check(task_worktree, &task.scope, staged).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::ScopeChecked(ScopeCheckedPayload {
