@@ -186,7 +186,7 @@ pub(crate) struct RunCtx<'a> {
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,
-    pub clock: &'a dyn Clock,
+    pub clock: Arc<dyn Clock>,
     pub ids: &'a dyn IdSource,
     pub max_task_retries: u32,
     /// Criteria memoization — one cache per `execute_run`
@@ -630,7 +630,7 @@ pub struct RunEnv<'a> {
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,
-    pub clock: &'a dyn Clock,
+    pub clock: Arc<dyn Clock>,
     /// Mints the ids of the runs this one gives birth to — its
     /// children and its promotion successor.
     pub ids: &'a dyn IdSource,
@@ -649,6 +649,31 @@ pub struct RunEnv<'a> {
 /// what remains, never in-process state.
 pub async fn execute_run(env: RunEnv<'_>) -> Result<RunReport, RunError> {
     execute_run_at_depth(env, 0).await
+}
+
+/// Records the `run_paused` a post-crash `yunta cancel` writes when it
+/// finds the engine already dead. The CLI never builds an `EventDraft`
+/// itself: event construction and its clock stamp live here, so every
+/// event on the log is emitted by the engine through one injected clock.
+pub async fn record_pause_after_crash(
+    storage: &AsyncStorage,
+    run_id: &RunId,
+    reason: &str,
+    clock: &dyn Clock,
+) -> Result<(), RunError> {
+    storage
+        .append(
+            EventDraft {
+                run_id: run_id.clone(),
+                node_id: None,
+                payload: EventPayload::RunPaused(RunPausedPayload {
+                    reason: reason.to_string(),
+                }),
+            },
+            clock.now(),
+        )
+        .await?;
+    Ok(())
 }
 
 /// [`execute_run`] with an explicit composition depth:
@@ -690,6 +715,10 @@ pub(crate) async fn execute_run_at_depth(
         Ok(registry) => (Some(registry), None),
         Err(e) => (None, Some(e)),
     };
+    // The per-run MCP host outlives every borrow of this invocation, so
+    // it owns a clone of the run's clock rather than borrowing it — the
+    // one injected clock reaches the listener's own event appends.
+    let clock_for_host = clock.clone();
     let ctx = RunCtx {
         run_id,
         manifest,
@@ -715,6 +744,7 @@ pub(crate) async fn execute_run_at_depth(
             storage.clone(),
             run_id.clone(),
             &manifest.workflow,
+            clock_for_host,
         )),
     };
 

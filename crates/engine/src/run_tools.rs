@@ -23,13 +23,12 @@
 //!
 //! **Shell edge, deliberately.** This module is the imperative shell's
 //! outermost boundary — a network listener serving a live agent. The
-//! high entropy the token is generated with (uuid v4) and the wall-clock
-//! timestamps on tool-written events both live here and only here:
-//! neither participates in any pure derivation (replay consumes stored
-//! timestamps), and injecting them would thread `Arc`s through every
-//! `execute_run` caller for no reproducibility gain — the moment an
-//! agent calls a tool is real wall time by nature, exactly like the
-//! session audit events surrounding it.
+//! high entropy the token is generated with (uuid v4) lives here and
+//! only here; it participates in no pure derivation. The events a tool
+//! writes, though, are the run's events like any other: they carry the
+//! run's own injected [`Clock`], shared with every other emitter, so a
+//! run driven by a fixed clock produces reproducible timestamps
+//! throughout — the host holds an `Arc<dyn Clock>` for exactly that.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -47,7 +46,6 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::RunToolsEndpoint;
 use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload, StoredEvent};
-use yunta_core::Clock;
 use yunta_core::{Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
 use yunta_storage::AsyncStorage;
 
@@ -60,10 +58,19 @@ pub struct RunToolsHost {
     storage: AsyncStorage,
     run_id: RunId,
     blackboard_members: HashMap<NodeId, Vec<NodeId>>,
+    /// The run's injected clock — the listener stamps its own event
+    /// appends with it, never a fresh `SystemClock`, so every emitter on
+    /// the run shares one clock.
+    clock: Arc<dyn yunta_core::Clock>,
 }
 
 impl RunToolsHost {
-    pub fn new(storage: AsyncStorage, run_id: RunId, workflow: &Workflow) -> Self {
+    pub fn new(
+        storage: AsyncStorage,
+        run_id: RunId,
+        workflow: &Workflow,
+        clock: Arc<dyn yunta_core::Clock>,
+    ) -> Self {
         let mut blackboard_members = HashMap::new();
         for node in &workflow.nodes {
             if let NodeKind::Parallel {
@@ -82,6 +89,7 @@ impl RunToolsHost {
             storage,
             run_id,
             blackboard_members,
+            clock,
         }
     }
 
@@ -323,7 +331,7 @@ impl SessionTools {
                     node_id: Some(self.node.clone()),
                     payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
                 },
-                yunta_core::SystemClock.now(),
+                self.host.clock.now(),
             )
             .await
             .map_err(|source| RunToolError::Storage { source })?;

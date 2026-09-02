@@ -46,8 +46,24 @@ struct Bench {
     host: Arc<RunToolsHost>,
 }
 
+/// A clock frozen at a distinctive instant, so a test can prove an event
+/// carries the run's injected clock rather than wall time.
+struct FrozenClock;
+
+impl yunta_core::Clock for FrozenClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2020-02-02T02:02:02Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+}
+
 impl Bench {
     fn new() -> Self {
+        Self::with_clock(Arc::new(yunta_core::SystemClock))
+    }
+
+    fn with_clock(clock: Arc<dyn yunta_core::Clock>) -> Self {
         let root = tempfile::tempdir().unwrap();
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-tools-1");
@@ -76,6 +92,7 @@ impl Bench {
             storage.async_handle(),
             run_id.clone(),
             &workflow,
+            clock,
         ));
         Bench {
             _root: root,
@@ -228,6 +245,45 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     assert!(text.contains("severity"), "got: {text}");
     assert_eq!(bench.findings_by("solo").len(), 1);
     client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_tool_written_event_carries_the_runs_injected_clock() {
+    // The finding a tool writes is stamped by the run's own clock, not a
+    // fresh `SystemClock` — so a run driven by a fixed clock is
+    // reproducible through its listener's events too.
+    let bench = Bench::with_clock(Arc::new(FrozenClock));
+    let session = bench.listener("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(
+        &client,
+        "yunta_post_finding",
+        json!({
+            "id": "clocked",
+            "severity": "note",
+            "title": "stamped by the injected clock",
+            "location": "src/lib.rs:1",
+            "detail": "the timestamp is the run's, not wall time",
+        }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    client.cancel().await.unwrap();
+
+    let event = bench
+        .storage
+        .events_for_run(&bench.run_id)
+        .unwrap()
+        .into_iter()
+        .find(|e| {
+            matches!(
+                e.payload(),
+                Some(EventPayload::FindingPosted(p)) if p.finding.id.as_str() == "clocked"
+            )
+        })
+        .expect("the finding is on the log");
+    assert_eq!(event.timestamp, yunta_core::Clock::now(&FrozenClock));
 }
 
 // --- yunta_get_blackboard (mount rule, read rule) --------------------

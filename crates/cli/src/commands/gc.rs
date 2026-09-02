@@ -69,7 +69,7 @@ pub fn gc(dry_run: bool) -> ExitCode {
         }
     };
 
-    let now = chrono::Utc::now();
+    let now = yunta_core::Clock::now(&yunta_core::SystemClock);
     let mut reclaimed = 0usize;
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {

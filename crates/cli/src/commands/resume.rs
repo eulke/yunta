@@ -85,7 +85,7 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: &SystemClock,
+        clock: std::sync::Arc::new(SystemClock),
         ids: &SystemIdSource,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,

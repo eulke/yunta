@@ -19,7 +19,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
-use yunta_core::{describe, events::EventPayload, Clock, Pid, RunId, SystemClock};
+use yunta_core::{describe, events::EventPayload, Pid, RunId, SystemClock};
 use yunta_engine::NodeState;
 use yunta_storage::AsyncStorage;
 
@@ -148,21 +148,18 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         }
     }
 
-    // Case 2 — the engine crashed; its leftovers are ours to clean.
+    // Case 2 — the engine crashed; its leftovers are ours to clean. The
+    // `run_paused` is emitted through the engine, not hand-built here, so
+    // the CLI never stamps an event with a clock of its own.
     kill_groups(&registry.process_groups);
-    let paused = storage
-        .append(
-            yunta_core::events::EventDraft {
-                run_id: run_id.clone(),
-                node_id: None,
-                payload: EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
-                    reason: "cancelled after crash".to_string(),
-                }),
-            },
-            SystemClock.now(),
-        )
-        .await;
-    if let Err(e) = paused {
+    if let Err(e) = yunta_engine::record_pause_after_crash(
+        &storage,
+        run_id,
+        "cancelled after crash",
+        &SystemClock,
+    )
+    .await
+    {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }

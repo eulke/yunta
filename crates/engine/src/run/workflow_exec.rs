@@ -436,7 +436,7 @@ pub(super) async fn execute_workflow(
             artifacts: &mounted,
         },
         ctx.storage,
-        ctx.clock,
+        ctx.clock.as_ref(),
     )
     .await?;
 
@@ -551,7 +551,7 @@ async fn drive_child(
                     worktree: &current_tree,
                     adapters: ctx.adapters,
                     storage: ctx.storage,
-                    clock: ctx.clock,
+                    clock: ctx.clock.clone(),
                     ids: ctx.ids,
                     max_task_retries: ctx.max_task_retries,
                     human_interaction: ctx.human_interaction,
@@ -613,7 +613,7 @@ async fn drive_child(
                         worktrees: &worktrees_root(ctx),
                     },
                     ctx.storage,
-                    ctx.clock,
+                    ctx.clock.as_ref(),
                     ctx.ids,
                 )
                 .await

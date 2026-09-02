@@ -206,7 +206,7 @@ async fn run_with_mode_and_findings(
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage.async_handle(),
-        clock: &FixedClock,
+        clock: std::sync::Arc::new(FixedClock),
         ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: interaction,

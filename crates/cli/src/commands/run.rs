@@ -424,7 +424,7 @@ pub async fn run(
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: &clock,
+        clock: std::sync::Arc::new(SystemClock),
         ids: &ids,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,

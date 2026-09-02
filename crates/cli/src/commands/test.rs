@@ -242,7 +242,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: &SystemClock,
+        clock: std::sync::Arc::new(SystemClock),
         ids: &SystemIdSource,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &yunta_engine::NoInteraction,
