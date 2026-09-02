@@ -297,9 +297,10 @@ nodes:
         .to_string();
 
     // Kill `yunta mcp` outright — no graceful shutdown.
-    unsafe {
-        libc_kill(mcp_pid as i32, 9); // SIGKILL
-    }
+    assert!(
+        signal(&mcp_pid.to_string(), "KILL"),
+        "`yunta mcp` must be alive to be killed"
+    );
     drop(client);
 
     // A brand new MCP session, sharing nothing with the killed one,
@@ -340,10 +341,13 @@ nodes:
     fresh_client.cancel().await.unwrap();
 }
 
-extern "C" {
-    fn kill(pid: i32, sig: i32) -> i32;
-}
-
-unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
-    kill(pid, sig)
+/// Sends `sig` to `target` — a pid, or `-<pgid>` for a whole process
+/// group — the way an operator does from a shell; `false` when nothing
+/// was left to signal.
+fn signal(target: &str, sig: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-s", sig, "--", target])
+        .status()
+        .expect("failed to run kill")
+        .success()
 }

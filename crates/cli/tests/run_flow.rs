@@ -1967,10 +1967,8 @@ nodes:
     .expect("run id in output");
 
     // The launcher itself has already exited — this signals whatever
-    // else is still in its group.
-    unsafe {
-        libc_kill(-launcher_pgid, 15); // SIGTERM
-    }
+    // else is still in its group, if anything is.
+    signal(&format!("-{launcher_pgid}"), "TERM");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -1993,12 +1991,15 @@ nodes:
     );
 }
 
-extern "C" {
-    fn kill(pid: i32, sig: i32) -> i32;
-}
-
-unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
-    kill(pid, sig)
+/// Sends `sig` to `target` — a pid, or `-<pgid>` for a whole process
+/// group — the way an operator does from a shell; `false` when nothing
+/// was left to signal.
+fn signal(target: &str, sig: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-s", sig, "--", target])
+        .status()
+        .expect("failed to run kill")
+        .success()
 }
 
 // --- `yunta resolve-gate` -------------------------------------------------
