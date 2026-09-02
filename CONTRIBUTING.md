@@ -10,7 +10,8 @@ repository, human or agent; read it first. Everything below is logistics.
 
 For anything beyond a small, obviously-scoped fix, open an issue first
 describing the problem and the approach. Design decisions live in
-`docs/design/adr/`; a change that touches one is settled there before any code.
+`docs/design/adrs.md`; a change that touches one starts as a proposal in
+`docs/design/adr/` and is settled there before any code.
 
 ## Building and testing
 
