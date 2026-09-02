@@ -76,6 +76,17 @@ impl Workflow {
             stack: self.nodes.iter().rev().collect(),
         }
     }
+
+    /// Every node in the same order as [`iter_nodes`](Self::iter_nodes),
+    /// each paired with its enclosing `parallel` group node — `Some(group)`
+    /// for a group's child, `None` for a top-level node. The one walk for a
+    /// check that must attribute a child's finding to its group, or reason
+    /// about a node together with the siblings it shares a worktree with.
+    pub fn iter_nodes_with_group(&self) -> NodeGroupIter<'_> {
+        NodeGroupIter {
+            stack: self.nodes.iter().rev().map(|node| (node, None)).collect(),
+        }
+    }
 }
 
 /// See [`Workflow::iter_nodes`].
@@ -92,6 +103,24 @@ impl<'a> Iterator for NodeIter<'a> {
             self.stack.extend(nodes.iter().rev());
         }
         Some(node)
+    }
+}
+
+/// See [`Workflow::iter_nodes_with_group`].
+pub struct NodeGroupIter<'a> {
+    stack: Vec<(&'a Node, Option<&'a Node>)>,
+}
+
+impl<'a> Iterator for NodeGroupIter<'a> {
+    type Item = (&'a Node, Option<&'a Node>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (node, group) = self.stack.pop()?;
+        if let NodeKind::Parallel { nodes, .. } = &node.kind {
+            self.stack
+                .extend(nodes.iter().rev().map(|child| (child, Some(node))));
+        }
+        Some((node, group))
     }
 }
 
@@ -1331,6 +1360,36 @@ fn describe(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iter_nodes_with_group_pairs_each_parallel_child_with_its_group() {
+        let workflow: Workflow = yaml::parse(
+            r#"
+name: groups
+nodes:
+  - { id: solo, kind: bash, run: x }
+  - id: fan
+    kind: parallel
+    nodes:
+      - { id: left, kind: bash, run: x }
+      - { id: right, kind: bash, run: x }
+"#,
+        )
+        .unwrap();
+        let pairs: Vec<(&str, Option<&str>)> = workflow
+            .iter_nodes_with_group()
+            .map(|(node, group)| (node.id.as_str(), group.map(|g| g.id.as_str())))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("solo", None),
+                ("fan", None),
+                ("left", Some("fan")),
+                ("right", Some("fan")),
+            ],
+        );
+    }
 
     /// One node per kind with every key its kind accepts, so that
     /// serializing it shows exactly which keys the variant owns.
