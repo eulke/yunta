@@ -54,8 +54,11 @@ uuid = "1"
 unsafe_code = "forbid"
 
 # The static binary is a feature of the product: every release build
-# pays for whole-program optimization and ships without symbols.
+# pays for whole-program optimization and ships without symbols. A panic
+# is a bug, never a state to unwind through, so the binary carries no
+# unwinding code either.
 [profile.release]
 lto = "fat"
 codegen-units = 1
 strip = true
+panic = "abort"
