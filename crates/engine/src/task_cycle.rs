@@ -788,16 +788,20 @@ pub async fn run_task(
 
     let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
 
-    if !matches!(pre_outcome, PreCheckOutcome::Red) {
-        let reason = match pre_outcome {
-            PreCheckOutcome::TrivialCriterion { cmd } => format!(
-                "criterion `{cmd}` already passes before any work — the criteria need fixing, not the task"
-            ),
-            PreCheckOutcome::BrokenGuard { cmd } => {
-                format!("guard `{cmd}` is already red before any work started")
-            }
-            PreCheckOutcome::Red => unreachable!(),
-        };
+    // The pre-check validates the criteria before any work: a non-guard that
+    // already passes, or a guard already red, means the criteria are wrong,
+    // not the task. Only `Red` — nothing prejudged — proceeds to the
+    // attempts; every other verdict blocks the task naming what to fix.
+    let blocked_before_work = match pre_outcome {
+        PreCheckOutcome::Red => None,
+        PreCheckOutcome::TrivialCriterion { cmd } => Some(format!(
+            "criterion `{cmd}` already passes before any work — the criteria need fixing, not the task"
+        )),
+        PreCheckOutcome::BrokenGuard { cmd } => {
+            Some(format!("guard `{cmd}` is already red before any work started"))
+        }
+    };
+    if let Some(reason) = blocked_before_work {
         return Ok(TaskCycleReport {
             task_id: task.id.clone(),
             staged: last_staged.clone(),
@@ -972,6 +976,15 @@ pub async fn run_task(
             expansion_outcome.as_ref().map(|o| &o.decision),
             Some(crate::scope_expansion::Decision::Escalate)
         );
+        // The session declared its failure won't yield to another try —
+        // captured before the outcome moves into the record below.
+        let non_retryable_failure = matches!(
+            dispatch_outcome,
+            DispatchOutcome::Failed {
+                retryable: false,
+                ..
+            }
+        );
 
         attempts.push(AttemptRecord {
             attempt,
@@ -1005,6 +1018,24 @@ pub async fn run_task(
                     reason: "a scope expansion request needs a human decision".to_string(),
                 },
                 needs_human_decision: true,
+            });
+        }
+        // A failure the session marked non-retryable ends the cycle now:
+        // the criteria were still verified above (the engine never trusts
+        // the session's own verdict), and having found them unmet, another
+        // attempt would only spend budget on the same dead end.
+        if non_retryable_failure {
+            return Ok(TaskCycleReport {
+                task_id: task.id.clone(),
+                staged: last_staged.clone(),
+                pre_check: pre_runs,
+                attempts,
+                outcome: TaskOutcome::Blocked {
+                    reason: "the session reported a non-retryable failure and the criteria \
+                             are still red"
+                        .to_string(),
+                },
+                needs_human_decision: false,
             });
         }
     }

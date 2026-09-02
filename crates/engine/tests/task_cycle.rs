@@ -364,6 +364,70 @@ sessions:
 }
 
 #[tokio::test]
+async fn a_non_retryable_failure_ends_the_cycle() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new("config-hash");
+
+    // Criteria stay red (nothing writes the file) and the session reports a
+    // failure it marks non-retryable — retrying cannot help, so the cycle
+    // stops after the one attempt instead of spending `max_retries` more.
+    let t = task("gives-up", &["output.txt"], vec![cmd("test -f output.txt")]);
+    // Scripts one session per attempt `max_retries` would allow, so the
+    // pre-fix cycle fails on the attempt count, not on running the fixture
+    // dry; the fix leaves the extra sessions unconsumed.
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: failed, message: "unrecoverable", retryable: false }
+  - outcome: { type: failed, message: "unrecoverable", retryable: false }
+  - outcome: { type: failed, message: "unrecoverable", retryable: false }
+"#,
+    )
+    .unwrap();
+
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+            registry: None,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            max_expansion_files: 5,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        report.attempts.len(),
+        1,
+        "no retry after a non-retryable failure"
+    );
+    assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
+    assert!(matches!(
+        report.attempts[0].dispatch,
+        DispatchOutcome::Failed {
+            retryable: false,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
