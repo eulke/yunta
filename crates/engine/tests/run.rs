@@ -4562,6 +4562,111 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
 }
 
 #[tokio::test]
+async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
+    // An internal gate crashed after its `node_started` and before it
+    // ever reached `gate_waiting`: the log leaves it `Running` with no
+    // `external_ref`. A resume must re-ask it, not fall through every
+    // scheduler section into a permanent "blocked behind unresolved
+    // failures" pause that never touches the gate again.
+    let bench = Bench::new();
+    let workflow: Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    // Craft the crash: `plan` finished, then the gate started and the
+    // engine died before recording anything else about it.
+    let append = |node: &str, payload: yunta_core::events::EventPayload| {
+        bench
+            .storage
+            .append(
+                &yunta_core::events::EventDraft {
+                    run_id: bench.run_id.clone(),
+                    node_id: Some(node.into()),
+                    payload,
+                },
+                &yunta_core::SystemClock,
+            )
+            .unwrap();
+    };
+    append(
+        "plan",
+        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
+            attempt: 1,
+        }),
+    );
+    append(
+        "plan",
+        yunta_core::events::EventPayload::NodeFinished(yunta_core::events::NodeFinishedPayload {
+            outcome: "ok".to_string(),
+            tokens_used: yunta_core::events::TokenUsage::default(),
+        }),
+    );
+    append(
+        "approve",
+        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
+            attempt: 1,
+        }),
+    );
+
+    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage.async_handle(),
+        clock: std::sync::Arc::new(FixedClock),
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &interaction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        report.terminal,
+        RunTerminal::Finished,
+        "the crashed gate is re-asked and resolved, not left stuck"
+    );
+    match report.state.nodes.get("approve") {
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
+        other => panic!("expected the gate resolved after the resume, got {other:?}"),
+    }
+    assert!(
+        matches!(
+            report.state.nodes.get("ship"),
+            Some(yunta_engine::NodeState::Finished { .. })
+        ),
+        "the node behind the gate runs once the gate resolves"
+    );
+}
+
+#[tokio::test]
 async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     // Re-route semantics through a human choice: `ajustar` re-routes to
     // `plan`, plan re-runs, and the gate asks AGAIN — the second answer

@@ -300,20 +300,30 @@ pub fn next_step(
 
     // 0. A `Running` gate node is never a crash orphan (`on_interrupt`
     //    is about session-crash uncertainty, which a gate has none of —
-    //    it isn't a session). It only reaches `Running` via the
-    //    SHA-drift recheck (re-opening a stale approval, the imperative
-    //    shell's own doing, before this function ever runs) — resolve
-    //    it the same way as any other unresolved, already-published
-    //    gate: poll again.
+    //    it isn't a session). It reaches `Running` two ways, both
+    //    resolved by re-driving the gate, never by restarting it as an
+    //    ordinary node: the SHA-drift recheck re-opens a stale external
+    //    approval (a recorded `external_ref` → poll again), or a crash
+    //    landed between the gate's `node_started` and its
+    //    `gate_waiting`/`gate_resolved` (no `external_ref` yet → an
+    //    external gate republishes, an internal one asks again). Without
+    //    this last case a crashed internal gate would fall through every
+    //    section below and the run would pause forever, never re-asked.
     if let Some(node) = nodes.iter().copied().find(|node| {
         is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
     }) {
-        if let Some(external_ref) = last_external_ref(events, &node.id) {
-            return ScheduleStep::PollGate {
+        return match (last_external_ref(events, &node.id), is_external_gate(node)) {
+            (Some(external_ref), _) => ScheduleStep::PollGate {
                 node: node.id.clone(),
                 external_ref,
-            };
-        }
+            },
+            (None, true) => ScheduleStep::PublishGate {
+                node: node.id.clone(),
+            },
+            (None, false) => ScheduleStep::ResolveInternalGate {
+                node: node.id.clone(),
+            },
+        };
     }
 
     // 0b. Nodes the log derives as `waiting` — a human's
