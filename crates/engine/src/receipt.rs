@@ -347,7 +347,7 @@ pub fn render_markdown(receipt: &Receipt) -> String {
     }
     out.push_str(&format!(
         "- cost: {} tokens ({} in / {} out){} · {} reroute(s)\n",
-        receipt.cost.tokens.input + receipt.cost.tokens.output,
+        receipt.cost.tokens.total(),
         receipt.cost.tokens.input,
         receipt.cost.tokens.output,
         match receipt.cost.cptv {

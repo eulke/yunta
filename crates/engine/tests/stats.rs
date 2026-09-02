@@ -266,6 +266,57 @@ fn cache_rate_is_none_unless_some_attempt_reported_it() {
 }
 
 #[test]
+fn cache_rate_is_none_without_input() {
+    // A run can report a cache figure yet spend no input tokens to divide
+    // by; a rate over zero input is undefined, never a fabricated 0%.
+    let wf = workflow(vec![node("a", &[])]);
+    let events = vec![
+        event(
+            0,
+            0,
+            None,
+            EventPayload::RunCreated(RunCreatedPayload {
+                manifest_hash: "h".to_string(),
+                inputs: Default::default(),
+                mode: "default".into(),
+                promoted_from: None,
+                yunta_schema: None,
+                base_branch: "main".to_string(),
+                base_commit: "deadbeef".to_string(),
+            }),
+        ),
+        event(
+            1,
+            0,
+            Some("a"),
+            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+        ),
+        event(
+            2,
+            5,
+            Some("a"),
+            EventPayload::NodeFinished(NodeFinishedPayload {
+                outcome: "ok".to_string(),
+                tokens_used: tokens(0, 50, Some(0)),
+            }),
+        ),
+    ];
+    let stats = compute_run_stats(&wf, &events);
+    assert_eq!(stats.total_tokens.input, 0);
+    assert_eq!(stats.cache_rate, None);
+}
+
+#[test]
+fn median_of_even_count_is_the_mean_of_the_two_middles() {
+    // Nearest-rank picks one side; a median of an even count averages the
+    // two central samples, and a median of nothing is None, not zero.
+    assert_eq!(yunta_engine::median(&[1.0, 2.0, 3.0, 4.0]), Some(2.5));
+    assert_eq!(yunta_engine::median(&[10.0]), Some(10.0));
+    assert_eq!(yunta_engine::median(&[1.0, 2.0, 3.0]), Some(2.0));
+    assert_eq!(yunta_engine::median(&[]), None);
+}
+
+#[test]
 fn a_retried_node_reports_its_max_attempt_and_summed_tokens() {
     let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
     let stats = compute_run_stats(&wf, &fixture_events());
@@ -361,8 +412,32 @@ fn three_or_more_runs_produce_median_and_p90() {
     assert_eq!(estimation.sample_count, 3);
     assert_eq!(estimation.tokens.median, 200.0);
     assert_eq!(estimation.tokens.p90, 300.0);
-    assert_eq!(estimation.wall_clock_secs.median, 20.0);
+    let wall_clock = estimation
+        .wall_clock_secs
+        .expect("every run reported a wall-clock");
+    assert_eq!(wall_clock.median, 20.0);
     assert_eq!(estimation.tasks.median, 2.0);
+}
+
+#[test]
+fn wall_clock_percentiles_are_absent_when_no_run_measured_one() {
+    // A run without a measurable wall-clock contributes no fabricated
+    // zero-second sample; with none measured, the estimate simply omits it
+    // rather than reporting a manufactured 0s median.
+    let history: Vec<RunSummary> = (0..3)
+        .map(|i| RunSummary {
+            run_id: "r".into(),
+            mode: "default".into(),
+            workflow_hash: "h".to_string(),
+            tokens: 100 * (i + 1),
+            wall_clock: None,
+            tasks_total: (i + 1) as usize,
+            cptv: None,
+        })
+        .collect();
+    let estimation = prior_estimation(&history).expect("3 samples estimate tokens and tasks");
+    assert_eq!(estimation.wall_clock_secs, None);
+    assert_eq!(estimation.tokens.median, 200.0);
 }
 
 #[test]

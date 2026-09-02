@@ -145,8 +145,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
     if done == 0 {
         return None;
     }
-    let total = state.total_tokens.input + state.total_tokens.output;
-    Some(total as f64 / done as f64)
+    Some(state.total_tokens.total() as f64 / done as f64)
 }
 
 /// Derives one run's stats from its workflow and event log alone.
@@ -241,17 +240,22 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStat
         });
     }
 
-    let total = state.total_tokens.input + state.total_tokens.output;
-    let rework_total = acc.rework_tokens.input + acc.rework_tokens.output;
+    let total = state.total_tokens.total();
+    let rework_total = acc.rework_tokens.total();
     let rework_rate = if total == 0 {
         None
     } else {
         Some(rework_total as f64 / total as f64)
     };
-    let cache_rate = state
-        .total_tokens
-        .cached
-        .map(|cached| cached as f64 / state.total_tokens.input.max(1) as f64);
+    // A rate needs input tokens to divide by; without them the answer is
+    // undefined, distinct from `Some(0.0)` (an adapter reported and cached
+    // nothing) — never a denominator invented with `.max(1)`.
+    let cache_rate = match state.total_tokens.cached {
+        Some(cached) if state.total_tokens.input > 0 => {
+            Some(cached as f64 / state.total_tokens.input as f64)
+        }
+        _ => None,
+    };
 
     RunStats {
         unknown_kinds: unknown_kind_counts(&state),
@@ -337,7 +341,7 @@ pub fn run_summary(
         run_id,
         mode,
         workflow_hash,
-        tokens: stats.total_tokens.input + stats.total_tokens.output,
+        tokens: stats.total_tokens.total(),
         wall_clock: stats.wall_clock,
         tasks_total: stats.tasks_total,
         cptv: stats.cptv,
@@ -353,10 +357,39 @@ pub struct Percentiles {
 /// Nearest-rank percentile over an already-sorted-ascending slice —
 /// deterministic (no interpolation to disagree about between two
 /// implementations), which is what makes a golden test on this
-/// reproducible.
-fn percentile(sorted: &[f64], p: f64) -> f64 {
+/// reproducible. `None` for an empty slice: a percentile of nothing has no
+/// value.
+fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
     let idx = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
-    sorted[idx.min(sorted.len() - 1)]
+    sorted.get(idx.min(sorted.len() - 1)).copied()
+}
+
+/// The middle value of an already-sorted-ascending slice, averaging the two
+/// central samples on an even count — the true median, not the nearest-rank
+/// one [`percentile`] gives. `None` for an empty slice: a median of nothing
+/// is not zero. This is the one median the whole workspace shares.
+pub fn median(sorted: &[f64]) -> Option<f64> {
+    let n = sorted.len();
+    match (n, n % 2) {
+        (0, _) => None,
+        (_, 1) => sorted.get(n / 2).copied(),
+        _ => match (sorted.get(n / 2 - 1), sorted.get(n / 2)) {
+            (Some(lo), Some(hi)) => Some((lo + hi) / 2.0),
+            _ => None,
+        },
+    }
+}
+
+/// Median and p90 of an already-sorted-ascending slice, or `None` when it
+/// holds no samples to summarize.
+fn percentiles(sorted: &[f64]) -> Option<Percentiles> {
+    Some(Percentiles {
+        median: median(sorted)?,
+        p90: percentile(sorted, 90.0)?,
+    })
 }
 
 /// Prior estimation: median and p90 of tokens, wall-clock and task
@@ -367,7 +400,9 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 pub struct PriorEstimation {
     pub sample_count: usize,
     pub tokens: Percentiles,
-    pub wall_clock_secs: Percentiles,
+    /// `None` when no run in the history reported a measurable wall-clock —
+    /// a run without one contributes no fabricated zero-second sample.
+    pub wall_clock_secs: Option<Percentiles>,
     pub tasks: Percentiles,
 }
 
@@ -400,28 +435,23 @@ pub fn prior_estimation(history: &[RunSummary]) -> Option<PriorEstimation> {
     }
 
     let mut tokens: Vec<f64> = history.iter().map(|r| r.tokens as f64).collect();
+    // Only the runs that measured a wall-clock: a missing one is left out,
+    // never counted as zero seconds.
     let mut wall_clock: Vec<f64> = history
         .iter()
-        .map(|r| r.wall_clock.map(|d| d.as_secs_f64()).unwrap_or(0.0))
+        .filter_map(|r| r.wall_clock.map(|d| d.as_secs_f64()))
         .collect();
     let mut tasks: Vec<f64> = history.iter().map(|r| r.tasks_total as f64).collect();
     for series in [&mut tokens, &mut wall_clock, &mut tasks] {
         series.sort_by(|a, b| a.total_cmp(b));
     }
 
+    // `tokens` and `tasks` always carry one sample per run (≥ 3 here), so
+    // their percentiles are always present; `wall_clock` may be empty.
     Some(PriorEstimation {
         sample_count: history.len(),
-        tokens: Percentiles {
-            median: percentile(&tokens, 50.0),
-            p90: percentile(&tokens, 90.0),
-        },
-        wall_clock_secs: Percentiles {
-            median: percentile(&wall_clock, 50.0),
-            p90: percentile(&wall_clock, 90.0),
-        },
-        tasks: Percentiles {
-            median: percentile(&tasks, 50.0),
-            p90: percentile(&tasks, 90.0),
-        },
+        tokens: percentiles(&tokens)?,
+        wall_clock_secs: percentiles(&wall_clock),
+        tasks: percentiles(&tasks)?,
     })
 }

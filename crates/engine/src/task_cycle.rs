@@ -119,14 +119,15 @@ impl Memo {
             .push(duration_ms);
     }
 
-    /// The median of this command's observed durations, `None` with no
-    /// history yet.
+    /// The median of this command's observed durations as a cheapest-first
+    /// sort key, `None` with no history yet — the workspace's one
+    /// [`crate::stats::median`], truncated back to whole milliseconds.
     fn median_duration(&self, cmd: &str) -> Option<u64> {
         let durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
         let samples = durations.get(cmd)?;
-        let mut sorted = samples.clone();
-        sorted.sort_unstable();
-        Some(sorted[sorted.len() / 2])
+        let mut sorted: Vec<f64> = samples.iter().map(|&ms| ms as f64).collect();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        crate::stats::median(&sorted).map(|ms| ms as u64)
     }
 
     fn key(&self, cmd: &str, tree_hash: &str) -> String {
@@ -638,7 +639,7 @@ pub(crate) async fn dispatch_session(
                     if let Some(cached) = cached_input_tokens {
                         tokens.cached = Some(tokens.cached.unwrap_or(0) + cached);
                     }
-                    let tokens_used = tokens.input + tokens.output;
+                    let tokens_used = tokens.total();
                     if let Some(max_tokens) = budget.max_tokens {
                         if tokens_used > max_tokens {
                             terminal = Some(DispatchOutcome::BudgetExceeded {

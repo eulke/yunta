@@ -335,7 +335,7 @@ fn render_run_stats(
         Some(rate) => println!("cache rate: {}", format_pct(rate)),
         None => println!("cache rate: n/a (adapter never reported it)"),
     }
-    let total = stats.total_tokens.input + stats.total_tokens.output;
+    let total = stats.total_tokens.total();
     print!(
         "tokens: {} in / {} out",
         stats.total_tokens.input, stats.total_tokens.output
@@ -353,7 +353,7 @@ fn render_run_stats(
         let max_tokens = stats
             .nodes
             .iter()
-            .map(|n| n.tokens.input + n.tokens.output)
+            .map(|n| n.tokens.total())
             .max()
             .unwrap_or(0);
         for node in &stats.nodes {
@@ -364,13 +364,9 @@ fn render_run_stats(
     let by_runner = stats.tokens_by_runner();
     if !by_runner.is_empty() {
         println!("\nrunners:");
-        let max_runner_tokens = by_runner
-            .iter()
-            .map(|(_, t)| t.input + t.output)
-            .max()
-            .unwrap_or(0);
+        let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
         for (runner, tokens) in &by_runner {
-            let total = tokens.input + tokens.output;
+            let total = tokens.total();
             println!(
                 "  {} {}  {total:>8} tok",
                 truncate(runner.as_str(), LABEL_WIDTH),
@@ -381,7 +377,7 @@ fn render_run_stats(
 }
 
 fn node_line(node: &NodeStat, max_tokens: u64) -> String {
-    let total = node.tokens.input + node.tokens.output;
+    let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
         .map(format_pct)
@@ -523,27 +519,26 @@ fn mode_table(history: &[RunSummary]) -> Vec<(ModeName, usize, Option<f64>, Opti
             let mut tokens: Vec<f64> = runs.iter().map(|r| r.tokens as f64).collect();
             cptv.sort_by(|a, b| a.total_cmp(b));
             tokens.sort_by(|a, b| a.total_cmp(b));
-            (mode, runs.len(), median(&cptv), median(&tokens))
+            (
+                mode,
+                runs.len(),
+                yunta_engine::median(&cptv),
+                yunta_engine::median(&tokens),
+            )
         })
         .collect()
-}
-
-fn median(sorted: &[f64]) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    Some(sorted[sorted.len() / 2])
 }
 
 /// Shared by `yunta stats --workflow` and `yunta run`/`list_workflows`
 /// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation) -> String {
+    let wall_clock = match estimation.wall_clock_secs {
+        Some(p) => format_duration(Duration::from_secs_f64(p.median)),
+        None => "n/a".to_string(),
+    };
     format!(
         "{} past run(s) · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
-        estimation.sample_count,
-        estimation.tokens.median,
-        estimation.tokens.p90,
-        format_duration(Duration::from_secs_f64(estimation.wall_clock_secs.median)),
+        estimation.sample_count, estimation.tokens.median, estimation.tokens.p90, wall_clock,
     )
 }
 
@@ -603,7 +598,7 @@ impl RunStatsJson {
         stats: &RunStats,
         pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
     ) -> Self {
-        let total = stats.total_tokens.input + stats.total_tokens.output;
+        let total = stats.total_tokens.total();
         Self {
             run_id: run_id.to_string(),
             mode: mode.to_string(),
@@ -653,8 +648,9 @@ struct EstimationJson {
     sample_count: usize,
     tokens_median: f64,
     tokens_p90: f64,
-    wall_clock_secs_median: f64,
-    wall_clock_secs_p90: f64,
+    /// `null` when no run in the history reported a measurable wall-clock.
+    wall_clock_secs_median: Option<f64>,
+    wall_clock_secs_p90: Option<f64>,
     tasks_median: f64,
     tasks_p90: f64,
 }
@@ -665,8 +661,8 @@ impl From<&yunta_engine::PriorEstimation> for EstimationJson {
             sample_count: e.sample_count,
             tokens_median: e.tokens.median,
             tokens_p90: e.tokens.p90,
-            wall_clock_secs_median: e.wall_clock_secs.median,
-            wall_clock_secs_p90: e.wall_clock_secs.p90,
+            wall_clock_secs_median: e.wall_clock_secs.map(|p| p.median),
+            wall_clock_secs_p90: e.wall_clock_secs.map(|p| p.p90),
             tasks_median: e.tasks.median,
             tasks_p90: e.tasks.p90,
         }

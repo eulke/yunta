@@ -152,6 +152,15 @@ pub struct TokenUsage {
     pub cached: Option<u64>,
 }
 
+impl TokenUsage {
+    /// Input plus output — the single figure token cost is measured by,
+    /// derived in one place so no two call sites can add it up differently.
+    /// `cached` is a subset of `input`, already counted, never added on top.
+    pub fn total(&self) -> u64 {
+        self.input + self.output
+    }
+}
+
 /// Field by field; `cached` stays unknown only while nobody reported it.
 impl std::ops::Add for TokenUsage {
     type Output = TokenUsage;

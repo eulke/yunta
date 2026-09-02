@@ -364,7 +364,7 @@ impl RunCtx<'_> {
         Ok(yunta_adapters::Budget {
             max_tokens: Some(budget::session_token_budget(
                 cap,
-                budget::tokens_spent(state.total_tokens),
+                state.total_tokens.total(),
                 non_terminal,
             )),
             timeout,
@@ -1142,7 +1142,7 @@ pub(crate) async fn execute_run_at_depth(
                         .as_ref()
                         .and_then(|limits| limits.max_tokens_per_run)
                     {
-                        let spent = budget::tokens_spent(derive(&events).total_tokens);
+                        let spent = derive(&events).total_tokens.total();
                         if spent >= cap {
                             match budget::authorize_over_budget(&ctx, spent, cap).await? {
                                 budget::BudgetDecision::Continue => ctx

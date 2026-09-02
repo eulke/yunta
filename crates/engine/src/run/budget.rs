@@ -147,12 +147,6 @@ pub async fn authorize_loop_overrun(
     }
 }
 
-/// `input + output` — cached reads are informational (a subset of
-/// input), never double-counted.
-pub fn tokens_spent(totals: yunta_core::events::TokenUsage) -> u64 {
-    totals.input + totals.output
-}
-
 /// Pure session-budget policy: one agent session may
 /// spend at most an equal share of the run cap, bounded by what actually
 /// remains — `min(remaining, cap / non_terminal_nodes)`. Deliberately

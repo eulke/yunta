@@ -323,7 +323,7 @@ pub(super) async fn execute_workflow(
     if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(limits) = child_config.limits.as_mut() {
             if let Some(cap) = limits.max_tokens_per_run {
-                let spent = super::budget::tokens_spent(derive(&events).total_tokens);
+                let spent = derive(&events).total_tokens.total();
                 limits.max_tokens_per_run = Some(cap.saturating_sub(spent));
             }
         }
