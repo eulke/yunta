@@ -37,9 +37,21 @@ confidence-threshold = 0.8
 ignore = false
 
 [bans]
-multiple-versions = "warn"
+# A second version of a crate is a decision, never a drift: every one is
+# named here with the reason it stays until its upstream converges.
+multiple-versions = "deny"
 wildcards = "deny"
 allow-workspace = true
+skip = [
+    # hyper-util and reqwest are on 0.22 while rmcp already moved to 0.23.
+    { crate = "base64:0.22.1", reason = "hyper-util/reqwest lag rmcp" },
+    # sha2 (via cpufeatures 0.2) and rand's chacha20 (via cpufeatures 0.3).
+    { crate = "cpufeatures:0.2.17", reason = "sha2 lags rand's chacha20" },
+    # rusqlite's hashlink pins hashbrown 0.14 while indexmap is on 0.17.
+    { crate = "hashbrown:0.14.5", reason = "rusqlite's hashlink lags indexmap" },
+    # Proc-macro crates in the tree still split between syn 2 and syn 3.
+    { crate = "syn:2.0.119", reason = "derive macros split between syn 2 and 3" },
+]
 
 [sources]
 unknown-registry = "deny"
