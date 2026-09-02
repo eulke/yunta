@@ -32,6 +32,7 @@ use crate::human_interaction::HumanInteraction;
 
 use super::node_exec::{template_vars, write_progress};
 use super::{RunCtx, RunError};
+use crate::reserved::ReservedOption;
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
@@ -428,8 +429,10 @@ pub(super) async fn resolve_internal_gate(
     // Whether `abort` is the engine's own appended option (never the
     // author's) — same rule `build_internal_gate_escalation` used to
     // decide whether to append it in the first place.
-    let engine_abort = !options.iter().any(|id| id == "abort");
-    if engine_abort && chosen == "abort" {
+    let engine_abort = !options
+        .iter()
+        .any(|id| id == ReservedOption::Abort.as_str());
+    if engine_abort && chosen == ReservedOption::Abort.as_str() {
         // The usual escalation convention exactly: record the
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
@@ -560,7 +563,7 @@ async fn degrade_to_console(
         evidence: "no forge reachable from this machine".to_string(),
         options: vec![
             GateOption {
-                id: "approve".to_string(),
+                id: ReservedOption::Approve.as_str().to_string(),
                 label: "Approve".to_string(),
                 tradeoff: "Marks the gate as passed; the run continues".to_string(),
             },
@@ -585,7 +588,7 @@ async fn degrade_to_console(
     )
     .await?;
     emit_started(ctx, node).await?;
-    if resolution.chosen_option.as_deref() == Some("approve") {
+    if resolution.chosen_option.as_deref() == Some(ReservedOption::Approve.as_str()) {
         ctx.emit(
             Some(&node.id),
             EventPayload::NodeFinished(NodeFinishedPayload {

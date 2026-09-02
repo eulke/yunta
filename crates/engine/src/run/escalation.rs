@@ -11,6 +11,7 @@ use yunta_core::events::{EventDraft, EventPayload, GateOption, GateWaitingPayloa
 use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
+use crate::reserved::ReservedOption;
 
 /// The escalation object for a node whose re-routes are exhausted:
 /// retry once more, abort, or — when `modes:` has somewhere later to go
@@ -26,7 +27,7 @@ pub(crate) fn build_reroute_escalation(
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
     let mut options = vec![
         GateOption {
-            id: "retry".to_string(),
+            id: ReservedOption::Retry.as_str().to_string(),
             label: format!("Re-route to `{goto}` once more"),
             tradeoff: format!(
                 "Uses one extra correction attempt beyond the declared max_reroutes \
@@ -34,14 +35,14 @@ pub(crate) fn build_reroute_escalation(
             ),
         },
         GateOption {
-            id: "abort".to_string(),
+            id: ReservedOption::Abort.as_str().to_string(),
             label: "Abort the run".to_string(),
             tradeoff: "Stops here; nothing further executes".to_string(),
         },
     ];
     if let Some(next_mode) = &suggested_mode {
         options.push(GateOption {
-            id: "promote".to_string(),
+            id: ReservedOption::Promote.as_str().to_string(),
             label: format!("Promote to mode `{next_mode}`"),
             tradeoff: format!(
                 "Closes this run (`run_finished: promoted`) and starts a successor in \
@@ -74,7 +75,7 @@ pub(crate) fn build_internal_gate_escalation(
     on: &indexmap::IndexMap<String, NodeId>,
 ) -> GateWaitingPayload {
     let declared: Vec<String> = if options.is_empty() {
-        vec!["approve".to_string()]
+        vec![ReservedOption::Approve.as_str().to_string()]
     } else {
         options.to_vec()
     };
@@ -91,10 +92,12 @@ pub(crate) fn build_internal_gate_escalation(
             },
         })
         .collect();
-    let engine_abort = !declared.iter().any(|id| id == "abort");
+    let engine_abort = !declared
+        .iter()
+        .any(|id| id == ReservedOption::Abort.as_str());
     if engine_abort {
         gate_options.push(GateOption {
-            id: "abort".to_string(),
+            id: ReservedOption::Abort.as_str().to_string(),
             label: "Abort the run".to_string(),
             tradeoff: "Pauses here; nothing further executes".to_string(),
         });

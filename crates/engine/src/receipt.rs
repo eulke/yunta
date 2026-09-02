@@ -190,6 +190,13 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
 }
 
 fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
+    // The one node that emitted `baseline_captured` did the capturing;
+    // every other `baseline_compare` node compared. Read from the event
+    // kind and the envelope's node id, never the node's outcome text.
+    let capturing_node = events.iter().find_map(|e| match e.payload() {
+        Some(EventPayload::BaselineCaptured(_)) => e.node_id.clone(),
+        _ => None,
+    });
     let captured = events.iter().find_map(|e| match e.payload() {
         Some(EventPayload::BaselineCaptured(p)) => Some(p),
         _ => None,
@@ -202,12 +209,12 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
         if !matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)) {
             continue;
         }
+        // The run's very first `baseline_compare` only captures — it has
+        // nothing yet to compare against, so it isn't counted.
+        if capturing_node.as_ref() == Some(&node.id) {
+            continue;
+        }
         match state.nodes.get(&node.id) {
-            // The run's very first `baseline_compare` only captures — it
-            // always finishes and has nothing yet to compare against, so
-            // it isn't counted as a comparison.
-            Some(NodeState::Finished { outcome, .. })
-                if outcome.starts_with("baseline captured") => {}
             Some(NodeState::Finished { .. }) => compared += 1,
             Some(NodeState::Failed { .. }) => {
                 compared += 1;

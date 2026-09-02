@@ -29,6 +29,7 @@ use super::node_exec::{
     close_node, fail, fail_with_tokens, prompt_text, render_or_fail, resolve_node_runner, NodeEnd,
 };
 use super::{RunCtx, RunError};
+use crate::reserved::ReservedOption;
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -449,7 +450,7 @@ pub(super) async fn execute_loop(
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string()),
                 };
-                if resolution.chosen_option.as_deref() == Some("grant") {
+                if resolution.chosen_option.as_deref() == Some(ReservedOption::Grant.as_str()) {
                     expansions_granted_this_run += 1;
                     ctx.emit(
                         Some(&node.id),
@@ -597,7 +598,7 @@ fn expansion_escalation(
         ),
         options: vec![
             yunta_core::events::GateOption {
-                id: "grant".to_string(),
+                id: ReservedOption::Grant.as_str().to_string(),
                 label: format!("Grant access to {}", request.paths.join(", ")),
                 tradeoff: "The task's final diff is evaluated against its scope plus these \
                            paths; consumes 1 of max_per_run"

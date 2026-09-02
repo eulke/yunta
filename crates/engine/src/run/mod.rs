@@ -54,6 +54,7 @@ use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
 use crate::replay::{derive, RunState};
+use crate::reserved::ReservedOption;
 use crate::scope::ScopeCheckError;
 use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
@@ -1035,7 +1036,7 @@ pub(crate) async fn execute_run_at_depth(
                     ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))
                         .await?;
                 }
-                if resolution.chosen_option.as_deref() == Some("retry") {
+                if resolution.chosen_option.as_deref() == Some(ReservedOption::Retry.as_str()) {
                     ctx.emit(
                         Some(&node),
                         EventPayload::NodeRerouted(NodeReroutedPayload {
@@ -1047,7 +1048,9 @@ pub(crate) async fn execute_run_at_depth(
                         }),
                     )
                     .await?;
-                } else if resolution.chosen_option.as_deref() == Some("promote") {
+                } else if resolution.chosen_option.as_deref()
+                    == Some(ReservedOption::Promote.as_str())
+                {
                     // `suggested_mode` must be `Some` here — `"promote"`
                     // only ever appeared as an option when it was.
                     let next_mode = suggested_mode.expect("promote option implies a next mode");

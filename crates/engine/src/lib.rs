@@ -39,6 +39,7 @@ mod progress;
 mod questions;
 mod receipt;
 mod replay;
+mod reserved;
 mod run;
 mod run_tools;
 mod runner;
