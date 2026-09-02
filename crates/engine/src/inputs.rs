@@ -14,13 +14,23 @@ use yunta_core::InputSpec;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum InputsError {
-    #[error("--input `{name}` was given, but this workflow declares no such input")]
-    Unknown { name: String },
+    /// Every `--input` name the workflow does not declare, sorted, so
+    /// one run of the command reports them all.
+    #[error(
+        "unknown input{} `{}` — this workflow declares {}",
+        if names.len() > 1 { "s" } else { "" },
+        names.join("`, `"),
+        if declared.is_empty() { "no inputs".to_string() } else { format!("only: {}", declared.join(", ")) }
+    )]
+    Unknown {
+        names: Vec<String>,
+        declared: Vec<String>,
+    },
 
     #[error("input `{name}` is required and has no default — pass `--input {name}=...`")]
     Missing { name: String },
 
-    #[error("input `{name}` expects a number, got `{value}`")]
+    #[error("input `{name}` expects a finite number, got `{value}`")]
     InvalidNumber { name: String, value: String },
 
     #[error("input `{name}` expects `true` or `false`, got `{value}`")]
@@ -80,10 +90,17 @@ pub fn resolve_inputs(
     provided: &HashMap<String, String>,
     base_dir: &Path,
 ) -> Result<BTreeMap<String, String>, InputsError> {
-    for name in provided.keys() {
-        if !specs.contains_key(name) {
-            return Err(InputsError::Unknown { name: name.clone() });
-        }
+    let mut unknown: Vec<String> = provided
+        .keys()
+        .filter(|name| !specs.contains_key(*name))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        unknown.sort();
+        return Err(InputsError::Unknown {
+            names: unknown,
+            declared: specs.keys().cloned().collect(),
+        });
     }
 
     let mut resolved = BTreeMap::new();
@@ -158,10 +175,14 @@ fn validate(
             Ok(raw.to_string())
         }
         InputSpec::Number { min, max, .. } => {
-            let value: f64 = raw.parse().map_err(|_| InputsError::InvalidNumber {
-                name: name.to_string(),
-                value: raw.to_string(),
-            })?;
+            let value: f64 = raw
+                .parse()
+                .ok()
+                .filter(|number: &f64| number.is_finite())
+                .ok_or_else(|| InputsError::InvalidNumber {
+                    name: name.to_string(),
+                    value: raw.to_string(),
+                })?;
             if let Some(min) = min {
                 if value < *min {
                     return Err(InputsError::BelowMin {

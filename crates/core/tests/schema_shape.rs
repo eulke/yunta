@@ -148,3 +148,21 @@ fn scope_expansion_mode_is_a_policy() {
         ScopeExpansionMode::Deny
     );
 }
+
+#[test]
+fn a_number_input_with_a_non_finite_bound_or_default_is_refused_at_parse() {
+    for (field, value) in [
+        ("default", ".nan"),
+        ("min", ".inf"),
+        ("max", "-.inf"),
+        ("default", ".Inf"),
+    ] {
+        let text = refused::<Workflow>(&format!(
+            "name: w\ninputs:\n  n: {{ type: number, {field}: {value} }}\n{BASH}"
+        ));
+        assert!(
+            text.contains("inputs.n") && text.contains(field) && text.contains("finite"),
+            "{field}: {text}"
+        );
+    }
+}

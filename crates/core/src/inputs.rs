@@ -128,18 +128,23 @@ impl From<bool> for Requiredness {
 }
 
 impl Requiredness {
-    fn check_against(self, has_default: bool) -> Result<(), InputSpecContradiction> {
+    fn check_against(self, has_default: bool) -> Result<(), InputSpecError> {
         match (self, has_default) {
-            (Requiredness::Required, true) => Err(InputSpecContradiction::RequiredWithDefault),
-            (Requiredness::Optional, false) => Err(InputSpecContradiction::OptionalWithoutDefault),
+            (Requiredness::Required, true) => Err(InputSpecError::RequiredWithDefault),
+            (Requiredness::Optional, false) => Err(InputSpecError::OptionalWithoutDefault),
             _ => Ok(()),
         }
     }
 }
 
-/// An input whose `required:` says the opposite of its `default`.
+/// An input declaration the schema cannot honor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum InputSpecContradiction {
+pub enum InputSpecError {
+    /// A number input's `default`, `min` and `max` are finite: NaN and
+    /// the infinities compare with nothing and render as nothing.
+    #[error("`{field}` is not a finite number — a number input's default and bounds are finite")]
+    NotFinite { field: &'static str },
+
     /// A `default` is what makes an input optional, so `required: true`
     /// next to one cannot be honored.
     #[error(
@@ -226,7 +231,7 @@ impl schemars::JsonSchema for InputSpec {
 }
 
 impl TryFrom<AuthoredInputSpec> for InputSpec {
-    type Error = InputSpecContradiction;
+    type Error = InputSpecError;
 
     fn try_from(authored: AuthoredInputSpec) -> Result<Self, Self::Error> {
         Ok(match authored {
@@ -253,6 +258,11 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                 max,
             } => {
                 required.check_against(default.is_some())?;
+                for (field, value) in [("default", default), ("min", min), ("max", max)] {
+                    if value.is_some_and(|number| !number.is_finite()) {
+                        return Err(InputSpecError::NotFinite { field });
+                    }
+                }
                 InputSpec::Number {
                     default,
                     description,

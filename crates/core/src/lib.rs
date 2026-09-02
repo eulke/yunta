@@ -47,7 +47,7 @@ pub use ids::{
     NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
     TaskId,
 };
-pub use inputs::{InputSpec, InputSpecContradiction};
+pub use inputs::{InputSpec, InputSpecError};
 pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
 pub use pack::{

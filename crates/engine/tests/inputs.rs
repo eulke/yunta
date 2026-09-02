@@ -51,8 +51,47 @@ fn an_undeclared_provided_input_is_an_error() {
     assert_eq!(
         err,
         InputsError::Unknown {
-            name: "ghost".into()
+            names: vec!["ghost".into()],
+            declared: vec![]
         }
+    );
+}
+
+#[test]
+fn nan_is_rejected() {
+    let specs = specs("inputs:\n  n:\n    type: number\n");
+    for raw in ["NaN", "nan", "inf", "-inf", "infinity", "+Infinity"] {
+        let provided = HashMap::from([("n".to_string(), raw.to_string())]);
+        assert!(
+            matches!(
+                resolve_inputs(&specs, &provided, std::path::Path::new(".")),
+                Err(InputsError::InvalidNumber { .. })
+            ),
+            "`{raw}` is not a finite number"
+        );
+    }
+}
+
+#[test]
+fn every_unknown_input_is_named_in_order() {
+    let specs = specs("inputs:\n  idea:\n    type: string\n    default: x\n");
+    let provided = HashMap::from([
+        ("zeta".to_string(), "1".to_string()),
+        ("alpha".to_string(), "2".to_string()),
+        ("idea".to_string(), "3".to_string()),
+    ]);
+    let err = resolve_inputs(&specs, &provided, std::path::Path::new(".")).unwrap_err();
+    assert_eq!(
+        err,
+        InputsError::Unknown {
+            names: vec!["alpha".into(), "zeta".into()],
+            declared: vec!["idea".into()]
+        }
+    );
+    let text = err.to_string();
+    assert!(
+        text.contains("alpha") && text.contains("zeta") && text.contains("idea"),
+        "every unknown name and the declared ones are listed: {text}"
     );
 }
 
