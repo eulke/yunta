@@ -67,7 +67,8 @@ use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::{render_template, TemplateError};
 
-use super::node_exec::{cancelled_end, fail, template_vars, NodeEnd};
+use super::node_exec::{cancelled_end, fail, template_vars};
+use super::step::Step;
 use super::{RunCtx, RunError};
 
 /// Bound on how long any single external call (`command:`'s subprocess,
@@ -222,7 +223,7 @@ pub(super) async fn resolve_and_assemble(
     ctx: &RunCtx<'_>,
     node: &Node,
     cancel: &CancellationToken,
-) -> Result<Result<Option<String>, NodeEnd>, RunError> {
+) -> Result<Step<Option<String>>, RunError> {
     assemble(ctx, node, None, None, cancel).await
 }
 
@@ -248,7 +249,7 @@ pub(super) async fn resolve_for_task(
     task_id: &yunta_core::TaskId,
     memo: &StableContextMemo,
     cancel: &CancellationToken,
-) -> Result<Result<Option<String>, NodeEnd>, RunError> {
+) -> Result<Step<Option<String>>, RunError> {
     assemble(ctx, node, Some(task_id), Some(memo), cancel).await
 }
 
@@ -261,18 +262,19 @@ async fn assemble(
     task_id: Option<&yunta_core::TaskId>,
     memo: Option<&StableContextMemo>,
     cancel: &CancellationToken,
-) -> Result<Result<Option<String>, NodeEnd>, RunError> {
+) -> Result<Step<Option<String>>, RunError> {
     if node.context.is_empty() {
-        return Ok(Ok(None));
+        return Ok(Step::Value(None));
     }
 
     match resolve_all(ctx, node, task_id, memo, cancel).await {
-        Ok(block) => Ok(Ok(Some(block))),
-        Err(ContextResolveError::Cancelled { .. }) => Ok(Err(cancelled_end(ctx, node).await?)),
-        Err(error) => {
-            let end = fail(ctx, node, error.to_string(), false).await?;
-            Ok(Err(end))
+        Ok(block) => Ok(Step::Value(Some(block))),
+        Err(ContextResolveError::Cancelled { .. }) => {
+            Ok(Step::Ended(cancelled_end(ctx, node).await?))
         }
+        Err(error) => Ok(Step::Ended(
+            fail(ctx, node, error.to_string(), false).await?,
+        )),
     }
 }
 

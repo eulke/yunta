@@ -32,6 +32,7 @@ mod node_exec;
 mod promote;
 mod questions_exec;
 mod schedule;
+mod step;
 mod workflow_exec;
 
 use std::collections::{BTreeSet, HashMap};
@@ -1144,7 +1145,9 @@ pub(crate) async fn execute_run_at_depth(
                     {
                         let spent = derive(&events).total_tokens.total();
                         if spent >= cap {
-                            match budget::authorize_over_budget(&ctx, spent, cap).await? {
+                            let (escalation, reason) =
+                                budget::over_budget_escalation(&ctx, spent, cap);
+                            match budget::escalate(&ctx, None, escalation, reason).await? {
                                 budget::BudgetDecision::Continue => ctx
                                     .budget_lifted
                                     .store(true, std::sync::atomic::Ordering::Relaxed),

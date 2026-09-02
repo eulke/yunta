@@ -25,6 +25,7 @@ use crate::scope::scope_check;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 use crate::template::{render_template, TemplateError};
 
+use super::step::Step;
 use super::{RunCtx, RunError};
 
 /// How the node's execution ended, as recorded in the log by the caller.
@@ -433,13 +434,10 @@ pub(super) async fn render_or_fail(
     ctx: &RunCtx<'_>,
     node: &Node,
     input: &str,
-) -> Result<Result<String, NodeEnd>, RunError> {
+) -> Result<Step<String>, RunError> {
     match render_template(input, &template_vars(ctx, node)) {
-        Ok(rendered) => Ok(Ok(rendered)),
-        Err(e) => {
-            let end = fail(ctx, node, e.to_string(), false).await?;
-            Ok(Err(end))
-        }
+        Ok(rendered) => Ok(Step::Value(rendered)),
+        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string(), false).await?)),
     }
 }
 
@@ -860,8 +858,8 @@ async fn execute_bash(
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match render_or_fail(ctx, node, run).await? {
-        Ok(rendered) => rendered,
-        Err(end) => return Ok(end),
+        Step::Value(rendered) => rendered,
+        Step::Ended(end) => return Ok(end),
     };
 
     // The runtime moment: the rendered command against the merged
@@ -947,7 +945,7 @@ pub(super) fn prompt_text<'a>(
 pub(super) async fn resolve_node_runner(
     ctx: &RunCtx<'_>,
     node: &Node,
-) -> Result<Result<yunta_core::RunnerCandidate, NodeEnd>, RunError> {
+) -> Result<Step<yunta_core::RunnerCandidate>, RunError> {
     // A node without `runner:` falls back to `defaults.runner`.
     let default_runner = ctx
         .manifest
@@ -967,7 +965,7 @@ pub(super) async fn resolve_node_runner(
             false,
         )
         .await?;
-        return Ok(Err(end));
+        return Ok(Step::Ended(end));
     };
 
     match resolve_runner(
@@ -1005,7 +1003,7 @@ pub(super) async fn resolve_node_runner(
                         false,
                     )
                     .await?;
-                    return Ok(Err(end));
+                    return Ok(Step::Ended(end));
                 }
             }
             ctx.emit(
@@ -1017,12 +1015,9 @@ pub(super) async fn resolve_node_runner(
                 }),
             )
             .await?;
-            Ok(Ok(chosen))
+            Ok(Step::Value(chosen))
         }
-        Err(e) => {
-            let end = fail(ctx, node, e.to_string(), false).await?;
-            Ok(Err(end))
-        }
+        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string(), false).await?)),
     }
 }
 
@@ -1124,21 +1119,21 @@ async fn execute_prompt(
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
-        Ok(rendered) => rendered,
-        Err(end) => return Ok(end),
+        Step::Value(rendered) => rendered,
+        Step::Ended(end) => return Ok(end),
     };
     let context_block =
         match super::context_resolve::resolve_and_assemble(ctx, node, cancel).await? {
-            Ok(block) => block,
-            Err(end) => return Ok(end),
+            Step::Value(block) => block,
+            Step::Ended(end) => return Ok(end),
         };
     let rendered = match context_block {
         Some(block) => format!("{block}\n{rendered}"),
         None => rendered,
     };
     let chosen = match resolve_node_runner(ctx, node).await? {
-        Ok(chosen) => chosen,
-        Err(end) => return Ok(end),
+        Step::Value(chosen) => chosen,
+        Step::Ended(end) => return Ok(end),
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];

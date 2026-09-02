@@ -31,6 +31,7 @@ use yunta_core::{ExternalGate, FindingId, Node};
 use crate::human_interaction::HumanInteraction;
 
 use super::node_exec::{template_vars, write_progress};
+use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
 use crate::reserved::ReservedOption;
 
@@ -65,8 +66,8 @@ pub(super) async fn publish_gate(
     };
 
     let branch = match render_or_fail_here(ctx, node, &external.branch).await? {
-        Ok(rendered) => rendered,
-        Err(step) => return Ok(step),
+        Step::Value(rendered) => rendered,
+        Step::Ended(step) => return Ok(step),
     };
 
     let mut artifacts = Vec::new();
@@ -626,9 +627,9 @@ async fn render_or_fail_here(
     ctx: &RunCtx<'_>,
     node: &Node,
     input: &str,
-) -> Result<Result<String, GateStep>, RunError> {
+) -> Result<GateRender, RunError> {
     match crate::template::render_template(input, &template_vars(ctx, node)) {
-        Ok(rendered) => Ok(Ok(rendered)),
+        Ok(rendered) => Ok(Step::Value(rendered)),
         Err(e) => {
             emit_started(ctx, node).await?;
             ctx.emit(
@@ -640,7 +641,7 @@ async fn render_or_fail_here(
                 }),
             )
             .await?;
-            Ok(Err(GateStep::Resolved))
+            Ok(Step::Ended(GateStep::Resolved))
         }
     }
 }

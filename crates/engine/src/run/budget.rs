@@ -24,41 +24,50 @@ pub enum BudgetDecision {
     Pause { reason: String },
 }
 
-/// Escalates an exhausted run budget. A resolution — either way —
-/// is recorded as a run-level `gate_waiting`/`gate_resolved` pair; no
-/// resolution records nothing, so a resume re-asks (the same convention
-/// every node gate follows).
-pub async fn authorize_over_budget(
+/// The one escalation flow every exhausted limit shares: it puts the
+/// caller's escalation object to the run's human-interaction surface and
+/// records a `gate_waiting`/`gate_resolved` pair only once actually resolved
+/// (no resolution records nothing, so a resume re-asks, the convention every
+/// node gate follows). `Continue` lifts the cap for this invocation only;
+/// anything else — abort, an unrecognized option, or no surface to ask —
+/// pauses with the caller's reason. `node_id` scopes the audited pair: the
+/// run budget is run-level (`None`), a loop overrun is the loop node's.
+pub async fn escalate(
     ctx: &RunCtx<'_>,
-    spent: u64,
-    cap: u64,
+    node_id: Option<&yunta_core::NodeId>,
+    escalation: GateWaitingPayload,
+    pause_reason: String,
 ) -> Result<BudgetDecision, RunError> {
-    let reason = format!(
-        "budget: run spent {spent} tokens with `limits.max_tokens_per_run: {cap}` — \
-         resume with an interactive surface to continue past the cap or abort"
-    );
-    let escalation = escalation(ctx, spent, cap);
     match ctx.human_interaction.resolve(&escalation).await {
         Some(resolution) => {
             let chosen = resolution.chosen_option.clone();
-            ctx.emit(None, EventPayload::GateWaiting(escalation))
+            ctx.emit(node_id, EventPayload::GateWaiting(escalation))
                 .await?;
-            ctx.emit(None, EventPayload::GateResolved(resolution))
+            ctx.emit(node_id, EventPayload::GateResolved(resolution))
                 .await?;
             if chosen.as_deref() == Some("continue") {
                 Ok(BudgetDecision::Continue)
             } else {
-                Ok(BudgetDecision::Pause { reason })
+                Ok(BudgetDecision::Pause {
+                    reason: pause_reason,
+                })
             }
         }
-        None => Ok(BudgetDecision::Pause { reason }),
+        None => Ok(BudgetDecision::Pause {
+            reason: pause_reason,
+        }),
     }
 }
 
-/// The escalation object: mechanical summary and evidence, options with their
-/// tradeoffs spelled out — never a bare "over budget, y/n?".
-fn escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> GateWaitingPayload {
-    GateWaitingPayload {
+/// The escalation object and pause reason for an exhausted run token budget:
+/// mechanical summary and evidence, options with their tradeoffs spelled out
+/// — never a bare "over budget, y/n?".
+pub fn over_budget_escalation(
+    ctx: &RunCtx<'_>,
+    spent: u64,
+    cap: u64,
+) -> (GateWaitingPayload, String) {
+    let escalation = GateWaitingPayload {
         summary: format!(
             "run `{}` exhausted its token budget: {spent} of {cap} tokens spent",
             ctx.run_id
@@ -82,26 +91,24 @@ fn escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> GateWaitingPayload {
             },
         ],
         external_ref: None,
-    }
+    };
+    let reason = format!(
+        "budget: run spent {spent} tokens with `limits.max_tokens_per_run: {cap}` — \
+         resume with an interactive surface to continue past the cap or abort"
+    );
+    (escalation, reason)
 }
 
-/// Escalates a loop that hit `limits.max_loop_iterations` — the
-/// same continue/abort mechanism as the token cap, and the only net under a
-/// ledger whose state oscillates forever. Node-scoped, unlike the run
-/// budget: the pair is recorded on the loop node as a synchronous internal
-/// pair invisible to derived state, and the same per-invocation rule
-/// applies — `Continue` lifts the cap only for the
-/// `execute_loop` call that asked.
-pub async fn authorize_loop_overrun(
-    ctx: &RunCtx<'_>,
+/// The escalation object and pause reason for a loop that hit
+/// `limits.max_loop_iterations` — the same continue/abort mechanism as the
+/// token cap, and the only net under a ledger whose state oscillates
+/// forever. Node-scoped, unlike the run budget: [`escalate`] records its
+/// pair on the loop node.
+pub fn loop_overrun_escalation(
     node_id: &yunta_core::NodeId,
     iteration: u32,
     cap: u32,
-) -> Result<BudgetDecision, RunError> {
-    let reason = format!(
-        "loop `{node_id}` exceeded `limits.max_loop_iterations` ({cap}) — resume with an \
-         interactive surface to continue past the cap or abort"
-    );
+) -> (GateWaitingPayload, String) {
     let escalation = GateWaitingPayload {
         summary: format!(
             "loop `{node_id}` needs iteration {iteration} but `limits.max_loop_iterations` \
@@ -130,21 +137,11 @@ pub async fn authorize_loop_overrun(
         ],
         external_ref: None,
     };
-    match ctx.human_interaction.resolve(&escalation).await {
-        Some(resolution) => {
-            let chosen = resolution.chosen_option.clone();
-            ctx.emit(Some(node_id), EventPayload::GateWaiting(escalation))
-                .await?;
-            ctx.emit(Some(node_id), EventPayload::GateResolved(resolution))
-                .await?;
-            if chosen.as_deref() == Some("continue") {
-                Ok(BudgetDecision::Continue)
-            } else {
-                Ok(BudgetDecision::Pause { reason })
-            }
-        }
-        None => Ok(BudgetDecision::Pause { reason }),
-    }
+    let reason = format!(
+        "loop `{node_id}` exceeded `limits.max_loop_iterations` ({cap}) — resume with an \
+         interactive surface to continue past the cap or abort"
+    );
+    (escalation, reason)
 }
 
 /// Pure session-budget policy: one agent session may

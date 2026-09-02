@@ -28,6 +28,7 @@ use crate::worktree::prepare_worktree;
 use super::node_exec::{
     close_node, fail, fail_with_tokens, prompt_text, render_or_fail, resolve_node_runner, NodeEnd,
 };
+use super::step::Step;
 use super::{RunCtx, RunError};
 use crate::reserved::ReservedOption;
 
@@ -88,14 +89,12 @@ pub(super) async fn execute_loop(
         }
 
         if state.iteration > prep.max_iterations && !state.iterations_lifted {
-            match super::budget::authorize_loop_overrun(
-                ctx,
+            let (escalation, reason) = super::budget::loop_overrun_escalation(
                 &node.id,
                 state.iteration,
                 prep.max_iterations,
-            )
-            .await?
-            {
+            );
+            match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { reason } => {
                     return fail_with_tokens(ctx, node, reason, false, state.tokens).await;
@@ -124,9 +123,9 @@ pub(super) async fn execute_loop(
             )
             .await?
             {
-                Ok(Some(block)) => briefs.push(format!("{block}\n\n{}", prep.instruction)),
-                Ok(None) => briefs.push(prep.instruction.clone()),
-                Err(end) => return Ok(end),
+                Step::Value(Some(block)) => briefs.push(format!("{block}\n\n{}", prep.instruction)),
+                Step::Value(None) => briefs.push(prep.instruction.clone()),
+                Step::Ended(end) => return Ok(end),
             }
         }
 
@@ -238,12 +237,12 @@ async fn prepare_loop<'a>(
     prompt: &PromptSource,
 ) -> Result<LoopReady<'a>, RunError> {
     let instruction = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
-        Ok(rendered) => rendered,
-        Err(end) => return Ok(LoopReady::Ended(end)),
+        Step::Value(rendered) => rendered,
+        Step::Ended(end) => return Ok(LoopReady::Ended(end)),
     };
     let chosen = match resolve_node_runner(ctx, node).await? {
-        Ok(chosen) => chosen,
-        Err(end) => return Ok(LoopReady::Ended(end)),
+        Step::Value(chosen) => chosen,
+        Step::Ended(end) => return Ok(LoopReady::Ended(end)),
     };
     let adapter = ctx.adapters[&chosen.adapter].clone();
 
