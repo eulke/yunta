@@ -99,6 +99,7 @@ async fn paused_manifest_and_events(
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -285,6 +286,7 @@ impl GateBench {
             human_interaction: interaction,
             forge: None,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap();
@@ -421,6 +423,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             human_interaction: &NoInteraction,
             forge: None,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap()

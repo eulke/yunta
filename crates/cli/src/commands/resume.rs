@@ -92,6 +92,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
         human_interaction: &crate::human_interaction::ConsoleInteraction,
         forge: forge.as_deref(),
         cancel: Some(&root_cancel),
+        adapter_override: None,
     })
     .await;
 

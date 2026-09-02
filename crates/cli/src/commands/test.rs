@@ -195,35 +195,12 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let run_id = RunId::from("test-run");
     let run_dir = runs_root.join(run_id.as_str());
 
-    // Render the fixture with the sandbox paths, then parse it.
     let fixture_path = case_path
         .parent()
         .unwrap_or(Path::new("."))
         .join(&case.fixture);
-    let fixture_text = std::fs::read_to_string(&fixture_path)
-        .map_err(|e| format!("cannot read fixture `{}`: {e}", fixture_path.display()))?;
-    let vars = BTreeMap::from([
-        ("run.dir".to_string(), run_dir.display().to_string()),
-        ("worktree".to_string(), worktree.display().to_string()),
-    ]);
-    let rendered = yunta_engine::render_template(&fixture_text, &vars)
-        .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?;
-    let mock = Arc::new(
-        MockAdapter::from_yaml(&rendered)
-            .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?,
-    );
-
-    // The mock stands in for every adapter the config names — that is
-    // the point of `yunta test`: same workflow, same runners, no LLM.
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), mock.clone());
-    if let Some(runners) = &config.runners {
-        for candidate in runners.values().flatten() {
-            adapters
-                .entry(candidate.adapter.clone())
-                .or_insert_with(|| mock.clone());
-        }
-    }
+    let mock = load_mock_fixture(&fixture_path, &run_dir, &worktree)?;
+    let adapters = mock_adapters(&config, mock);
 
     let provided_inputs: HashMap<String, String> = case.inputs.into_iter().collect();
     let manifest = yunta_engine::build_manifest(
@@ -264,6 +241,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -305,6 +283,46 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         }
     }
     Ok(problems)
+}
+
+/// Reads a mock fixture, renders it with the run's own paths
+/// (`{{run.dir}}`, `{{worktree}}`) and parses it — the one way a
+/// scripted session comes to exist, for `yunta test` and for
+/// `yunta run --adapter mock --fixture` alike.
+pub(crate) fn load_mock_fixture(
+    fixture_path: &Path,
+    run_dir: &Path,
+    worktree: &Path,
+) -> Result<Arc<MockAdapter>, String> {
+    let fixture_text = std::fs::read_to_string(fixture_path)
+        .map_err(|e| format!("cannot read fixture `{}`: {e}", fixture_path.display()))?;
+    let vars = BTreeMap::from([
+        ("run.dir".to_string(), run_dir.display().to_string()),
+        ("worktree".to_string(), worktree.display().to_string()),
+    ]);
+    let rendered = yunta_engine::render_template(&fixture_text, &vars)
+        .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?;
+    MockAdapter::from_yaml(&rendered)
+        .map(Arc::new)
+        .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))
+}
+
+/// The mock standing in for every adapter the config names, so the
+/// same workflow resolves the same runners with no LLM behind them.
+pub(crate) fn mock_adapters(
+    config: &yunta_core::ConfigLayer,
+    mock: Arc<MockAdapter>,
+) -> HashMap<String, Arc<dyn Adapter>> {
+    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".to_string(), mock.clone());
+    if let Some(runners) = &config.runners {
+        for candidate in runners.values().flatten() {
+            adapters
+                .entry(candidate.adapter.clone())
+                .or_insert_with(|| mock.clone());
+        }
+    }
+    adapters
 }
 
 /// Copies `from`'s tree into `into`, which already exists. Every entry

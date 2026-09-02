@@ -542,6 +542,7 @@ async fn drive_child(
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
                     cancel: Some(cancel),
+                    adapter_override: ctx.adapter_override,
                 },
                 ctx.depth + 1,
             ));

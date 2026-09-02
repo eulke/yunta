@@ -45,7 +45,7 @@ use yunta_core::events::{
     Event, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
     RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
 };
-use yunta_core::{Clock, Manifest, NodeId, RunId, YuntaError};
+use yunta_core::{AdapterId, Clock, Manifest, NodeId, RunId, YuntaError};
 use yunta_storage::{Storage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -154,6 +154,7 @@ pub(crate) struct RunCtx<'a> {
     /// `on_interrupt`) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
+    pub(crate) adapter_override: Option<&'a AdapterId>,
     /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
     /// own gates are as real as the parent's).
@@ -450,6 +451,10 @@ pub struct RunEnv<'a> {
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a CancellationToken>,
+    /// `yunta run --adapter <id>`: every role resolves to its candidate
+    /// on this adapter, or fails naming what it tried. Invocation-scoped,
+    /// never frozen: the log's `runner_resolved` records the discards.
+    pub adapter_override: Option<&'a AdapterId>,
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and
@@ -479,6 +484,7 @@ pub(crate) async fn execute_run_at_depth(
         human_interaction,
         forge,
         cancel,
+        adapter_override,
     } = env;
     // The root of every per-node token this invocation hands out.
     // `None` (tests, callers with no signal source) gets a token nothing
@@ -496,6 +502,7 @@ pub(crate) async fn execute_run_at_depth(
         max_task_retries,
         memo: Memo::new(manifest.config_hash.clone()),
         human_interaction,
+        adapter_override,
         budget_lifted: std::sync::atomic::AtomicBool::new(false),
         process_registry: match crate::process_registry::ProcessRegistry::create(
             run_dir,

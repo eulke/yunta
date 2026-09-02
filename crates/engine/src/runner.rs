@@ -11,7 +11,7 @@
 
 use thiserror::Error;
 use yunta_core::events::DiscardedCandidate;
-use yunta_core::{ConfigLayer, RunnerCandidate};
+use yunta_core::{AdapterId, ConfigLayer, RunnerCandidate};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RunnerError {
@@ -23,6 +23,17 @@ pub enum RunnerError {
         tried.join(", ")
     )]
     NoCandidateAvailable { role: String, tried: Vec<String> },
+
+    #[error(
+        "role `{role}` has no candidate on `--adapter {adapter}` — its candidates are on: {}; \
+         add one on `{adapter}` to `runners.{role}`, or drop the flag",
+        candidates.join(", ")
+    )]
+    OverrideHasNoCandidate {
+        role: String,
+        adapter: String,
+        candidates: Vec<String>,
+    },
 }
 
 /// The outcome of resolving one role: the winning candidate plus every
@@ -37,11 +48,16 @@ pub struct ResolvedRunner {
 
 /// Picks the first candidate of `role` whose adapter `available`
 /// accepts. Pure: availability is injected, so tests and the CLI shell
-/// decide what "available" means without this logic changing.
+/// decide what "available" means without this logic changing. With an
+/// `adapter_override` (`yunta run --adapter <id>`), only candidates on
+/// that adapter qualify; every other candidate is discarded with the
+/// override as its reason, so the log says why declaration order did
+/// not decide.
 pub fn resolve_runner(
     role: &str,
     config: &ConfigLayer,
     available: &dyn Fn(&str) -> bool,
+    adapter_override: Option<&AdapterId>,
 ) -> Result<ResolvedRunner, RunnerError> {
     let candidates = config
         .runners
@@ -53,6 +69,18 @@ pub fn resolve_runner(
 
     let mut discarded = Vec::new();
     for candidate in candidates {
+        if let Some(wanted) = adapter_override {
+            if candidate.adapter != wanted.as_str() {
+                discarded.push(DiscardedCandidate {
+                    candidate: candidate.clone(),
+                    reason: format!(
+                        "adapter `{}` is not the `--adapter` override (`{wanted}`)",
+                        candidate.adapter
+                    ),
+                });
+                continue;
+            }
+        }
         if available(&candidate.adapter) {
             return Ok(ResolvedRunner {
                 role: role.to_string(),
@@ -66,8 +94,18 @@ pub fn resolve_runner(
         });
     }
 
-    Err(RunnerError::NoCandidateAvailable {
-        role: role.to_string(),
-        tried: candidates.iter().map(|c| c.adapter.clone()).collect(),
-    })
+    let adapters: Vec<String> = candidates.iter().map(|c| c.adapter.clone()).collect();
+    match adapter_override {
+        Some(wanted) if !adapters.iter().any(|adapter| adapter == wanted.as_str()) => {
+            Err(RunnerError::OverrideHasNoCandidate {
+                role: role.to_string(),
+                adapter: wanted.to_string(),
+                candidates: adapters,
+            })
+        }
+        _ => Err(RunnerError::NoCandidateAvailable {
+            role: role.to_string(),
+            tried: adapters,
+        }),
+    }
 }

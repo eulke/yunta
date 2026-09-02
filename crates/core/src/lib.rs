@@ -33,7 +33,7 @@ pub use config::{
 };
 pub use error::{Result, YuntaError};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
-pub use ids::{NodeId, RunId, SessionId, TaskId};
+pub use ids::{AdapterId, NodeId, RunId, SessionId, TaskId};
 pub use inputs::InputSpec;
 pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};

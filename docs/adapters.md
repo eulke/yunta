@@ -57,8 +57,8 @@ parallelism — is testable without ever calling a real model. This is why
 `cargo test --workspace` and CI never touch a real LLM: every engine test
 runs against `mock`.
 
-You'll use it directly too: `yunta run <workflow> --adapter mock` runs a
-workflow against a fixture instead of a real session, and `yunta test` (cases
+You'll use it directly too: `yunta run <workflow> --adapter mock --fixture
+<path>` runs a workflow against a fixture instead of a real session, and `yunta test` (cases
 under `.yunta/tests/`) always uses it — see the [workflow
 guide](guide.md#authoring-patterns) for writing workflows, and
 [packs](packs.md#testing-a-pack-before-sharing-it) for using it to test a

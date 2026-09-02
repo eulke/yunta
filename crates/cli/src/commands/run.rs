@@ -41,24 +41,13 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
     Ok(inputs)
 }
 
-/// `--adapter <name>` picks which adapter a run's sessions use. `mock`
-/// is a legitimate adapter id but its fixtures are `yunta test`'s
-/// territory: a real `run` has no `.yunta/tests/` case to script it
-/// from, so naming
-/// it here degrades explicitly instead of spawning a mock with nothing
-/// to simulate. Any other name must be one `real_adapters` would
-/// actually construct — `claude-code` and `codex`, today.
+/// `--adapter <name>` names a real adapter every session runs on; it
+/// must be one `real_adapters` constructed from the config. `mock` is
+/// handled before this: it needs a fixture, never a real binary.
 fn validate_adapter_flag(
     name: &str,
     adapters: &HashMap<String, std::sync::Arc<dyn yunta_adapters::Adapter>>,
 ) -> Result<(), String> {
-    if name == "mock" {
-        return Err(
-            "`--adapter mock` has no fixture to run without a `.yunta/tests/` case — \
-             use `yunta test` instead"
-                .to_string(),
-        );
-    }
     if !adapters.contains_key(name) {
         return Err(format!(
             "unknown adapter `{name}` — this binary can run: {}",
@@ -142,6 +131,7 @@ pub async fn run(
     workflow_path: &Path,
     raw_inputs: &[String],
     adapter: Option<&str>,
+    fixture: Option<&Path>,
     mode: Option<&str>,
     follow: bool,
     detach: bool,
@@ -194,18 +184,47 @@ pub async fn run(
     if let Err(code) = super::check_or_refuse(&workflow, &project.config, workflow_path) {
         return code;
     }
-    let adapters = super::real_adapters(&project.config);
-    if let Err(code) = super::refuse_unrunnable(&workflow, &adapters) {
-        return code;
-    }
-    if let Some(name) = adapter {
-        if let Err(e) = validate_adapter_flag(name, &adapters) {
-            eprintln!("error: {e}");
+    // `--adapter mock --fixture <path>` runs against a scripted fixture:
+    // no real adapter is constructed or probed. Any other `--adapter`
+    // is an override every role resolves through.
+    let mock_fixture = match (adapter, fixture) {
+        (Some("mock"), Some(path)) => Some(path),
+        (Some("mock"), None) => {
+            eprintln!(
+                "error: `--adapter mock` runs the workflow against a scripted fixture — pass \
+                 `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
+                 case and run `yunta test`"
+            );
             return ExitCode::FAILURE;
         }
-    }
-    if let Err(code) = super::probe_or_refuse(&adapters).await {
-        return code;
+        (_, Some(_)) => {
+            eprintln!("error: `--fixture` only applies together with `--adapter mock`");
+            return ExitCode::FAILURE;
+        }
+        _ => None,
+    };
+    let adapter_override = match adapter {
+        Some("mock") | None => None,
+        Some(name) => Some(yunta_core::AdapterId::from(name)),
+    };
+    let real_adapters = if mock_fixture.is_some() {
+        HashMap::new()
+    } else {
+        super::real_adapters(&project.config)
+    };
+    if mock_fixture.is_none() {
+        if let Err(code) = super::refuse_unrunnable(&workflow, &real_adapters) {
+            return code;
+        }
+        if let Some(name) = adapter {
+            if let Err(e) = validate_adapter_flag(name, &real_adapters) {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+        if let Err(code) = super::probe_or_refuse(&real_adapters).await {
+            return code;
+        }
     }
 
     let provided_inputs = match parse_inputs(raw_inputs) {
@@ -354,6 +373,17 @@ pub async fn run(
     };
     println!("run {run_id}: created at {}", run_dir.display());
 
+    let adapters = match mock_fixture {
+        Some(path) => match super::test::load_mock_fixture(path, &run_dir, &worktree) {
+            Ok(mock) => super::test::mock_adapters(&project.config, mock),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => real_adapters,
+    };
+
     // `run_workflow`'s own async pattern — create synchronously (fast,
     // no agent I/O yet), then hand off to a fully independent
     // `yunta resume` and return.
@@ -388,6 +418,7 @@ pub async fn run(
         human_interaction: &crate::human_interaction::ConsoleInteraction,
         forge: forge.as_deref(),
         cancel: Some(&root_cancel),
+        adapter_override: adapter_override.as_ref(),
     })
     .await;
 

@@ -2114,3 +2114,135 @@ nodes:
         stdout(&status)
     );
 }
+
+fn codex_stub() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/codex_stub.sh")
+}
+
+/// `--adapter <real>` makes every role resolve to its candidate on that
+/// adapter, whatever `runners:` lists first — recorded as discards in
+/// the log, never silently.
+#[test]
+fn adapter_flag_overrides_runner_resolution() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let claude_args = root.path().join("claude-args.txt");
+    let codex_args = root.path().join("codex-args.txt");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            r#"
+runners:
+  executor:
+    - {{ adapter: codex, model: codex-model }}
+    - {{ adapter: claude-code, model: claude-model }}
+adapters:
+  codex:
+    binary: {codex}
+  claude-code:
+    binary: {claude}
+secrets: [CLAUDE_STUB_ARGS_FILE, CODEX_STUB_ARGS_FILE]
+"#,
+            codex = codex_stub().display(),
+            claude = claude_code_stub().display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: override\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    prompt: \"Do the thing.\"\n",
+    );
+    write(
+        &repo.join(".claude-stub-lines.jsonl"),
+        &format!(
+            "{}\n{}\n",
+            r#"{"type":"system","subtype":"init","session_id":"sess-cli","model":"claude-sonnet-5"}"#,
+            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":3,"output_tokens":2}}"#,
+        ),
+    );
+    git(&repo, &["add", ".claude-stub-lines.jsonl"]);
+    git(&repo, &["commit", "-q", "-m", "stub fixture"]);
+
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml", "--adapter", "claude-code"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .env("CLAUDE_STUB_ARGS_FILE", &claude_args)
+        .env("CODEX_STUB_ARGS_FILE", &codex_args)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
+    // Both stubs record every invocation, the health probe (`--version`)
+    // included: a session is the invocation that is not the probe.
+    let ran_a_session =
+        |args: &Path| std::fs::read_to_string(args).is_ok_and(|text| !text.contains("--version"));
+    assert!(
+        ran_a_session(&claude_args),
+        "the override adapter must have run the session"
+    );
+    assert!(
+        !ran_a_session(&codex_args),
+        "the first-listed candidate must not have run a session"
+    );
+}
+
+/// `--adapter mock --fixture <path>` runs a workflow against a scripted
+/// fixture with no test case and no real CLI on the machine.
+#[test]
+fn adapter_mock_with_fixture_runs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: claude-model }\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: mocked\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    prompt: \"Do the thing.\"\n    artifacts:\n      produces: [note.md]\n",
+    );
+    write(
+        &repo.join("fixture.yaml"),
+        "sessions:\n  - effects:\n      - { path: \"{{run.dir}}/artifacts/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
+    );
+
+    let refused = yunta_in(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("--fixture"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+
+    let run = yunta_in(
+        &repo,
+        &home,
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
+}

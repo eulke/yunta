@@ -168,6 +168,7 @@ impl Bench {
             human_interaction,
             forge: None,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap();
@@ -502,6 +503,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -828,6 +830,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -852,6 +855,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1017,6 +1021,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1051,6 +1056,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         human_interaction: &interaction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1166,6 +1172,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1228,6 +1235,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1304,6 +1312,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1389,6 +1398,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -1649,6 +1659,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -2806,6 +2817,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -4600,6 +4612,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -4626,6 +4639,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         human_interaction: &interaction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -4832,6 +4846,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -4853,6 +4868,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         human_interaction: &interaction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -5322,6 +5338,7 @@ async fn run_with_recording_mock(
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -5571,6 +5588,7 @@ sessions:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -5697,6 +5715,7 @@ sessions:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -6013,6 +6032,7 @@ nodes:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await;
 
@@ -6112,6 +6132,7 @@ async fn resume_orphan_with_mock(
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();

@@ -84,6 +84,7 @@ pub(crate) async fn drive_promotions(
             human_interaction: &crate::human_interaction::ConsoleInteraction,
             forge: env.forge,
             cancel: env.cancel,
+            adapter_override: None,
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -222,6 +223,7 @@ nodes:
             human_interaction: &AlwaysPromote,
             forge: None,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap();

@@ -48,6 +48,12 @@ string_id!(
 );
 
 string_id!(
+    /// An adapter's id as config names it (`claude-code`, `codex`,
+    /// `mock`).
+    AdapterId
+);
+
+string_id!(
     /// A run identifier (a ULID). Nothing generates real ULIDs
     /// yet — that comes later, via an injected id source per
     /// CLAUDE.md's "determinismo inyectado" — this type only fixes the

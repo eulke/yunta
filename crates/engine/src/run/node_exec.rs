@@ -1012,9 +1012,12 @@ pub(super) fn resolve_node_runner(
         return Ok(Err(end));
     };
 
-    match resolve_runner(role, &ctx.manifest.config, &|adapter| {
-        ctx.adapters.contains_key(adapter)
-    }) {
+    match resolve_runner(
+        role,
+        &ctx.manifest.config,
+        &|adapter| ctx.adapters.contains_key(adapter),
+        ctx.adapter_override,
+    ) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();
             // The node's own `agent:` wins over the

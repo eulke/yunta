@@ -40,9 +40,15 @@ enum Command {
         #[arg(long = "input", value_name = "name=value")]
         input: Vec<String>,
         /// Runs every session with this adapter instead of `runners:`'s
-        /// own resolution. `mock` is refused here — see `yunta test`.
+        /// own resolution: each role resolves to its candidate on it, and
+        /// the log records every candidate passed over. `mock` needs
+        /// `--fixture`.
         #[arg(long)]
         adapter: Option<String>,
+        /// With `--adapter mock`: the fixture that scripts every session,
+        /// in the same format a `.yunta/tests/` fixture uses.
+        #[arg(long, requires = "adapter")]
+        fixture: Option<PathBuf>,
         /// Selects a workflow mode. Omitted with `modes:` declared
         /// defaults to the first declared mode; a workflow with no
         /// `modes:` at all ignores this entirely.
@@ -266,6 +272,7 @@ async fn main() -> ExitCode {
             workflow,
             input,
             adapter,
+            fixture,
             mode,
             follow,
             detach,
@@ -274,6 +281,7 @@ async fn main() -> ExitCode {
                 &workflow,
                 &input,
                 adapter.as_deref(),
+                fixture.as_deref(),
                 mode.as_deref(),
                 follow,
                 detach,

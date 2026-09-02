@@ -159,6 +159,7 @@ impl Bench {
             human_interaction: &NoInteraction,
             forge,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap();

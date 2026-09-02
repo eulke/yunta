@@ -201,6 +201,7 @@ async fn run_with_mode_and_findings(
         human_interaction: interaction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();

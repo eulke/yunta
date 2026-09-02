@@ -361,6 +361,7 @@ impl Bench {
             human_interaction: &yunta_engine::NoInteraction,
             forge: None,
             cancel: None,
+            adapter_override: None,
         })
         .await
         .unwrap();
@@ -463,6 +464,7 @@ nodes:
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();

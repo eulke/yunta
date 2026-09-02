@@ -223,6 +223,7 @@ sessions:
         human_interaction: &ApproveEverything,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();

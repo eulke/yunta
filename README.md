@@ -151,7 +151,7 @@ a verified task ledger, lint→fix, a baseline check, multi-runner review, PR).
 | `yunta init` | Detects language, test command, base branch and available adapters; writes `.yunta/config.yaml`. |
 | `yunta new <name> [--shape one-node\|lint-fix\|ledger]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and checks it. |
 | `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
-| `yunta run <workflow> [--input k=v] [--adapter] [--mode] [--follow] [--detach]` | Creates a run from a workflow and executes it. `--follow` prints live progress; `--detach` returns the run id immediately and keeps running independent of the calling process. |
+| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--follow] [--detach]` | Creates a run from a workflow and executes it. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--follow` prints live progress; `--detach` returns the run id immediately and keeps running independent of the calling process. |
 | `yunta list [--runs]` | Without `--runs`: the workflow catalog (repo + packs) with descriptions, inputs and modes. With `--runs`: local runs and their derived state. |
 | `yunta status <run_id>` | A run's derived state: nodes, tasks, tokens — reconstructed from the event log. |
 | `yunta resume <run_id>` | Resumes a run from its event log, restarting orphaned nodes per `on_interrupt`. |

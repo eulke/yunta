@@ -182,6 +182,7 @@ sessions:
         human_interaction: &ApproveEverything,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
@@ -262,6 +263,7 @@ sessions:
         human_interaction: &NoInteraction,
         forge: None,
         cancel: None,
+        adapter_override: None,
     })
     .await
     .unwrap();
