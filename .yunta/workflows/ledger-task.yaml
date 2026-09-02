@@ -1,0 +1,32 @@
+name: ledger-task
+description: Executes a hand-written task ledger — every criterion red before the work and green after it, scope clean — then the workspace checks.
+inputs:
+  ledger:
+    type: path
+    required: true
+    description: Ledger YAML, relative to the repository root.
+nodes:
+  - id: register
+    kind: bash
+    run: "mkdir -p {{run.dir}}/artifacts && cp {{inputs.ledger}} {{run.dir}}/artifacts/plan.yaml"
+    artifacts:
+      produces: [{ name: plan.yaml, kind: task-ledger }]
+
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [register]
+    until: all_tasks_complete
+    invariant: true
+    prompt: |
+      Read your task from the ledger. Implement it inside its own scope and
+      make every criterion pass; the engine verifies both.
+
+  - id: verify
+    kind: bash
+    invariant: true
+    depends_on: [implement]
+    run: |
+      cargo fmt --all -- --check
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo test --workspace

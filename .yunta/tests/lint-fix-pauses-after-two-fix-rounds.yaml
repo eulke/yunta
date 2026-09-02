@@ -1,0 +1,11 @@
+# With no crate in the worktree the lint fails; the workflow hands the
+# report to the mechanical runner twice and then pauses with its re-route
+# budget spent, instead of looping.
+workflow: lint-fix
+fixture: fixtures/lint-fix.yaml
+expect:
+  final_state: paused
+  nodes:
+    lint: failed
+    fix-lint: finished
+    fmt: never ran

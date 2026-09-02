@@ -1,0 +1,30 @@
+version: 1
+
+project:
+  name: yunta
+  base_branch: main
+  branch_prefix: yunta/
+
+# Runners: bindings the workflows ask for by name. `yunta test` stands the
+# `mock` adapter in for every adapter named here.
+runners:
+  planner:
+    - { adapter: claude-code, model: claude-opus-4-8 }
+    - { adapter: codex, model: gpt-5-codex }
+  executor:
+    - { adapter: claude-code, model: claude-sonnet-4-6 }
+  mechanical:
+    - { adapter: claude-code, model: claude-haiku-4-5 }
+  reviewer:
+    - { adapter: claude-code, model: claude-sonnet-4-6 }
+  reviewer-alt:
+    - { adapter: codex, model: gpt-5-codex }
+
+defaults:
+  runner: executor
+  isolation: worktree
+  timeout_minutes: 45
+  on_failure: pause
+
+baseline:
+  suite: "cargo test --workspace"

@@ -1,0 +1,3 @@
+sessions:
+  - outcome: { type: completed, summary: "first fix round" }
+  - outcome: { type: completed, summary: "second fix round" }

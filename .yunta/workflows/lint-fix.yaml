@@ -1,0 +1,21 @@
+name: lint-fix
+description: Runs the workspace lint and format checks; a lint report goes to the mechanical runner for at most two fix rounds.
+nodes:
+  - id: lint
+    kind: bash
+    invariant: true
+    run: "cargo clippy --workspace --all-targets -- -D warnings"
+    on_failure: { goto: fix-lint, max_reroutes: 2 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    context: [{ node-output: { node: lint } }]
+    prompt: "Fix exclusively the errors in the report."
+    scope: ["crates/**"]
+
+  - id: fmt
+    kind: bash
+    invariant: true
+    depends_on: [lint]
+    run: "cargo fmt --all -- --check"

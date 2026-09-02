@@ -37,17 +37,16 @@ jobs:
       - name: build (release binary, for the factory-pack checks below)
         run: cargo build --release --locked -p yunta
 
-      - name: factory packs pass `check` and run end-to-end with mock
+      - name: the repository's own workflows and the factory packs pass check and their cases
         run: |
           bin="$PWD/target/release/yunta"
-          for pack in packs/starter packs/fragua; do
-            for wf in "$pack"/.yunta/workflows/*.yaml; do
-              echo "::group::check $wf"
-              "$bin" check "$wf"
-              echo "::endgroup::"
-            done
+          for wf in .yunta/workflows/*.yaml packs/*/.yunta/workflows/*.yaml; do
+            echo "::group::check $wf"
+            "$bin" check "$wf"
+            echo "::endgroup::"
           done
-          echo "::group::pack self-tests (mock adapter)"
+          echo "::group::test cases (mock adapter)"
+          "$bin" test
           "$bin" test --dir packs/starter
           "$bin" test --dir packs/fragua
           echo "::endgroup::"
