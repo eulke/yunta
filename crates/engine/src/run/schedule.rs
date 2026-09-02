@@ -22,11 +22,11 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{EventPayload, StoredEvent};
+use yunta_core::events::{EventPayload, ResumePolicy, StoredEvent};
 use yunta_core::{ModeName, Node, NodeId, NodeKind, OnInterrupt, Seq, Workflow};
 
 use crate::modes::dependencies_in_mode;
-use crate::replay::{derive, NodeState};
+use crate::replay::{derive, NodeState, RunState};
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -123,6 +123,29 @@ pub enum ScheduleStep {
 /// its resolution is a forge round-trip, not a session.
 fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
+}
+
+/// The orphans a resume finds among `nodes` — left `running` in the
+/// log with no terminal event, gates excepted (a running gate is a
+/// question still open, not a crash) — each with the `on_interrupt`
+/// it resolves to: its own declaration, or `default_on_interrupt`.
+/// The one place that resolution is made; `run_resumed` records it
+/// and the scheduler acts on it.
+pub(crate) fn resume_policies<'a>(
+    nodes: impl IntoIterator<Item = &'a Node>,
+    state: &RunState,
+    default_on_interrupt: OnInterrupt,
+) -> Vec<ResumePolicy> {
+    nodes
+        .into_iter()
+        .filter(|node| {
+            !is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
+        })
+        .map(|node| ResumePolicy {
+            node: node.id.clone(),
+            on_interrupt: node.on_interrupt.unwrap_or(default_on_interrupt),
+        })
+        .collect()
 }
 
 /// Whether a gate node has an `external:` block (forge-published)
@@ -339,19 +362,12 @@ pub fn next_step(
     //    already committed to running concurrently before the crash, so
     //    capacity doesn't retroactively apply to how many come back.
     //    Gate nodes never reach here (handled in section 0 above).
-    let orphaned: Vec<&Node> = nodes
-        .iter()
-        .copied()
-        .filter(|node| {
-            !is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
-        })
-        .collect();
+    let orphaned = resume_policies(nodes.iter().copied(), &state, default_on_interrupt);
     if !orphaned.is_empty() {
-        let resolved = |node: &Node| node.on_interrupt.unwrap_or(default_on_interrupt);
         let uncertain: Vec<&NodeId> = orphaned
             .iter()
-            .filter(|node| resolved(node) == OnInterrupt::FailIfUncertain)
-            .map(|node| &node.id)
+            .filter(|policy| policy.on_interrupt == OnInterrupt::FailIfUncertain)
+            .map(|policy| &policy.node)
             .collect();
         if !uncertain.is_empty() {
             let names = uncertain
@@ -369,7 +385,7 @@ pub fn next_step(
         }
         let orphans: Vec<(NodeId, u32)> = orphaned
             .iter()
-            .map(|node| (node.id.clone(), hist(&node.id).starts + 1))
+            .map(|policy| (policy.node.clone(), hist(&policy.node).starts + 1))
             .collect();
         return ScheduleStep::Execute(orphans);
     }

@@ -361,7 +361,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `reason` | string | solo en `run_paused` | presupuesto excedido, gate esperando, etc. |
-| `resume_policy_applied` [inferido] | `Option<string>` | solo en `run_resumed` | qué `on_interrupt` se aplicó a cada nodo huérfano retomado |
+| `resume_policy_applied` [inferido] | `Option<string>` | solo en `run_resumed` | el único `on_interrupt` que todos los huérfanos resolvieron; ausente sin huérfanos o con políticas distintas |
+| `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config |
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
 

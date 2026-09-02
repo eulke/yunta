@@ -34,7 +34,7 @@ mod questions_exec;
 mod schedule;
 mod workflow_exec;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -689,11 +689,27 @@ pub(crate) async fn execute_run_at_depth(
     }
     if events.len() > 1 {
         // Anything beyond run_created means a previous invocation worked
-        // on this run — this one is a resume.
+        // on this run — this one is a resume. A node the mode excludes
+        // never ran, so the orphans are the same whichever nodes are
+        // in the mode.
+        let policies = schedule::resume_policies(
+            manifest.workflow.nodes.iter(),
+            &derive(&events),
+            manifest.config.resolved_on_interrupt(),
+        );
+        let shared: BTreeSet<&str> = policies
+            .iter()
+            .map(|policy| policy.on_interrupt.as_str())
+            .collect();
+        let resume_policy_applied = match shared.iter().next() {
+            Some(policy) if shared.len() == 1 => Some((*policy).to_string()),
+            _ => None,
+        };
         ctx.emit(
             None,
             EventPayload::RunResumed(RunResumedPayload {
-                resume_policy_applied: Some("restart_node".to_string()),
+                resume_policy_applied,
+                policies,
             }),
         )
         .await?;

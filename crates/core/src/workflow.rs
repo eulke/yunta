@@ -718,6 +718,17 @@ pub enum OnInterrupt {
     ResumeSession,
 }
 
+impl OnInterrupt {
+    /// The YAML spelling, for diagnostics and the log.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OnInterrupt::RestartNode => "restart_node",
+            OnInterrupt::FailIfUncertain => "fail_if_uncertain",
+            OnInterrupt::ResumeSession => "resume_session",
+        }
+    }
+}
+
 /// The node kinds built so far. `gate` and
 /// `workflow` are the rest of the full catalogue and stay out until
 /// their own turn.

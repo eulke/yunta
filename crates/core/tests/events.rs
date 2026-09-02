@@ -200,6 +200,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::RunResumed(RunResumedPayload {
             resume_policy_applied: Some("restart_node".to_string()),
+            policies: Vec::new(),
         }),
         EventPayload::RunFinished(RunFinishedPayload {
             terminal_state: TerminalState::Done,

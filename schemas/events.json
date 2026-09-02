@@ -1214,6 +1214,23 @@
         "attempt"
       ]
     },
+    "OnInterrupt": {
+      "description": "A node's crash-recovery policy — the full triple of options.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "restart_node",
+            "fail_if_uncertain"
+          ]
+        },
+        {
+          "description": "Continue the same agent conversation — the\n`session_id` the log recorded (`agent_session_opened`) is\nhanded back to the adapter's `resume`. Only `kind: prompt` opens\na node-scoped session, so `check` refuses the explicit\ndeclaration anywhere else; an adapter without the\n`resume_session` capability — or a crash before any session\nopened — degrades to `restart_node` with an explicit\n`capability_degraded` event, never silently. As a *config default*\n(`defaults.on_interrupt`) it applies where a session exists;\nkinds without one (bash/check/…, and a loop's per-task sessions)\nrestart, which is the only meaning the policy can have there.",
+          "type": "string",
+          "const": "resume_session"
+        }
+      ]
+    },
     "Phase": {
       "type": "string",
       "enum": [
@@ -1282,6 +1299,21 @@
       "required": [
         "answers_hash",
         "channel"
+      ]
+    },
+    "ResumePolicy": {
+      "type": "object",
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "on_interrupt": {
+          "$ref": "#/$defs/OnInterrupt"
+        }
+      },
+      "required": [
+        "node",
+        "on_interrupt"
       ]
     },
     "RunCreatedPayload": {
@@ -1380,7 +1412,15 @@
     "RunResumedPayload": {
       "type": "object",
       "properties": {
+        "policies": {
+          "description": "Every node the log left running with no terminal event, and the\n`on_interrupt` it resolved to: its own, or the config's default.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResumePolicy"
+          }
+        },
         "resume_policy_applied": {
+          "description": "The one `on_interrupt` every orphan of this resume resolved to;\nabsent when the resume found no orphan or their policies differ\n— `policies` is the record either way.",
           "type": [
             "string",
             "null"

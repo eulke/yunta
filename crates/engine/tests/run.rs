@@ -6451,3 +6451,101 @@ nodes:
     assert_eq!(created.inputs["greeting"], "hola");
     assert_eq!(created.inputs["idea"], "ship it");
 }
+
+#[tokio::test]
+async fn run_resumed_records_the_policy_each_orphan_resolved_to() {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_yaml::from_str(
+        r#"
+name: resumable
+nodes:
+  - id: only
+    kind: bash
+    on_interrupt: fail_if_uncertain
+    run: "true"
+"#,
+    )
+    .unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+    // A crash mid-node: node_started with no terminal event.
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some("only".into()),
+                payload: yunta_core::events::EventPayload::NodeStarted(
+                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
+        .unwrap();
+
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage.async_handle(),
+        clock: &FixedClock,
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &yunta_engine::NoInteraction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+    })
+    .await
+    .unwrap();
+    assert!(
+        matches!(report.terminal, RunTerminal::Paused { .. }),
+        "fail_if_uncertain pauses instead of guessing: {:?}",
+        report.terminal
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let resumed = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::RunResumed(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("a second invocation records run_resumed");
+    assert_eq!(
+        resumed.policies,
+        vec![yunta_core::events::ResumePolicy {
+            node: "only".into(),
+            on_interrupt: yunta_core::OnInterrupt::FailIfUncertain,
+        }],
+        "the orphan and the policy it resolved to"
+    );
+    assert_eq!(
+        resumed.resume_policy_applied.as_deref(),
+        Some("fail_if_uncertain"),
+        "the one policy every orphan shares, never a fixed literal"
+    );
+}

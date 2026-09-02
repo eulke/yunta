@@ -13,6 +13,7 @@ use crate::ids::{
     SessionId, TaskId,
 };
 use crate::policy::ScopeExpansionMode;
+use crate::workflow::OnInterrupt;
 use crate::Capabilities;
 
 /// A ledger criterion, frozen into `task_registered` — the same shape
@@ -518,8 +519,21 @@ pub struct RunPausedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunResumedPayload {
+    /// The one `on_interrupt` every orphan of this resume resolved to;
+    /// absent when the resume found no orphan or their policies differ
+    /// — `policies` is the record either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_policy_applied: Option<String>,
+    /// Every node the log left running with no terminal event, and the
+    /// `on_interrupt` it resolved to: its own, or the config's default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<ResumePolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ResumePolicy {
+    pub node: NodeId,
+    pub on_interrupt: OnInterrupt,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
