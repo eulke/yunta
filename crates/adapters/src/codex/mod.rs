@@ -36,20 +36,14 @@ mod permissions;
 mod settings;
 
 use std::path::PathBuf;
-use std::process::Stdio;
 
 use async_trait::async_trait;
-use futures::stream::{self, BoxStream};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, ModelName, Pid, Result, SessionId,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, ModelName, Result, SessionId,
 };
 
-use crate::session::{
-    write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
-};
-use crate::signal::{signal_group, Signal};
+use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::subprocess::{self, Launch, LineParser};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
@@ -103,107 +97,47 @@ impl CodexAdapter {
         args
     }
 
-    async fn open_session(
+    async fn launch(
         &self,
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        // Codex's own `thread.started` line never carries the model it
-        // used (confirmed gap in the CLI — openai/codex#14736, still
-        // open) — the request's own model is the only source `parse.rs`
-        // has for `SessionOpened.model`, which must always report one.
         let requested_model = req.model.clone().unwrap_or_else(|| DEFAULT_MODEL.clone());
         let args = self.build_args(&req, resume);
-
-        let mut std_cmd = std::process::Command::new(&self.binary);
-        std_cmd
-            .args(&args)
-            .current_dir(&req.cwd)
-            .envs(req.env.iter().map(|(name, value)| (name, value.expose())))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        // The whole session's process tree must die together on
-        // interrupt/kill — same reasoning as claude_code's own.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            std_cmd.process_group(0);
-        }
-
-        let mut child = tokio::process::Command::from(std_cmd)
-            .spawn()
-            .map_err(|source| AdapterError::AdapterIo {
-                adapter: ID.clone(),
-                action: "spawn the codex subprocess".to_string(),
-                source,
-            })?;
-
-        let pid = child
-            .id()
-            .and_then(|id| Pid::try_from(id).ok())
-            .ok_or_else(|| AdapterError::Adapter {
-                adapter: ID.clone(),
-                message: "the codex subprocess exited before it could be tracked".to_string(),
-            })?;
-
-        let stdin = child.stdin.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the codex subprocess has no stdin pipe".to_string(),
-        })?;
-
-        let stdout = child.stdout.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the codex subprocess has no stdout pipe".to_string(),
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the codex subprocess has no stderr pipe".to_string(),
-        })?;
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            // Purely a parsing need: `turn.completed`
-            // carries no text of its own (`parse.rs`'s own doc comment)
-            // — the last `agent_message` item seen is what becomes the
-            // outcome summary when the turn closes.
-            let mut last_message = String::new();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
-                        for event in parse::parse_line(&line, &requested_model, &last_message) {
-                            if let AgentEvent::Note { text } = &event {
-                                last_message = text.clone();
-                            }
-                            if tx.send(event).is_err() {
-                                return;
-                            }
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "codex: error reading stdout");
-                        break;
-                    }
-                }
-            }
-            let _ = child.wait().await;
-        });
-        tokio::spawn(drain_stderr(stderr));
-        write_prompt(stdin, &req.prompt, &ID).await?;
-
-        Ok(Box::new(CodexSession {
-            pid,
-            receiver: Some(rx),
-        }))
+        subprocess::open(Launch {
+            adapter: &ID,
+            binary: &self.binary,
+            args,
+            cwd: &req.cwd,
+            env: &req.env,
+            prompt: &req.prompt,
+            parser: Box::new(CodexParser {
+                requested_model,
+                last_message: String::new(),
+            }),
+        })
+        .await
     }
 }
 
-async fn drain_stderr(stderr: tokio::process::ChildStderr) {
-    let mut lines = BufReader::new(stderr).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        tracing::debug!(target: "codex_stderr", "{line}");
+/// The CLI's JSONL, one event list per line. The last note seen is
+/// what a turn's completion reports as its summary, so it travels from
+/// line to line.
+struct CodexParser {
+    requested_model: ModelName,
+    last_message: String,
+}
+
+impl LineParser for CodexParser {
+    fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
+        let events = parse::parse_line(line, &self.requested_model, &self.last_message);
+        if let Some(text) = events.iter().rev().find_map(|event| match event {
+            AgentEvent::Note { text } => Some(text.clone()),
+            _ => None,
+        }) {
+            self.last_message = text;
+        }
+        events
     }
 }
 
@@ -243,25 +177,11 @@ impl Adapter for CodexAdapter {
                 message: e.to_string(),
             });
         }
-        let output = tokio::process::Command::new(&self.binary)
-            .arg("--version")
-            .output()
-            .await;
-        Ok(match output {
-            Ok(output) if output.status.success() => ProbeReport::Healthy {
-                version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-            },
-            Ok(output) => ProbeReport::Unhealthy {
-                diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            },
-            Err(e) => ProbeReport::Unhealthy {
-                diagnostic: e.to_string(),
-            },
-        })
+        Ok(subprocess::probe_version(&self.binary).await)
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
-        self.open_session(req, None).await
+        self.launch(req, None).await
     }
 
     async fn resume(
@@ -269,37 +189,6 @@ impl Adapter for CodexAdapter {
         session: &SessionId,
         req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
-        self.open_session(req, Some(session)).await
-    }
-}
-
-pub struct CodexSession {
-    pid: Pid,
-    receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
-}
-
-#[async_trait]
-impl AgentSession for CodexSession {
-    fn events(&mut self) -> BoxStream<'_, AgentEvent> {
-        match self.receiver.take() {
-            Some(rx) => Box::pin(stream::unfold(rx, |mut rx| async move {
-                rx.recv().await.map(|event| (event, rx))
-            })),
-            None => Box::pin(stream::empty()),
-        }
-    }
-
-    async fn interrupt(&mut self) -> Result<()> {
-        signal_group(self.pid, Signal::SIGINT).map_err(|e| e.into_adapter_error(&ID))
-    }
-
-    async fn kill(&mut self) -> Result<()> {
-        signal_group(self.pid, Signal::SIGKILL).map_err(|e| e.into_adapter_error(&ID))
-    }
-
-    fn pgid(&self) -> Option<Pid> {
-        // Spawned with `process_group(0)`, so the child's pid is its
-        // process-group id.
-        Some(self.pid)
+        self.launch(req, Some(session)).await
     }
 }

@@ -11,18 +11,12 @@ mod permissions;
 mod settings;
 
 use std::path::PathBuf;
-use std::process::Stdio;
 
 use async_trait::async_trait;
-use futures::stream::{self, BoxStream};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
-use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Pid, Result, SessionId};
+use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
-use crate::session::{
-    write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
-};
-use crate::signal::{signal_group, Signal};
+use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::subprocess::{self, Launch, LineParser};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("claude-code");
@@ -76,100 +70,32 @@ impl ClaudeCodeAdapter {
         args
     }
 
-    async fn open_session(
+    async fn launch(
         &self,
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
         stage_skills(&req)?;
         let args = self.build_args(&req, resume);
-
-        let mut std_cmd = std::process::Command::new(&self.binary);
-        std_cmd
-            .args(&args)
-            .current_dir(&req.cwd)
-            .envs(req.env.iter().map(|(name, value)| (name, value.expose())))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        // The whole session's process tree must die together on
-        // interrupt/kill. Putting the child in its own process group
-        // means a group-targeted signal (negative pid) reaches every
-        // descendant the CLI spawns — its own tool subprocesses included
-        // — not just the CLI process itself.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            std_cmd.process_group(0);
-        }
-
-        let mut child = tokio::process::Command::from(std_cmd)
-            .spawn()
-            .map_err(|source| AdapterError::AdapterIo {
-                adapter: ID.clone(),
-                action: "spawn the claude subprocess".to_string(),
-                source,
-            })?;
-
-        let pid = child
-            .id()
-            .and_then(|id| Pid::try_from(id).ok())
-            .ok_or_else(|| AdapterError::Adapter {
-                adapter: ID.clone(),
-                message: "the claude subprocess exited before it could be tracked".to_string(),
-            })?;
-
-        let stdin = child.stdin.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the claude subprocess has no stdin pipe".to_string(),
-        })?;
-
-        let stdout = child.stdout.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the claude subprocess has no stdout pipe".to_string(),
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "the claude subprocess has no stderr pipe".to_string(),
-        })?;
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
-                        for event in parse::parse_line(&line) {
-                            if tx.send(event).is_err() {
-                                return;
-                            }
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "claude-code: error reading stdout");
-                        break;
-                    }
-                }
-            }
-            // Reap the child so a killed or naturally-finished session
-            // never leaves a zombie behind.
-            let _ = child.wait().await;
-        });
-        tokio::spawn(drain_stderr(stderr));
-        write_prompt(stdin, &req.prompt, &ID).await?;
-
-        Ok(Box::new(ClaudeCodeSession {
-            pid,
-            receiver: Some(rx),
-        }))
+        subprocess::open(Launch {
+            adapter: &ID,
+            binary: &self.binary,
+            args,
+            cwd: &req.cwd,
+            env: &req.env,
+            prompt: &req.prompt,
+            parser: Box::new(ClaudeParser),
+        })
+        .await
     }
 }
 
-async fn drain_stderr(stderr: tokio::process::ChildStderr) {
-    let mut lines = BufReader::new(stderr).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        tracing::debug!(target: "claude_code_stderr", "{line}");
+/// The CLI's stream-json lines, one event list per line.
+struct ClaudeParser;
+
+impl LineParser for ClaudeParser {
+    fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
+        parse::parse_line(line)
     }
 }
 
@@ -205,25 +131,11 @@ impl Adapter for ClaudeCodeAdapter {
                 message: e.to_string(),
             });
         }
-        let output = tokio::process::Command::new(&self.binary)
-            .arg("--version")
-            .output()
-            .await;
-        Ok(match output {
-            Ok(output) if output.status.success() => ProbeReport::Healthy {
-                version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-            },
-            Ok(output) => ProbeReport::Unhealthy {
-                diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            },
-            Err(e) => ProbeReport::Unhealthy {
-                diagnostic: e.to_string(),
-            },
-        })
+        Ok(subprocess::probe_version(&self.binary).await)
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
-        self.open_session(req, None).await
+        self.launch(req, None).await
     }
 
     async fn resume(
@@ -231,40 +143,7 @@ impl Adapter for ClaudeCodeAdapter {
         session: &SessionId,
         req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
-        self.open_session(req, Some(session)).await
-    }
-}
-
-pub struct ClaudeCodeSession {
-    pid: Pid,
-    receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
-}
-
-#[async_trait]
-impl AgentSession for ClaudeCodeSession {
-    fn events(&mut self) -> BoxStream<'_, AgentEvent> {
-        match self.receiver.take() {
-            Some(rx) => Box::pin(stream::unfold(rx, |mut rx| async move {
-                rx.recv().await.map(|event| (event, rx))
-            })),
-            // A second call gets an already-exhausted stream rather than
-            // a panic — the caller's misuse, not a reason to crash.
-            None => Box::pin(stream::empty()),
-        }
-    }
-
-    async fn interrupt(&mut self) -> Result<()> {
-        signal_group(self.pid, Signal::SIGINT).map_err(|e| e.into_adapter_error(&ID))
-    }
-
-    async fn kill(&mut self) -> Result<()> {
-        signal_group(self.pid, Signal::SIGKILL).map_err(|e| e.into_adapter_error(&ID))
-    }
-
-    fn pgid(&self) -> Option<Pid> {
-        // Spawned with `process_group(0)`, so the child's pid is its
-        // process-group id.
-        Some(self.pid)
+        self.launch(req, Some(session)).await
     }
 }
 

@@ -334,42 +334,117 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     req.env
         .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
     let mut session = adapter().spawn(req).await.unwrap();
+    let grandchild_pid = grandchild_pid(&child_pid_file).await;
 
-    // Give the stub a moment to record its grandchild's pid.
+    session.kill().await.unwrap();
+
+    // The grandchild the stub spawned must die too, not just the
+    // stub itself — proving the kill reached the whole process group.
+    assert!(
+        stops_running(&grandchild_pid).await,
+        "grandchild process survived kill()"
+    );
+}
+
+/// The pid of the `sleep` the stub spawned, once the stub has recorded
+/// it.
+async fn grandchild_pid(child_pid_file: &std::path::Path) -> String {
     for _ in 0..50 {
         if child_pid_file.exists() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let grandchild_pid = std::fs::read_to_string(&child_pid_file)
+    std::fs::read_to_string(child_pid_file)
         .unwrap()
         .trim()
-        .to_string();
+        .to_string()
+}
 
-    session.kill().await.unwrap();
+/// True while `pid` runs. `kill -0` alone is not enough: a killed
+/// process whose parent is gone lingers as a zombie — still visible to
+/// `kill -0` — until something reaps it, so running means `ps` reports
+/// a state for it that is not `Z`.
+fn running(pid: &str) -> bool {
+    let ps = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", pid])
+        .output()
+        .unwrap();
+    let state = String::from_utf8_lossy(&ps.stdout);
+    let state = state.trim();
+    !(state.is_empty() || state.starts_with('Z'))
+}
 
-    // The grandchild the stub spawned must die too, not just the
-    // stub itself — proving the kill reached the whole process group.
-    // `kill -0` alone isn't enough here: a killed process whose parent
-    // is also gone lingers as a zombie (still `kill -0`-visible) until
-    // something reaps it, so a live, running process is specifically
-    // one `ps` still reports a state for that isn't `Z` (zombie).
-    let mut grandchild_running = true;
+/// Polls until `pid` stops running; `false` when it never does.
+async fn stops_running(pid: &str) -> bool {
     for _ in 0..50 {
-        let ps = std::process::Command::new("ps")
-            .args(["-o", "stat=", "-p", &grandchild_pid])
-            .output()
-            .unwrap();
-        let state = String::from_utf8_lossy(&ps.stdout);
-        let state = state.trim();
-        if state.is_empty() || state.starts_with('Z') {
-            grandchild_running = false;
-            break;
+        if !running(pid) {
+            return true;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(!grandchild_running, "grandchild process survived kill()");
+    false
+}
+
+#[tokio::test]
+async fn dropping_a_session_kills_its_process_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_pid_file = dir.path().join("child.pid");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
+        child_pid_file.display().to_string().into(),
+    );
+    req.env
+        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
+    let session = adapter().spawn(req).await.unwrap();
+    let grandchild_pid = grandchild_pid(&child_pid_file).await;
+
+    // No kill(), no interrupt(): the session goes out of scope — what
+    // an early return or a panic in the engine looks like from here.
+    drop(session);
+
+    assert!(
+        stops_running(&grandchild_pid).await,
+        "the grandchild survived the session being dropped"
+    );
+}
+
+#[tokio::test]
+async fn non_utf8_output_does_not_end_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = dir.path().join("lines.jsonl");
+    let mut scripted = Vec::new();
+    scripted.extend_from_slice(INIT_LINE.as_bytes());
+    scripted.push(b'\n');
+    // A note whose text carries bytes no UTF-8 decoder accepts.
+    scripted.extend_from_slice(
+        br#"{"type":"assistant","message":{"id":"msg-1","content":[{"type":"text","text":"caf"#,
+    );
+    scripted.extend_from_slice(b"\xff\xfe");
+    scripted.extend_from_slice(br#""}]}}"#);
+    scripted.push(b'\n');
+    scripted.extend_from_slice(br#"{"type":"result","is_error":false,"result":"all done"}"#);
+    scripted.push(b'\n');
+    std::fs::write(&lines, scripted).unwrap();
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
+    assert!(
+        matches!(
+            events.last(),
+            Some(AgentEvent::Completed { result }) if result.summary == "all done"
+        ),
+        "the session must reach its terminal event past the undecodable line, got: {events:?}"
+    );
 }
 
 #[tokio::test]

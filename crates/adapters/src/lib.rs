@@ -12,6 +12,7 @@ mod mock;
 pub mod process_start;
 mod session;
 pub mod signal;
+pub mod subprocess;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};
