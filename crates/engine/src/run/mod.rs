@@ -46,7 +46,9 @@ use yunta_core::events::{
     RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, StoredEvent,
     TerminalState,
 };
-use yunta_core::{AdapterId, Clock, Manifest, ModeName, NodeId, Pid, RunId, Seq, YuntaError};
+use yunta_core::{
+    AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, Pid, RunId, Seq, YuntaError,
+};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -56,7 +58,7 @@ use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
-pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor};
+pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor, RunRoots};
 use schedule::ScheduleStep;
 
 #[derive(Debug, Error)]
@@ -80,6 +82,16 @@ pub enum RunError {
         mode: ModeName,
         declared: String,
     },
+
+    /// `create_run`'s other guard: a run is born once, whole. A
+    /// directory already at the run's path belongs to another run, or
+    /// to a birth that stopped before its `run_created` — either way
+    /// the id is not free.
+    #[error(
+        "run directory `{path}` already exists — a run id names one birth; a directory with \
+         no run in the log is left from a birth that stopped early and is safe to delete"
+    )]
+    RunDirExists { path: PathBuf },
 
     /// An identifier the engine composed breaks its own rule — an
     /// invariant of the composition, reported rather than assumed.
@@ -136,6 +148,7 @@ pub(crate) struct RunCtx<'a> {
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,
     pub clock: &'a dyn Clock,
+    pub ids: &'a dyn IdSource,
     pub max_task_retries: u32,
     /// Criteria memoization — one cache per `execute_run`
     /// call, never persisted: a resume simply starts cold, which is safe
@@ -336,6 +349,15 @@ pub struct RunReport {
     pub state: RunState,
 }
 
+/// A file a run carries from birth, under its `artifacts/`: what a
+/// parent mounts into a child, or a successor inherits from its
+/// predecessor. `name` is relative to `artifacts/` and may nest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BirthArtifact {
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
 /// What [`create_run`] freezes: the run's identity and its
 /// declared birth facts, bundled — `storage`/`clock` stay separate
 /// arguments because they are the caller's *infrastructure*, not this
@@ -348,11 +370,18 @@ pub struct CreateRunParams<'a> {
     pub mode: &'a ModeName,
     /// The predecessor this run inherits from, if any.
     pub promoted_from: Option<&'a RunId>,
+    /// Files under `artifacts/` from birth, written before
+    /// `run_created` — a run that exists in the log has them.
+    pub artifacts: &'a [BirthArtifact],
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
-/// `scratch/`, the frozen `manifest.yaml`, and the `run_created` event.
-/// Returns the run directory.
+/// `scratch/`, the frozen `manifest.yaml`, the birth artifacts, and
+/// the `run_created` event — in that order, so the log names a run
+/// only once its directory is complete. Returns the run directory.
+///
+/// The run directory must not exist: a run is born once, and an id is
+/// never reused ([`RunError::RunDirExists`]).
 ///
 /// `mode` is frozen into `run_created.mode` right here and
 /// never re-resolved again — a resume reads the same name back off the
@@ -373,6 +402,7 @@ pub async fn create_run(
         runs_root,
         mode,
         promoted_from,
+        artifacts,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -399,12 +429,27 @@ pub async fn create_run(
     }
 
     let run_dir = runs_root.join(run_id.as_str());
-    for dir in [
-        run_dir.clone(),
-        run_dir.join("artifacts"),
-        run_dir.join("scratch"),
-    ] {
-        tokio::fs::create_dir_all(&dir)
+    tokio::fs::create_dir_all(runs_root)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("create runs root `{}`", runs_root.display()),
+            source,
+        })?;
+    match tokio::fs::create_dir(&run_dir).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(RunError::RunDirExists { path: run_dir });
+        }
+        Err(source) => {
+            return Err(RunError::Io {
+                context: format!("create run directory `{}`", run_dir.display()),
+                source,
+            });
+        }
+    }
+    let artifacts_dir = run_dir.join("artifacts");
+    for dir in [artifacts_dir.clone(), run_dir.join("scratch")] {
+        tokio::fs::create_dir(&dir)
             .await
             .map_err(|source| RunError::Io {
                 context: format!("create run directory `{}`", dir.display()),
@@ -423,6 +468,24 @@ pub async fn create_run(
             context: format!("write `{}`", manifest_path.display()),
             source,
         })?;
+
+    for artifact in artifacts {
+        let dest = artifacts_dir.join(&artifact.name);
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|source| RunError::Io {
+                    context: format!("create `{}`", parent.display()),
+                    source,
+                })?;
+        }
+        tokio::fs::write(&dest, &artifact.bytes)
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("write birth artifact `{}`", dest.display()),
+                source,
+            })?;
+    }
 
     let event = EventDraft {
         run_id: run_id.clone(),
@@ -454,7 +517,7 @@ pub async fn create_run(
 
 /// Everything [`execute_run`] needs from its caller, grouped: the run's
 /// own identity/manifest/paths, the environment it executes against
-/// (adapters, storage, clock), and the cross-cutting surfaces
+/// (adapters, storage, clock, ids), and the cross-cutting surfaces
 /// (human_interaction, forge, cancel) every deep execution path can
 /// reach through [`RunCtx`] once this is unpacked into one.
 pub struct RunEnv<'a> {
@@ -465,6 +528,9 @@ pub struct RunEnv<'a> {
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,
     pub clock: &'a dyn Clock,
+    /// Mints the ids of the runs this one gives birth to — its
+    /// children and its promotion successor.
+    pub ids: &'a dyn IdSource,
     pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
@@ -498,6 +564,7 @@ pub(crate) async fn execute_run_at_depth(
         adapters,
         storage,
         clock,
+        ids,
         max_task_retries,
         human_interaction,
         forge,
@@ -517,6 +584,7 @@ pub(crate) async fn execute_run_at_depth(
         adapters,
         storage,
         clock,
+        ids,
         max_task_retries,
         memo: Memo::new(manifest.config_hash.clone()),
         human_interaction,

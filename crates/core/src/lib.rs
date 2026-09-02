@@ -12,6 +12,7 @@ mod error;
 pub mod events;
 mod findings;
 mod glob;
+mod id_source;
 mod ids;
 mod inputs;
 mod ledger;
@@ -36,6 +37,9 @@ pub use config::{
 pub use error::{Result, YuntaError};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
+#[cfg(any(test, feature = "testkit"))]
+pub use id_source::SeqIdSource;
+pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName,
     NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,

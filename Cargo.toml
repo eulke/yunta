@@ -47,6 +47,7 @@ tokio = "1"
 tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+ulid = "3"
 uuid = "1"
 
 # Lints apply to every crate, tests included, through `[lints]

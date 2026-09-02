@@ -12,12 +12,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
+use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, Clock, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunError, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+
+/// Run ids for everything a test run gives birth to — unique across
+/// the binary, so parallel tests never share a run directory.
+static IDS: SeqIdSource = SeqIdSource::new("minted");
 
 struct FixedClock;
 
@@ -124,6 +129,7 @@ impl Bench {
                 runs_root: &self.runs_root,
                 mode: &ModeName::from(mode),
                 promoted_from: None,
+                artifacts: &[],
             },
             &self.storage.async_handle(),
             &FixedClock,
@@ -142,6 +148,7 @@ impl Bench {
             adapters: &adapters,
             storage: &self.storage.async_handle(),
             clock: &FixedClock,
+            ids: &IDS,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &NoInteraction,
             forge: None,

@@ -1792,8 +1792,13 @@ nodes:
     assert!(stdout(&output).contains("finished"));
 
     // The child is a complete run of its own under the same state root:
-    // frozen manifest, own worktree with the work done.
-    let child_id = format!("{parent_id}-feat");
+    // frozen manifest, own worktree with the work done. Its id is the
+    // log's to give — the only other run directory is the child's.
+    let child_id = std::fs::read_dir(home.join("runs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .find(|name| *name != parent_id)
+        .expect("the child run has a directory of its own");
     let child_manifest = home.join("runs").join(&child_id).join("manifest.yaml");
     assert!(
         child_manifest.exists(),

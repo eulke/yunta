@@ -32,6 +32,11 @@ globset.workspace = true
 # Names the path of a value that failed inside an already-buffered
 # `Value` — the one place the parser's own path tracking cannot reach.
 serde_path_to_error.workspace = true
+# Run ids are ULIDs (time-ordered, one path segment, collision-free across
+# processes). The crate is the encoding and the 48-bit millisecond
+# arithmetic and nothing else; its randomness comes from `rand`, already
+# in the workspace graph through `rmcp`.
+ulid.workspace = true
 
 [features]
 # Unchecked `From<&str>`/`From<String>` for identifiers, so a test can

@@ -10,12 +10,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
+use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, check, create_run, execute_run, CreateRunParams, HumanInteraction,
     NoInteraction, NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+
+/// Run ids for everything a test run gives birth to — unique across
+/// the binary, so parallel tests never share a run directory.
+static IDS: SeqIdSource = SeqIdSource::new("minted");
 
 struct FixedClock;
 
@@ -145,6 +150,7 @@ async fn an_approved_gate_publishes_the_new_version() {
             runs_root: &runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &storage.async_handle(),
         &FixedClock,
@@ -179,6 +185,7 @@ sessions:
         adapters: &adapters,
         storage: &storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &ApproveEverything,
         forge: None,
@@ -228,6 +235,7 @@ async fn an_unresolved_gate_never_publishes_anything() {
             runs_root: &runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &storage.async_handle(),
         &FixedClock,
@@ -261,6 +269,7 @@ sessions:
         adapters: &adapters,
         storage: &storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,

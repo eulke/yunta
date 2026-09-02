@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use yunta_adapters::{Adapter, MockAdapter, MOCK_ID};
-use yunta_core::{AdapterId, ModeName, RunId, SystemClock, Workflow};
+use yunta_core::{AdapterId, Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
 use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -37,7 +37,6 @@ use crate::load_yaml;
 use crate::project;
 
 /// The run id every case's single run is created under.
-static TEST_RUN: RunId = RunId::from_static("test-run");
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -197,7 +196,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         .await
         .map_err(|e| e.to_string())?;
 
-    let run_id = TEST_RUN.clone();
+    let run_id = SystemIdSource.mint_run_id(SystemClock.now());
     let run_dir = runs_root.join(run_id.as_str());
 
     let fixture_path = case_path
@@ -227,6 +226,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
             runs_root: &runs_root,
             mode: &mode,
             promoted_from: None,
+            artifacts: &[],
         },
         &storage,
         &SystemClock,
@@ -243,6 +243,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         adapters: &adapters,
         storage: &storage,
         clock: &SystemClock,
+        ids: &SystemIdSource,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,

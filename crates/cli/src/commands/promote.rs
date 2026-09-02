@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, Forge};
-use yunta_core::{AdapterId, Manifest, RunId, SystemClock};
+use yunta_core::{AdapterId, IdSource, Manifest, RunId, SystemClock};
 use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -28,6 +28,7 @@ pub(crate) struct PromotionEnv<'a> {
     pub cwd: &'a Path,
     pub project: &'a Project,
     pub(crate) storage: &'a AsyncStorage,
+    pub ids: &'a dyn IdSource,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
@@ -50,7 +51,8 @@ pub(crate) async fn drive_promotions(
         let suggested_mode = suggested_mode.clone();
         // The creation mechanics live in the engine (shared with
         // `kind: workflow` children that promote); this loop keeps only
-        // what's the CLI's — the console surface and the system clock.
+        // what's the CLI's — the console surface, the system clock and
+        // the id source.
         let successor = yunta_engine::create_promotion_successor(
             yunta_engine::Predecessor {
                 id: &run_id,
@@ -60,10 +62,13 @@ pub(crate) async fn drive_promotions(
             },
             env.cwd,
             &suggested_mode,
-            &env.project.runs_root,
-            &env.project.worktrees_root,
+            yunta_engine::RunRoots {
+                runs: &env.project.runs_root,
+                worktrees: &env.project.worktrees_root,
+            },
             env.storage,
             &SystemClock,
+            env.ids,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -80,6 +85,7 @@ pub(crate) async fn drive_promotions(
             adapters: env.adapters,
             storage: env.storage,
             clock: &SystemClock,
+            ids: env.ids,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &crate::human_interaction::ConsoleInteraction,
             forge: env.forge,
@@ -201,6 +207,7 @@ nodes:
                 runs_root: &project.runs_root,
                 mode: &"quick".into(),
                 promoted_from: None,
+                artifacts: &[],
             },
             &storage.async_handle(),
             &SystemClock,
@@ -220,6 +227,7 @@ nodes:
             adapters: &adapters,
             storage: &storage.async_handle(),
             clock: &SystemClock,
+            ids: &yunta_core::SystemIdSource,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &AlwaysPromote,
             forge: None,
@@ -238,6 +246,7 @@ nodes:
                 cwd: &cwd,
                 project: &project,
                 storage: &storage.async_handle(),
+                ids: &yunta_core::SystemIdSource,
                 adapters: &adapters,
                 forge: None,
                 cancel: None,
@@ -250,7 +259,7 @@ nodes:
         .await
         .unwrap();
 
-        assert_eq!(final_id, RunId::from("run-parent-promoted"));
+        assert_ne!(final_id, run_id, "the successor is a run of its own");
         assert_eq!(final_report.terminal, yunta_engine::RunTerminal::Finished);
 
         // Chain audited on the successor's own log: run_created carries

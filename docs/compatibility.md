@@ -86,7 +86,12 @@ rule is refused with the value, what it was meant to be and the rule:
   as the adapter's CLI accepts them.
 - A run id, a publisher and a pack name are one path segment: printable,
   without whitespace, `/` or `\`, and not `.` or `..`. A pack reference is
-  `publisher/name`.
+  `publisher/name`. Every run yunta creates — a `yunta run`, a child of a
+  `kind: workflow` node, a promotion successor — gets a ULID as its id: 26
+  Crockford base32 characters that sort by the instant of birth. The link
+  between a parent and its child, and between a run and its promotion
+  successor, is recorded in the log (`child_run_created`, `promoted_from`),
+  never encoded in the id.
 - A finding id is any printable label; a session id is whatever the
   adapter's CLI issued, as long as it is not empty.
 

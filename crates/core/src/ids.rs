@@ -359,6 +359,14 @@ string_id!(
     RunId, what = "run id", rule = SEGMENT_RULE, check = is_segment
 );
 
+/// A ULID is 26 Crockford base32 characters — one path segment by
+/// construction, so the conversion is total.
+impl From<ulid::Ulid> for RunId {
+    fn from(ulid: ulid::Ulid) -> Self {
+        RunId(Cow::Owned(ulid.to_string()))
+    }
+}
+
 string_id!(
     /// A task's id from the ledger, unique within one ledger:
     /// `^[A-Za-z][A-Za-z0-9_-]*$`.

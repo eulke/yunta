@@ -9,12 +9,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
+use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+
+/// Run ids for everything a test run gives birth to — unique across
+/// the binary, so parallel tests never share a run directory.
+static IDS: SeqIdSource = SeqIdSource::new("minted");
 
 struct FixedClock;
 
@@ -146,6 +151,7 @@ impl Bench {
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
                 promoted_from: None,
+                artifacts: &[],
             },
             &self.storage.async_handle(),
             &FixedClock,
@@ -165,6 +171,7 @@ impl Bench {
             adapters: &adapters,
             storage: &self.storage.async_handle(),
             clock: &FixedClock,
+            ids: &IDS,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
             forge: None,
@@ -497,6 +504,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -811,6 +819,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -829,6 +838,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         adapters: &first_adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -854,6 +864,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         adapters: &resume_adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1002,6 +1013,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1021,6 +1033,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         adapters: &first_adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1056,6 +1069,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         adapters: &resume_adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
         forge: None,
@@ -1158,6 +1172,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1173,6 +1188,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1222,6 +1238,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1237,6 +1254,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1283,6 +1301,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1316,6 +1335,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1374,6 +1394,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1405,6 +1426,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -1613,6 +1635,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -1666,6 +1689,7 @@ nodes:
         adapters: &HashMap::new(),
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -2667,6 +2691,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -2810,6 +2835,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -4583,6 +4609,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -4602,6 +4629,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -4630,6 +4658,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
         forge: None,
@@ -4823,6 +4852,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -4841,6 +4871,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -4863,6 +4894,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
         forge: None,
@@ -5318,6 +5350,7 @@ async fn run_with_recording_mock(
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -5335,6 +5368,7 @@ async fn run_with_recording_mock(
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -5569,6 +5603,7 @@ sessions:
             runs_root: &bench.runs_root,
             mode: &"quick".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -5586,6 +5621,7 @@ sessions:
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -5697,6 +5733,7 @@ sessions:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -5714,6 +5751,7 @@ sessions:
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -5998,6 +6036,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -6030,6 +6069,7 @@ nodes:
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -6082,6 +6122,7 @@ async fn resume_orphan_with_mock(
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -6132,6 +6173,7 @@ async fn resume_orphan_with_mock(
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
         forge: None,
@@ -6239,4 +6281,104 @@ sessions:
         e.payload(),
         Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
     )));
+}
+
+// --- a run is born once, whole -----------------------------------------------
+
+struct BirthBench {
+    _root: tempfile::TempDir,
+    runs_root: std::path::PathBuf,
+    storage: Storage,
+    manifest: yunta_core::Manifest,
+}
+
+impl BirthBench {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let worktree = root.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        init_repo(&worktree);
+        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
+        let workflow: Workflow = serde_yaml::from_str(
+            "name: birth\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n",
+        )
+        .unwrap();
+        let manifest = build_manifest(
+            &workflow,
+            &ConfigLayer::default(),
+            &worktree,
+            &worktree,
+            &HashMap::new(),
+        )
+        .unwrap();
+        BirthBench {
+            runs_root: root.path().join("runs"),
+            _root: root,
+            storage,
+            manifest,
+        }
+    }
+
+    async fn create(
+        &self,
+        run_id: &RunId,
+        artifacts: &[yunta_engine::BirthArtifact],
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        create_run(
+            CreateRunParams {
+                run_id,
+                manifest: &self.manifest,
+                runs_root: &self.runs_root,
+                mode: &"default".into(),
+                promoted_from: None,
+                artifacts,
+            },
+            &self.storage.async_handle(),
+            &FixedClock,
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn create_run_refuses_an_existing_run_dir() {
+    let bench = BirthBench::new();
+    let run_id = RunId::from("run-once");
+    bench.create(&run_id, &[]).await.unwrap();
+
+    let error = bench.create(&run_id, &[]).await.unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            yunta_engine::RunError::RunDirExists { path } if *path == bench.runs_root.join("run-once")
+        ),
+        "{error:?}"
+    );
+    // Refused before anything is written: the log still holds one birth.
+    assert_eq!(bench.storage.events_for_run(&run_id).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log() {
+    let bench = BirthBench::new();
+    let run_id = RunId::from("run-with-brief");
+    let artifacts = vec![yunta_engine::BirthArtifact {
+        name: "brief/plan.md".to_string(),
+        bytes: b"hello".to_vec(),
+    }];
+
+    let run_dir = bench.create(&run_id, &artifacts).await.unwrap();
+
+    assert_eq!(
+        std::fs::read(run_dir.join("artifacts").join("brief").join("plan.md")).unwrap(),
+        b"hello"
+    );
+    let events = bench.storage.events_for_run(&run_id).unwrap();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [only] if matches!(only.payload(), Some(yunta_core::events::EventPayload::RunCreated(_)))
+        ),
+        "the birth is one run_created after the directory is complete"
+    );
 }

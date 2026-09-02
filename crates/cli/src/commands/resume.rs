@@ -9,7 +9,7 @@
 
 use std::process::ExitCode;
 
-use yunta_core::{Isolation, Manifest, RunId, SystemClock};
+use yunta_core::{Isolation, Manifest, RunId, SystemClock, SystemIdSource};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -86,6 +86,7 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
         adapters: &adapters,
         storage: &storage,
         clock: &SystemClock,
+        ids: &SystemIdSource,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,
         forge: forge.as_deref(),
@@ -101,6 +102,7 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
                     cwd: &cwd,
                     project: &project,
                     storage: &storage,
+                    ids: &SystemIdSource,
                     adapters: &adapters,
                     forge: forge.as_deref(),
                     cancel: Some(&root_cancel),

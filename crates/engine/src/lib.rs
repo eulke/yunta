@@ -80,8 +80,8 @@ pub use replay::{
 };
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, resolve_gate,
-    session_token_budget, CreateRunParams, Predecessor, PromotionSuccessor, ResolveGateError,
-    RunEnv, RunError, RunReport, RunTerminal,
+    session_token_budget, BirthArtifact, CreateRunParams, Predecessor, PromotionSuccessor,
+    ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};

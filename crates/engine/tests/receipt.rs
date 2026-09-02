@@ -16,6 +16,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{StoredEvent, TerminalState, TokenUsage};
+use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, Clock, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
@@ -23,6 +24,10 @@ use yunta_engine::{
     EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
 };
 use yunta_storage::Storage;
+
+/// Run ids for everything a test run gives birth to — unique across
+/// the binary, so parallel tests never share a run directory.
+static IDS: SeqIdSource = SeqIdSource::new("minted");
 
 // --- formatters: golden output over a hand-built Receipt --------------------
 
@@ -340,6 +345,7 @@ impl Bench {
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
                 promoted_from: None,
+                artifacts: &[],
             },
             &self.storage.async_handle(),
             &FixedClock,
@@ -359,6 +365,7 @@ impl Bench {
             adapters: &adapters,
             storage: &self.storage.async_handle(),
             clock: &FixedClock,
+            ids: &IDS,
             max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
             human_interaction: &yunta_engine::NoInteraction,
             forge: None,
@@ -448,6 +455,7 @@ nodes:
             runs_root: &bench.runs_root,
             mode: &"default".into(),
             promoted_from: None,
+            artifacts: &[],
         },
         &bench.storage.async_handle(),
         &FixedClock,
@@ -463,6 +471,7 @@ nodes:
         adapters: &adapters,
         storage: &bench.storage.async_handle(),
         clock: &FixedClock,
+        ids: &IDS,
         max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,

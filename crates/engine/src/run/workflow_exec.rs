@@ -12,14 +12,14 @@
 //!   `.yunta/workflows/<name>.yaml` catalog first, a publisher's
 //!   vendored packs second — the same resolver `list_workflows` and
 //!   `check_workflow_refs` share.
-//! - The child run id is `<parent>-<node>` (with a `-N` ordinal when a
-//!   re-route runs the node again), derived from the parent's log —
-//!   deterministic, no entropy in the engine.
+//! - The child run id comes from the run's injected `IdSource`, like
+//!   every run id; the link to this parent and node is the
+//!   `child_run_created` on the parent's log, never the name.
 //! - `child_run_created` lands on the parent's log *before* the child's
 //!   own `run_created`: a crash in between leaves a dangling reference
 //!   (a child with no events) that the next resume supersedes with a
-//!   fresh ordinal, instead of a half-created run colliding with its
-//!   own re-creation.
+//!   fresh birth under a fresh id, instead of a half-created run
+//!   colliding with its own re-creation.
 //! - Budgets cascade at birth: the child's frozen
 //!   `limits.max_tokens_per_run` is the parent's *remaining* budget, so
 //!   the parent's cap bounds the whole tree; the child's spend
@@ -45,7 +45,7 @@ use crate::template::render_template;
 
 use super::node_exec::{cancelled_end, close_node, fail, template_vars, NodeEnd};
 use super::CreateRunParams;
-use super::{RunCtx, RunError, RunTerminal};
+use super::{BirthArtifact, RunCtx, RunError, RunTerminal};
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
 /// it, so no configuration lookup can ever disagree with where the
@@ -76,13 +76,13 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
 /// node with nothing dangling. A `kind: workflow` source resolves
 /// through the recorded link (its last `child_run_finished` on this
 /// log) to that child run's `artifacts/`; any other node is the
-/// parent's own `run.dir/artifacts/`. Returns `(dest_name, bytes)`
-/// pairs, or the diagnostic to fail the node with.
+/// parent's own `run.dir/artifacts/`. Returns the child's birth
+/// artifacts, or the diagnostic to fail the node with.
 fn resolve_mounts(
     ctx: &RunCtx<'_>,
     events: &[yunta_core::events::StoredEvent],
     mounts: &[MountSpec],
-) -> Result<Vec<(String, Vec<u8>)>, String> {
+) -> Result<Vec<BirthArtifact>, String> {
     let mut resolved = Vec::new();
     for mount in mounts {
         let m = &mount.artifact;
@@ -118,7 +118,10 @@ fn resolve_mounts(
         let path = source_dir.join(&m.name);
         match std::fs::read(&path) {
             Ok(bytes) => {
-                resolved.push((m.rename.clone().unwrap_or_else(|| m.name.clone()), bytes));
+                resolved.push(BirthArtifact {
+                    name: m.rename.clone().unwrap_or_else(|| m.name.clone()),
+                    bytes,
+                });
             }
             Err(e) => {
                 return Err(format!(
@@ -344,15 +347,9 @@ pub(super) async fn execute_workflow(
         worktrees_root: std::path::absolute(&trees).unwrap_or_else(|_| trees.clone()),
     });
 
-    // Deterministic child id from the log alone: first birth is
-    // `<parent>-<node>`; a re-route running the node again (or a
-    // superseded dangling reference) counts up.
-    let ordinal = created.len() + 1;
-    let child_id = RunId::try_from(if ordinal == 1 {
-        format!("{}-{}", ctx.run_id, node.id)
-    } else {
-        format!("{}-{}-{ordinal}", ctx.run_id, node.id)
-    })?;
+    // A fresh id from the injected source: the link to this parent and
+    // node is the `child_run_created` below, never the name.
+    let child_id = ctx.ids.mint_run_id(ctx.clock.now());
 
     let child_tree = match isolation {
         WorkflowIsolation::Inherit => ctx.worktree.to_path_buf(),
@@ -381,36 +378,15 @@ pub(super) async fn execute_workflow(
         }
     };
 
-    // The copies land before the link — a crash here re-derives
-    // the same ordinal (nothing was linked) and simply rewrites them.
-    // The promotion inheritance mechanism generalized: files into the
-    // child's own `artifacts/`, where its ordinary machinery (context
-    // `artifact: {name}`, `{{run.dir}}` templates) already looks.
-    if !mounted.is_empty() {
-        let child_artifacts = runs.join(child_id.as_str()).join("artifacts");
-        std::fs::create_dir_all(&child_artifacts).map_err(|source| RunError::Io {
-            context: format!("create `{}`", child_artifacts.display()),
-            source,
-        })?;
-        for (dest_name, bytes) in &mounted {
-            let dest = child_artifacts.join(dest_name);
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
-                    context: format!("create `{}`", parent.display()),
-                    source,
-                })?;
-            }
-            std::fs::write(&dest, bytes).map_err(|source| RunError::Io {
-                context: format!("write mounted artifact `{}`", dest.display()),
-                source,
-            })?;
-        }
-    }
-
     // Link first, then create: the identity pair (`child_run_id` +
     // `child_workflow_hash`) is on the parent's log before the child
     // exists, so no crash window can orphan a child the parent never
-    // heard of.
+    // heard of — a link whose birth never completed has no run_created
+    // and is superseded on resume. The mounts are the child's birth
+    // artifacts: the promotion inheritance mechanism generalized, files
+    // into the child's own `artifacts/`, where its ordinary machinery
+    // (context `artifact: {name}`, `{{run.dir}}` templates) already
+    // looks.
     ctx.emit(
         Some(&node.id),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {
@@ -435,6 +411,7 @@ pub(super) async fn execute_workflow(
             runs_root: &runs,
             mode: &child_mode,
             promoted_from: None,
+            artifacts: &mounted,
         },
         ctx.storage,
         ctx.clock,
@@ -557,6 +534,7 @@ async fn drive_child(
                     adapters: ctx.adapters,
                     storage: ctx.storage,
                     clock: ctx.clock,
+                    ids: ctx.ids,
                     max_task_retries: ctx.max_task_retries,
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
@@ -612,10 +590,13 @@ async fn drive_child(
                     },
                     ctx.worktree,
                     &suggested_mode,
-                    &runs_root(ctx),
-                    &worktrees_root(ctx),
+                    super::RunRoots {
+                        runs: &runs_root(ctx),
+                        worktrees: &worktrees_root(ctx),
+                    },
                     ctx.storage,
                     ctx.clock,
+                    ctx.ids,
                 )
                 .await
                 {

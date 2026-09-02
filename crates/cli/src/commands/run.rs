@@ -2,8 +2,9 @@
 //! prepare the run's isolated working tree, create the run and execute
 //! it there.
 //!
-//! The run id comes from the wall clock + pid — the shell may use
-//! entropy, the engine never does.
+//! The run id is a ULID from the shell's id source; the engine mints
+//! only the ids of the runs this one gives birth to, through the same
+//! injected source.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,7 +12,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{AdapterId, Isolation, Manifest, ModeName, RunId, SystemClock, Workflow};
+use yunta_core::{
+    AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, RunId, SystemClock, SystemIdSource,
+    Workflow,
+};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -317,17 +321,9 @@ pub async fn run(
         }
     }
 
-    let run_id = match RunId::try_from(format!(
-        "run-{}-{}",
-        chrono::Utc::now().format("%Y%m%d-%H%M%S"),
-        std::process::id()
-    )) {
-        Ok(run_id) => run_id,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let clock = SystemClock;
+    let ids = SystemIdSource;
+    let run_id = ids.mint_run_id(clock.now());
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => project.worktrees_root.join(run_id.as_str()),
@@ -355,8 +351,6 @@ pub async fn run(
         }
     }
 
-    let clock = SystemClock;
-
     // An explicit `--mode` is used as given (`create_run` itself
     // refuses an unknown name); omitted with `modes:` declared
     // defaults to the *first* declared mode — promotion only ever
@@ -380,6 +374,7 @@ pub async fn run(
             runs_root: &project.runs_root,
             mode: &resolved_mode,
             promoted_from: None,
+            artifacts: &[],
         },
         &storage,
         &clock,
@@ -430,6 +425,7 @@ pub async fn run(
         adapters: &adapters,
         storage: &storage,
         clock: &clock,
+        ids: &ids,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,
         forge: forge.as_deref(),
@@ -454,6 +450,7 @@ pub async fn run(
                     cwd: &cwd,
                     project: &project,
                     storage: &storage,
+                    ids: &ids,
                     adapters: &adapters,
                     forge: forge.as_deref(),
                     cancel: Some(&root_cancel),
