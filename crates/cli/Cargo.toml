@@ -2,56 +2,58 @@
 name = "yunta"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Yunta — a deterministic workflow engine for code agents."
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "yunta"
 path = "src/main.rs"
 
 [dependencies]
-# `version` must track [workspace.package].version — crates.io publish
-# rejects a path dependency with no version requirement.
-yunta-core = { path = "../core", version = "0.1.0" }
-yunta-engine = { path = "../engine", version = "0.1.0" }
-yunta-adapters = { path = "../adapters", version = "0.1.0" }
-yunta-storage = { path = "../storage", version = "0.1.0" }
-clap = { version = "4", features = ["derive"] }
-chrono = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+yunta-core.workspace = true
+yunta-engine.workspace = true
+yunta-adapters.workspace = true
+yunta-storage.workspace = true
+clap = { workspace = true, features = ["derive"] }
+chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_yaml.workspace = true
 # `yunta stats --json` — already a transitive dependency of every crate
 # here via `yunta-engine`, made direct now that the CLI serializes its
 # own JSON DTOs rather than only ever deserializing YAML.
-serde_json = "1"
+serde_json.workspace = true
 # `yunta test` sandboxes each case in a throwaway worktree/runs root.
-tempfile = "3"
-thiserror = "2"
+tempfile.workspace = true
+thiserror.workspace = true
 # `yunta run`/`resume`/`test` drive the async engine; a current-thread
 # runtime is all the sequential scheduler needs.
-tokio = { version = "1", features = ["rt", "macros", "signal", "time", "process"] }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "process"] }
 # CancellationToken for the Ctrl-C -> root-token bridge; the engine
 # already speaks this type on its execute_run surface.
-tokio-util = "0.7"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
-async-trait = "0.1"
+async-trait.workspace = true
 # `yunta mcp`: the control-plane MCP server, stdio. `server` +
 # `transport-io` only — no HTTP transport, no client features: the
 # per-run MCP server is a separate, later concern with its own
 # transport (HTTP loopback).
-rmcp = { version = "3", default-features = false, features = ["server", "transport-io"] }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 # `yunta mcp`'s own end-to-end test: a real stdio JSON-RPC round trip
 # against the binary, spawned as a child process — the same combination
 # rmcp documents for testing a stdio server from the outside.
-rmcp = { version = "3", default-features = false, features = [
+rmcp = { workspace = true, features = [
     "client",
     "transport-child-process",
 ] }

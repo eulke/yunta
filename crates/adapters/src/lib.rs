@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! The `Adapter`/`AgentSession` traits and their implementations
 //! (`claude-code`, `codex`, `mock`) — Spec Adapter v0.2.
 //!

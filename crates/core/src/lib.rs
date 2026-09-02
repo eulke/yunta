@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Shared domain types for the Yunta workspace.
 //!
 //! `yunta-core` is the bottom of the dependency graph: every other

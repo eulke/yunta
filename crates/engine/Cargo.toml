@@ -2,33 +2,35 @@
 name = "yunta-engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The Yunta workflow engine: scheduler, verification cycle, resumability."
 
+[lints]
+workspace = true
+
 [dependencies]
-# `version` must track [workspace.package].version — crates.io publish
-# rejects a path dependency with no version requirement.
-yunta-core = { path = "../core", version = "0.1.0" }
-yunta-storage = { path = "../storage", version = "0.1.0" }
-yunta-adapters = { path = "../adapters", version = "0.1.0" }
-thiserror = "2"
-futures = "0.3"
-globset = "0.4"
+yunta-core.workspace = true
+yunta-storage.workspace = true
+yunta-adapters.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+globset.workspace = true
 # The engine interprets `kind: task-ledger` artifacts at node close —
 # runtime YAML parsing, not just test fixtures.
-serde_yaml = "0.9"
+serde_yaml.workspace = true
 # `kind: executor`'s stdin/stdout contract is JSON by definition —
 # already a dependency of yunta-core/yunta-adapters/yunta-storage at the
 # same version, not a new one to the workspace.
-serde_json = "1"
-serde = { version = "1", features = ["derive"] }
-tracing = "0.1"
-tokio = { version = "1", features = ["process", "rt", "macros", "time"] }
+serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+tokio = { workspace = true, features = ["process", "rt", "macros", "time"] }
 # CancellationToken (`join: any`'s interrupt→kill of the losing
 # siblings) — the propagated-cancellation primitive CLAUDE.md's own
 # "Concurrencia estructurada" section names, not a new idiom.
-tokio-util = "0.7"
+tokio-util.workspace = true
 # `mcp:` context source — an outbound streamable-HTTP MCP client, the
 # transport the reference config's own `mcp_servers:` shape uses (a
 # `url:` + bearer `auth_env:`, never stdio). The `server` +
@@ -37,7 +39,7 @@ tokio-util = "0.7"
 # loopback HTTP — a normative mechanism, not a convenience, which is
 # what justifies tower/hyper reaching the release binary (hyper was
 # already in it via `reqwest` below).
-rmcp = { version = "3", default-features = false, features = [
+rmcp = { workspace = true, features = [
     "client",
     "transport-streamable-http-client-reqwest",
     "reqwest",
@@ -48,40 +50,40 @@ rmcp = { version = "3", default-features = false, features = [
 # `Service`) to a real `127.0.0.1:0` socket, plus the bearer-token
 # middleware in front of it — promoted from dev-only now that the
 # listener is engine code, not just a test's toy server.
-axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+axum = { workspace = true, features = ["tokio", "http1"] }
 # The per-session bearer token — a single-use, high-entropy credential.
 # Already in the dependency tree via rmcp's own `server` feature — `v4`
 # adds the RNG-backed constructor, the one entropy this crate uses,
 # confined to `run_tools.rs` and never written to the log.
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 # `reqwest::Client` is named directly in `context_resolve.rs` to build the
 # streamable-HTTP transport rmcp's own reqwest feature only wires
 # internally — rustls (not native-tls/OpenSSL), matching the TLS backend
 # the `reqwest` feature above already selects for rmcp's side.
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { workspace = true, features = ["rustls"] }
 # `inputs:`'s `pattern:` validation — the one place the workspace
 # validates a user-supplied regex against a string; nothing already in
 # the dependency tree exposes that.
-regex = "1"
+regex.workspace = true
 # `HumanInteraction` needs a dyn-safe async trait method, same reason
 # `yunta-adapters`'s own `Adapter`/`AgentSession` already use this — not
 # a new idiom to the workspace, just the same one crossing into engine
 # because a gate's resolution surface (console today, MCP later) is
 # exactly this kind of boundary (CLAUDE.md's own "traits solo en
 # fronteras reales").
-async-trait = "0.1"
+async-trait.workspace = true
 # `kind: gate`'s `on:` mapping is the same ordered map the schema itself
 # uses (`yunta-core` already depends on it — no new node in the
 # workspace graph); named here because gate_exec's own signature takes
 # it.
-indexmap = "2"
+indexmap.workspace = true
 # `stats::compute_run_stats` derives wall-clock and blocked-time per
 # node from `Event.timestamp` — already this exact `chrono` version via
 # `yunta-core`'s own dependency, promoted here from dev-only now that
 # production code (not just tests) needs to subtract and format
 # timestamps.
-chrono = "0.4"
+chrono.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }

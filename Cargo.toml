@@ -11,5 +11,44 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/eulke/yunta"
+
+# Every dependency's version lives here once; a crate opts in with
+# `workspace = true` and adds only the features it uses. Internal
+# crates carry `version` because crates.io rejects a path dependency
+# without one.
+[workspace.dependencies]
+yunta-core = { path = "crates/core", version = "0.1.0" }
+yunta-storage = { path = "crates/storage", version = "0.1.0" }
+yunta-adapters = { path = "crates/adapters", version = "0.1.0" }
+yunta-engine = { path = "crates/engine", version = "0.1.0" }
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false }
+base64 = "0.22"
+chrono = "0.4"
+clap = "4"
+futures = "0.3"
+globset = "0.4"
+indexmap = "2"
+regex = "1"
+reqwest = { version = "0.13", default-features = false }
+rmcp = { version = "3", default-features = false }
+rusqlite = "0.32"
+serde = "1"
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = "1"
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = "1"
+
+# Lints apply to every crate, tests included, through `[lints]
+# workspace = true` in each manifest.
+[workspace.lints.rust]
+unsafe_code = "forbid"

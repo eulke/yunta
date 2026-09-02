@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! The workflow engine: DAG scheduler, verification cycle, resumability.
 //! `yunta-engine` never depends on rusqlite/sqlx
 //! directly and never contains CLI-specific knowledge — those

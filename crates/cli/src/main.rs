@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! `yunta` binary entrypoint. Stays thin by design: parse args with
 //! clap, delegate everything else to the library crates and the command
 //! modules.
