@@ -6,6 +6,19 @@
 //! This crate anchors the workspace dependency graph
 //! (core ← storage/adapters ← engine ← cli), keeping it compiling and testable.
 
+// The run contract needs a process layer that owns whole process trees:
+// every subprocess in its own process group, interrupted and killed
+// with its descendants, and lock liveness by signal. That layer is
+// POSIX; a build for another platform would compile and then leave
+// orphans on cancellation, the one degradation the contract forbids.
+#[cfg(not(unix))]
+compile_error!(
+    "yunta-engine builds for unix targets only: its process management (process groups, \
+     signals, lock liveness) is POSIX, and a binary that cannot cancel a whole process tree \
+     cannot keep the run contract. Windows returns as a target once a process layer with the \
+     same guarantees exists and its cancellation tests pass there."
+);
+
 mod artifacts;
 mod catalog;
 mod check;

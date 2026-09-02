@@ -50,10 +50,12 @@ jobs:
           "$bin" test --dir packs/fragua
           echo "::endgroup::"
 
-  # Five-target matrix, all gated on `test`. musl via `cross` (a real
-  # static Linux binary, no glibc dependency); macOS and Windows compile
-  # natively on their own runner — cross-compiling to them costs more than
-  # it saves.
+  # Four-target matrix, all gated on `test`. musl via `cross` (a real
+  # static Linux binary, no glibc dependency); macOS compiles natively on
+  # its own runner — cross-compiling to it costs more than it saves.
+  # Windows is not a target: the engine's process layer (process groups,
+  # signals, lock liveness) is POSIX, and a binary that cannot keep the
+  # run contract is not published.
   build:
     needs: test
     strategy:
@@ -73,9 +75,6 @@ jobs:
             cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
-            cross: false
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
             cross: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -98,8 +97,7 @@ jobs:
         if: ${{ !matrix.cross }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p yunta
 
-      - name: package (unix)
-        if: runner.os != 'Windows'
+      - name: package
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -109,22 +107,11 @@ jobs:
           cp LICENSE README.md "$stage/"
           tar czf "${stage}.tar.gz" "$stage"
 
-      - name: package (windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          stage="yunta-${version}-${{ matrix.target }}"
-          mkdir "$stage"
-          cp "target/${{ matrix.target }}/release/yunta.exe" "$stage/"
-          cp LICENSE README.md "$stage/"
-          7z a "${stage}.zip" "$stage"
-
       # Verified install in a clean environment, per platform, is
       # non-negotiable for a release to ship. Linux gets an actual clean
       # container (proving the musl binary has no hidden glibc
-      # dependency); macOS/Windows use the runner itself, which is
-      # already a fresh, single-use VM.
+      # dependency); macOS uses the runner itself, which is already a
+      # fresh, single-use VM.
       - uses: docker/setup-qemu-action@v3
         if: matrix.docker_platform
       - name: verify install (clean container)
@@ -136,22 +123,15 @@ jobs:
       - name: verify install (fresh runner)
         if: ${{ !matrix.docker_platform }}
         shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            "target/${{ matrix.target }}/release/yunta.exe" --version
-          else
-            "target/${{ matrix.target }}/release/yunta" --version
-          fi
+        run: '"target/${{ matrix.target }}/release/yunta" --version'
 
       - uses: actions/upload-artifact@v4
         with:
           name: yunta-${{ matrix.target }}
-          path: |
-            yunta-*.tar.gz
-            yunta-*.zip
+          path: yunta-*.tar.gz
           if-no-files-found: error
 
-  # Origin of truth: gathers the 5 packages, checksums them, writes notes
+  # Origin of truth: gathers the 4 packages, checksums them, writes notes
   # from the conventional commits since the previous tag, publishes the
   # GitHub release. Everything downstream only ever reads this release.
   release:

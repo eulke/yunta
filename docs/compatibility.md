@@ -58,12 +58,23 @@ Per the release pipeline's `test` gate (`.github/workflows/release.yml`):
 - The factory packs (`packs/starter`, `packs/fragua`) pass `yunta check` and
   their own `.yunta/tests/` cases against the `mock` adapter
   (`yunta test --dir <pack>`).
-- Each of the five published binaries installs and runs in a clean
-  container for its target platform, and `yunta doctor` is the first
+- Each of the four published binaries (Linux x86_64 and aarch64 as static
+  musl binaries, macOS x86_64 and aarch64) installs and runs in a clean
+  environment for its target platform, and `yunta doctor` is the first
   command the installer suggests running.
 
 None of this is negotiable on a per-release basis — a release that doesn't
 pass all of it doesn't ship.
+
+## Platforms
+
+Yunta builds and is published for Linux and macOS. The engine's process
+layer — every subprocess in its own process group, interrupted and killed
+with its whole tree, lock liveness checked by signal — is POSIX, and
+`yunta-engine` refuses to compile for any other target rather than ship a
+binary that would leave processes behind on cancellation. Windows becomes a
+target when a process layer with the same guarantees exists and its
+cancellation tests pass on a Windows runner.
 
 ## What isn't covered here
 
