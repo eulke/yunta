@@ -1,10 +1,10 @@
-//! `modes:` exercised end-to-end: a node a mode
-//! excludes is never scheduled, an in-mode node's dependency on an
-//! excluded node is treated as already satisfied (the
+//! `modes:` exercised end-to-end: a node a mode excludes is never
+//! scheduled; an in-mode node that depended on an excluded node waits
+//! for the excluded node's own in-mode dependencies instead (the
 //! "quick"/"standard"/"full" example does exactly this — `implement`
-//! depends_on the excluded `approve-plan` in "quick"), and the run
-//! finishes once every *included* node is done, never waiting on one
-//! that was never going to run.
+//! depends_on the excluded `approve-plan` in "quick", so it waits for
+//! `plan`); and the run finishes once every *included* node is done,
+//! never waiting on one that was never going to run.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -98,7 +98,16 @@ impl Bench {
         run_id: &str,
         mode: &str,
     ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
-        let workflow: Workflow = serde_yaml::from_str(WORKFLOW).unwrap();
+        self.run_workflow(WORKFLOW, run_id, mode).await
+    }
+
+    async fn run_workflow(
+        &self,
+        workflow_yaml: &str,
+        run_id: &str,
+        mode: &str,
+    ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
+        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
         let manifest = build_manifest(
             &workflow,
             &ConfigLayer::default(),
@@ -202,4 +211,108 @@ async fn an_unknown_mode_name_is_refused_before_the_run_is_created() {
     assert!(matches!(err, RunError::UnknownMode { .. }), "got: {err:?}");
     // Refused before anything was written — no run directory, no event.
     assert!(bench.storage.list_run_ids().unwrap().is_empty());
+}
+
+/// Declared so that the dependent of the excluded node comes *first* in
+/// declaration order: an edge merely "treated as satisfied" would make
+/// `ship` ready before `start` ran at all.
+const ORDER_WORKFLOW: &str = r#"
+name: mode-order
+modes:
+  quick:  { include: [ship, start] }
+  full:   { include: all }
+nodes:
+  - id: ship
+    kind: bash
+    depends_on: [extra]
+    run: "true"
+  - id: extra
+    kind: bash
+    depends_on: [start]
+    run: "true"
+  - id: start
+    kind: bash
+    run: "true"
+"#;
+
+const GATE_WORKFLOW: &str = r#"
+name: mode-gate
+modes:
+  quick:  { include: [start, ship] }
+  full:   { include: all }
+nodes:
+  - id: start
+    kind: bash
+    run: "true"
+  - id: extra
+    kind: bash
+    depends_on: [start]
+    run: "true"
+  - id: ship
+    kind: gate
+    depends_on: [extra]
+    assignee: lead
+    message: "Ship it?"
+"#;
+
+fn seq_of(
+    events: &[yunta_core::events::Event],
+    node: &str,
+    pick: impl Fn(&yunta_core::events::EventPayload) -> bool,
+) -> u64 {
+    events
+        .iter()
+        .find(|e| e.node_id.as_ref().is_some_and(|id| id.as_str() == node) && pick(&e.payload))
+        .unwrap_or_else(|| panic!("no matching event for node `{node}`"))
+        .seq
+}
+
+#[tokio::test]
+async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies() {
+    let bench = Bench::new();
+    let (terminal, _) = bench
+        .run_workflow(ORDER_WORKFLOW, "run-order", "quick")
+        .await
+        .unwrap();
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench
+        .storage
+        .events_for_run(&RunId::from("run-order"))
+        .unwrap();
+    use yunta_core::events::EventPayload;
+    let start_finished = seq_of(&events, "start", |p| {
+        matches!(p, EventPayload::NodeFinished(_))
+    });
+    let ship_started = seq_of(&events, "ship", |p| {
+        matches!(p, EventPayload::NodeStarted(_))
+    });
+    assert!(
+        start_finished < ship_started,
+        "`ship` (depends_on the excluded `extra`, which depends_on `start`) started at seq \
+         {ship_started}, before `start` finished at seq {start_finished}"
+    );
+}
+
+#[tokio::test]
+async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() {
+    // With nobody to answer it, the internal gate pauses the run — but
+    // only once everything it effectively depends on has run.
+    let bench = Bench::new();
+    let (terminal, state) = bench
+        .run_workflow(GATE_WORKFLOW, "run-gate", "quick")
+        .await
+        .unwrap();
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "expected the unanswered gate to pause the run, got {terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.get(&"start".into()),
+            Some(NodeState::Finished { .. })
+        ),
+        "`start` must finish before the gate that transitively depends on it is asked; got {:?}",
+        state.nodes.get(&"start".into())
+    );
 }

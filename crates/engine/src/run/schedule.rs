@@ -10,7 +10,8 @@
 //! Node states are covered in full: `waiting` is derived (a
 //! published gate, or unanswered questions — sections 0/0b below) and
 //! `skipped` is the render-side reading of a mode-excluded node (the
-//! filter here + `status`'s own display). `on_interrupt` covers the
+//! filter here + `status`'s own display), and what an included node
+//! waits on under that mode comes from `crate::modes`. `on_interrupt` covers the
 //! Contrato's full triple — `resume_session` orphans re-Execute exactly
 //! like `restart_node` ones from this function's point of view; the
 //! *dispatch* path (`node_exec`) is what continues the recorded session
@@ -22,22 +23,10 @@
 use std::collections::HashSet;
 
 use yunta_core::events::{Event, EventPayload};
-use yunta_core::{ModeInclude, Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
+use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState};
-
-/// The top-level node ids `mode_name` makes schedulable, or
-/// `None` when nothing narrows the graph — no `modes:` declared at all,
-/// or the resolved mode's own `include: all`. A name with no matching
-/// entry in `modes:` never reaches this function — `create_run` already
-/// refused it before the run existed.
-pub fn mode_included_nodes(workflow: &Workflow, mode_name: &str) -> Option<HashSet<NodeId>> {
-    let spec = workflow.modes.as_ref()?.get(mode_name)?;
-    match &spec.include {
-        ModeInclude::All => None,
-        ModeInclude::Nodes(ids) => Some(ids.iter().cloned().collect()),
-    }
-}
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -201,24 +190,24 @@ pub fn next_step(
         return ScheduleStep::Broken { diagnostic };
     }
 
-    // A node this run's mode excludes is never scheduled and
-    // never counted toward completion — `check`'s own `check_modes`
-    // already guarantees no *included* node's `depends_on`/
-    // `on_failure.goto` reaches outside the mode, but an excluded node's
-    // dependents (a mode's own examples: `implement` depends_on the
-    // excluded `approve-plan` in "quick") still need their edge to it
-    // treated as satisfied — a mode cuts deliberation, never blocks on
-    // work it deliberately skipped.
+    // A node this run's mode excludes is never scheduled and never
+    // counted toward completion — `check`'s own `check_modes` already
+    // guarantees no *included* node's `on_failure.goto` reaches outside
+    // the mode. An excluded node's dependents (a mode's own examples:
+    // `implement` depends_on the excluded `approve-plan` in "quick")
+    // wait on what the excluded node itself waited on — a mode cuts
+    // deliberation, never the order of the work around it.
     let nodes: Vec<&Node> = workflow
         .nodes
         .iter()
         .filter(|n| mode_nodes.is_none_or(|set| set.contains(&n.id)))
         .collect();
-    let excluded = |id: &NodeId| mode_nodes.is_some_and(|set| !set.contains(id));
+    let dependencies = dependencies_in_mode(workflow, mode_nodes);
+    let deps_of = |id: &NodeId| dependencies.get(id).map(Vec::as_slice).unwrap_or(&[]);
     let deps_satisfied = |node: &Node| {
-        node.depends_on.iter().all(|dep| {
-            excluded(dep) || matches!(state.nodes.get(dep), Some(NodeState::Finished { .. }))
-        })
+        deps_of(&node.id)
+            .iter()
+            .all(|dep| matches!(state.nodes.get(dep), Some(NodeState::Finished { .. })))
     };
 
     // A node named only as an `on_failure.goto` or gate `on:`
@@ -242,9 +231,9 @@ pub fn next_step(
     // declares `depends_on: [plan]`, so `plan` is a real predecessor on
     // the main path that also happens to be a valid re-route target
     // later, not a node existing solely for the re-route.
-    let goto_or_gate_on_targets: HashSet<&NodeId> = workflow
-        .nodes
+    let goto_or_gate_on_targets: HashSet<&NodeId> = nodes
         .iter()
+        .copied()
         .flat_map(|n| {
             let goto = n.on_failure.iter().map(|of| &of.goto);
             let gate_on = match &n.kind {
@@ -254,16 +243,9 @@ pub fn next_step(
             goto.chain(gate_on)
         })
         .collect();
-    let has_forward_dependent =
-        |id: &NodeId| workflow.nodes.iter().any(|n| n.depends_on.contains(id));
+    let has_forward_dependent = |id: &NodeId| nodes.iter().any(|n| deps_of(&n.id).contains(id));
     let is_reroute_only_target = |id: &NodeId| {
-        goto_or_gate_on_targets.contains(id)
-            && !has_forward_dependent(id)
-            && workflow
-                .nodes
-                .iter()
-                .find(|n| &n.id == id)
-                .is_some_and(|n| n.depends_on.is_empty())
+        goto_or_gate_on_targets.contains(id) && !has_forward_dependent(id) && deps_of(id).is_empty()
     };
 
     // A degenerate 0 would starve every ready node forever. `yunta

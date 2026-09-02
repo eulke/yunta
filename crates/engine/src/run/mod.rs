@@ -56,7 +56,6 @@ use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor};
-pub use schedule::mode_included_nodes;
 use schedule::ScheduleStep;
 
 #[derive(Debug, Error)]
@@ -578,7 +577,7 @@ pub(crate) async fn execute_run_at_depth(
     // same "resolved once, reused forever" discipline runner resolution
     // already follows.
     let mode_name = yunta_core::events::run_mode(&events).to_string();
-    let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
+    let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
 
     loop {
         // A Ctrl-C (or any root cancellation) between scheduler

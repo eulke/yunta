@@ -15,6 +15,7 @@ mod human_interaction;
 mod inputs;
 mod ledger;
 mod manifest;
+mod modes;
 mod pack_audit;
 mod pack_requires;
 mod permissions;
@@ -47,6 +48,7 @@ pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
+pub use modes::{dependencies_in_mode, mode_included_nodes};
 pub use pack_audit::{audit_pack, NodeAudit, PackAudit, PromptText, WorkflowAudit};
 pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
@@ -62,9 +64,9 @@ pub use receipt::{
 };
 pub use replay::{dedup_findings, derive, NodeState, RunState};
 pub use run::{
-    create_promotion_successor, create_run, current_escalation, execute_run, mode_included_nodes,
-    resolve_gate, session_token_budget, CreateRunParams, Predecessor, PromotionSuccessor,
-    ResolveGateError, RunEnv, RunError, RunReport, RunTerminal,
+    create_promotion_successor, create_run, current_escalation, execute_run, resolve_gate,
+    session_token_budget, CreateRunParams, Predecessor, PromotionSuccessor, ResolveGateError,
+    RunEnv, RunError, RunReport, RunTerminal,
 };
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};

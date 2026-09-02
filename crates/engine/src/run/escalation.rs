@@ -186,7 +186,7 @@ fn current_mode_name(events: &[Event]) -> Option<String> {
 /// for every step that isn't one of the two gate shapes.
 fn current_step(manifest: &Manifest, events: &[Event]) -> Option<ScheduleStep> {
     let mode_name = current_mode_name(events)?;
-    let mode_nodes = schedule::mode_included_nodes(&manifest.workflow, &mode_name);
+    let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
     let step = schedule::next_step(
         &manifest.workflow,
         events,
