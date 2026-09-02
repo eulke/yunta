@@ -63,7 +63,7 @@ pub(super) async fn publish_gate(
         .await;
     };
 
-    let branch = match render_or_fail_here(ctx, node, &external.branch)? {
+    let branch = match render_or_fail_here(ctx, node, &external.branch).await? {
         Ok(rendered) => rendered,
         Err(step) => return Ok(step),
     };
@@ -107,8 +107,9 @@ pub(super) async fn publish_gate(
             options: Vec::new(),
             external_ref: Some(encode_ref(&published)),
         }),
-    )?;
-    pause(ctx, format!("waiting on external gate: {}", published.url))?;
+    )
+    .await?;
+    pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
     Ok(GateStep::StillWaiting {
         reason: published.url,
     })
@@ -141,7 +142,7 @@ pub(super) async fn poll_gate(
         source: std::io::Error::other(e.to_string()),
     })?;
 
-    resolve_from_poll(ctx, node, &polled)
+    resolve_from_poll(ctx, node, &polled).await
 }
 
 /// The review→outcome mapping, applied uniformly whether resolving a
@@ -150,14 +151,14 @@ pub(super) async fn poll_gate(
 /// if it covers the PR's *current* head; anything
 /// else — no decisive review yet, or one that no longer covers the
 /// current commit — is "still waiting", not a decision.
-fn resolve_from_poll(
+async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
     polled: &PolledGate,
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
-            emit_started(ctx, node)?;
+            emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::GateResolved(GateResolvedPayload {
@@ -166,15 +167,17 @@ fn resolve_from_poll(
                     free_text: None,
                     approved_sha: Some(polled.head_sha.clone()),
                 }),
-            )?;
+            )
+            .await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFinished(NodeFinishedPayload {
                     outcome: format!("approved by {by}"),
                     tokens_used: TokenUsage::default(),
                 }),
-            )?;
-            write_progress(ctx)?;
+            )
+            .await?;
+            write_progress(ctx).await?;
             Ok(GateStep::Resolved)
         }
         ReviewOutcome::ChangesRequested {
@@ -182,7 +185,7 @@ fn resolve_from_poll(
             reviewed_sha,
             comments,
         } => {
-            emit_started(ctx, node)?;
+            emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::GateResolved(GateResolvedPayload {
@@ -191,7 +194,8 @@ fn resolve_from_poll(
                     free_text: None,
                     approved_sha: None,
                 }),
-            )?;
+            )
+            .await?;
             for (i, comment) in comments.iter().enumerate() {
                 ctx.emit(
                     Some(&node.id),
@@ -208,7 +212,8 @@ fn resolve_from_poll(
                             proposed_criterion: None,
                         },
                     }),
-                )?;
+                )
+                .await?;
             }
             ctx.emit(
                 Some(&node.id),
@@ -220,11 +225,12 @@ fn resolve_from_poll(
                     tokens_used: TokenUsage::default(),
                     retryable: true,
                 }),
-            )?;
+            )
+            .await?;
             Ok(GateStep::Resolved)
         }
         ReviewOutcome::Closed => {
-            emit_started(ctx, node)?;
+            emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::GateResolved(GateResolvedPayload {
@@ -233,7 +239,8 @@ fn resolve_from_poll(
                     free_text: None,
                     approved_sha: None,
                 }),
-            )?;
+            )
+            .await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFailed(NodeFailedPayload {
@@ -241,7 +248,8 @@ fn resolve_from_poll(
                     tokens_used: TokenUsage::default(),
                     retryable: false,
                 }),
-            )?;
+            )
+            .await?;
             Ok(GateStep::Resolved)
         }
         // Pending, or an approval that no longer covers the current
@@ -251,7 +259,8 @@ fn resolve_from_poll(
             pause(
                 ctx,
                 format!("waiting on external gate for node `{}`", node.id),
-            )?;
+            )
+            .await?;
             Ok(GateStep::StillWaiting {
                 reason: node.id.to_string(),
             })
@@ -286,7 +295,7 @@ pub(super) async fn recheck_approved_gates(
         return Ok(()); // nothing to re-check without a live forge
     };
 
-    let events = ctx.load_events()?;
+    let events = ctx.load_events().await?;
     let state = crate::replay::derive(&events);
 
     for node in &ctx.manifest.workflow.nodes {
@@ -308,7 +317,7 @@ pub(super) async fn recheck_approved_gates(
             source: std::io::Error::other(e.to_string()),
         })?;
         if polled.head_sha != approved_sha {
-            emit_started(ctx, node)?;
+            emit_started(ctx, node).await?;
         }
     }
     Ok(())
@@ -367,7 +376,7 @@ pub(super) async fn resolve_internal_gate(
     // code — never re-asked, and its escalation pair is already
     // recorded so it is never re-emitted. Re-validated against the
     // re-derived menu: a mismatch means ask normally.
-    let events = ctx.load_events()?;
+    let events = ctx.load_events().await?;
     let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id).filter(|r| {
         r.chosen_option
             .as_deref()
@@ -399,11 +408,13 @@ pub(super) async fn resolve_internal_gate(
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
         if !already_recorded {
-            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
+                .await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::GateResolved(resolution.clone()),
-            )?;
+            )
+            .await?;
         }
         return Ok(GateStep::StillWaiting {
             reason: format!(
@@ -418,13 +429,15 @@ pub(super) async fn resolve_internal_gate(
         });
     }
 
-    emit_started(ctx, node)?;
+    emit_started(ctx, node).await?;
     if !already_recorded {
-        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
+            .await?;
         ctx.emit(
             Some(&node.id),
             EventPayload::GateResolved(resolution.clone()),
-        )?;
+        )
+        .await?;
     }
     match on.get(&chosen) {
         Some(target) => {
@@ -440,7 +453,8 @@ pub(super) async fn resolve_internal_gate(
                     tokens_used: TokenUsage::default(),
                     retryable: true,
                 }),
-            )?;
+            )
+            .await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
@@ -449,7 +463,8 @@ pub(super) async fn resolve_internal_gate(
                     attempt: 1,
                     max_reroutes: 0,
                 }),
-            )?;
+            )
+            .await?;
         }
         None => {
             ctx.emit(
@@ -458,15 +473,16 @@ pub(super) async fn resolve_internal_gate(
                     outcome: chosen,
                     tokens_used: TokenUsage::default(),
                 }),
-            )?;
-            write_progress(ctx)?;
+            )
+            .await?;
+            write_progress(ctx).await?;
         }
     }
     Ok(GateStep::Resolved)
 }
 
-fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
-    let events = ctx.load_events()?;
+async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
+    let events = ctx.load_events().await?;
     let attempt = events
         .iter()
         .filter(|e| {
@@ -478,13 +494,15 @@ fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::NodeStarted(NodeStartedPayload { attempt }),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
-fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
-    ctx.emit(None, EventPayload::RunPaused(RunPausedPayload { reason }))?;
-    ctx.export_events_jsonl()
+async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
+    ctx.emit(None, EventPayload::RunPaused(RunPausedPayload { reason }))
+        .await?;
+    ctx.export_events_jsonl().await
 }
 
 fn encode_ref(published: &PublishedGate) -> String {
@@ -526,16 +544,18 @@ async fn degrade_to_console(
         external_ref: None,
     };
     let Some(resolution) = human_interaction.resolve(&escalation).await else {
-        pause(ctx, summary.clone())?;
+        pause(ctx, summary.clone()).await?;
         return Ok(GateStep::StillWaiting { reason: summary });
     };
 
-    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
+    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
+        .await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::GateResolved(resolution.clone()),
-    )?;
-    emit_started(ctx, node)?;
+    )
+    .await?;
+    emit_started(ctx, node).await?;
     if resolution.chosen_option.as_deref() == Some("approve") {
         ctx.emit(
             Some(&node.id),
@@ -550,8 +570,9 @@ async fn degrade_to_console(
                 ),
                 tokens_used: TokenUsage::default(),
             }),
-        )?;
-        write_progress(ctx)?;
+        )
+        .await?;
+        write_progress(ctx).await?;
     } else {
         ctx.emit(
             Some(&node.id),
@@ -560,7 +581,8 @@ async fn degrade_to_console(
                 tokens_used: TokenUsage::default(),
                 retryable: true,
             }),
-        )?;
+        )
+        .await?;
     }
     Ok(GateStep::Resolved)
 }
@@ -568,7 +590,7 @@ async fn degrade_to_console(
 /// Renders `external.branch`'s template, or fails the *run* the same
 /// way `node_exec::render_or_fail` fails a node — an undefined
 /// `{{...}}` here is a workflow-authoring mistake, not a forge problem.
-fn render_or_fail_here(
+async fn render_or_fail_here(
     ctx: &RunCtx<'_>,
     node: &Node,
     input: &str,
@@ -576,7 +598,7 @@ fn render_or_fail_here(
     match crate::template::render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Ok(rendered)),
         Err(e) => {
-            emit_started(ctx, node)?;
+            emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFailed(NodeFailedPayload {
@@ -584,7 +606,8 @@ fn render_or_fail_here(
                     tokens_used: TokenUsage::default(),
                     retryable: false,
                 }),
-            )?;
+            )
+            .await?;
             Ok(Err(GateStep::Resolved))
         }
     }

@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use yunta_core::{Isolation, Manifest, RunId, SystemClock};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use crate::load_yaml;
 use crate::project;
@@ -51,7 +51,7 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
         return code;
     }
 
-    let storage = match Storage::open(&project.storage_path) {
+    let storage = match AsyncStorage::open(&project.storage_path).await {
         Ok(storage) => storage,
         Err(e) => {
             eprintln!("error: {e}");

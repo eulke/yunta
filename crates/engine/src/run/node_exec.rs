@@ -49,7 +49,7 @@ pub(super) enum NodeEnd {
 /// The shared "my token fired" epilogue — which cancellation was
 /// it? A user/root cancel leaves the node orphaned; a `join: any`
 /// sibling race records the loss so the group can close over it.
-pub(super) fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
+pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
     if ctx.root_cancel.is_cancelled() {
         return Ok(NodeEnd::Interrupted);
     }
@@ -59,6 +59,7 @@ pub(super) fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, Ru
         "interrupted: a sibling in this join: any group finished first".to_string(),
         false,
     )
+    .await
 }
 
 /// `cancel` only ever fires for a child of a `join: any` parallel group
@@ -73,7 +74,8 @@ pub(super) async fn execute_node(
     ctx.emit(
         Some(&node.id),
         EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
-    )?;
+    )
+    .await?;
 
     // hooks.before: a failing before aborts without spending a
     // token; a failing after fails the node before verification. Either
@@ -83,14 +85,15 @@ pub(super) async fn execute_node(
     let hooks = effective_hooks(ctx, node);
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
-            HookRun::Violation(rule) => return fail(ctx, node, rule, false),
+            HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
             HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
                 return fail(
                     ctx,
                     node,
                     format!("before hook `{}` failed", step.run),
                     false,
-                );
+                )
+                .await;
             }
             HookRun::Ran(_) => {}
         }
@@ -121,7 +124,7 @@ pub(super) async fn execute_node(
                 let members: Vec<yunta_core::NodeId> =
                     nodes.iter().map(|child| child.id.clone()).collect();
                 let consolidated =
-                    crate::run_tools::consolidate_blackboard(&ctx.load_events()?, &members);
+                    crate::run_tools::consolidate_blackboard(&ctx.load_events().await?, &members);
                 super::context_resolve::write_node_output(
                     ctx.run_dir,
                     &node.id,
@@ -190,7 +193,7 @@ async fn execute_parallel(
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let group_cancel = cancel.child_token();
-    let state = derive(&ctx.load_events()?);
+    let state = derive(&ctx.load_events().await?);
 
     let already_failed: Vec<&Node> = children
         .iter()
@@ -219,7 +222,8 @@ async fn execute_parallel(
                     node,
                     format!("child `{}` failed under join: all", first.id),
                     false,
-                );
+                )
+                .await;
             }
             let results = futures::future::join_all(
                 to_run
@@ -263,7 +267,8 @@ async fn execute_parallel(
                     node,
                     format!("child `{id}` failed under join: all"),
                     false,
-                );
+                )
+                .await;
             }
             close_node(
                 ctx,
@@ -359,6 +364,7 @@ async fn execute_parallel(
                         format!("join: any — no child succeeded ({} failed)", failures.len()),
                         false,
                     )
+                    .await
                 }
             }
         }
@@ -411,7 +417,7 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
 /// Renders `input` or fails the node with a diagnostic naming the
 /// variable — a prompt with `{{run.dir}}` left verbatim must never reach
 /// an agent.
-pub(super) fn render_or_fail(
+pub(super) async fn render_or_fail(
     ctx: &RunCtx<'_>,
     node: &Node,
     input: &str,
@@ -419,7 +425,7 @@ pub(super) fn render_or_fail(
     match render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Ok(rendered)),
         Err(e) => {
-            let end = fail(ctx, node, e.to_string(), false)?;
+            let end = fail(ctx, node, e.to_string(), false).await?;
             Ok(Err(end))
         }
     }
@@ -454,7 +460,8 @@ async fn run_hook(
                     command: step.run.clone(),
                     exit_code: -1,
                 }),
-            )?;
+            )
+            .await?;
             tracing::warn!(node_id = %node.id, error = %e, "hook template failed to render");
             return Ok(HookRun::Ran(false));
         }
@@ -527,7 +534,8 @@ async fn run_hook(
             command: rendered,
             exit_code,
         }),
-    )?;
+    )
+    .await?;
     Ok(HookRun::Ran(exit_code == 0))
 }
 
@@ -615,7 +623,9 @@ pub(super) async fn close_node(
 ) -> Result<NodeEnd, RunError> {
     for step in &effective_hooks(ctx, node).after {
         match run_hook(ctx, node, HookPhase::After, step).await? {
-            HookRun::Violation(rule) => return fail_with_tokens(ctx, node, rule, false, tokens),
+            HookRun::Violation(rule) => {
+                return fail_with_tokens(ctx, node, rule, false, tokens).await
+            }
             HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
                 return fail_with_tokens(
                     ctx,
@@ -623,7 +633,8 @@ pub(super) async fn close_node(
                     format!("after hook `{}` failed", step.run),
                     false,
                     tokens,
-                );
+                )
+                .await;
             }
             HookRun::Ran(_) => {}
         }
@@ -639,7 +650,8 @@ pub(super) async fn close_node(
                 diff: result.diff.clone(),
                 violations: result.violations.clone(),
             }),
-        )?;
+        )
+        .await?;
         if !result.violations.is_empty() {
             return fail_with_tokens(
                 ctx,
@@ -650,7 +662,8 @@ pub(super) async fn close_node(
                 ),
                 false,
                 tokens,
-            );
+            )
+            .await;
         }
     }
 
@@ -665,7 +678,7 @@ pub(super) async fn close_node(
     // sibling verifies its own file.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
-        Err(detail) => return fail_with_tokens(ctx, node, detail, false, tokens),
+        Err(detail) => return fail_with_tokens(ctx, node, detail, false, tokens).await,
     };
     let node = &node_rendered;
     match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
@@ -695,7 +708,8 @@ pub(super) async fn close_node(
                 yunta_core::TaskId,
                 (Vec<yunta_core::events::Criterion>, Vec<String>),
             > = ctx
-                .load_events()?
+                .load_events()
+                .await?
                 .into_iter()
                 .filter_map(|event| match event.payload() {
                     Some(EventPayload::TaskRegistered(p)) => {
@@ -713,22 +727,25 @@ pub(super) async fn close_node(
                         content_hash: artifact.content_hash.clone(),
                         artifact_kind: artifact.kind.clone(),
                     }),
-                )?;
+                )
+                .await?;
                 if let Some(ledger) = &artifact.ledger {
                     for task in &ledger.tasks {
                         let criteria: Vec<yunta_core::events::Criterion> =
                             task.criteria.iter().map(Into::into).collect();
-                        let registered_seq = ctx.emit(
-                            Some(&node.id),
-                            EventPayload::TaskRegistered(
-                                yunta_core::events::TaskRegisteredPayload {
-                                    task_id: task.id.clone(),
-                                    criteria: criteria.clone(),
-                                    scope: task.scope.clone(),
-                                    depends_on: task.depends_on.clone(),
-                                },
-                            ),
-                        )?;
+                        let registered_seq = ctx
+                            .emit(
+                                Some(&node.id),
+                                EventPayload::TaskRegistered(
+                                    yunta_core::events::TaskRegisteredPayload {
+                                        task_id: task.id.clone(),
+                                        criteria: criteria.clone(),
+                                        scope: task.scope.clone(),
+                                        depends_on: task.depends_on.clone(),
+                                    },
+                                ),
+                            )
+                            .await?;
                         let changed_identity = previous_registrations.get(&task.id).is_some_and(
                             |(previous, scope)| *previous != criteria || *scope != task.scope,
                         );
@@ -740,7 +757,8 @@ pub(super) async fn close_node(
                                     new_status: TaskStatus::Pending,
                                     caused_by: registered_seq,
                                 }),
-                            )?;
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -751,7 +769,8 @@ pub(super) async fn close_node(
                             EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
                                 finding: finding.clone(),
                             }),
-                        )?;
+                        )
+                        .await?;
                     }
                 }
             }
@@ -780,7 +799,8 @@ pub(super) async fn close_node(
                     ),
                     false,
                     tokens,
-                );
+                )
+                .await;
             }
 
             ctx.emit(
@@ -789,8 +809,9 @@ pub(super) async fn close_node(
                     outcome,
                     tokens_used: tokens,
                 }),
-            )?;
-            write_progress(ctx)?;
+            )
+            .await?;
+            write_progress(ctx).await?;
             Ok(NodeEnd::Finished)
         }
         Err(errors) => {
@@ -799,26 +820,26 @@ pub(super) async fn close_node(
                 .map(|e| e.to_string())
                 .collect::<Vec<_>>()
                 .join("; ");
-            fail_with_tokens(ctx, node, listed, false, tokens)
+            fail_with_tokens(ctx, node, listed, false, tokens).await
         }
     }
 }
 
-pub(super) fn fail(
+pub(super) async fn fail(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
     retryable: bool,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default())
+    fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default()).await
 }
 
 /// Regenerates `progress.md` at `run.dir`'s root — the
 /// engine's own call, right after the `node_finished` that triggers it
 /// (the Contrato's literal text names only `node_finished`, not
 /// `node_failed`, as the regeneration point).
-pub(super) fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
-    let events = ctx.load_events()?;
+pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
     std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {
         context: "write progress.md".to_string(),
@@ -826,7 +847,7 @@ pub(super) fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     })
 }
 
-pub(super) fn fail_with_tokens(
+pub(super) async fn fail_with_tokens(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
@@ -840,7 +861,8 @@ pub(super) fn fail_with_tokens(
             tokens_used: tokens,
             retryable,
         }),
-    )?;
+    )
+    .await?;
     Ok(NodeEnd::Failed)
 }
 
@@ -857,7 +879,7 @@ async fn execute_bash(
     run: &str,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let rendered = match render_or_fail(ctx, node, run)? {
+    let rendered = match render_or_fail(ctx, node, run).await? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
@@ -868,7 +890,7 @@ async fn execute_bash(
     if let Some(rule) =
         crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
     {
-        return fail(ctx, node, rule, false);
+        return fail(ctx, node, rule, false).await;
     }
 
     let mut std_cmd = std::process::Command::new("sh");
@@ -923,7 +945,7 @@ async fn execute_bash(
             if let Some(task) = stdout_task {
                 let _ = task.await;
             }
-            cancelled_end(ctx, node)
+            cancelled_end(ctx, node).await
         }
         status = child.wait() => {
             let status = status.map_err(|source| RunError::Io {
@@ -965,7 +987,7 @@ async fn execute_bash(
                     node,
                     format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
                     false,
-                )
+                ).await
             }
         }
     }
@@ -996,7 +1018,7 @@ pub(super) fn prompt_text<'a>(
 
 /// Resolves the node's runner or fails the node; on success emits
 /// `runner_resolved` and hands back the request pieces.
-pub(super) fn resolve_node_runner(
+pub(super) async fn resolve_node_runner(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Result<yunta_core::RunnerCandidate, NodeEnd>, RunError> {
@@ -1017,7 +1039,8 @@ pub(super) fn resolve_node_runner(
                 node.id
             ),
             false,
-        )?;
+        )
+        .await?;
         return Ok(Err(end));
     };
 
@@ -1054,7 +1077,8 @@ pub(super) fn resolve_node_runner(
                             chosen.adapter
                         ),
                         false,
-                    )?;
+                    )
+                    .await?;
                     return Ok(Err(end));
                 }
             }
@@ -1065,11 +1089,12 @@ pub(super) fn resolve_node_runner(
                     chosen: chosen.clone(),
                     discarded: resolved.discarded.clone(),
                 }),
-            )?;
+            )
+            .await?;
             Ok(Ok(chosen))
         }
         Err(e) => {
-            let end = fail(ctx, node, e.to_string(), false)?;
+            let end = fail(ctx, node, e.to_string(), false).await?;
             Ok(Err(end))
         }
     }
@@ -1077,11 +1102,11 @@ pub(super) fn resolve_node_runner(
 
 /// Opens this session attempt's per-run MCP listener, or decides
 /// it must not exist. `Ok(None)` — no `run_tools` capability outside a
-/// blackboard group, or the host degraded at run start — is the
-/// resting state. `Err(diagnostic)` is the degradation case: the node's
-/// group declared `coordination: blackboard` and this session cannot
-/// carry it (capability missing, host down, or the listener failed to
-/// bind) — the caller fails the node with it, never emulates.
+/// blackboard group — is the resting state. `Err(diagnostic)` is the
+/// degradation case: the node's group declared `coordination:
+/// blackboard` and this session cannot carry it (capability missing,
+/// or the listener failed to bind) — the caller fails the node with
+/// it, never emulates.
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -1089,11 +1114,8 @@ pub(super) async fn open_run_tools(
     adapter_id: &AdapterId,
     task: Option<&yunta_core::TaskId>,
 ) -> Result<Option<crate::run_tools::RunToolsSession>, String> {
-    let needs_blackboard = ctx
-        .run_tools_host
-        .as_ref()
-        .is_some_and(|host| host.is_blackboard_member(&node.id))
-        || (ctx.run_tools_host.is_none() && node_declared_blackboard(ctx, &node.id));
+    let host = &ctx.run_tools_host;
+    let needs_blackboard = host.is_blackboard_member(&node.id);
     if !adapter.capabilities().run_tools {
         if needs_blackboard {
             return Err(format!(
@@ -1103,15 +1125,6 @@ pub(super) async fn open_run_tools(
         }
         return Ok(None);
     }
-    let Some(host) = &ctx.run_tools_host else {
-        if needs_blackboard {
-            return Err(format!(
-                "node `{}` is in a `coordination: blackboard` group but this run's                  per-run MCP host is unavailable (storage reopen failed at run start) —                  the blackboard cannot be mounted",
-                node.id
-            ));
-        }
-        return Ok(None);
-    };
     match crate::run_tools::open_session_listener(
         host.clone(),
         node.id.clone(),
@@ -1134,29 +1147,13 @@ pub(super) async fn open_run_tools(
     }
 }
 
-/// Whether the frozen workflow puts `node_id` inside a
-/// `coordination: blackboard` group — the fallback membership check for
-/// when the run-tools host itself never came up.
-fn node_declared_blackboard(ctx: &RunCtx<'_>, node_id: &yunta_core::NodeId) -> bool {
-    ctx.manifest.workflow.nodes.iter().any(|candidate| {
-        matches!(
-            &candidate.kind,
-            yunta_core::NodeKind::Parallel {
-                coordination: yunta_core::Coordination::Blackboard,
-                nodes: children,
-                ..
-            } if children.iter().any(|child| &child.id == node_id)
-        )
-    })
-}
-
 async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt))? {
+    let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
@@ -1168,7 +1165,7 @@ async fn execute_prompt(
         Some(block) => format!("{block}\n{rendered}"),
         None => rendered,
     };
-    let chosen = match resolve_node_runner(ctx, node)? {
+    let chosen = match resolve_node_runner(ctx, node).await? {
         Ok(chosen) => chosen,
         Err(end) => return Ok(end),
     };
@@ -1184,7 +1181,7 @@ async fn execute_prompt(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
     };
     let skills = if !skills.is_empty() && !adapter.capabilities().skills {
         ctx.emit(
@@ -1196,7 +1193,8 @@ async fn execute_prompt(
                                  mechanism; the session runs without them"
                     .to_string(),
             }),
-        )?;
+        )
+        .await?;
         Vec::new()
     } else {
         skills
@@ -1208,7 +1206,7 @@ async fn execute_prompt(
     // semantics the engine never emulates: that's a node failure.
     let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
         Ok(run_tools) => run_tools,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
     };
     let request = SessionRequest {
         prompt: rendered,
@@ -1218,7 +1216,7 @@ async fn execute_prompt(
         permissions: session_profile(node),
         env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
         edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
-        budget: ctx.session_budget()?,
+        budget: ctx.session_budget().await?,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
@@ -1233,7 +1231,7 @@ async fn execute_prompt(
         .unwrap_or(ctx.manifest.config.resolved_on_interrupt());
     let mut resume_session: Option<yunta_core::SessionId> = None;
     if policy == yunta_core::OnInterrupt::ResumeSession {
-        match orphaned_session(&ctx.load_events()?, &node.id) {
+        match orphaned_session(&ctx.load_events().await?, &node.id) {
             OrphanedSession::Open(session_id) => {
                 if adapter.capabilities().resume_session {
                     resume_session = Some(session_id);
@@ -1248,7 +1246,7 @@ async fn execute_prompt(
                                     .to_string(),
                             },
                         ),
-                    )?;
+                    ).await?;
                 }
             }
             OrphanedSession::NoneRecorded => {
@@ -1262,7 +1260,7 @@ async fn execute_prompt(
                                 .to_string(),
                         },
                     ),
-                )?;
+                ).await?;
             }
             OrphanedSession::NotAnOrphan => {}
         }
@@ -1284,21 +1282,24 @@ async fn execute_prompt(
     match outcome {
         DispatchOutcome::Completed { summary } => close_node(ctx, node, summary, tokens).await,
         DispatchOutcome::Failed { message, retryable } => {
-            fail_with_tokens(ctx, node, message, retryable, tokens)
+            fail_with_tokens(ctx, node, message, retryable, tokens).await
         }
         // No terminal event means the engine synthesizes a retryable
         // failure — the adapter never invents one.
-        DispatchOutcome::Crashed => fail_with_tokens(
-            ctx,
-            node,
-            "session ended without a terminal event".to_string(),
-            true,
-            tokens,
-        ),
-        DispatchOutcome::BudgetExceeded { reason } => {
-            fail_with_tokens(ctx, node, reason, false, tokens)
+        DispatchOutcome::Crashed => {
+            fail_with_tokens(
+                ctx,
+                node,
+                "session ended without a terminal event".to_string(),
+                true,
+                tokens,
+            )
+            .await
         }
-        DispatchOutcome::Cancelled => cancelled_end(ctx, node),
+        DispatchOutcome::BudgetExceeded { reason } => {
+            fail_with_tokens(ctx, node, reason, false, tokens).await
+        }
+        DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
     }
 }
 

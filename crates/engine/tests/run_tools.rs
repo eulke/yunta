@@ -73,7 +73,7 @@ impl Bench {
             )
             .unwrap();
         let host = Arc::new(RunToolsHost::new(
-            storage.reopen().unwrap(),
+            storage.async_handle(),
             run_id.clone(),
             &workflow,
         ));

@@ -161,9 +161,10 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
             mode: &"quick".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     // One scripted session per node the "quick" mode actually spawns,
@@ -217,7 +218,7 @@ sessions:
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &ApproveEverything,

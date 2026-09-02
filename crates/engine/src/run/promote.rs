@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::{Clock, Isolation, Manifest, ModeName, RunId};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use super::{create_run, CreateRunParams, RunError};
 
@@ -49,7 +49,7 @@ pub async fn create_promotion_successor(
     suggested_mode: &ModeName,
     runs_root: &Path,
     worktrees_root: &Path,
-    storage: &Storage,
+    storage: &AsyncStorage,
     clock: &dyn Clock,
 ) -> Result<PromotionSuccessor, RunError> {
     let Predecessor {
@@ -91,7 +91,8 @@ pub async fn create_promotion_successor(
         },
         storage,
         clock,
-    )?;
+    )
+    .await?;
 
     copy_inherited_artifacts(predecessor_run_dir, &run_dir).map_err(|source| RunError::Io {
         context: format!("inherit artifacts from `{predecessor_id}`"),

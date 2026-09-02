@@ -94,11 +94,11 @@ struct Bench {
 }
 
 impl Bench {
-    fn new() -> Self {
-        Self::with_workflow(GATE_ONLY_WORKFLOW)
+    async fn new() -> Self {
+        Self::with_workflow(GATE_ONLY_WORKFLOW).await
     }
 
-    fn with_workflow(workflow_yaml: &str) -> Self {
+    async fn with_workflow(workflow_yaml: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
         let worktree = root.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -124,9 +124,10 @@ impl Bench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &storage,
+            &storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
 
         Bench {
@@ -153,7 +154,7 @@ impl Bench {
             run_dir: &self.run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &NoInteraction,
@@ -169,7 +170,7 @@ impl Bench {
 
 #[tokio::test]
 async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
-    let bench = Bench::new();
+    let bench = Bench::new().await;
     let forge_state = MockForgeState::new();
     let forge = MockForge::new(forge_state.clone());
 
@@ -229,7 +230,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // Needs a still-open run (see this workflow's own doc comment) —
     // `after` fails with no `on_failure`, so the run pauses rather than
     // reaching `run_finished` once the gate resolves.
-    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW);
+    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
     let forge_state = MockForgeState::new();
     let forge = MockForge::new(forge_state.clone());
 
@@ -287,7 +288,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 
 #[tokio::test]
 async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
-    let bench = Bench::new();
+    let bench = Bench::new().await;
     let forge_state = MockForgeState::new();
     let forge = MockForge::new(forge_state.clone());
 
@@ -328,7 +329,7 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
 
 #[tokio::test]
 async fn a_closed_pr_fails_the_node_non_retryably() {
-    let bench = Bench::new();
+    let bench = Bench::new().await;
     let forge_state = MockForgeState::new();
     let forge = MockForge::new(forge_state.clone());
 
@@ -347,7 +348,7 @@ async fn a_closed_pr_fails_the_node_non_retryably() {
 
 #[tokio::test]
 async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
-    let bench = Bench::new();
+    let bench = Bench::new().await;
     // `NoInteraction` always reports "can't interact" — the same
     // degrade-to-pause path a headless console already takes.
     let (terminal, state) = bench.wake(None).await;

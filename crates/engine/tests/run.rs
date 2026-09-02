@@ -147,9 +147,10 @@ impl Bench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &self.storage,
+            &self.storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
 
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
@@ -162,7 +163,7 @@ impl Bench {
             run_dir: &run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
@@ -494,7 +495,7 @@ nodes:
         run_dir: &bench.run_dir(),
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -811,9 +812,10 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
@@ -825,7 +827,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &first_adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -850,7 +852,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &resume_adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1001,9 +1003,10 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     // First invocation: headless — asks, pauses.
@@ -1016,7 +1019,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &first_adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1051,7 +1054,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &resume_adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
@@ -1156,9 +1159,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let report = execute_run(RunEnv {
@@ -1167,7 +1171,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1219,9 +1223,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let report = execute_run(RunEnv {
@@ -1230,7 +1235,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1279,9 +1284,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     // Simulate a crash mid-node: the log has node_started with no
@@ -1308,7 +1314,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1369,9 +1375,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     // Same simulated crash as the restart_node test: node_started with no
@@ -1396,7 +1403,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -1607,9 +1614,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     // Simulate a crash mid-group: the parallel node and one child
@@ -1656,7 +1664,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &HashMap::new(),
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -2660,9 +2668,10 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let ledger = format!(
@@ -2799,7 +2808,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -4575,9 +4584,10 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::from([(
@@ -4590,7 +4600,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -4618,7 +4628,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
@@ -4814,9 +4824,10 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let adapter = MockAdapter::from_yaml(BUDGET_FIXTURE).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -4828,7 +4839,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -4850,7 +4861,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &interaction,
@@ -5308,9 +5319,10 @@ async fn run_with_recording_mock(
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -5321,7 +5333,7 @@ async fn run_with_recording_mock(
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -5558,9 +5570,10 @@ sessions:
             mode: &"quick".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -5571,7 +5584,7 @@ sessions:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -5685,9 +5698,10 @@ sessions:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -5698,7 +5712,7 @@ sessions:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -5985,9 +5999,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     bench
         .storage
@@ -6013,7 +6028,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -6068,9 +6083,10 @@ async fn resume_orphan_with_mock(
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let emit = |node: &str, payload: yunta_core::events::EventPayload| {
         bench
@@ -6114,7 +6130,7 @@ async fn resume_orphan_with_mock(
         run_dir: &bench.runs_root.join(bench.run_id.as_str()),
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,

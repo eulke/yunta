@@ -166,9 +166,10 @@ async fn run_with_mode_and_findings(
             mode: &ModeName::from(mode),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     for finding in findings {
@@ -198,7 +199,7 @@ async fn run_with_mode_and_findings(
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: interaction,

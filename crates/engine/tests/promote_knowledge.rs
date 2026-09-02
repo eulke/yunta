@@ -146,9 +146,10 @@ async fn an_approved_gate_publishes_the_new_version() {
             mode: &"default".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let notes_path = run_dir.join("artifacts/promotion-notes.md");
@@ -176,7 +177,7 @@ sessions:
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &ApproveEverything,
@@ -228,9 +229,10 @@ async fn an_unresolved_gate_never_publishes_anything() {
             mode: &"default".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let notes_path = run_dir.join("artifacts/promotion-notes.md");
@@ -257,7 +259,7 @@ sessions:
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,

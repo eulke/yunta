@@ -16,7 +16,11 @@ rusqlite = { workspace = true, features = ["bundled"] }
 serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
+# Async code reaches the log through `spawn_blocking` (D122): the runtime's
+# threads never wait on SQLite. Only the runtime feature the hop needs.
+tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }

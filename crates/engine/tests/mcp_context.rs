@@ -159,9 +159,10 @@ async fn run_with_config(
             mode: &"default".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
@@ -174,7 +175,7 @@ async fn run_with_config(
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,

@@ -47,22 +47,23 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::RunToolsEndpoint;
 use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload, StoredEvent};
+use yunta_core::Clock;
 use yunta_core::{Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
-/// What every listener of one run shares: its own storage handle (a
-/// [`Storage::reopen`]ed one — the listener outlives any borrow of the
-/// engine's), the run identity, and which nodes sit in a
-/// `coordination: blackboard` group — for anyone else, the
-/// blackboard tools are never even mounted.
+/// What every listener of one run shares: its own handle on the log
+/// (the listener outlives any borrow of the engine's), the run
+/// identity, and which nodes sit in a `coordination: blackboard`
+/// group — for anyone else, the blackboard tools are never even
+/// mounted.
 pub struct RunToolsHost {
-    storage: Storage,
+    storage: AsyncStorage,
     run_id: RunId,
     blackboard_members: HashMap<NodeId, Vec<NodeId>>,
 }
 
 impl RunToolsHost {
-    pub fn new(storage: Storage, run_id: RunId, workflow: &Workflow) -> Self {
+    pub fn new(storage: AsyncStorage, run_id: RunId, workflow: &Workflow) -> Self {
         let mut blackboard_members = HashMap::new();
         for node in &workflow.nodes {
             if let NodeKind::Parallel {
@@ -236,14 +237,15 @@ impl SessionTools {
         self.host.blackboard_members.contains_key(&self.node)
     }
 
-    fn events(&self) -> Result<Vec<StoredEvent>, String> {
+    async fn events(&self) -> Result<Vec<StoredEvent>, String> {
         self.host
             .storage
-            .events_for_run(&self.host.run_id)
+            .events_for_run(self.host.run_id.clone())
+            .await
             .map_err(|e| e.to_string())
     }
 
-    fn post_finding(&self, args: serde_json::Map<String, Value>) -> Result<String, String> {
+    async fn post_finding(&self, args: serde_json::Map<String, Value>) -> Result<String, String> {
         // One schema, both intake paths: the same `Finding`
         // type the artifact path parses — an incomplete report is a
         // visible error naming the field, never free text nobody can
@@ -254,18 +256,19 @@ impl SessionTools {
         self.host
             .storage
             .append(
-                &EventDraft {
+                EventDraft {
                     run_id: self.host.run_id.clone(),
                     node_id: Some(self.node.clone()),
                     payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
                 },
-                &yunta_core::SystemClock,
+                yunta_core::SystemClock.now(),
             )
+            .await
             .map_err(|e| e.to_string())?;
         Ok(format!("finding `{id}` recorded"))
     }
 
-    fn get_blackboard(&self) -> Result<String, String> {
+    async fn get_blackboard(&self) -> Result<String, String> {
         if !self.in_blackboard_group() {
             return Err(
                 "this session's node is not in a `coordination: blackboard` group — the \
@@ -278,7 +281,8 @@ impl SessionTools {
         // arrival order, not content. Siblings' posts arrive through
         // the group's post-join consolidation, never through here.
         let own: Vec<Finding> = self
-            .events()?
+            .events()
+            .await?
             .into_iter()
             .filter(|event| event.node_id.as_ref() == Some(&self.node))
             .filter_map(|event| match event.payload() {
@@ -294,8 +298,8 @@ impl SessionTools {
         .map_err(|e| e.to_string())
     }
 
-    fn task_status(&self) -> Result<String, String> {
-        let state = crate::replay::derive(&self.events()?);
+    async fn task_status(&self) -> Result<String, String> {
+        let state = crate::replay::derive(&self.events().await?);
         let mut tasks: Vec<(String, String)> = state
             .tasks
             .iter()
@@ -436,9 +440,9 @@ impl ServerHandler for SessionTools {
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
         let outcome = match request.name.as_ref() {
-            "yunta_post_finding" => self.post_finding(args),
-            "yunta_get_blackboard" => self.get_blackboard(),
-            "yunta_task_status" => self.task_status(),
+            "yunta_post_finding" => self.post_finding(args).await,
+            "yunta_get_blackboard" => self.get_blackboard().await,
+            "yunta_task_status" => self.task_status().await,
             "yunta_request_scope_expansion" => self.request_scope_expansion(args),
             other => Err(format!("unknown tool `{other}`")),
         };

@@ -18,10 +18,9 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use yunta_core::RunId;
-use yunta_core::{events::EventPayload, Pid};
+use yunta_core::{events::EventPayload, Clock, Pid, RunId, SystemClock};
 use yunta_engine::NodeState;
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use crate::project;
 
@@ -45,14 +44,14 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let storage = match Storage::open(&project.storage_path) {
+    let storage = match AsyncStorage::open(&project.storage_path).await {
         Ok(storage) => storage,
         Err(e) => {
             eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let events = match storage.events_for_run(run_id) {
+    let events = match storage.events_for_run(run_id.clone()).await {
         Ok(events) => events,
         Err(e) => {
             eprintln!("error: {e}");
@@ -114,7 +113,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            let events = match storage.events_for_run(run_id) {
+            let events = match storage.events_for_run(run_id.clone()).await {
                 Ok(events) => events,
                 Err(e) => {
                     eprintln!("error: {e}");
@@ -151,16 +150,18 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
     for pgid in &registry.process_groups {
         kill_group(*pgid);
     }
-    let paused = storage.append(
-        &yunta_core::events::EventDraft {
-            run_id: run_id.clone(),
-            node_id: None,
-            payload: EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
-                reason: "cancelled after crash".to_string(),
-            }),
-        },
-        &yunta_core::SystemClock,
-    );
+    let paused = storage
+        .append(
+            yunta_core::events::EventDraft {
+                run_id: run_id.clone(),
+                node_id: None,
+                payload: EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
+                    reason: "cancelled after crash".to_string(),
+                }),
+            },
+            SystemClock.now(),
+        )
+        .await;
     if let Err(e) = paused {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;

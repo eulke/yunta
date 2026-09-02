@@ -83,7 +83,8 @@ pub(super) async fn execute_executor(
             node,
             format!("executor `{executor}` needs a matching entry under `skills.executors`"),
             false,
-        );
+        )
+        .await;
     };
     // The only variant today (`ExecutorKind::Binary`) — matched
     // explicitly rather than ignored so a future `wasm` variant
@@ -98,7 +99,7 @@ pub(super) async fn execute_executor(
         &path.display().to_string(),
         ctx.manifest.config.permissions.as_ref(),
     ) {
-        return fail(ctx, node, rule, false);
+        return fail(ctx, node, rule, false).await;
     }
 
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
@@ -109,7 +110,8 @@ pub(super) async fn execute_executor(
                 node,
                 format!("failed to serialize executor `{executor}`'s stdin: {source}"),
                 false,
-            );
+            )
+            .await;
         }
     };
 
@@ -198,7 +200,7 @@ pub(super) async fn execute_executor(
                 kill_process_group(pid).await;
             }
             let _ = child.wait().await;
-            return super::node_exec::cancelled_end(ctx, node);
+            return super::node_exec::cancelled_end(ctx, node).await;
         }
         WaitOutcome::TimedOut => {
             if let Some(pid) = crate::process_registry::child_pid(&child) {
@@ -213,7 +215,8 @@ pub(super) async fn execute_executor(
                     timeout_seconds.unwrap_or_default()
                 ),
                 false,
-            );
+            )
+            .await;
         }
         WaitOutcome::Done(status) => status,
     };
@@ -250,5 +253,6 @@ pub(super) async fn execute_executor(
             format!("executor `{executor}` exited {exit_code}: {stderr_tail}"),
             false,
         )
+        .await
     }
 }

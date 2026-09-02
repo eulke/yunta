@@ -110,12 +110,12 @@ impl Bench {
         fixture_yaml: &str,
         human_interaction: &dyn yunta_engine::HumanInteraction,
     ) -> (RunTerminal, yunta_engine::RunState) {
-        let manifest = self.create(run_id, parent_yaml, config_yaml, inputs);
+        let manifest = self.create(run_id, parent_yaml, config_yaml, inputs).await;
         self.execute(run_id, &manifest, fixture_yaml, human_interaction)
             .await
     }
 
-    fn create(
+    async fn create(
         &self,
         run_id: &RunId,
         parent_yaml: &str,
@@ -134,9 +134,10 @@ impl Bench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &self.storage,
+            &self.storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
         manifest
     }
@@ -158,7 +159,7 @@ impl Bench {
             run_dir: &run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
@@ -392,7 +393,7 @@ nodes:
     isolation: inherit
 "#;
     let run_id = RunId::from("run-parent-resume");
-    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new());
+    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new()).await;
     // No interaction surface: the child's internal gate has nobody to
     // ask, so the child pauses waiting — and the parent pauses with it,
     // since a parent run spends most of its life waiting on its children.
@@ -897,7 +898,7 @@ nodes:
       - artifact: { node: plan, name: plan.yaml, as: brief.md }
 "#;
     let run_id = RunId::from("run-mounts");
-    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new());
+    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new()).await;
 
     // Each mount implies depends_on — visible in the frozen graph.
     let cons = manifest

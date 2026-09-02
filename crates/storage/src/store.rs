@@ -115,8 +115,8 @@ fn cause(error: rusqlite::Error) -> Cause {
 /// without blocking on that writer.
 pub struct Storage {
     conn: Mutex<Connection>,
-    /// Where this handle was opened — what [`Storage::reopen`] uses to
-    /// mint an independent connection onto the same database.
+    /// Where this handle was opened — what [`Storage::async_handle`]
+    /// hands to async code, which opens its own connections there.
     path: PathBuf,
 }
 
@@ -186,22 +186,23 @@ impl Storage {
         &self.path
     }
 
-    /// A second, independent handle onto the same database — what a
-    /// concurrent reader/writer with a `'static` life of its own (the
-    /// per-session run-tools listener; the CLI's `--follow` poller
-    /// already does this by path from outside) opens instead of
-    /// sharing this handle's connection. WAL + the busy timeout above
-    /// are what make the concurrency safe; `seq` assignment stays
-    /// correct because [`Storage::append`] computes it inside its own
-    /// transaction.
-    pub fn reopen(&self) -> Result<Self> {
-        Self::open(&self.path)
+    /// The handle async code uses on this same log — every call it makes
+    /// opens its own connection on a blocking thread.
+    pub fn async_handle(&self) -> crate::AsyncStorage {
+        crate::AsyncStorage::at(self.path.clone())
     }
 
     /// Appends one draft, assigning the next `seq` for its run and the
     /// timestamp `clock` reports (append-only — nothing here ever
     /// updates or deletes a row). Returns the assigned `seq`.
     pub fn append(&self, draft: &EventDraft, clock: &dyn Clock) -> Result<Seq> {
+        self.append_at(draft, clock.now())
+    }
+
+    /// [`Storage::append`] with the timestamp already read from the
+    /// clock — what an async caller does before hopping to a blocking
+    /// thread, so the instant recorded is the one its clock reported.
+    pub fn append_at(&self, draft: &EventDraft, at: chrono::DateTime<chrono::Utc>) -> Result<Seq> {
         let append_err = |error| StorageError::Append {
             run_id: draft.run_id.clone(),
             source: cause(error),
@@ -260,7 +261,7 @@ impl Storage {
             .unwrap_or_default()
         };
 
-        let ts = clock.now().to_rfc3339();
+        let ts = at.to_rfc3339();
         let event_hash = chain_hash(ChainHashFields {
             prev_hash: &prev_hash,
             run_id: draft.run_id.as_str(),

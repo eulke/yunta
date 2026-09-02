@@ -43,13 +43,14 @@ pub(super) async fn execute_loop(
             node,
             format!("loop until `{until}` is not supported — only `all_tasks_complete` is"),
             false,
-        );
+        )
+        .await;
     }
-    let instruction = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt))? {
+    let instruction = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
-    let chosen = match resolve_node_runner(ctx, node)? {
+    let chosen = match resolve_node_runner(ctx, node).await? {
         Ok(chosen) => chosen,
         Err(end) => return Ok(end),
     };
@@ -65,7 +66,7 @@ pub(super) async fn execute_loop(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
     };
     let skills = if !skills.is_empty() && !adapter.capabilities().skills {
         ctx.emit(
@@ -77,7 +78,8 @@ pub(super) async fn execute_loop(
                                  mechanism; task sessions run without them"
                     .to_string(),
             }),
-        )?;
+        )
+        .await?;
         Vec::new()
     } else {
         skills
@@ -86,15 +88,9 @@ pub(super) async fn execute_loop(
     // and a blackboard-group loop on a capability-less adapter fails
     // rather than silently dropping its declared coordination.
     let run_tools = if adapter.capabilities().run_tools {
-        ctx.run_tools_host
-            .as_ref()
-            .map(|host| (host.clone(), node.id.clone()))
+        Some((ctx.run_tools_host.clone(), node.id.clone()))
     } else {
-        let in_blackboard = ctx
-            .run_tools_host
-            .as_ref()
-            .is_some_and(|host| host.is_blackboard_member(&node.id));
-        if in_blackboard {
+        if ctx.run_tools_host.is_blackboard_member(&node.id) {
             return fail(
                 ctx,
                 node,
@@ -103,7 +99,7 @@ pub(super) async fn execute_loop(
                     node.id, chosen.adapter
                 ),
                 false,
-            );
+            ).await;
         }
         None
     };
@@ -122,7 +118,8 @@ pub(super) async fn execute_loop(
              produce an artifact with `kind: task-ledger`"
                 .to_string(),
             false,
-        );
+        )
+        .await;
     };
 
     // Absent means the engine's own default, 1 — sequential, deliberately
@@ -169,7 +166,7 @@ pub(super) async fn execute_loop(
         // whole batch has integrated; only what stays unresolved (no
         // live surface) pauses the run.
         let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
-        let events = ctx.load_events()?;
+        let events = ctx.load_events().await?;
         let state = derive(&events);
 
         let batch = select_batch(&ledger, &state, concurrency);
@@ -185,7 +182,8 @@ pub(super) async fn execute_loop(
                     iteration,
                     until_result: all_done,
                 }),
-            )?;
+            )
+            .await?;
             if all_done {
                 return close_node(
                     ctx,
@@ -202,7 +200,7 @@ pub(super) async fn execute_loop(
                 diagnostic.push_str("; ");
                 diagnostic.push_str(reason);
             }
-            return fail_with_tokens(ctx, node, diagnostic, false, tokens);
+            return fail_with_tokens(ctx, node, diagnostic, false, tokens).await;
         };
 
         if iteration > max_iterations && !iterations_lifted {
@@ -211,7 +209,7 @@ pub(super) async fn execute_loop(
             {
                 super::budget::BudgetDecision::Continue => iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { reason } => {
-                    return fail_with_tokens(ctx, node, reason, false, tokens);
+                    return fail_with_tokens(ctx, node, reason, false, tokens).await;
                 }
             }
         }
@@ -275,25 +273,29 @@ pub(super) async fn execute_loop(
             // it — what the escalation object below is built from.
             let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
 
-            let mut last_check_seq = ctx.emit(
-                Some(&node.id),
-                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-                    task_id: task.id.clone(),
-                    phase: Phase::Pre,
-                    results: to_results(&report.pre_check),
-                }),
-            )?;
-
-            for attempt in report.attempts.drain(..) {
-                tokens = sum_tokens(tokens, attempt.tokens);
-                last_check_seq = ctx.emit(
+            let mut last_check_seq = ctx
+                .emit(
                     Some(&node.id),
                     EventPayload::CriteriaChecked(CriteriaCheckedPayload {
                         task_id: task.id.clone(),
-                        phase: Phase::Post,
-                        results: to_results(&attempt.post_check),
+                        phase: Phase::Pre,
+                        results: to_results(&report.pre_check),
                     }),
-                )?;
+                )
+                .await?;
+
+            for attempt in report.attempts.drain(..) {
+                tokens = sum_tokens(tokens, attempt.tokens);
+                last_check_seq = ctx
+                    .emit(
+                        Some(&node.id),
+                        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                            task_id: task.id.clone(),
+                            phase: Phase::Post,
+                            results: to_results(&attempt.post_check),
+                        }),
+                    )
+                    .await?;
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::ScopeChecked(ScopeCheckedPayload {
@@ -301,7 +303,8 @@ pub(super) async fn execute_loop(
                         diff: attempt.scope.diff,
                         violations: attempt.scope.violations,
                     }),
-                )?;
+                )
+                .await?;
 
                 if let Some(outcome) = &attempt.scope_expansion {
                     emit_scope_expansion_events(
@@ -312,7 +315,8 @@ pub(super) async fn execute_loop(
                         outcome,
                         scope_expansion,
                         &mut expansions_granted_this_run,
-                    )?;
+                    )
+                    .await?;
                     if outcome.decision == crate::scope_expansion::Decision::Escalate {
                         escalated = Some((attempt.attempt, outcome.clone()));
                     }
@@ -326,7 +330,7 @@ pub(super) async fn execute_loop(
             // the node's own fate follows the same root-vs-sibling rule
             // every other kind applies.
             if matches!(report.outcome, TaskOutcome::Interrupted) {
-                return super::node_exec::cancelled_end(ctx, node);
+                return super::node_exec::cancelled_end(ctx, node).await;
             }
             let blocked_reason = match report.outcome {
                 TaskOutcome::Blocked { reason } => {
@@ -337,7 +341,8 @@ pub(super) async fn execute_loop(
                             new_status: TaskStatus::Blocked,
                             caused_by: last_check_seq,
                         }),
-                    )?;
+                    )
+                    .await?;
                     Some(reason)
                 }
                 TaskOutcome::Done => {
@@ -376,7 +381,8 @@ pub(super) async fn execute_loop(
                             new_status,
                             caused_by: last_check_seq,
                         }),
-                    )?;
+                    )
+                    .await?;
                     // Never counted toward the loop's own "no task ready"
                     // diagnostic — a `Pending` task is retriable, not
                     // stuck, so there's nothing to cite a human decision
@@ -431,11 +437,14 @@ pub(super) async fn execute_loop(
                 // resolved land together, only once actually resolved —
                 // an unresolved question re-asks on resume instead of
                 // remembering a decision nobody made.
-                ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))?;
-                let resolved_seq = ctx.emit(
-                    Some(&node.id),
-                    EventPayload::GateResolved(resolution.clone()),
-                )?;
+                ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
+                    .await?;
+                let resolved_seq = ctx
+                    .emit(
+                        Some(&node.id),
+                        EventPayload::GateResolved(resolution.clone()),
+                    )
+                    .await?;
                 let decided_by = Decider::Person {
                     id: resolution
                         .resolved_by
@@ -453,7 +462,8 @@ pub(super) async fn execute_loop(
                             count_this_run: expansions_granted_this_run,
                             paths: pending.outcome.request.paths.clone(),
                         }),
-                    )?;
+                    )
+                    .await?;
                 } else {
                     // Anything that isn't an explicit grant denies — the
                     // conservative reading of an ambiguous resolution,
@@ -472,7 +482,8 @@ pub(super) async fn execute_loop(
                             count_this_run: expansions_granted_this_run,
                             denial_reason: Some(reason.clone()),
                         }),
-                    )?;
+                    )
+                    .await?;
                     ctx.emit(
                         Some(&node.id),
                         EventPayload::FindingPosted(FindingPostedPayload {
@@ -499,7 +510,8 @@ pub(super) async fn execute_loop(
                                     .map(Into::into),
                             },
                         }),
-                    )?;
+                    )
+                    .await?;
                 }
                 // Granted or denied, the task gets its retry: with the
                 // widened scope (from the log's own granted paths), or
@@ -513,7 +525,8 @@ pub(super) async fn execute_loop(
                             new_status: TaskStatus::Pending,
                             caused_by: resolved_seq,
                         }),
-                    )?;
+                    )
+                    .await?;
                 }
             }
             if !unresolved.is_empty() {
@@ -525,7 +538,7 @@ pub(super) async fn execute_loop(
                         "; task `{task_id}` has a scope expansion request awaiting a human decision"
                     ));
                 }
-                return fail_with_tokens(ctx, node, diagnostic, false, tokens);
+                return fail_with_tokens(ctx, node, diagnostic, false, tokens).await;
             }
             // Everything resolved — the next iteration re-dispatches the
             // (now Pending again) tasks with the decisions on the log.
@@ -759,7 +772,8 @@ async fn dispatch_task_in_isolation<'a>(
             new_status: TaskStatus::Running,
             caused_by: registered_seq,
         }),
-    )?;
+    )
+    .await?;
 
     let report = run_task(
         task,
@@ -768,7 +782,7 @@ async fn dispatch_task_in_isolation<'a>(
             adapter,
             cwd: &task_worktree,
             max_retries: ctx.max_task_retries,
-            budget: ctx.session_budget()?,
+            budget: ctx.session_budget().await?,
             memo: &ctx.memo,
         },
         ScopeGovernance {
@@ -820,20 +834,22 @@ async fn integrate_task(
         // outcome is: a synthetic `CriterionRun` naming the git command
         // and its (failing) exit code, through the existing
         // `CriteriaChecked` vocabulary rather than a new event kind.
-        *last_check_seq = ctx.emit(
-            Some(&node.id),
-            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-                task_id: task.id.clone(),
-                phase: Phase::Post,
-                results: vec![CriterionResult {
-                    cmd: format!("git rebase {integration_head}"),
-                    exit_code: 1,
-                    r#type: None,
-                    reused: false,
-                    duration_ms: None,
-                }],
-            }),
-        )?;
+        *last_check_seq = ctx
+            .emit(
+                Some(&node.id),
+                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                    task_id: task.id.clone(),
+                    phase: Phase::Post,
+                    results: vec![CriterionResult {
+                        cmd: format!("git rebase {integration_head}"),
+                        exit_code: 1,
+                        r#type: None,
+                        reused: false,
+                        duration_ms: None,
+                    }],
+                }),
+            )
+            .await?;
         return Ok(IntegrationOutcome::Rejected(format!(
             "rebase onto the integrated tree conflicted for task `{}`",
             task.id
@@ -841,14 +857,16 @@ async fn integrate_task(
     }
 
     let post_runs = post_check(task, task_worktree, memo).await?;
-    *last_check_seq = ctx.emit(
-        Some(&node.id),
-        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-            task_id: task.id.clone(),
-            phase: Phase::Post,
-            results: to_results(&post_runs),
-        }),
-    )?;
+    *last_check_seq = ctx
+        .emit(
+            Some(&node.id),
+            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: task.id.clone(),
+                phase: Phase::Post,
+                results: to_results(&post_runs),
+            }),
+        )
+        .await?;
     let scope = scope_check(task_worktree, &task.scope).await?;
     ctx.emit(
         Some(&node.id),
@@ -857,7 +875,8 @@ async fn integrate_task(
             diff: scope.diff.clone(),
             violations: scope.violations.clone(),
         }),
-    )?;
+    )
+    .await?;
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     if !criteria_green || !scope.violations.is_empty() {
@@ -979,7 +998,7 @@ async fn head_commit(repo: &Path) -> Result<String, RunError> {
 /// here — this recorte has no gate node for a person to decide
 /// through, so `ask` mode only ever reaches `Escalate`, never a rendered
 /// verdict.
-fn emit_scope_expansion_events(
+async fn emit_scope_expansion_events(
     ctx: &RunCtx<'_>,
     node: &Node,
     task_id: &yunta_core::TaskId,
@@ -1001,7 +1020,8 @@ fn emit_scope_expansion_events(
                 .precheck_exit
                 .map(|exit_code| ProposedCriterionPrecheck { exit_code }),
         }),
-    )?;
+    )
+    .await?;
 
     match &outcome.decision {
         crate::scope_expansion::Decision::Granted => {
@@ -1015,7 +1035,8 @@ fn emit_scope_expansion_events(
                     count_this_run: *granted_this_run,
                     paths: outcome.request.paths.clone(),
                 }),
-            )?;
+            )
+            .await?;
         }
         crate::scope_expansion::Decision::Denied(reason) => {
             ctx.emit(
@@ -1027,7 +1048,8 @@ fn emit_scope_expansion_events(
                     count_this_run: *granted_this_run,
                     denial_reason: Some(reason.clone()),
                 }),
-            )?;
+            )
+            .await?;
             ctx.emit(
                 Some(&node.id),
                 EventPayload::FindingPosted(FindingPostedPayload {
@@ -1054,7 +1076,8 @@ fn emit_scope_expansion_events(
                             .map(Into::into),
                     },
                 }),
-            )?;
+            )
+            .await?;
         }
         crate::scope_expansion::Decision::Escalate => {}
     }

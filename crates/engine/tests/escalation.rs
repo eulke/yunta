@@ -78,9 +78,10 @@ async fn paused_manifest_and_events(
             mode: &"default".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
 
     let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
@@ -93,7 +94,7 @@ async fn paused_manifest_and_events(
         run_dir: &run_dir,
         worktree: &worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage: &storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &NoInteraction,
@@ -254,9 +255,10 @@ impl GateBench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &storage,
+            &storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
         GateBench {
             _root: root,
@@ -282,7 +284,7 @@ impl GateBench {
             run_dir: &self.run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: interaction,
@@ -295,16 +297,17 @@ impl GateBench {
         (report.terminal, report.state)
     }
 
-    fn resolve(&self, option: &str) -> Result<(), ResolveGateError> {
+    async fn resolve(&self, option: &str) -> Result<(), ResolveGateError> {
         resolve_gate(
             &self.manifest,
-            &self.storage,
+            &self.storage.async_handle(),
             &self.run_id,
             &FixedClock,
             option,
             Some("mcp".to_string()),
             None,
         )
+        .await
     }
 
     fn events(&self) -> Vec<yunta_core::events::StoredEvent> {
@@ -334,7 +337,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     )
     .await;
 
-    bench.resolve("retry").unwrap();
+    bench.resolve("retry").await.unwrap();
     // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
@@ -402,9 +405,10 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             mode: &"quick".into(),
             promoted_from: None,
         },
-        &storage,
+        &storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     async fn drive(
         run_id: &RunId,
@@ -422,7 +426,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             run_dir,
             worktree,
             adapters: &adapters,
-            storage,
+            storage: &storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &NoInteraction,
@@ -439,13 +443,14 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
 
     resolve_gate(
         &manifest,
-        &storage,
+        &storage.async_handle(),
         &run_id,
         &FixedClock,
         "promote",
         Some("mcp".to_string()),
         None,
     )
+    .await
     .unwrap();
 
     let report = drive(&run_id, &manifest, &run_dir, &worktree, &storage).await;
@@ -495,7 +500,7 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
     let bench = GateBench::paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
 
-    bench.resolve("aprobar").unwrap();
+    bench.resolve("aprobar").await.unwrap();
     let (terminal, state) = bench.execute("sessions: []\n", &NoInteraction).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -520,7 +525,7 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
     let bench = GateBench::paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
-    bench.resolve("ajustar").unwrap();
+    bench.resolve("ajustar").await.unwrap();
     let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came
@@ -537,7 +542,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     )
     .await;
 
-    bench.resolve("abort").unwrap();
+    bench.resolve("abort").await.unwrap();
     let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
@@ -598,7 +603,7 @@ sessions:
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    seeded.resolve("retry").unwrap();
+    seeded.resolve("retry").await.unwrap();
     let (seeded_terminal, seeded_state) = seeded.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
 
     assert_eq!(live_terminal, seeded_terminal);
@@ -627,7 +632,7 @@ nodes:
     let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let err = bench.resolve("retry").unwrap_err();
+    let err = bench.resolve("retry").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NotPaused));
 }
 
@@ -638,7 +643,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    let err = bench.resolve("nonexistent-option").unwrap_err();
+    let err = bench.resolve("nonexistent-option").await.unwrap_err();
     match err {
         ResolveGateError::UnknownOption { chosen, declared } => {
             assert_eq!(chosen, "nonexistent-option");
@@ -666,6 +671,6 @@ nodes:
         "sessions: []\n",
     )
     .await;
-    let err = bench.resolve("anything").unwrap_err();
+    let err = bench.resolve("anything").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NothingToResolve));
 }

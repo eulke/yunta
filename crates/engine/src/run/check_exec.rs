@@ -140,20 +140,22 @@ async fn execute_baseline_compare(
             node,
             "check `baseline_compare` needs `baseline.suite` configured".to_string(),
             false,
-        );
+        )
+        .await;
     };
 
-    let already_captured = ctx
-        .load_events()?
-        .into_iter()
-        .find_map(|event| match event.payload() {
-            Some(EventPayload::BaselineCaptured(payload)) => Some(payload.clone()),
-            _ => None,
-        });
+    let already_captured =
+        ctx.load_events()
+            .await?
+            .into_iter()
+            .find_map(|event| match event.payload() {
+                Some(EventPayload::BaselineCaptured(payload)) => Some(payload.clone()),
+                _ => None,
+            });
 
     let output = match run_command(ctx, ctx.worktree, &baseline.suite, cancel).await? {
         CommandRun::Done(output) => output,
-        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node),
+        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
     };
 
     match already_captured {
@@ -174,7 +176,8 @@ async fn execute_baseline_compare(
                     },
                     hash: yunta_core::sha256_hex(output.stdout.as_bytes()),
                 }),
-            )?;
+            )
+            .await?;
             close_node(
                 ctx,
                 node,
@@ -194,6 +197,7 @@ async fn execute_baseline_compare(
                     ),
                     false,
                 )
+                .await
             } else {
                 close_node(
                     ctx,
@@ -223,12 +227,13 @@ async fn execute_coverage_gate(
             "check `coverage_gate` needs `coverage.cmd` and `coverage.threshold` configured"
                 .to_string(),
             false,
-        );
+        )
+        .await;
     };
 
     let output = match run_command(ctx, ctx.worktree, &coverage.cmd, cancel).await? {
         CommandRun::Done(output) => output,
-        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node),
+        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
     };
     let Some(measured) = parse_last_percentage(&output.stdout) else {
         return fail(
@@ -239,7 +244,8 @@ async fn execute_coverage_gate(
                 coverage.cmd
             ),
             false,
-        );
+        )
+        .await;
     };
 
     if measured < coverage.threshold {
@@ -252,6 +258,7 @@ async fn execute_coverage_gate(
             ),
             false,
         )
+        .await
     } else {
         close_node(
             ctx,
@@ -309,7 +316,7 @@ async fn execute_findings_gate(
     node: &Node,
     max_severity: FindingSeverity,
 ) -> Result<NodeEnd, RunError> {
-    let state = derive(&ctx.load_events()?);
+    let state = derive(&ctx.load_events().await?);
     let offending: Vec<&str> = state
         .findings
         .iter()
@@ -336,6 +343,7 @@ async fn execute_findings_gate(
             ),
             false,
         )
+        .await
     }
 }
 

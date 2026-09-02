@@ -30,7 +30,7 @@ use serde::Deserialize;
 use yunta_adapters::{Adapter, MockAdapter, MOCK_ID};
 use yunta_core::{AdapterId, ModeName, RunId, SystemClock, Workflow};
 use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use super::status::task_status_label;
 use crate::load_yaml;
@@ -193,7 +193,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     }
     init_git(&worktree)?;
     let runs_root = sandbox.path().join("runs");
-    let storage = Storage::open(&sandbox.path().join("events.db")).map_err(|e| e.to_string())?;
+    let storage = AsyncStorage::open(sandbox.path().join("events.db"))
+        .await
+        .map_err(|e| e.to_string())?;
 
     let run_id = TEST_RUN.clone();
     let run_dir = runs_root.join(run_id.as_str());
@@ -229,6 +231,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &storage,
         &SystemClock,
     )
+    .await
     .map_err(|e| e.to_string())?;
     // A test case's every session comes from a scripted fixture — a
     // gate here has no human to ask, same as it has no LLM to call.

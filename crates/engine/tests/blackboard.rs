@@ -84,9 +84,10 @@ impl Bench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &storage,
+            &storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
 
         let mock = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
@@ -99,7 +100,7 @@ impl Bench {
             run_dir: &run_dir,
             worktree: &worktree,
             adapters: &adapters,
-            storage: &storage,
+            storage: &storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &NoInteraction,

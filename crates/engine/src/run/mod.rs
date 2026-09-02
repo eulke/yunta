@@ -47,7 +47,7 @@ use yunta_core::events::{
     TerminalState,
 };
 use yunta_core::{AdapterId, Clock, Manifest, ModeName, NodeId, Pid, RunId, Seq, YuntaError};
-use yunta_storage::{Storage, StorageError};
+use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
 use crate::replay::{derive, RunState};
@@ -134,7 +134,7 @@ pub(crate) struct RunCtx<'a> {
     pub run_dir: &'a Path,
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
-    pub storage: &'a Storage,
+    pub storage: &'a AsyncStorage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
     /// Criteria memoization — one cache per `execute_run`
@@ -173,16 +173,16 @@ pub(crate) struct RunCtx<'a> {
     /// `limits.max_workflow_depth` before a child is born.
     pub depth: u32,
     /// The per-run MCP host every session listener of this run
-    /// shares (its own reopened storage handle — listeners outlive any
-    /// borrow of ours). `None` when the reopen failed at run start:
-    /// sessions run without an endpoint, degraded loudly where a node
-    /// actually needed one.
-    pub run_tools_host: Option<Arc<crate::run_tools::RunToolsHost>>,
+    /// shares — it holds its own handle on the log, since listeners
+    /// outlive any borrow of ours.
+    pub run_tools_host: Arc<crate::run_tools::RunToolsHost>,
 }
 
 impl RunCtx<'_> {
-    /// Appends one event and returns the seq storage assigned to it.
-    pub(crate) fn emit(
+    /// Appends one event and returns the seq storage assigned to it. The
+    /// timestamp is read from the run's clock here, before the hop to
+    /// the blocking thread that writes it.
+    pub(crate) async fn emit(
         &self,
         node_id: Option<&NodeId>,
         payload: EventPayload,
@@ -192,11 +192,12 @@ impl RunCtx<'_> {
             node_id: node_id.cloned(),
             payload,
         };
-        Ok(self.storage.append(&draft, self.clock)?)
+        let at = self.clock.now();
+        Ok(self.storage.append(draft, at).await?)
     }
 
-    pub(crate) fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
-        Ok(self.storage.events_for_run(self.run_id)?)
+    pub(crate) async fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
+        Ok(self.storage.events_for_run(self.run_id.clone()).await?)
     }
 
     /// Exports the run's whole log to `run.dir/events.jsonl` — called
@@ -206,13 +207,15 @@ impl RunCtx<'_> {
     /// `progress.md` already follows — a run that pauses, resumes, and
     /// later finishes just gets the file rewritten with the fuller log,
     /// never appended to.
-    pub(crate) fn export_events_jsonl(&self) -> Result<(), RunError> {
-        let events = self.load_events()?;
+    pub(crate) async fn export_events_jsonl(&self) -> Result<(), RunError> {
+        let events = self.load_events().await?;
         let jsonl = crate::events_export::render_events_jsonl(&events)?;
-        std::fs::write(self.run_dir.join("events.jsonl"), jsonl).map_err(|source| RunError::Io {
-            context: "write events.jsonl".to_string(),
-            source,
-        })
+        tokio::fs::write(self.run_dir.join("events.jsonl"), jsonl)
+            .await
+            .map_err(|source| RunError::Io {
+                context: "write events.jsonl".to_string(),
+                source,
+            })
     }
 
     /// The [`Budget`] for one agent session: an equal
@@ -223,7 +226,7 @@ impl RunCtx<'_> {
     /// must not resurface as a zero-token session budget). `timeout`
     /// stays `None`: `defaults.timeout_minutes` is resolved separately,
     /// outside this function's scope.
-    pub(crate) fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
+    pub(crate) async fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
         // `defaults.timeout_minutes` applies on every path —
         // the wall clock is orthogonal to the token cap and to a
         // human's `continue`.
@@ -249,7 +252,7 @@ impl RunCtx<'_> {
                 ..Default::default()
             });
         };
-        let state = derive(&self.load_events()?);
+        let state = derive(&self.load_events().await?);
         let non_terminal = self
             .manifest
             .workflow
@@ -293,9 +296,10 @@ impl RunCtx<'_> {
 /// sees the live session. A failed append warns instead of aborting the
 /// stream: the run's next mandatory event hits the same storage and
 /// fails the run properly if it's really down.
+#[async_trait::async_trait]
 impl crate::task_cycle::SessionObserver for RunCtx<'_> {
-    fn emit_session_event(&self, node_id: &NodeId, payload: EventPayload) {
-        if let Err(e) = self.emit(Some(node_id), payload) {
+    async fn emit_session_event(&self, node_id: &NodeId, payload: EventPayload) {
+        if let Err(e) = self.emit(Some(node_id), payload).await {
             tracing::warn!(error = %e, "failed to append a session audit event");
         }
     }
@@ -358,9 +362,9 @@ pub struct CreateRunParams<'a> {
 /// all has nothing to validate a name against, and every node stays
 /// schedulable, exactly the behavior before modes existed. A workflow
 /// that *does* declare `modes:` rejects any other unrecognized name.
-pub fn create_run(
+pub async fn create_run(
     params: CreateRunParams<'_>,
-    storage: &Storage,
+    storage: &AsyncStorage,
     clock: &dyn Clock,
 ) -> Result<PathBuf, RunError> {
     let CreateRunParams {
@@ -400,10 +404,12 @@ pub fn create_run(
         run_dir.join("artifacts"),
         run_dir.join("scratch"),
     ] {
-        std::fs::create_dir_all(&dir).map_err(|source| RunError::Io {
-            context: format!("create run directory `{}`", dir.display()),
-            source,
-        })?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("create run directory `{}`", dir.display()),
+                source,
+            })?;
     }
 
     let manifest_path = run_dir.join("manifest.yaml");
@@ -411,10 +417,12 @@ pub fn create_run(
         path: manifest_path.clone(),
         detail: e.to_string(),
     })?;
-    std::fs::write(&manifest_path, yaml).map_err(|source| RunError::Io {
-        context: format!("write `{}`", manifest_path.display()),
-        source,
-    })?;
+    tokio::fs::write(&manifest_path, yaml)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("write `{}`", manifest_path.display()),
+            source,
+        })?;
 
     let event = EventDraft {
         run_id: run_id.clone(),
@@ -438,7 +446,8 @@ pub fn create_run(
             base_commit: manifest.base_commit.clone(),
         }),
     };
-    storage.append(&event, clock)?;
+    let at = clock.now();
+    storage.append(event, at).await?;
 
     Ok(run_dir)
 }
@@ -454,7 +463,7 @@ pub struct RunEnv<'a> {
     pub run_dir: &'a Path,
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
-    pub storage: &'a Storage,
+    pub storage: &'a AsyncStorage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
@@ -527,29 +536,17 @@ pub(crate) async fn execute_run_at_depth(
         root_cancel: root_cancel_for_ctx,
         forge,
         depth,
-        // One host per execute_run invocation; every session
-        // listener reopens nothing — they share this handle's clone of
-        // the storage connection path. A failed reopen degrades here,
-        // once, loudly; nodes that *need* the endpoint (a blackboard
-        // group) fail individually with their own diagnostic.
-        run_tools_host: match storage.reopen() {
-            Ok(own) => Some(Arc::new(crate::run_tools::RunToolsHost::new(
-                own,
-                run_id.clone(),
-                &manifest.workflow,
-            ))),
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "cannot reopen storage for the per-run MCP host — sessions run without \
-                     run tools"
-                );
-                None
-            }
-        },
+        // One host per execute_run invocation, shared by every
+        // session listener; each of them reads and writes through the
+        // host's own clone of the log handle.
+        run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
+            storage.clone(),
+            run_id.clone(),
+            &manifest.workflow,
+        )),
     };
 
-    let events = ctx.load_events()?;
+    let events = ctx.load_events().await?;
     if events.is_empty() {
         return Err(RunError::UnknownRun {
             run_id: run_id.clone(),
@@ -574,7 +571,8 @@ pub(crate) async fn execute_run_at_depth(
             EventPayload::RunResumed(RunResumedPayload {
                 resume_policy_applied: Some("restart_node".to_string()),
             }),
-        )?;
+        )
+        .await?;
     }
 
     // "On wake" means once per invocation, not once per
@@ -606,16 +604,17 @@ pub(crate) async fn execute_run_at_depth(
                 EventPayload::RunPaused(RunPausedPayload {
                     reason: "cancelled by user".to_string(),
                 }),
-            )?;
-            ctx.export_events_jsonl()?;
+            )
+            .await?;
+            ctx.export_events_jsonl().await?;
             return Ok(RunReport {
                 terminal: RunTerminal::Paused {
                     reason: "cancelled by user".to_string(),
                 },
-                state: derive(&ctx.load_events()?),
+                state: derive(&ctx.load_events().await?),
             });
         }
-        let events = ctx.load_events()?;
+        let events = ctx.load_events().await?;
         match schedule::next_step(
             &manifest.workflow,
             &events,
@@ -630,7 +629,7 @@ pub(crate) async fn execute_run_at_depth(
                 // Best-effort by design: if the export itself fails, the
                 // original diagnostic wins (never masked by an IO error
                 // about its own post-mortem).
-                if let Err(export_error) = ctx.export_events_jsonl() {
+                if let Err(export_error) = ctx.export_events_jsonl().await {
                     tracing::warn!(
                         error = %export_error,
                         "could not export events.jsonl for the broken run"
@@ -643,7 +642,7 @@ pub(crate) async fn execute_run_at_depth(
                 // emitted after the close event, and its findings
                 // are events.
                 distill::run_distill(&ctx, &mode_name).await?;
-                let state = derive(&ctx.load_events()?);
+                let state = derive(&ctx.load_events().await?);
                 ctx.emit(
                     None,
                     EventPayload::RunFinished(RunFinishedPayload {
@@ -653,8 +652,9 @@ pub(crate) async fn execute_run_at_depth(
                             tokens: state.total_tokens,
                         },
                     }),
-                )?;
-                ctx.export_events_jsonl()?;
+                )
+                .await?;
+                ctx.export_events_jsonl().await?;
                 // `on_finish.cleanup: worktree` — after the
                 // export, only at a real Finish (a paused run expects a
                 // resume in that tree; a promoted one seeds its
@@ -699,11 +699,12 @@ pub(crate) async fn execute_run_at_depth(
                     EventPayload::RunPaused(RunPausedPayload {
                         reason: reason.clone(),
                     }),
-                )?;
-                ctx.export_events_jsonl()?;
+                )
+                .await?;
+                ctx.export_events_jsonl().await?;
                 return Ok(RunReport {
                     terminal: RunTerminal::Paused { reason },
-                    state: derive(&ctx.load_events()?),
+                    state: derive(&ctx.load_events().await?),
                 });
             }
             ScheduleStep::Reroute {
@@ -721,7 +722,8 @@ pub(crate) async fn execute_run_at_depth(
                         attempt,
                         max_reroutes,
                     }),
-                )?;
+                )
+                .await?;
             }
             ScheduleStep::GateExhaustedReroutes {
                 node,
@@ -770,18 +772,21 @@ pub(crate) async fn execute_run_at_depth(
                         EventPayload::RunPaused(RunPausedPayload {
                             reason: escalation.summary.clone(),
                         }),
-                    )?;
-                    ctx.export_events_jsonl()?;
+                    )
+                    .await?;
+                    ctx.export_events_jsonl().await?;
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused {
                             reason: escalation.summary,
                         },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 };
                 if !already_recorded {
-                    ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))?;
-                    ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))?;
+                    ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
+                        .await?;
+                    ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))
+                        .await?;
                 }
                 if resolution.chosen_option.as_deref() == Some("retry") {
                     ctx.emit(
@@ -792,7 +797,8 @@ pub(crate) async fn execute_run_at_depth(
                             attempt: max_reroutes + 1,
                             max_reroutes,
                         }),
-                    )?;
+                    )
+                    .await?;
                 } else if resolution.chosen_option.as_deref() == Some("promote") {
                     // `suggested_mode` must be `Some` here — `"promote"`
                     // only ever appeared as an option when it was.
@@ -806,7 +812,8 @@ pub(crate) async fn execute_run_at_depth(
                             evidence: cause,
                             suggested_mode: next_mode.clone(),
                         }),
-                    )?;
+                    )
+                    .await?;
                     // A promotion is a real close — the
                     // short attempt's knowledge is knowledge, and the
                     // successor inherits it through the repo layer.
@@ -816,7 +823,7 @@ pub(crate) async fn execute_run_at_depth(
                     // derive them into an inheritable artifact so the
                     // successor's copied context carries them. No
                     // findings, no file.
-                    let events_for_close = ctx.load_events()?;
+                    let events_for_close = ctx.load_events().await?;
                     let inherited = crate::findings::inherited_findings(&events_for_close);
                     if !inherited.is_empty() {
                         let file = yunta_core::FindingsFile::from_findings(inherited);
@@ -840,13 +847,14 @@ pub(crate) async fn execute_run_at_depth(
                                 tokens: state.total_tokens,
                             },
                         }),
-                    )?;
-                    ctx.export_events_jsonl()?;
+                    )
+                    .await?;
+                    ctx.export_events_jsonl().await?;
                     return Ok(RunReport {
                         terminal: RunTerminal::Promoted {
                             suggested_mode: next_mode,
                         },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 } else {
                     let reason = format!(
@@ -862,11 +870,12 @@ pub(crate) async fn execute_run_at_depth(
                         EventPayload::RunPaused(RunPausedPayload {
                             reason: reason.clone(),
                         }),
-                    )?;
-                    ctx.export_events_jsonl()?;
+                    )
+                    .await?;
+                    ctx.export_events_jsonl().await?;
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 }
             }
@@ -893,11 +902,12 @@ pub(crate) async fn execute_run_at_depth(
                                         EventPayload::RunPaused(RunPausedPayload {
                                             reason: reason.clone(),
                                         }),
-                                    )?;
-                                    ctx.export_events_jsonl()?;
+                                    )
+                                    .await?;
+                                    ctx.export_events_jsonl().await?;
                                     return Ok(RunReport {
                                         terminal: RunTerminal::Paused { reason },
-                                        state: derive(&ctx.load_events()?),
+                                        state: derive(&ctx.load_events().await?),
                                     });
                                 }
                             }
@@ -951,11 +961,12 @@ pub(crate) async fn execute_run_at_depth(
                             EventPayload::RunPaused(RunPausedPayload {
                                 reason: reason.clone(),
                             }),
-                        )?;
-                        ctx.export_events_jsonl()?;
+                        )
+                        .await?;
+                        ctx.export_events_jsonl().await?;
                         return Ok(RunReport {
                             terminal: RunTerminal::Paused { reason },
-                            state: derive(&ctx.load_events()?),
+                            state: derive(&ctx.load_events().await?),
                         });
                     }
                 }
@@ -987,7 +998,7 @@ pub(crate) async fn execute_run_at_depth(
                 if let gate_exec::GateStep::StillWaiting { reason } = step {
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 }
             }
@@ -999,7 +1010,7 @@ pub(crate) async fn execute_run_at_depth(
                 if let gate_exec::GateStep::StillWaiting { reason } = step {
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 }
             }
@@ -1035,11 +1046,12 @@ pub(crate) async fn execute_run_at_depth(
                         EventPayload::RunPaused(RunPausedPayload {
                             reason: reason.clone(),
                         }),
-                    )?;
-                    ctx.export_events_jsonl()?;
+                    )
+                    .await?;
+                    ctx.export_events_jsonl().await?;
                     return Ok(RunReport {
                         terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events()?),
+                        state: derive(&ctx.load_events().await?),
                     });
                 }
             }
@@ -1053,11 +1065,12 @@ pub(crate) async fn execute_run_at_depth(
                             EventPayload::RunPaused(RunPausedPayload {
                                 reason: reason.clone(),
                             }),
-                        )?;
-                        ctx.export_events_jsonl()?;
+                        )
+                        .await?;
+                        ctx.export_events_jsonl().await?;
                         return Ok(RunReport {
                             terminal: RunTerminal::Paused { reason },
-                            state: derive(&ctx.load_events()?),
+                            state: derive(&ctx.load_events().await?),
                         });
                     }
                 }

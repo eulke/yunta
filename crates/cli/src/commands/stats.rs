@@ -7,6 +7,7 @@
 //! Every rendered line stays inside 80 columns and never depends on
 //! color — see this module's own render functions for how.
 
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -110,7 +111,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
-    let history = collect_history(&project, &storage, workflow_name);
+    let history = collect_history(&project.runs_root, &storage, workflow_name);
     if history.is_empty() {
         println!("no runs of workflow `{workflow_name}` yet");
         return ExitCode::SUCCESS;
@@ -119,7 +120,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
     // criteria/re-routes/gates against.
-    let (raw_history, workflow) = collect_raw_history(&project, &storage, workflow_name);
+    let (raw_history, workflow) = collect_raw_history(&project.runs_root, &storage, workflow_name);
     let findings = workflow
         .as_ref()
         .map(|wf| yunta_engine::analyze_verification_effectiveness(wf, &raw_history));
@@ -146,7 +147,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
 /// what a for-display command can't use" stance `list_runs` already
 /// takes for its own unreadable entries.
 pub(crate) fn collect_history(
-    project: &Project,
+    runs_root: &Path,
     storage: &Storage,
     workflow_name: &str,
 ) -> Vec<RunSummary> {
@@ -162,10 +163,7 @@ pub(crate) fn collect_history(
         let Some(first) = events.first() else {
             continue;
         };
-        let manifest_path = project
-            .runs_root
-            .join(run_id.as_str())
-            .join("manifest.yaml");
+        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
@@ -200,7 +198,7 @@ pub(crate) fn collect_history(
 /// gates against. Same skip-what-can't-be-read stance as
 /// [`collect_history`].
 pub(crate) fn collect_raw_history(
-    project: &Project,
+    runs_root: &Path,
     storage: &Storage,
     workflow_name: &str,
 ) -> (Vec<Vec<StoredEvent>>, Option<yunta_core::Workflow>) {
@@ -217,10 +215,7 @@ pub(crate) fn collect_raw_history(
         let Some(first) = events.first() else {
             continue;
         };
-        let manifest_path = project
-            .runs_root
-            .join(run_id.as_str())
-            .join("manifest.yaml");
+        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())

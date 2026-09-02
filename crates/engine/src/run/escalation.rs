@@ -217,16 +217,16 @@ fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleS
 /// `run_paused` — refuses `NotPaused` otherwise, which also removes any
 /// race with a live process about to ask the same question), and the
 /// chosen option must be on the reconstructed escalation's own menu.
-pub fn resolve_gate(
+pub async fn resolve_gate(
     manifest: &Manifest,
-    storage: &yunta_storage::Storage,
+    storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
     option_id: &str,
     resolved_by: Option<String>,
     free_text: Option<String>,
 ) -> Result<(), ResolveGateError> {
-    let events = storage.events_for_run(run_id)?;
+    let events = storage.events_for_run(run_id.clone()).await?;
     if !matches!(
         events.last().and_then(StoredEvent::payload),
         Some(EventPayload::RunPaused(_))
@@ -253,22 +253,26 @@ pub fn resolve_gate(
         free_text,
         approved_sha: None,
     };
-    storage.append(
-        &EventDraft {
-            run_id: run_id.clone(),
-            node_id: Some(node.clone()),
-            payload: EventPayload::GateWaiting(escalation),
-        },
-        clock,
-    )?;
-    storage.append(
-        &EventDraft {
-            run_id: run_id.clone(),
-            node_id: Some(node),
-            payload: EventPayload::GateResolved(resolution),
-        },
-        clock,
-    )?;
+    storage
+        .append(
+            EventDraft {
+                run_id: run_id.clone(),
+                node_id: Some(node.clone()),
+                payload: EventPayload::GateWaiting(escalation),
+            },
+            clock.now(),
+        )
+        .await?;
+    storage
+        .append(
+            EventDraft {
+                run_id: run_id.clone(),
+                node_id: Some(node),
+                payload: EventPayload::GateResolved(resolution),
+            },
+            clock.now(),
+        )
+        .await?;
     Ok(())
 }
 

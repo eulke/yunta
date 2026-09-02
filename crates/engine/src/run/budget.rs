@@ -41,8 +41,10 @@ pub async fn authorize_over_budget(
     match ctx.human_interaction.resolve(&escalation).await {
         Some(resolution) => {
             let chosen = resolution.chosen_option.clone();
-            ctx.emit(None, EventPayload::GateWaiting(escalation))?;
-            ctx.emit(None, EventPayload::GateResolved(resolution))?;
+            ctx.emit(None, EventPayload::GateWaiting(escalation))
+                .await?;
+            ctx.emit(None, EventPayload::GateResolved(resolution))
+                .await?;
             if chosen.as_deref() == Some("continue") {
                 Ok(BudgetDecision::Continue)
             } else {
@@ -131,8 +133,10 @@ pub async fn authorize_loop_overrun(
     match ctx.human_interaction.resolve(&escalation).await {
         Some(resolution) => {
             let chosen = resolution.chosen_option.clone();
-            ctx.emit(Some(node_id), EventPayload::GateWaiting(escalation))?;
-            ctx.emit(Some(node_id), EventPayload::GateResolved(resolution))?;
+            ctx.emit(Some(node_id), EventPayload::GateWaiting(escalation))
+                .await?;
+            ctx.emit(Some(node_id), EventPayload::GateResolved(resolution))
+                .await?;
             if chosen.as_deref() == Some("continue") {
                 Ok(BudgetDecision::Continue)
             } else {

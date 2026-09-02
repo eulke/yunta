@@ -463,8 +463,11 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(project) = project::resolve(&cwd) {
             if let Ok(storage) = yunta_storage::Storage::open(&project.storage_path) {
-                let (history, _) =
-                    commands::stats::collect_raw_history(&project, &storage, &workflow.name);
+                let (history, _) = commands::stats::collect_raw_history(
+                    &project.runs_root,
+                    &storage,
+                    &workflow.name,
+                );
                 let findings =
                     yunta_engine::analyze_verification_effectiveness(&workflow, &history);
                 let text = commands::stats::render_verification_findings(&findings);

@@ -195,7 +195,8 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                             proposed_criterion: None,
                         },
                     }),
-                )?;
+                )
+                .await?;
                 artifacts.push(ProvenanceArtifact {
                     name: name.to_string(),
                     content_hash: None,
@@ -212,7 +213,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         mode: mode.to_string(),
         distilled_at: ctx.clock.now().to_rfc3339(),
         artifacts,
-        verification: verification(&ctx.load_events()?),
+        verification: verification(&ctx.load_events().await?),
     };
     let yaml = yunta_core::yaml::to_string(&provenance).map_err(|e| RunError::Broken {
         diagnostic: format!("failed to serialize distill provenance: {e}"),

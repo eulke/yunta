@@ -15,7 +15,7 @@ use std::sync::Arc;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::{AdapterId, Manifest, RunId, SystemClock};
 use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use crate::project::Project;
 
@@ -27,7 +27,7 @@ use crate::project::Project;
 pub(crate) struct PromotionEnv<'a> {
     pub cwd: &'a Path,
     pub project: &'a Project,
-    pub storage: &'a Storage,
+    pub(crate) storage: &'a AsyncStorage,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
@@ -202,9 +202,10 @@ nodes:
                 mode: &"quick".into(),
                 promoted_from: None,
             },
-            &storage,
+            &storage.async_handle(),
             &SystemClock,
         )
+        .await
         .unwrap();
 
         // A real artifact file on the parent's own run.dir — what
@@ -217,7 +218,7 @@ nodes:
             run_dir: &run_dir,
             worktree: &worktree,
             adapters: &adapters,
-            storage: &storage,
+            storage: &storage.async_handle(),
             clock: &SystemClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &AlwaysPromote,
@@ -236,7 +237,7 @@ nodes:
             &PromotionEnv {
                 cwd: &cwd,
                 project: &project,
-                storage: &storage,
+                storage: &storage.async_handle(),
                 adapters: &adapters,
                 forge: None,
                 cancel: None,

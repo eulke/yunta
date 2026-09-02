@@ -13,7 +13,7 @@ use std::time::Duration;
 use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, Isolation, Manifest, ModeName, RunId, SystemClock, Workflow};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use super::status::progress_summary;
 use crate::load_yaml;
@@ -70,13 +70,13 @@ fn validate_adapter_flag(
 /// `yunta-storage` exposes no such subscription mechanism — a
 /// deliberately narrow, ~5-method interface; the *content* printed is
 /// identical either way, only the delivery latency (bounded by the
-/// poll interval) differs from a true stream. Opens its own `Storage`
-/// handle onto the same SQLite file — WAL mode (already set by
-/// `Storage::open`) is exactly what makes a second, read-only
-/// connection safe to run concurrently with the writer `execute_run`
-/// itself is using.
+/// poll interval) differs from a true stream. Reads through its own
+/// clone of the run's log handle: every poll is its own read-only
+/// connection on a blocking thread, which WAL mode (set by
+/// `Storage::open`) keeps safe beside the writer `execute_run` itself
+/// is using.
 fn spawn_follower(
-    storage_path: std::path::PathBuf,
+    storage: AsyncStorage,
     run_id: RunId,
     manifest: Manifest,
 ) -> (
@@ -86,17 +86,13 @@ fn spawn_follower(
     let stop = std::sync::Arc::new(tokio::sync::Notify::new());
     let stop_follower = stop.clone();
     let handle = tokio::spawn(async move {
-        let storage = match Storage::open(&storage_path) {
-            Ok(storage) => storage,
-            Err(_) => return, // `run` itself already opened this path fine.
-        };
         let mut last = String::new();
         loop {
             tokio::select! {
                 _ = stop_follower.notified() => return,
                 _ = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
-            let Ok(events) = storage.events_for_run(&run_id) else {
+            let Ok(events) = storage.events_for_run(run_id.clone()).await else {
                 continue;
             };
             if events.is_empty() {
@@ -114,10 +110,12 @@ fn spawn_follower(
 
 /// Every run in storage with events but no `run_finished` — paused runs
 /// hold a slot (they expect a `resume`), finished ones never do.
-fn count_non_terminal_runs(storage: &Storage) -> Result<usize, yunta_storage::StorageError> {
+async fn count_non_terminal_runs(
+    storage: &AsyncStorage,
+) -> Result<usize, yunta_storage::StorageError> {
     let mut active = 0;
-    for run_id in storage.list_runs()?.into_iter().map(|run| run.run_id) {
-        let events = storage.events_for_run(&run_id)?;
+    for run_id in storage.list_runs().await?.into_iter().map(|run| run.run_id) {
+        let events = storage.events_for_run(run_id).await?;
         let finished = events.iter().any(|e| {
             matches!(
                 e.payload(),
@@ -155,7 +153,7 @@ pub async fn run(
         }
     };
 
-    let storage = match Storage::open(&project.storage_path) {
+    let storage = match AsyncStorage::open(&project.storage_path).await {
         Ok(storage) => storage,
         Err(e) => {
             eprintln!("error: {e}");
@@ -261,8 +259,22 @@ pub async fn run(
     });
 
     // Informative, never blocking — the history a run's own log will
-    // later join once it finishes.
-    let history = super::stats::collect_history(&project, &storage, &workflow.name);
+    // later join once it finishes; a log that cannot be read is an
+    // empty history here, exactly as it is for `stats`.
+    let history = {
+        let runs_root = project.runs_root.clone();
+        let workflow_name = workflow.name.clone();
+        storage
+            .blocking("collect the workflow's history", move |storage| {
+                Ok(super::stats::collect_history(
+                    &runs_root,
+                    storage,
+                    &workflow_name,
+                ))
+            })
+            .await
+            .unwrap_or_default()
+    };
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
         println!("{}", super::stats::format_estimation_line(estimation));
@@ -288,7 +300,7 @@ pub async fn run(
         .as_ref()
         .and_then(|limits| limits.max_concurrent_runs)
     {
-        match count_non_terminal_runs(&storage) {
+        match count_non_terminal_runs(&storage).await {
             Ok(active) if active >= cap as usize => {
                 eprintln!(
                     "error: {active} run(s) are still active and `limits.max_concurrent_runs` \
@@ -371,7 +383,9 @@ pub async fn run(
         },
         &storage,
         &clock,
-    ) {
+    )
+    .await
+    {
         Ok(run_dir) => run_dir,
         Err(e) => {
             eprintln!("error: {e}");
@@ -403,13 +417,8 @@ pub async fn run(
         return ExitCode::SUCCESS;
     }
 
-    let follower = follow.then(|| {
-        spawn_follower(
-            project.storage_path.clone(),
-            run_id.clone(),
-            manifest.clone(),
-        )
-    });
+    let follower =
+        follow.then(|| spawn_follower(storage.clone(), run_id.clone(), manifest.clone()));
 
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();

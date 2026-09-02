@@ -158,7 +158,8 @@ pub(super) async fn execute_workflow(
                 ctx.depth + 1
             ),
             false,
-        );
+        )
+        .await;
     }
 
     // Resume before create (a parent's resume recursively resumes
@@ -166,7 +167,7 @@ pub(super) async fn execute_workflow(
     // never reached child_run_finished — and actually exists (a
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
-    let events = ctx.load_events()?;
+    let events = ctx.load_events().await?;
     let created: Vec<RunId> = events
         .iter()
         .filter(|e| e.node_id.as_ref() == Some(&node.id))
@@ -184,7 +185,12 @@ pub(super) async fn execute_workflow(
         })
         .collect();
     if let Some(open_child) = created.iter().rev().find(|child| !finished.contains(child)) {
-        if !ctx.storage.events_for_run(open_child)?.is_empty() {
+        if !ctx
+            .storage
+            .events_for_run(open_child.clone())
+            .await?
+            .is_empty()
+        {
             return resume_child(ctx, node, open_child, cancel).await;
         }
     }
@@ -200,7 +206,8 @@ pub(super) async fn execute_workflow(
                 node,
                 format!("child workflow `use: {use_name}` cannot be resolved: {e}"),
                 false,
-            );
+            )
+            .await;
         }
     };
     let text = match std::fs::read_to_string(&resolved.path) {
@@ -214,7 +221,8 @@ pub(super) async fn execute_workflow(
                     resolved.path.display()
                 ),
                 false,
-            );
+            )
+            .await;
         }
     };
     let child_workflow: Workflow = match yunta_core::yaml::parse(&text) {
@@ -228,7 +236,8 @@ pub(super) async fn execute_workflow(
                     resolved.path.display()
                 ),
                 false,
-            );
+            )
+            .await;
         }
     };
     // The same static gate `yunta run` applies before spending anything
@@ -246,7 +255,8 @@ pub(super) async fn execute_workflow(
             node,
             format!("child workflow `{use_name}` fails check: {listed}"),
             false,
-        );
+        )
+        .await;
     }
 
     // The parent's frozen contribution: the declared inputs, rendered
@@ -264,7 +274,8 @@ pub(super) async fn execute_workflow(
                     node,
                     format!("child input `{name}` does not render: {e}"),
                     false,
-                );
+                )
+                .await;
             }
         }
     }
@@ -274,7 +285,7 @@ pub(super) async fn execute_workflow(
     // child left behind.
     let mounted = match resolve_mounts(ctx, &events, mounts) {
         Ok(mounted) => mounted,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false),
+        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
     };
 
     // Budgets cascade: the child's frozen cap is what the parent
@@ -315,7 +326,8 @@ pub(super) async fn execute_workflow(
                 node,
                 format!("child workflow `{use_name}` cannot freeze its manifest: {e}"),
                 false,
-            );
+            )
+            .await;
         }
     };
     child_manifest.isolation = match isolation {
@@ -362,7 +374,8 @@ pub(super) async fn execute_workflow(
                         node,
                         format!("child run `{child_id}` cannot prepare its worktree: {e}"),
                         false,
-                    );
+                    )
+                    .await;
                 }
             }
         }
@@ -404,7 +417,8 @@ pub(super) async fn execute_workflow(
             child_run_id: child_id.clone(),
             child_workflow_hash: child_manifest.workflow_hash.clone(),
         }),
-    )?;
+    )
+    .await?;
 
     // Same mode convention as the CLI: a child declaring `modes:`
     // starts at the floor (first declared — promotion only ever
@@ -424,7 +438,8 @@ pub(super) async fn execute_workflow(
         },
         ctx.storage,
         ctx.clock,
-    )?;
+    )
+    .await?;
 
     drive_child(
         ctx,
@@ -463,7 +478,8 @@ async fn resume_child(
                     manifest_path.display()
                 ),
                 false,
-            );
+            )
+            .await;
         }
     };
     let child_tree = match child_manifest.isolation {
@@ -485,7 +501,8 @@ async fn resume_child(
                         tree.display()
                     ),
                     false,
-                );
+                )
+                .await;
             }
             tree
         }
@@ -561,7 +578,8 @@ async fn drive_child(
                         terminal_state: TerminalState::Done,
                         tokens: report.state.total_tokens,
                     }),
-                )?;
+                )
+                .await?;
                 return close_node(
                     ctx,
                     node,
@@ -583,7 +601,8 @@ async fn drive_child(
                         terminal_state: TerminalState::Promoted,
                         tokens: report.state.total_tokens,
                     }),
-                )?;
+                )
+                .await?;
                 let successor = match super::promote::create_promotion_successor(
                     super::Predecessor {
                         id: &current_id,
@@ -610,7 +629,8 @@ async fn drive_child(
                                  but its successor could not be created: {e}"
                             ),
                             false,
-                        );
+                        )
+                        .await;
                     }
                 };
                 ctx.emit(
@@ -619,7 +639,8 @@ async fn drive_child(
                         child_run_id: successor.run_id.clone(),
                         child_workflow_hash: successor.manifest.workflow_hash.clone(),
                     }),
-                )?;
+                )
+                .await?;
                 current_id = successor.run_id;
                 current_manifest = successor.manifest;
                 current_run_dir = successor.run_dir;
@@ -630,7 +651,7 @@ async fn drive_child(
                     // The child paused because a cancellation reached
                     // it, not on its own account — the shared epilogue
                     // decides orphan vs. join:any loss.
-                    return cancelled_end(ctx, node);
+                    return cancelled_end(ctx, node).await;
                 }
                 return Ok(NodeEnd::ChildPaused {
                     reason: format!(

@@ -208,7 +208,7 @@ pub(super) async fn resolve_and_assemble(
     match resolve_all(ctx, node, None, None).await {
         Ok(block) => Ok(Ok(Some(block))),
         Err(error) => {
-            let end = fail(ctx, node, error.to_string(), false)?;
+            let end = fail(ctx, node, error.to_string(), false).await?;
             Ok(Err(end))
         }
     }
@@ -243,7 +243,7 @@ pub(super) async fn resolve_for_task(
     match resolve_all(ctx, node, Some(task_id), Some(memo)).await {
         Ok(block) => Ok(Ok(Some(block))),
         Err(error) => {
-            let end = fail(ctx, node, error.to_string(), false)?;
+            let end = fail(ctx, node, error.to_string(), false).await?;
             Ok(Err(end))
         }
     }
@@ -342,6 +342,7 @@ async fn resolve_all(
             segment_hashes,
         }),
     )
+    .await
     .map_err(|source| ContextResolveError::Io {
         node: node.id.clone(),
         source_id: "*".to_string(),
@@ -474,12 +475,15 @@ async fn resolve_run_events(
     source_id: &str,
     params: &yunta_core::RunEventsParams,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    let events = ctx.load_events().map_err(|e| ContextResolveError::Io {
-        node: node.id.clone(),
-        source_id: source_id.to_string(),
-        action: "read the event log".to_string(),
-        source: std::io::Error::other(e.to_string()),
-    })?;
+    let events = ctx
+        .load_events()
+        .await
+        .map_err(|e| ContextResolveError::Io {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            action: "read the event log".to_string(),
+            source: std::io::Error::other(e.to_string()),
+        })?;
     let lines: Vec<String> = match params.filter.as_deref() {
         None => events.iter().map(|e| format!("{e:?}")).collect(),
         Some("failed") => events
@@ -499,7 +503,7 @@ async fn resolve_run_events(
 }
 
 async fn resolve_ledger(ctx: &RunCtx<'_>) -> Result<Vec<u8>, ContextResolveError> {
-    let events = ctx.load_events().unwrap_or_default();
+    let events = ctx.load_events().await.unwrap_or_default();
     let state = crate::replay::derive(&events);
     let mut lines: Vec<String> = state
         .tasks

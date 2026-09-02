@@ -3,7 +3,7 @@ use std::thread;
 
 use yunta_core::events::{EventBody, EventDraft, EventPayload, RunPausedPayload};
 use yunta_core::{RunId, Seq};
-use yunta_storage::{ChainVerification, Purge, Storage, StorageError};
+use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
 
 fn open_temp() -> (tempfile::TempDir, Storage) {
     let dir = tempfile::tempdir().unwrap();
@@ -124,9 +124,8 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
 
 /// The production shape a shared-handle test can never exercise — the
 /// per-session run-tools listener appends `finding_posted` through its
-/// own `reopen`ed connection while the engine appends
-/// session/audit events through the original, both into the same run,
-/// at the same time. `append_event`'s transaction reads (`MAX(seq)`)
+/// own connection while the engine appends session/audit events through
+/// another, both into the same run, at the same time. `append_event`'s transaction reads (`MAX(seq)`)
 /// before writing; under a deferred `BEGIN`, that read→write upgrade
 /// can't wait on a busy writer (SQLite refuses to invoke the busy
 /// handler on an upgrade — waiting could deadlock) and surfaces
@@ -134,10 +133,10 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
 /// IMMEDIATE` takes the write lock up front, where the busy handler
 /// does apply.
 #[test]
-fn concurrent_appends_across_reopened_handles_never_fail_busy() {
+fn concurrent_appends_across_two_connections_never_fail_busy() {
     let (_dir, storage) = open_temp();
     let storage = Arc::new(storage);
-    let second = Arc::new(storage.reopen().unwrap());
+    let second = Arc::new(Storage::open(storage.path()).unwrap());
     let run_id = RunId::from("run-two-conns");
     storage
         .append(&created_draft("run-two-conns"), &yunta_core::SystemClock)
@@ -399,13 +398,13 @@ fn purge_run_removes_every_row_for_exactly_that_run() {
     );
 }
 
-// --- a reopened handle interleaves writes safely --------------------------
+// --- a second connection interleaves writes safely ------------------------
 
 #[test]
-fn reopened_handle_appends_interleaved_with_the_original_and_seq_stays_monotonic() {
+fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotonic() {
     let dir = tempfile::tempdir().unwrap();
     let storage = Storage::open(&dir.path().join("events.db")).unwrap();
-    let second = storage.reopen().unwrap();
+    let second = Storage::open(storage.path()).unwrap();
 
     let run_id = RunId::from("run-reopen");
     let seq1 = storage
@@ -608,4 +607,90 @@ fn purging_a_run_reports_the_rows_it_removed() {
         storage.purge_run(&RunId::from("run-old")).unwrap(),
         Purge { rows: 0 }
     );
+}
+
+#[tokio::test]
+async fn async_storage_appends_off_the_runtime_thread_and_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = AsyncStorage::open(dir.path().join("yunta.db"))
+        .await
+        .unwrap();
+    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+
+    let first = storage
+        .append(created_draft("run-1"), instant)
+        .await
+        .unwrap();
+    let second = storage
+        .append(paused_draft("run-1", "budget"), instant)
+        .await
+        .unwrap();
+    assert_eq!((first, second), (Seq::FIRST, Seq::FIRST.next()));
+
+    let events = storage.events_for_run(RunId::from("run-1")).await.unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1].timestamp, instant);
+    assert!(matches!(
+        storage.verify_chain(RunId::from("run-1")).await.unwrap(),
+        ChainVerification::Intact { events: 2 }
+    ));
+    assert_eq!(storage.list_runs().await.unwrap().len(), 1);
+    assert_eq!(
+        storage.purge_run(RunId::from("run-1")).await.unwrap(),
+        Purge { rows: 2 }
+    );
+}
+
+#[tokio::test]
+async fn async_storage_runs_a_compound_operation_on_one_blocking_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = AsyncStorage::open(dir.path().join("yunta.db"))
+        .await
+        .unwrap();
+    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    storage
+        .append(created_draft("run-1"), instant)
+        .await
+        .unwrap();
+    storage
+        .append(created_draft("run-2"), instant)
+        .await
+        .unwrap();
+
+    let run_ids = storage
+        .blocking("collect run ids", |storage| {
+            let mut ids: Vec<String> = Vec::new();
+            for run in storage.list_runs()? {
+                let events = storage.events_for_run(&run.run_id)?;
+                ids.push(format!("{}:{}", run.run_id, events.len()));
+            }
+            Ok(ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(run_ids, vec!["run-1:1", "run-2:1"]);
+}
+
+#[tokio::test]
+async fn async_storage_open_fails_on_a_path_that_cannot_be_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let error = AsyncStorage::open(dir.path().join("missing").join("yunta.db"))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, StorageError::Open { .. }), "{error:?}");
+}
+
+#[tokio::test]
+async fn async_storage_reports_a_log_that_vanished_as_the_calls_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = AsyncStorage::open(dir.path().join("yunta.db"))
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(dir.path()).unwrap();
+    let error = storage.list_runs().await.unwrap_err();
+    assert!(matches!(error, StorageError::Open { .. }), "{error:?}");
 }

@@ -13,7 +13,7 @@
 use std::process::ExitCode;
 
 use yunta_core::{Manifest, RunId, SystemClock};
-use yunta_storage::Storage;
+use yunta_storage::AsyncStorage;
 
 use crate::load_yaml;
 use crate::project;
@@ -50,7 +50,7 @@ pub async fn resolve_gate(
         Err(code) => return code,
     };
 
-    let storage = match Storage::open(&project.storage_path) {
+    let storage = match AsyncStorage::open(&project.storage_path).await {
         Ok(storage) => storage,
         Err(e) => {
             eprintln!("error: {e}");
@@ -66,7 +66,9 @@ pub async fn resolve_gate(
         option_id,
         resolved_by.map(str::to_string),
         free_text.map(str::to_string),
-    ) {
+    )
+    .await
+    {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }

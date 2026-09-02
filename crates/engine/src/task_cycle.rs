@@ -420,8 +420,9 @@ impl SessionSetup {
 /// (its own integration tests): append the session's audit events, and
 /// expose the process registry for pgid bookkeeping. `RunCtx` is the one
 /// real implementor.
+#[async_trait::async_trait]
 pub trait SessionObserver: Sync {
-    fn emit_session_event(&self, node_id: &yunta_core::NodeId, payload: EventPayload);
+    async fn emit_session_event(&self, node_id: &yunta_core::NodeId, payload: EventPayload);
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
 }
 
@@ -474,9 +475,9 @@ pub(crate) async fn dispatch_session(
     // `status` sees the live session. A failed append warns instead of
     // aborting the stream — the run's next mandatory event hits the same
     // storage and fails the run properly if it's really down.
-    let audit_emit = |payload: yunta_core::events::EventPayload| {
+    let audit_emit = |payload: yunta_core::events::EventPayload| async move {
         if let Some((observer, node_id)) = audit {
-            observer.emit_session_event(node_id, payload);
+            observer.emit_session_event(node_id, payload).await;
         }
     };
 
@@ -538,7 +539,8 @@ pub(crate) async fn dispatch_session(
                             model,
                             capabilities: adapter.capabilities(),
                         },
-                    ));
+                    ))
+                    .await;
                 }
                 AgentEvent::ToolUse {
                     name,
@@ -554,7 +556,8 @@ pub(crate) async fn dispatch_session(
                             cached_input_tokens: None,
                             text: None,
                         },
-                    ));
+                    ))
+                    .await;
                 }
                 AgentEvent::Note { text } => {
                     audit_emit(yunta_core::events::EventPayload::AgentMessage(
@@ -570,7 +573,8 @@ pub(crate) async fn dispatch_session(
                             // able to carry a secret the note contained.
                             text: Some(note_summary(&text)),
                         },
-                    ));
+                    ))
+                    .await;
                 }
                 AgentEvent::Usage {
                     input_tokens,
@@ -587,7 +591,8 @@ pub(crate) async fn dispatch_session(
                             cached_input_tokens,
                             text: None,
                         },
-                    ));
+                    ))
+                    .await;
                     tokens.input += input_tokens;
                     tokens.output += output_tokens;
                     if let Some(cached) = cached_input_tokens {

@@ -101,7 +101,8 @@ pub fn list_workflows() -> ExitCode {
             );
         }
         if let Some((project, storage)) = &history_source {
-            let history = super::stats::collect_history(project, storage, &workflow.name);
+            let history =
+                super::stats::collect_history(&project.runs_root, storage, &workflow.name);
             if let Some(estimation) = yunta_engine::prior_estimation(&history) {
                 println!("  {}", super::stats::format_estimation_line(&estimation));
             }

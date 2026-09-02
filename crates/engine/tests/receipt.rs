@@ -341,9 +341,10 @@ impl Bench {
                 mode: &"default".into(),
                 promoted_from: None,
             },
-            &self.storage,
+            &self.storage.async_handle(),
             &FixedClock,
         )
+        .await
         .unwrap();
 
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
@@ -356,7 +357,7 @@ impl Bench {
             run_dir: &run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
             human_interaction: &yunta_engine::NoInteraction,
@@ -448,9 +449,10 @@ nodes:
             mode: &"default".into(),
             promoted_from: None,
         },
-        &bench.storage,
+        &bench.storage.async_handle(),
         &FixedClock,
     )
+    .await
     .unwrap();
     let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     execute_run(RunEnv {
@@ -459,7 +461,7 @@ nodes:
         run_dir: &run_dir,
         worktree: &bench.worktree,
         adapters: &adapters,
-        storage: &bench.storage,
+        storage: &bench.storage.async_handle(),
         clock: &FixedClock,
         max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
         human_interaction: &yunta_engine::NoInteraction,

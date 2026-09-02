@@ -95,7 +95,8 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     // with its `questions_answered` (hash + channel + responder),
     // close finished.
     let attempt = ctx
-        .load_events()?
+        .load_events()
+        .await?
         .iter()
         .filter(|e| {
             e.node_id.as_ref() == Some(&node.id)
@@ -106,7 +107,8 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     ctx.emit(
         Some(&node.id),
         EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
-    )?;
+    )
+    .await?;
     for (relative, reply) in replies {
         let answers_path = std::path::PathBuf::from(format!("{}.answers.yaml", relative.display()));
         let answers_abs = ctx.run_dir.join(&answers_path);
@@ -131,7 +133,8 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                 content_hash: answers_hash.clone(),
                 artifact_kind: None,
             }),
-        )?;
+        )
+        .await?;
         ctx.emit(
             Some(&node.id),
             EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
@@ -139,7 +142,8 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                 channel: reply.channel,
                 responder: reply.responder,
             }),
-        )?;
+        )
+        .await?;
     }
     ctx.emit(
         Some(&node.id),
@@ -147,7 +151,8 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             outcome: "questions answered".to_string(),
             tokens_used: Default::default(),
         }),
-    )?;
-    write_progress(ctx)?;
+    )
+    .await?;
+    write_progress(ctx).await?;
     Ok(AskOutcome::Answered)
 }

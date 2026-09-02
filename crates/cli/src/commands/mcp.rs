@@ -308,7 +308,9 @@ async fn tool_resolve_gate(
     let manifest: yunta_core::Manifest = std::fs::read_to_string(run_dir.join("manifest.yaml"))
         .map_err(|e| e.to_string())
         .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
-    let storage = yunta_storage::Storage::open(&project.storage_path).map_err(|e| e.to_string())?;
+    let storage = yunta_storage::AsyncStorage::open(&project.storage_path)
+        .await
+        .map_err(|e| e.to_string())?;
 
     yunta_engine::resolve_gate(
         &manifest,
@@ -319,6 +321,7 @@ async fn tool_resolve_gate(
         by,
         text,
     )
+    .await
     .map_err(|e| e.to_string())?;
 
     super::spawn_detached_resume(&run_dir, run_id, cwd)

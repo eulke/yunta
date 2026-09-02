@@ -125,9 +125,10 @@ impl Bench {
                 mode: &ModeName::from(mode),
                 promoted_from: None,
             },
-            &self.storage,
+            &self.storage.async_handle(),
             &FixedClock,
-        )?;
+        )
+        .await?;
 
         let adapter = MockAdapter::from_yaml(FIXTURE).unwrap();
         let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
@@ -139,7 +140,7 @@ impl Bench {
             run_dir: &run_dir,
             worktree: &self.worktree,
             adapters: &adapters,
-            storage: &self.storage,
+            storage: &self.storage.async_handle(),
             clock: &FixedClock,
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &NoInteraction,

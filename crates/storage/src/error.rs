@@ -95,8 +95,8 @@ pub enum StorageError {
 
     /// A blocking storage call could not be joined from the async
     /// runtime — the task that ran it was cancelled or panicked.
-    #[error("the storage task for run `{run_id}` did not complete: {detail}")]
-    Join { run_id: RunId, detail: String },
+    #[error("the storage task to {what} did not complete: {detail}")]
+    Join { what: &'static str, detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
