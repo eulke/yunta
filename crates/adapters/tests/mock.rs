@@ -5,7 +5,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use yunta_adapters::{
     Adapter, AgentEvent, Budget, Forge, ForgeError, MockAdapter, MockForge, MockForgeState,
-    PermissionProfile, ProbeReport, PublishedGate, SessionRequest,
+    PermissionProfile, ProbeReport, PublishRequest, PublishedGate, ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
 
@@ -466,5 +466,53 @@ async fn polling_a_gate_the_forge_never_published_is_a_typed_error() {
     assert!(
         matches!(error, ForgeError::UnknownGate { number: 99 }),
         "{error:?}"
+    );
+}
+
+fn gate_request(run_id: &str) -> PublishRequest {
+    PublishRequest {
+        branch: format!("yunta/{run_id}/gate"),
+        base_branch: "main".to_string(),
+        run_id: run_id.to_string(),
+        summary: "spec ready for review".to_string(),
+        artifacts: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn the_mock_forge_reuses_only_open_prs() {
+    let state = MockForgeState::new();
+    let forge = MockForge::new(state.clone());
+
+    let first = forge.publish(&gate_request("run-1")).await.unwrap();
+    let again = forge.publish(&gate_request("run-1")).await.unwrap();
+    assert_eq!(
+        again.number, first.number,
+        "an open PR for the run is reused"
+    );
+
+    // A person closed it: the gate publishes a new one, never the closed
+    // one — the same rule the GitHub forge follows.
+    state.close("run-1");
+    let reopened = forge.publish(&gate_request("run-1")).await.unwrap();
+    assert_ne!(reopened.number, first.number);
+    assert_eq!(state.pr_number("run-1"), Some(reopened.number));
+}
+
+#[tokio::test]
+async fn the_mock_forge_reports_a_merged_pr() {
+    let state = MockForgeState::new();
+    let forge = MockForge::new(state.clone());
+    let published = forge.publish(&gate_request("run-1")).await.unwrap();
+
+    let merge_sha = state.merge("run-1", "octocat");
+
+    let polled = forge.poll(&published).await.unwrap();
+    assert_eq!(
+        polled.review,
+        ReviewOutcome::Merged {
+            by: "octocat".to_string(),
+            merge_sha,
+        }
     );
 }

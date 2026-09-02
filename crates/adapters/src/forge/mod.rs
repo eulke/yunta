@@ -18,24 +18,37 @@ mod mock;
 pub use github::GitHubForge;
 pub use mock::{MockForge, MockForgeState};
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ForgeError {
-    /// The request never got an answer.
-    #[error("forge: failed to {action}")]
-    Request {
+    /// No answer: the connection, the TLS handshake or the wait for a
+    /// response failed.
+    #[error("forge: no answer while trying to {action}")]
+    Transport {
         action: &'static str,
         #[source]
         source: reqwest::Error,
     },
-    /// The forge answered, and the answer is a refusal.
-    #[error("forge: failed to {action}: {status} {body}")]
-    Status {
+    /// The forge answered with a refusal, kept as it came.
+    #[error("forge: failed to {action}: HTTP {status}: {body}")]
+    Http {
         action: &'static str,
         status: u16,
         body: String,
+    },
+    /// The forge refused for now: the rate limit is spent. `retry_after`
+    /// is the wait it named, when it named one.
+    #[error(
+        "forge: rate limited while trying to {action}{}",
+        retry_after.map(|wait| format!(" — retry in {}s", wait.as_secs())).unwrap_or_default()
+    )]
+    RateLimited {
+        action: &'static str,
+        retry_after: Option<Duration>,
     },
     /// The forge answered success with a body that is not the shape the
     /// call expects.
@@ -56,9 +69,10 @@ pub enum ForgeError {
 pub struct PublishRequest {
     pub branch: String,
     pub base_branch: String,
-    /// Carried in the PR body so a later `publish` call for the same
-    /// gate can find the existing PR instead of opening a duplicate —
-    /// idempotent across `resume` invocations.
+    /// Carried in the PR body as the run marker, so a later `publish`
+    /// call for the same gate finds the open PR it already has instead
+    /// of opening a duplicate — idempotent across `resume` invocations.
+    /// A closed or merged PR is never reused.
     pub run_id: String,
     pub summary: String,
     /// (path relative to the repo root, raw content).
@@ -95,8 +109,7 @@ pub struct PolledGate {
     pub review: ReviewOutcome,
 }
 
-/// Maps a review to one of: approved / changes requested / closed /
-/// pending.
+/// What the forge says about a published gate.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReviewOutcome {
     Pending,
@@ -109,7 +122,13 @@ pub enum ReviewOutcome {
         reviewed_sha: String,
         comments: Vec<ReviewComment>,
     },
+    /// Closed without merging.
     Closed,
+    /// Merged: approved and landed. `merge_sha` is the merge commit.
+    Merged {
+        by: String,
+        merge_sha: String,
+    },
 }
 
 #[async_trait]

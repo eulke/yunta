@@ -145,7 +145,7 @@ fn config_with_forge() -> ConfigLayer {
     ConfigLayer {
         forge: Some(yunta_core::ForgeConfig {
             github: Some(yunta_core::GitHubForgeConfig {
-                repo: "acme/demo".to_string(),
+                repo: "acme/demo".parse().unwrap(),
                 token_env: "GITHUB_TOKEN".to_string(),
             }),
         }),

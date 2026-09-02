@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use yunta_core::{
     permission_layer_conflicts, AdapterSettings, CommandPermissions, ConfigLayer, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, Isolation, LimitsConfig, McpServerConfig,
+    ExecutorKind, ExecutorRegistration, GitHubRepo, Isolation, LimitsConfig, McpServerConfig,
     NetworkPermissions, OnInterrupt, PackExecutorPolicy, PackPermissions, PathsConfig,
     PermissionsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
 };
@@ -767,4 +767,27 @@ fn another_users_home_is_refused_naming_the_field() {
         &err,
         yunta_core::HomeExpansionError::OtherUser { field, .. } if field == "paths.runs"
     ));
+}
+
+#[test]
+fn a_github_repo_is_owner_slash_name() {
+    let repo: GitHubRepo = "octo/widgets".parse().unwrap();
+    assert_eq!(repo.owner(), "octo");
+    assert_eq!(repo.name(), "widgets");
+    assert_eq!(repo.to_string(), "octo/widgets");
+    for bad in ["octo", "octo/", "/widgets", "octo/widgets/extra", ""] {
+        assert!(
+            bad.parse::<GitHubRepo>().is_err(),
+            "{bad:?} is not a repository"
+        );
+    }
+
+    let err = yunta_core::yaml::parse::<ConfigLayer>(
+        "forge:\n  github:\n    repo: not-a-repo\n    token_env: GITHUB_TOKEN\n",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("forge.github.repo"),
+        "the refusal names the path: {err}"
+    );
 }

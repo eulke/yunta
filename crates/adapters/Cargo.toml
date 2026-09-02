@@ -48,5 +48,9 @@ rmcp = { workspace = true, features = [
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# The GitHub forge's tests answer its HTTP calls from a local stub of
+# the API — the same crate the engine's per-run MCP listener already
+# builds on, so nothing new enters the tree.
+axum = { workspace = true, features = ["tokio", "http1", "json", "query"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }

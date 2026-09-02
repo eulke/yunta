@@ -19,7 +19,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, AgentName, ExecutorName, ModelName, Publisher, RunnerName};
+use crate::ids::{
+    AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, Publisher, RunnerName,
+};
 use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
@@ -65,8 +67,9 @@ pub struct ForgeConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GitHubForgeConfig {
-    /// `owner/name`.
-    pub repo: String,
+    pub repo: GitHubRepo,
+    /// The environment variable holding the token; its value never
+    /// enters the config.
     pub token_env: String,
 }
 

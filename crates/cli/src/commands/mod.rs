@@ -28,7 +28,7 @@ use yunta_adapters::{
     Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
     CODEX_ID,
 };
-use yunta_core::{AdapterId, ConfigLayer, Workflow};
+use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
 /// Ctrl-C → the run's root `CancellationToken`. The in-process
@@ -164,7 +164,16 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<AdapterId, Arc<dyn 
 pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
     let github = config.forge.as_ref()?.github.as_ref()?;
     let token = std::env::var(&github.token_env).ok()?;
-    Some(Arc::new(GitHubForge::new(github.repo.clone(), token)))
+    match GitHubForge::new(github.repo.clone(), Secret::new(token)) {
+        Ok(forge) => Some(Arc::new(forge)),
+        Err(e) => {
+            eprintln!(
+                "warning: the forge is unavailable — {}; external gates degrade to the console",
+                describe(&e)
+            );
+            None
+        }
+    }
 }
 
 /// Refuses early when `workflow` needs agent sessions no available

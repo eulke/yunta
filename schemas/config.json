@@ -384,10 +384,10 @@
       "type": "object",
       "properties": {
         "repo": {
-          "description": "`owner/name`.",
-          "type": "string"
+          "$ref": "#/$defs/GitHubRepo"
         },
         "token_env": {
+          "description": "The environment variable holding the token; its value never\nenters the config.",
           "type": "string"
         }
       },
@@ -396,6 +396,11 @@
         "repo",
         "token_env"
       ]
+    },
+    "GitHubRepo": {
+      "description": "A GitHub repository: `owner/name`, each one path segment",
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$"
     },
     "Isolation": {
       "description": "How a first-level run isolates its working tree from the checkout\nthat started it. `worktree` (default) gives each run its\nown `git worktree`; `none` operates directly on the given checkout,\nlegitimate for watching an agent edit live or for CI already inside\nan ephemeral container. `inherit` (sub-runs only) isn't a value\nhere — a first-level run has no parent to inherit from — and\n`container` isn't a schema value at all (not yet designed).",

@@ -94,10 +94,13 @@ pub(super) async fn publish_gate(
         artifacts,
     };
 
-    let published = forge.publish(&request).await.map_err(|e| RunError::Io {
-        context: format!("publish node `{}`'s external gate", node.id),
-        source: std::io::Error::other(e.to_string()),
-    })?;
+    let published = forge
+        .publish(&request)
+        .await
+        .map_err(|source| RunError::Forge {
+            context: format!("publish node `{}`'s external gate", node.id),
+            source,
+        })?;
 
     ctx.emit(
         Some(&node.id),
@@ -137,10 +140,13 @@ pub(super) async fn poll_gate(
     };
 
     let published: PublishedGate = decode_ref(external_ref)?;
-    let polled = forge.poll(&published).await.map_err(|e| RunError::Io {
-        context: format!("poll node `{}`'s external gate", node.id),
-        source: std::io::Error::other(e.to_string()),
-    })?;
+    let polled = forge
+        .poll(&published)
+        .await
+        .map_err(|source| RunError::Forge {
+            context: format!("poll node `{}`'s external gate", node.id),
+            source,
+        })?;
 
     resolve_from_poll(ctx, node, &polled).await
 }
@@ -151,6 +157,38 @@ pub(super) async fn poll_gate(
 /// if it covers the PR's *current* head; anything
 /// else — no decisive review yet, or one that no longer covers the
 /// current commit — is "still waiting", not a decision.
+/// The gate continues: `gate_resolved` records who approved and the
+/// commit the approval covers, and the node finishes.
+async fn resolve_approved(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    by: &str,
+    approved_sha: &str,
+    outcome: String,
+) -> Result<GateStep, RunError> {
+    emit_started(ctx, node).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::GateResolved(GateResolvedPayload {
+            chosen_option: None,
+            resolved_by: Some(by.to_string()),
+            free_text: None,
+            approved_sha: Some(approved_sha.to_string()),
+        }),
+    )
+    .await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::NodeFinished(NodeFinishedPayload {
+            outcome,
+            tokens_used: TokenUsage::default(),
+        }),
+    )
+    .await?;
+    write_progress(ctx).await?;
+    Ok(GateStep::Resolved)
+}
+
 async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -158,27 +196,12 @@ async fn resolve_from_poll(
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
-            emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload {
-                    chosen_option: None,
-                    resolved_by: Some(by.clone()),
-                    free_text: None,
-                    approved_sha: Some(polled.head_sha.clone()),
-                }),
-            )
-            .await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFinished(NodeFinishedPayload {
-                    outcome: format!("approved by {by}"),
-                    tokens_used: TokenUsage::default(),
-                }),
-            )
-            .await?;
-            write_progress(ctx).await?;
-            Ok(GateStep::Resolved)
+            resolve_approved(ctx, node, by, &polled.head_sha, format!("approved by {by}")).await
+        }
+        // A merge is an approval that also landed: the evidence is the
+        // merge commit, and nothing can move the branch after it.
+        ReviewOutcome::Merged { by, merge_sha } => {
+            resolve_approved(ctx, node, by, merge_sha, format!("merged by {by}")).await
         }
         ReviewOutcome::ChangesRequested {
             by,
@@ -312,10 +335,13 @@ pub(super) async fn recheck_approved_gates(
             continue;
         };
         let published: PublishedGate = decode_ref(&external_ref)?;
-        let polled = forge.poll(&published).await.map_err(|e| RunError::Io {
-            context: format!("re-check node `{}`'s external gate", node.id),
-            source: std::io::Error::other(e.to_string()),
-        })?;
+        let polled = forge
+            .poll(&published)
+            .await
+            .map_err(|source| RunError::Forge {
+                context: format!("re-check node `{}`'s external gate", node.id),
+                source,
+            })?;
         if polled.head_sha != approved_sha {
             emit_started(ctx, node).await?;
         }

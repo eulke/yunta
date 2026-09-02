@@ -1,13 +1,14 @@
 //! `MockForge`: a fixture-driven `Forge` double the engine's own tests
 //! exercise the full gate state machine against — publish, poll,
-//! approve, request changes, close, and push a commit after approval —
-//! all in-memory, no network. Shared via
+//! approve, request changes, close, merge, and push a commit after
+//! approval — all in-memory, no network, under the same rules as the
+//! GitHub forge: a gate keeps the open PR that carries its run marker,
+//! and a closed or merged PR is never reused. Shared via
 //! [`MockForgeState`] so a test can hold one handle to drive "what
 //! person B does on the forge" while a completely separate
 //! `execute_run` call (simulating "person A's machine, a later
 //! `resume`") polls the same state through the ordinary `Forge` trait.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -29,23 +30,41 @@ enum Review {
         comments: Vec<ReviewComment>,
     },
     Closed,
+    Merged {
+        by: String,
+        merge_sha: String,
+    },
 }
 
 struct MockPr {
     number: u64,
+    run_id: String,
+    branch: String,
     url: String,
     head_sha: String,
+    open: bool,
     review: Review,
 }
 
 #[derive(Default)]
 struct Inner {
-    /// Keyed by `run_id` — mirrors how the real `GitHubForge` finds an
-    /// existing PR for a gate it's already published: idempotent
-    /// across `resume`.
-    prs: HashMap<String, MockPr>,
+    /// Every PR ever published, in order; a run may have more than one
+    /// once a person closed an earlier one.
+    prs: Vec<MockPr>,
     next_number: u64,
     next_sha: u64,
+}
+
+impl Inner {
+    /// The run's newest PR — what a person acts on.
+    fn latest_for(&mut self, run_id: &str) -> Option<&mut MockPr> {
+        self.prs.iter_mut().rev().find(|pr| pr.run_id == run_id)
+    }
+
+    fn fresh_sha(&mut self) -> String {
+        self.next_sha += 1;
+        format!("sha{:040}", self.next_sha)
+    }
 }
 
 /// The state a test drives directly — everything here is "what happens
@@ -59,50 +78,51 @@ impl MockForgeState {
         Self::default()
     }
 
-    fn fresh_sha(inner: &mut Inner) -> String {
-        inner.next_sha += 1;
-        format!("sha{:040}", inner.next_sha)
-    }
-
     /// Person B approves — no Yunta involved on their end, just this
     /// call standing in for "clicked Approve in the forge's own UI".
     /// The approval covers whatever the PR's head is *right now*.
     pub fn approve(&self, run_id: &str, by: &str) {
         let mut inner = self.0.lock().unwrap();
-        let head = inner
-            .prs
-            .get(run_id)
-            .map(|pr| pr.head_sha.clone())
-            .unwrap_or_default();
-        if let Some(pr) = inner.prs.get_mut(run_id) {
+        if let Some(pr) = inner.latest_for(run_id) {
             pr.review = Review::Approved {
                 by: by.to_string(),
-                reviewed_sha: head,
+                reviewed_sha: pr.head_sha.clone(),
             };
         }
     }
 
     pub fn request_changes(&self, run_id: &str, by: &str, comments: Vec<ReviewComment>) {
         let mut inner = self.0.lock().unwrap();
-        let head = inner
-            .prs
-            .get(run_id)
-            .map(|pr| pr.head_sha.clone())
-            .unwrap_or_default();
-        if let Some(pr) = inner.prs.get_mut(run_id) {
+        if let Some(pr) = inner.latest_for(run_id) {
             pr.review = Review::ChangesRequested {
                 by: by.to_string(),
-                reviewed_sha: head,
+                reviewed_sha: pr.head_sha.clone(),
                 comments,
             };
         }
     }
 
+    /// Person B closes the PR without merging.
     pub fn close(&self, run_id: &str) {
         let mut inner = self.0.lock().unwrap();
-        if let Some(pr) = inner.prs.get_mut(run_id) {
+        if let Some(pr) = inner.latest_for(run_id) {
+            pr.open = false;
             pr.review = Review::Closed;
         }
+    }
+
+    /// Person B merges the PR; returns the merge commit.
+    pub fn merge(&self, run_id: &str, by: &str) -> String {
+        let mut inner = self.0.lock().unwrap();
+        let merge_sha = inner.fresh_sha();
+        if let Some(pr) = inner.latest_for(run_id) {
+            pr.open = false;
+            pr.review = Review::Merged {
+                by: by.to_string(),
+                merge_sha: merge_sha.clone(),
+            };
+        }
+        merge_sha
     }
 
     /// A new commit lands on the PR after it was already approved —
@@ -114,15 +134,20 @@ impl MockForgeState {
     /// by SHA.
     pub fn push_commit(&self, run_id: &str) -> String {
         let mut inner = self.0.lock().unwrap();
-        let sha = Self::fresh_sha(&mut inner);
-        if let Some(pr) = inner.prs.get_mut(run_id) {
+        let sha = inner.fresh_sha();
+        if let Some(pr) = inner.latest_for(run_id) {
             pr.head_sha = sha.clone();
         }
         sha
     }
 
+    /// The run's newest PR.
     pub fn pr_number(&self, run_id: &str) -> Option<u64> {
-        self.0.lock().unwrap().prs.get(run_id).map(|pr| pr.number)
+        self.0
+            .lock()
+            .unwrap()
+            .latest_for(run_id)
+            .map(|pr| pr.number)
     }
 }
 
@@ -140,7 +165,11 @@ impl MockForge {
 impl Forge for MockForge {
     async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError> {
         let mut inner = self.state.0.lock().unwrap();
-        if let Some(existing) = inner.prs.get(&req.run_id) {
+        let existing = inner
+            .prs
+            .iter()
+            .find(|pr| pr.open && pr.branch == req.branch && pr.run_id == req.run_id);
+        if let Some(existing) = existing {
             return Ok(PublishedGate {
                 url: existing.url.clone(),
                 number: existing.number,
@@ -149,28 +178,26 @@ impl Forge for MockForge {
         inner.next_number += 1;
         let number = inner.next_number;
         let url = format!("https://mock.forge/pr/{number}");
-        let head_sha = MockForgeState::fresh_sha(&mut inner);
-        inner.prs.insert(
-            req.run_id.clone(),
-            MockPr {
-                number,
-                url: url.clone(),
-                head_sha,
-                review: Review::Pending,
-            },
-        );
+        let head_sha = inner.fresh_sha();
+        inner.prs.push(MockPr {
+            number,
+            run_id: req.run_id.clone(),
+            branch: req.branch.clone(),
+            url: url.clone(),
+            head_sha,
+            open: true,
+            review: Review::Pending,
+        });
         Ok(PublishedGate { url, number })
     }
 
     async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError> {
         let inner = self.state.0.lock().unwrap();
-        let pr = inner
-            .prs
-            .values()
-            .find(|pr| pr.number == gate.number)
-            .ok_or(ForgeError::UnknownGate {
+        let pr = inner.prs.iter().find(|pr| pr.number == gate.number).ok_or(
+            ForgeError::UnknownGate {
                 number: gate.number,
-            })?;
+            },
+        )?;
         let review = match &pr.review {
             Review::Pending => ReviewOutcome::Pending,
             Review::Approved { by, reviewed_sha } => ReviewOutcome::Approved {
@@ -187,6 +214,10 @@ impl Forge for MockForge {
                 comments: comments.clone(),
             },
             Review::Closed => ReviewOutcome::Closed,
+            Review::Merged { by, merge_sha } => ReviewOutcome::Merged {
+                by: by.clone(),
+                merge_sha: merge_sha.clone(),
+            },
         };
         Ok(PolledGate {
             head_sha: pr.head_sha.clone(),

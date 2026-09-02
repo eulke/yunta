@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge};
+use yunta_adapters::{Adapter, Forge, ForgeError};
 use yunta_core::events::{
     EventDraft, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
     RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, StoredEvent,
@@ -135,6 +135,12 @@ pub enum RunError {
         context: String,
         #[source]
         source: std::io::Error,
+    },
+    #[error("failed to {context}")]
+    Forge {
+        context: String,
+        #[source]
+        source: ForgeError,
     },
 
     #[error("git failed to {context}: {detail}")]

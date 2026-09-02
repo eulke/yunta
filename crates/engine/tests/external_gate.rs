@@ -335,6 +335,38 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
 }
 
 #[tokio::test]
+async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
+    let bench = Bench::new().await;
+    let forge_state = MockForgeState::new();
+    let forge = MockForge::new(forge_state.clone());
+
+    bench.wake(Some(&forge)).await;
+    // Person B merges the PR outright: an approval that also landed.
+    let merge_sha = forge_state.merge(bench.run_id.as_str(), "person-b");
+
+    let (terminal, state) = bench.wake(Some(&forge)).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get("approve"),
+        Some(NodeState::Finished { .. })
+    ));
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let resolved = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+            _ => None,
+        })
+        .expect("the gate resolves");
+    assert_eq!(resolved.resolved_by.as_deref(), Some("person-b"));
+    assert_eq!(
+        resolved.approved_sha.as_deref(),
+        Some(merge_sha.as_str()),
+        "the evidence is the merge commit"
+    );
+}
+
+#[tokio::test]
 async fn a_closed_pr_fails_the_node_non_retryably() {
     let bench = Bench::new().await;
     let forge_state = MockForgeState::new();

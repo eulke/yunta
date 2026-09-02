@@ -501,6 +501,87 @@ impl schemars::JsonSchema for PackRef {
     }
 }
 
+/// A GitHub repository, `owner/name`: the two path segments every
+/// forge URL is built from, and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GitHubRepo {
+    owner: String,
+    name: String,
+}
+
+const GITHUB_REPO_RULE: &str = "`owner/name`, each one path segment";
+
+impl GitHubRepo {
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl fmt::Display for GitHubRepo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.owner, self.name)
+    }
+}
+
+impl FromStr for GitHubRepo {
+    type Err = InvalidId;
+
+    fn from_str(value: &str) -> Result<Self, InvalidId> {
+        let invalid = || InvalidId {
+            what: "GitHub repository",
+            value: value.to_string(),
+            rule: GITHUB_REPO_RULE,
+        };
+        let (owner, name) = value.split_once('/').ok_or_else(invalid)?;
+        if !is_path_segment(owner) || !is_path_segment(name) {
+            return Err(invalid());
+        }
+        Ok(GitHubRepo {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        })
+    }
+}
+
+impl TryFrom<String> for GitHubRepo {
+    type Error = InvalidId;
+
+    fn try_from(value: String) -> Result<Self, InvalidId> {
+        value.parse()
+    }
+}
+
+impl Serialize for GitHubRepo {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubRepo {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for GitHubRepo {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "GitHubRepo".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^[^/]+/[^/]+$",
+            "description": format!("A GitHub repository: {}", GITHUB_REPO_RULE),
+        })
+    }
+}
+
 // --- Process ids ---------------------------------------------------------
 
 /// A process id: a positive number, as the kernel hands them out. Zero
