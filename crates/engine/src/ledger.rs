@@ -7,7 +7,7 @@
 //! red pre-check's job, which is where a trivial or broken
 //! criterion actually gets caught by being run.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use thiserror::Error;
 use yunta_core::{Ledger, Task, TaskId};
@@ -127,69 +127,11 @@ pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
 }
 
 fn find_cycle(tasks: &[Task]) -> Option<Vec<TaskId>> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Color {
-        White,
-        /// Carries its own index in `stack`, so finding a gray node's
-        /// position never needs a fallible search.
-        Gray(usize),
-        Black,
-    }
-
-    let adjacency: HashMap<TaskId, Vec<TaskId>> = tasks
+    let adjacency: BTreeMap<TaskId, Vec<TaskId>> = tasks
         .iter()
         .map(|t| (t.id.clone(), t.depends_on.clone()))
         .collect();
-    let mut color: HashMap<TaskId, Color> = adjacency
-        .keys()
-        .cloned()
-        .map(|id| (id, Color::White))
-        .collect();
-    let mut stack: Vec<TaskId> = Vec::new();
-
-    fn visit(
-        id: &TaskId,
-        adjacency: &HashMap<TaskId, Vec<TaskId>>,
-        color: &mut HashMap<TaskId, Color>,
-        stack: &mut Vec<TaskId>,
-    ) -> Option<Vec<TaskId>> {
-        color.insert(id.clone(), Color::Gray(stack.len()));
-        stack.push(id.clone());
-
-        if let Some(deps) = adjacency.get(id) {
-            for dep in deps {
-                if !adjacency.contains_key(dep) {
-                    continue; // unknown dependency — reported separately
-                }
-                match color.get(dep).copied() {
-                    Some(Color::Gray(pos)) => {
-                        let mut cycle = stack[pos..].to_vec();
-                        cycle.push(dep.clone());
-                        return Some(cycle);
-                    }
-                    Some(Color::Black) => continue,
-                    _ => {
-                        if let Some(cycle) = visit(dep, adjacency, color, stack) {
-                            return Some(cycle);
-                        }
-                    }
-                }
-            }
-        }
-
-        stack.pop();
-        color.insert(id.clone(), Color::Black);
-        None
-    }
-
-    for id in adjacency.keys() {
-        if matches!(color.get(id), Some(Color::White)) {
-            if let Some(cycle) = visit(id, &adjacency, &mut color, &mut stack) {
-                return Some(cycle);
-            }
-        }
-    }
-    None
+    crate::graph::find_cycle(&adjacency)
 }
 
 /// Transitive closure of `depends_on`, in either direction: `a` and `b`

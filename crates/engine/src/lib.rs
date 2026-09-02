@@ -25,6 +25,7 @@ mod check;
 mod events_export;
 mod findings;
 pub mod git;
+mod graph;
 mod human_interaction;
 mod inputs;
 mod ledger;

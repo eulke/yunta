@@ -1307,69 +1307,11 @@ fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<CheckWarning>) {
 }
 
 fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Color {
-        White,
-        /// Carries its own index in `stack`, so finding a gray node's
-        /// position never needs a fallible search.
-        Gray(usize),
-        Black,
-    }
-
-    let adjacency: HashMap<NodeId, Vec<NodeId>> = nodes
+    let adjacency: std::collections::BTreeMap<NodeId, Vec<NodeId>> = nodes
         .iter()
         .map(|n| (n.id.clone(), n.depends_on.clone()))
         .collect();
-    let mut color: HashMap<NodeId, Color> = adjacency
-        .keys()
-        .cloned()
-        .map(|id| (id, Color::White))
-        .collect();
-    let mut stack: Vec<NodeId> = Vec::new();
-
-    fn visit(
-        id: &NodeId,
-        adjacency: &HashMap<NodeId, Vec<NodeId>>,
-        color: &mut HashMap<NodeId, Color>,
-        stack: &mut Vec<NodeId>,
-    ) -> Option<Vec<NodeId>> {
-        color.insert(id.clone(), Color::Gray(stack.len()));
-        stack.push(id.clone());
-
-        if let Some(deps) = adjacency.get(id) {
-            for dep in deps {
-                if !adjacency.contains_key(dep) {
-                    continue; // unknown dependency — reported separately
-                }
-                match color.get(dep).copied() {
-                    Some(Color::Gray(pos)) => {
-                        let mut cycle = stack[pos..].to_vec();
-                        cycle.push(dep.clone());
-                        return Some(cycle);
-                    }
-                    Some(Color::Black) => continue,
-                    _ => {
-                        if let Some(cycle) = visit(dep, adjacency, color, stack) {
-                            return Some(cycle);
-                        }
-                    }
-                }
-            }
-        }
-
-        stack.pop();
-        color.insert(id.clone(), Color::Black);
-        None
-    }
-
-    for id in adjacency.keys() {
-        if matches!(color.get(id), Some(Color::White)) {
-            if let Some(cycle) = visit(id, &adjacency, &mut color, &mut stack) {
-                return Some(cycle);
-            }
-        }
-    }
-    None
+    crate::graph::find_cycle(&adjacency)
 }
 
 /// Config values the schema parses but nothing implements yet
