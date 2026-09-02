@@ -24,11 +24,11 @@ fn node(id: &str, description: Option<&str>) -> Node {
         on_interrupt: None,
         description: description.map(str::to_string),
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }

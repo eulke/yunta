@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
-use yunta_adapters::{Adapter, AgentEvent, Budget, MockAdapter, PermissionProfile, SessionRequest};
+use yunta_adapters::{
+    Adapter, AgentEvent, Budget, MockAdapter, PermissionProfile, ProbeReport, SessionRequest,
+};
 use yunta_core::{Capabilities, SessionId};
 
 fn request(cwd: PathBuf) -> SessionRequest {
@@ -193,7 +195,7 @@ outcome: { type: completed, summary: "done" }
 async fn probe_reports_healthy() {
     let fixture = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
     let report = fixture.probe().await.unwrap();
-    assert!(report.healthy);
+    assert!(matches!(report, ProbeReport::Healthy { .. }), "{report:?}");
 }
 
 #[tokio::test]

@@ -18,6 +18,7 @@ mod inputs;
 mod ledger;
 mod manifest;
 mod pack;
+pub mod policy;
 mod questions;
 mod secret;
 mod workflow;
@@ -45,22 +46,23 @@ pub use ids::{
     NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
     TaskId,
 };
-pub use inputs::InputSpec;
+pub use inputs::{InputSpec, InputSpecContradiction};
 pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
 pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,
 };
+pub use policy::ScopeExpansionMode;
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use secret::Secret;
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
     ContextSpec, Coordination, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks,
-    JoinPolicy, KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams, ModeInclude,
-    ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
-    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsParams,
-    ScopeExpansion, Workflow, WorkflowIsolation,
+    JoinPolicy, KnowledgeLayer, KnowledgeParams, LedgerParams, LoopUntil, McpQueryParams,
+    ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind,
+    NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource,
+    RunEventsParams, ScopeExpansion, Workflow, WorkflowIsolation,
 };
 
 /// The schema major this binary speaks — what a

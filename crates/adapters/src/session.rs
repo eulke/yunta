@@ -149,10 +149,12 @@ pub async fn write_prompt(
 /// Health check result (`probe()` — binary present, version compatible,
 /// auth valid).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeReport {
-    pub healthy: bool,
-    pub version: Option<String>,
-    pub diagnostic: Option<String>,
+pub enum ProbeReport {
+    /// The adapter can open sessions; `version` is what its CLI
+    /// reported, when it reports one.
+    Healthy { version: Option<String> },
+    /// The adapter cannot open sessions, and why.
+    Unhealthy { diagnostic: String },
 }
 
 /// What the agent itself reported it did — telemetry, never a verdict;

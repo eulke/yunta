@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_adapters::{
-    Adapter, AgentEvent, Budget, CodexAdapter, PermissionProfile, SessionRequest,
+    Adapter, AgentEvent, Budget, CodexAdapter, PermissionProfile, ProbeReport, SessionRequest,
 };
 use yunta_core::{AdapterSettings, SessionId};
 
@@ -68,8 +68,10 @@ const THREAD_STARTED_LINE: &str = r#"{"type":"thread.started","thread_id":"threa
 #[tokio::test]
 async fn probe_reports_the_stub_as_healthy_with_its_version() {
     let report = adapter().probe().await.unwrap();
-    assert!(report.healthy);
-    assert!(report.version.unwrap().contains("0.47.0"));
+    let ProbeReport::Healthy { version } = report else {
+        panic!("the stub is healthy: {report:?}");
+    };
+    assert!(version.unwrap().contains("0.47.0"));
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 use yunta_core::{
-    ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, NodeKind,
+    ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, LoopUntil, NodeKind,
     NodePermissions, OnInterrupt, PromptSource, Workflow,
 };
 
@@ -20,7 +20,7 @@ fn parses_the_m0_schema_recorte_without_loss() {
     );
     match &implement.kind {
         NodeKind::Loop { until, prompt, .. } => {
-            assert_eq!(until, "all_tasks_complete");
+            assert_eq!(*until, LoopUntil::AllTasksComplete);
             assert!(matches!(prompt, PromptSource::Inline(_)));
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -471,7 +471,7 @@ scope_expansion:
             scope_expansion, ..
         } => {
             let se = scope_expansion.unwrap();
-            assert_eq!(se.mode, yunta_core::events::ScopeExpansionMode::Ask);
+            assert_eq!(se.mode, yunta_core::ScopeExpansionMode::Ask);
             assert_eq!(se.within, vec!["src/**".to_string()]);
             assert_eq!(se.max_per_run, Some(3));
         }
@@ -496,7 +496,7 @@ scope_expansion:
         } => {
             assert_eq!(
                 scope_expansion.unwrap().mode,
-                yunta_core::events::ScopeExpansionMode::Deny
+                yunta_core::ScopeExpansionMode::Deny
             );
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -555,7 +555,7 @@ run: "true"
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(node.permissions, None);
-    assert_eq!(node.network, None);
+    assert!(!node.network);
 }
 
 #[test]
@@ -567,7 +567,7 @@ run: "cargo clippy"
 network: false
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(node.network, Some(false));
+    assert!(!node.network);
 }
 
 #[test]
@@ -805,14 +805,13 @@ nodes:
     let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).expect("should parse");
     assert_eq!(workflow.inputs.len(), 6);
 
+    assert!(workflow.inputs["idea"].is_required());
     match &workflow.inputs["idea"] {
         yunta_core::InputSpec::String {
-            required,
             default,
             description,
             ..
         } => {
-            assert_eq!(*required, Some(true));
             assert_eq!(*default, None);
             assert_eq!(description.as_deref(), Some("What to build"));
         }
@@ -916,7 +915,7 @@ on_finish:
     let wf: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
-    assert_eq!(wf.nodes[0].interactive, Some(true));
+    assert!(wf.nodes[0].interactive);
     assert_eq!(
         wf.on_finish,
         vec![

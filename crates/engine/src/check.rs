@@ -160,23 +160,6 @@ pub enum CheckError {
     )]
     ContextOnUnsupportedNode { node: NodeId },
 
-    /// The two fields are mutually exclusive by
-    /// definition — a `default` is what makes an input optional at all.
-    #[error(
-        "input `{name}` declares both `required: true` and a `default` — \
-         they are mutually exclusive by definition"
-    )]
-    InputRequiredWithDefault { name: String },
-
-    /// The mirror case: `required: false` with nothing to fall back to
-    /// would resolve to no value at all, which no `{{inputs.x}}` render
-    /// site can represent.
-    #[error(
-        "input `{name}` declares `required: false` with no `default` — \
-         give it a default, or drop `required: false` (the implicit default when neither is given)"
-    )]
-    InputOptionalWithoutDefault { name: String },
-
     #[error("input `{name}` is type `enum` with an empty `values` list")]
     InputEmptyEnumValues { name: String },
 
@@ -699,17 +682,6 @@ fn check_input_specs(
     errors: &mut Vec<CheckError>,
 ) {
     for (name, spec) in inputs {
-        let has_default = spec.has_default();
-        match spec.required_field() {
-            Some(true) if has_default => {
-                errors.push(CheckError::InputRequiredWithDefault { name: name.clone() });
-            }
-            Some(false) if !has_default => {
-                errors.push(CheckError::InputOptionalWithoutDefault { name: name.clone() });
-            }
-            _ => {}
-        }
-
         match spec {
             InputSpec::Enum { values, .. } if values.is_empty() => {
                 errors.push(CheckError::InputEmptyEnumValues { name: name.clone() });
@@ -770,12 +742,10 @@ fn check_input_references_in_nodes(
                 prompt: yunta_core::PromptSource::Inline(text),
             } => check_template_text(&node.id, text, workflow, errors),
             NodeKind::Bash { run } => check_template_text(&node.id, run, workflow, errors),
-            NodeKind::Loop { until, prompt, .. } => {
-                check_template_text(&node.id, until, workflow, errors);
-                if let yunta_core::PromptSource::Inline(text) = prompt {
-                    check_template_text(&node.id, text, workflow, errors);
-                }
-            }
+            NodeKind::Loop {
+                prompt: yunta_core::PromptSource::Inline(text),
+                ..
+            } => check_template_text(&node.id, text, workflow, errors),
             NodeKind::Parallel {
                 nodes: children, ..
             } => {

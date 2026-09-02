@@ -102,9 +102,11 @@ pub(super) async fn execute_node(
     let end = match &node.kind {
         NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
         NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
-        NodeKind::Loop { until, prompt, .. } => {
-            super::loop_exec::execute_loop(ctx, node, until, prompt, cancel).await?
-        }
+        NodeKind::Loop {
+            until: yunta_core::LoopUntil::AllTasksComplete,
+            prompt,
+            ..
+        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
         NodeKind::Parallel {
             join,
             coordination,

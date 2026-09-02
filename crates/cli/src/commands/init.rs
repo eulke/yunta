@@ -12,7 +12,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter};
+use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, ProbeReport};
 use yunta_core::AdapterSettings;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -125,17 +125,15 @@ async fn probe_known_adapters() -> Vec<ProbedAdapter> {
         ("codex", codex.probe().await),
     ] {
         probed.push(match report {
-            Ok(r) if r.healthy => ProbedAdapter {
+            Ok(ProbeReport::Healthy { version }) => ProbedAdapter {
                 id,
                 healthy: true,
-                detail: r.version.unwrap_or_else(|| "version unknown".to_string()),
+                detail: version.unwrap_or_else(|| "version unknown".to_string()),
             },
-            Ok(r) => ProbedAdapter {
+            Ok(ProbeReport::Unhealthy { diagnostic }) => ProbedAdapter {
                 id,
                 healthy: false,
-                detail: r
-                    .diagnostic
-                    .unwrap_or_else(|| "unhealthy, no diagnostic".to_string()),
+                detail: diagnostic,
             },
             Err(e) => ProbedAdapter {
                 id,

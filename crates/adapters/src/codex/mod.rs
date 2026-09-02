@@ -247,20 +247,14 @@ impl Adapter for CodexAdapter {
             .output()
             .await;
         Ok(match output {
-            Ok(output) if output.status.success() => ProbeReport {
-                healthy: true,
+            Ok(output) if output.status.success() => ProbeReport::Healthy {
                 version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-                diagnostic: None,
             },
-            Ok(output) => ProbeReport {
-                healthy: false,
-                version: None,
-                diagnostic: Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+            Ok(output) => ProbeReport::Unhealthy {
+                diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
             },
-            Err(e) => ProbeReport {
-                healthy: false,
-                version: None,
-                diagnostic: Some(e.to_string()),
+            Err(e) => ProbeReport::Unhealthy {
+                diagnostic: e.to_string(),
             },
         })
     }

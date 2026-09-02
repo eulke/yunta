@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-use yunta_core::events::ScopeExpansionMode;
 use yunta_core::ProposedCriterionEntry;
+use yunta_core::ScopeExpansionMode;
 use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
 
 fn git(dir: &Path, args: &[&str]) {

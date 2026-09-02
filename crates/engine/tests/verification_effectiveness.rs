@@ -25,11 +25,11 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -58,11 +58,11 @@ fn gate_node(id: &str) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -368,13 +368,12 @@ fn no_history_flags_nothing_at_all() {
 // --- signals tied to modes -----------
 
 fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
-    use std::collections::HashMap;
     vec![event(
         0,
         None,
         EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
             manifest_hash: "h".to_string(),
-            inputs: HashMap::new(),
+            inputs: std::collections::BTreeMap::new(),
             mode: mode.into(),
             promoted_from: None,
             yunta_schema: None,

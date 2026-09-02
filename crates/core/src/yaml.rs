@@ -38,11 +38,15 @@ fn locate(path: &str, message: &str) -> String {
     }
 }
 
-/// Parses `text` into `T`.
+/// Parses `text` into `T`. An error locates the failing value by its
+/// path from the document's root, and keeps the parser's own line and
+/// column.
 pub fn parse<T: DeserializeOwned>(text: &str) -> Result<T, YamlError> {
-    serde_yaml::from_str(text).map_err(|error| YamlError::Parse {
-        path: String::new(),
-        message: error.to_string(),
+    serde_path_to_error::deserialize(serde_yaml::Deserializer::from_str(text)).map_err(|error| {
+        YamlError::Parse {
+            path: error.path().to_string(),
+            message: error.into_inner().to_string(),
+        }
     })
 }
 

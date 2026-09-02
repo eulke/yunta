@@ -1,8 +1,7 @@
 //! `requires:` validated against the local merged config —
 //! pure comparison, no filesystem/PATH involved.
 
-use std::collections::HashMap;
-
+use std::collections::BTreeMap;
 use yunta_core::{
     ConfigLayer, PackDeclares, PackManifest, PackRequires, RequiredRunner, RunnerCandidate,
     RunnerName,
@@ -64,7 +63,7 @@ fn a_role_with_zero_candidates_is_also_flagged() {
         vec![],
     );
     let config = ConfigLayer {
-        runners: Some(HashMap::from([("reviewer".into(), Vec::new())])),
+        runners: Some(BTreeMap::from([("reviewer".into(), Vec::new())])),
         ..Default::default()
     };
 
@@ -83,7 +82,7 @@ fn a_role_with_at_least_one_candidate_resolves() {
         vec![],
     );
     let config = ConfigLayer {
-        runners: Some(HashMap::from([(
+        runners: Some(BTreeMap::from([(
             "reviewer".into(),
             vec![RunnerCandidate {
                 adapter: "claude-code".into(),
@@ -113,7 +112,7 @@ fn an_undefined_mcp_server_is_flagged() {
 fn a_defined_mcp_server_resolves() {
     let manifest = manifest(vec![], vec!["internal-docs"], vec![]);
     let config = ConfigLayer {
-        mcp_servers: Some(HashMap::from([(
+        mcp_servers: Some(BTreeMap::from([(
             "internal-docs".to_string(),
             yunta_core::McpServerConfig {
                 url: "https://example.invalid".to_string(),

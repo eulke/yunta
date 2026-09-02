@@ -154,10 +154,8 @@ impl Adapter for MockAdapter {
     }
 
     async fn probe(&self) -> Result<ProbeReport> {
-        Ok(ProbeReport {
-            healthy: true,
+        Ok(ProbeReport::Healthy {
             version: Some("mock-0.1".to_string()),
-            diagnostic: None,
         })
     }
 

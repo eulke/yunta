@@ -14,7 +14,7 @@
 //! layer is a ceiling and lower layers only narrow (see
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -396,7 +396,7 @@ pub struct PermissionsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionPermissions {
-    pub max_mode: crate::events::ScopeExpansionMode,
+    pub max_mode: crate::policy::ScopeExpansionMode,
 }
 
 /// `permissions.commands` — patterns matched against every hook, criterion,
@@ -478,11 +478,11 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runners: Option<HashMap<RunnerName, Vec<RunnerCandidate>>>,
+    pub runners: Option<BTreeMap<RunnerName, Vec<RunnerCandidate>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapters: Option<HashMap<AdapterId, AdapterSettings>>,
+    pub adapters: Option<BTreeMap<AdapterId, AdapterSettings>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
+    pub mcp_servers: Option<BTreeMap<String, McpServerConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -507,7 +507,7 @@ pub struct ConfigLayer {
     /// means everything stays in tokens — the engine has no opinion of
     /// its own on what a token costs, and never invents one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pricing: Option<HashMap<String, PricingEntry>>,
+    pub pricing: Option<BTreeMap<String, PricingEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forge: Option<ForgeConfig>,
     /// `secrets:` — env var *names* a session may receive; values
@@ -936,11 +936,11 @@ fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> Limit
 /// present in the more specific layer replaces the base's value for that
 /// key wholesale, rather than concatenating the two arrays.
 fn merge_map_replacing_values<K, V>(
-    base: Option<HashMap<K, Vec<V>>>,
-    more_specific: Option<HashMap<K, Vec<V>>>,
-) -> Option<HashMap<K, Vec<V>>>
+    base: Option<BTreeMap<K, Vec<V>>>,
+    more_specific: Option<BTreeMap<K, Vec<V>>>,
+) -> Option<BTreeMap<K, Vec<V>>>
 where
-    K: Eq + std::hash::Hash,
+    K: Ord,
 {
     merge_maps(base, more_specific, |_base_value, override_value| {
         override_value
@@ -949,23 +949,23 @@ where
 
 /// A map whose values are themselves mergeable structs (field by field).
 fn merge_map_of_fields<K, V>(
-    base: Option<HashMap<K, V>>,
-    more_specific: Option<HashMap<K, V>>,
+    base: Option<BTreeMap<K, V>>,
+    more_specific: Option<BTreeMap<K, V>>,
     merge_value: impl Fn(V, V) -> V,
-) -> Option<HashMap<K, V>>
+) -> Option<BTreeMap<K, V>>
 where
-    K: Eq + std::hash::Hash,
+    K: Ord,
 {
     merge_maps(base, more_specific, merge_value)
 }
 
 fn merge_maps<K, V>(
-    base: Option<HashMap<K, V>>,
-    more_specific: Option<HashMap<K, V>>,
+    base: Option<BTreeMap<K, V>>,
+    more_specific: Option<BTreeMap<K, V>>,
     merge_value: impl Fn(V, V) -> V,
-) -> Option<HashMap<K, V>>
+) -> Option<BTreeMap<K, V>>
 where
-    K: Eq + std::hash::Hash,
+    K: Ord,
 {
     match (base, more_specific) {
         (None, None) => None,

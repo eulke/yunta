@@ -40,8 +40,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 use thiserror::Error;
-use yunta_core::events::ScopeExpansionMode;
 use yunta_core::ProposedCriterionEntry;
+use yunta_core::ScopeExpansionMode;
 
 /// The well-known path, relative to a task's own isolated worktree, an
 /// agent writes to request an expansion — mirrors `findings.yaml`'s role

@@ -3,7 +3,7 @@
 //! implements it task by task, a bash gate — plus re-routes, pauses and
 //! resume, all derived from the event log alone.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -3938,7 +3938,7 @@ async fn run_stable_first(
 ) -> (
     yunta_core::events::ContextSourceRef,
     yunta_core::events::ContextSourceRef,
-    HashMap<String, String>,
+    BTreeMap<String, String>,
 ) {
     std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
     let artifacts_dir = bench.run_dir().join("artifacts");

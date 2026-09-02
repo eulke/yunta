@@ -84,10 +84,10 @@ pub fn list_workflows() -> ExitCode {
                 .unwrap_or("(no description)")
         );
         for (input_name, spec) in &workflow.inputs {
-            let optionality = if spec.has_default() {
-                "optional"
-            } else {
+            let optionality = if spec.is_required() {
                 "required"
+            } else {
+                "optional"
             };
             let description = spec.description().unwrap_or("");
             println!(

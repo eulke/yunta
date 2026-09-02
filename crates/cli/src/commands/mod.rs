@@ -25,7 +25,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use yunta_adapters::{
-    Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, CLAUDE_CODE_ID, CODEX_ID,
+    Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
+    CODEX_ID,
 };
 use yunta_core::{AdapterId, ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
@@ -202,11 +203,10 @@ pub(crate) async fn probe_or_refuse(
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
         match adapter.probe().await {
-            Ok(report) if report.healthy => {}
-            Ok(report) => unhealthy.push(format!(
-                "{name}: {}",
-                report.diagnostic.as_deref().unwrap_or("unhealthy")
-            )),
+            Ok(ProbeReport::Healthy { .. }) => {}
+            Ok(ProbeReport::Unhealthy { diagnostic }) => {
+                unhealthy.push(format!("{name}: {diagnostic}"));
+            }
             Err(e) => unhealthy.push(format!("{name}: {e}")),
         }
     }

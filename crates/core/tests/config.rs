@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use yunta_core::{
@@ -19,14 +19,14 @@ fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
 #[test]
 fn repo_replaces_a_runners_array_wholesale_instead_of_concatenating() {
     let org = ConfigLayer {
-        runners: Some(HashMap::from([
+        runners: Some(BTreeMap::from([
             ("planner".into(), vec![candidate("codex", "gpt-5-codex")]),
             ("reviewer".into(), vec![candidate("codex", "gpt-5-codex")]),
         ])),
         ..Default::default()
     };
     let repo = ConfigLayer {
-        runners: Some(HashMap::from([(
+        runners: Some(BTreeMap::from([(
             "planner".into(),
             vec![candidate("claude-code", "claude-opus-4-8")],
         )])),
@@ -49,7 +49,7 @@ fn repo_replaces_a_runners_array_wholesale_instead_of_concatenating() {
 #[test]
 fn user_wins_over_org_for_a_field_repo_never_sets() {
     let org = ConfigLayer {
-        adapters: Some(HashMap::from([(
+        adapters: Some(BTreeMap::from([(
             "claude-code".into(),
             AdapterSettings {
                 binary: Some(PathBuf::from("/usr/bin/claude")),
@@ -59,7 +59,7 @@ fn user_wins_over_org_for_a_field_repo_never_sets() {
         ..Default::default()
     };
     let user = ConfigLayer {
-        adapters: Some(HashMap::from([(
+        adapters: Some(BTreeMap::from([(
             "claude-code".into(),
             AdapterSettings {
                 binary: Some(PathBuf::from("~/.local/bin/claude")),
@@ -509,7 +509,7 @@ mcp_servers:
 #[test]
 fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     let org = ConfigLayer {
-        mcp_servers: Some(HashMap::from([
+        mcp_servers: Some(BTreeMap::from([
             (
                 "internal-docs".to_string(),
                 McpServerConfig {
@@ -528,7 +528,7 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
         ..Default::default()
     };
     let repo = ConfigLayer {
-        mcp_servers: Some(HashMap::from([(
+        mcp_servers: Some(BTreeMap::from([(
             "internal-docs".to_string(),
             McpServerConfig {
                 url: "http://localhost:8000/mcp".to_string(),
@@ -667,7 +667,7 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
             .scope_expansion
             .unwrap()
             .max_mode,
-        yunta_core::events::ScopeExpansionMode::Deny
+        yunta_core::ScopeExpansionMode::Deny
     );
 
     // The other way around the ceiling still holds: a softer lower
@@ -682,7 +682,7 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
             .scope_expansion
             .unwrap()
             .max_mode,
-        yunta_core::events::ScopeExpansionMode::Ask
+        yunta_core::ScopeExpansionMode::Ask
     );
 }
 

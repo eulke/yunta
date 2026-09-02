@@ -1,13 +1,14 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use yunta_core::events::*;
+use yunta_core::ScopeExpansionMode;
 use yunta_core::{RunId, RunnerCandidate};
 
 fn all_kinds() -> Vec<EventPayload> {
     vec![
         EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: "sha256:abc".to_string(),
-            inputs: HashMap::new(),
+            inputs: BTreeMap::new(),
             mode: "default".into(),
             promoted_from: None,
             yunta_schema: None,
@@ -59,7 +60,7 @@ fn all_kinds() -> Vec<EventPayload> {
                 kind: "files".to_string(),
                 content_hash: "sha256:333".to_string(),
             }],
-            segment_hashes: HashMap::from([("stable".to_string(), "sha256:222".to_string())]),
+            segment_hashes: BTreeMap::from([("stable".to_string(), "sha256:222".to_string())]),
         }),
         EventPayload::TaskRegistered(TaskRegisteredPayload {
             task_id: "graph-cmd".into(),

@@ -4,7 +4,7 @@
 //! `context_resolve.rs` client code path against a real (if minimal)
 //! `rmcp` server, the same library the client itself is built on.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -199,7 +199,7 @@ async fn run_with_config(
 
 fn config_with_server(url: &str, auth_env: Option<&str>) -> ConfigLayer {
     ConfigLayer {
-        runners: Some(HashMap::from([(
+        runners: Some(BTreeMap::from([(
             "executor".into(),
             vec![yunta_core::RunnerCandidate {
                 adapter: "mock".into(),
@@ -207,7 +207,7 @@ fn config_with_server(url: &str, auth_env: Option<&str>) -> ConfigLayer {
                 agent: None,
             }],
         )])),
-        mcp_servers: Some(HashMap::from([(
+        mcp_servers: Some(BTreeMap::from([(
             "toy".to_string(),
             McpServerConfig {
                 url: url.to_string(),
@@ -254,7 +254,7 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
 #[tokio::test]
 async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
     let config = ConfigLayer {
-        runners: Some(HashMap::from([(
+        runners: Some(BTreeMap::from([(
             "executor".into(),
             vec![yunta_core::RunnerCandidate {
                 adapter: "mock".into(),

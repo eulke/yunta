@@ -125,7 +125,7 @@ impl RunStats {
         for node in &self.nodes {
             let Some(runner) = &node.runner else { continue };
             match by_runner.iter_mut().find(|(r, _)| r == runner) {
-                Some((_, tokens)) => *tokens = sum_tokens(*tokens, node.tokens),
+                Some((_, tokens)) => *tokens += node.tokens,
                 None => by_runner.push((runner.clone(), node.tokens)),
             }
         }
@@ -291,14 +291,14 @@ fn close_attempt(
     let Some(node_id) = node_id else { return };
     acc.last_terminal.insert(node_id.clone(), at);
     let entry = acc.node_tokens.entry(node_id.clone()).or_default();
-    *entry = sum_tokens(*entry, tokens);
+    *entry += tokens;
     let Some(opened) = acc.open.remove(node_id) else {
         return;
     };
     let duration = (at - opened.started_at).to_std().unwrap_or(Duration::ZERO);
     *acc.node_active.entry(node_id.clone()).or_default() += duration;
     if opened.attempt > 1 {
-        acc.rework_tokens = sum_tokens(acc.rework_tokens, tokens);
+        acc.rework_tokens += tokens;
     }
 }
 
@@ -306,18 +306,6 @@ struct OpenAttempt {
     attempt: u32,
     started_at: DateTime<Utc>,
 }
-
-fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
-    TokenUsage {
-        input: a.input + b.input,
-        output: a.output + b.output,
-        cached: match (a.cached, b.cached) {
-            (None, None) => None,
-            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-        },
-    }
-}
-
 // --- History across runs of the same workflow (`--workflow`) --
 
 /// One past run's contribution to a workflow's history — enough to drive

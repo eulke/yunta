@@ -41,7 +41,7 @@ fn write_full_pack(root: &Path) {
          \x20   run: \"cargo clippy\"\n\
          \x20 - id: fix\n\
          \x20   kind: loop\n\
-         \x20   until: \"cargo test\"\n\
+         \x20   until: all_tasks_complete\n\
          \x20   prompt: \"fix it, {{run.dir}}\"\n\
          \x20   hooks:\n\
          \x20     before: [{ run: \"echo before\" }]\n\
@@ -83,7 +83,7 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
 
     let fix = &workflow.nodes[1];
     assert_eq!(fix.kind, "loop");
-    assert_eq!(fix.command.as_deref(), Some("cargo test"));
+    assert_eq!(fix.command.as_deref(), Some("all_tasks_complete"));
     assert_eq!(fix.hooks_before, vec!["echo before".to_string()]);
     assert_eq!(fix.hooks_after, vec!["echo after".to_string()]);
     match fix.prompt.as_ref().unwrap() {

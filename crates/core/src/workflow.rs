@@ -256,9 +256,9 @@ pub struct Node {
     /// exists for policy and audit (a pack declaring it and then curling
     /// is a detectable contradiction), and an executor may choose to
     /// actually enforce it on its own. Reading it as a sandbox is reading
-    /// a guarantee the system never offered.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub network: Option<bool>,
+    /// a guarantee the system never offered. Absent means `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub network: bool,
     /// `context:` — data resolved and materialized
     /// *before* a session opens, in declaration order. Consumed by
     /// `kind: prompt` (the node's one session) and `kind: loop` (once
@@ -277,8 +277,9 @@ pub struct Node {
     /// `interactive: true` — presentation datum for
     /// this node's questions: the surface renders them as a live
     /// conversation when it can. With no surface, nothing changes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interactive: Option<bool>,
+    /// Absent means `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive: bool,
     /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A
@@ -349,13 +350,13 @@ struct NodeFields {
     #[serde(default)]
     permissions: Option<NodePermissions>,
     #[serde(default)]
-    network: Option<bool>,
+    network: bool,
     #[serde(default)]
     context: Vec<ContextSpec>,
     #[serde(default)]
     skills: Vec<String>,
     #[serde(default)]
-    interactive: Option<bool>,
+    interactive: bool,
     #[serde(default)]
     invariant: bool,
 }
@@ -647,7 +648,7 @@ pub struct NodeOutputParams {
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
     #[serde(default)]
-    pub mode: crate::events::ScopeExpansionMode,
+    pub mode: crate::policy::ScopeExpansionMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub within: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -660,6 +661,22 @@ pub enum NodePermissions {
     ReadOnly,
     Edit,
     Full,
+}
+
+impl NodePermissions {
+    /// The YAML spelling, for diagnostics and reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NodePermissions::ReadOnly => "read-only",
+            NodePermissions::Edit => "edit",
+            NodePermissions::Full => "full",
+        }
+    }
+}
+
+/// `skip_serializing_if` for a flag whose absence means `false`.
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// A node's crash-recovery policy — the full triple of options.
@@ -686,6 +703,29 @@ pub enum OnInterrupt {
 /// The node kinds built so far. `gate` and
 /// `workflow` are the rest of the full catalogue and stay out until
 /// their own turn.
+/// What a `kind: loop` runs until. One condition exists: the ledger
+/// has no task left to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopUntil {
+    AllTasksComplete,
+}
+
+impl LoopUntil {
+    /// The YAML spelling, for diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LoopUntil::AllTasksComplete => "all_tasks_complete",
+        }
+    }
+}
+
+impl std::fmt::Display for LoopUntil {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NodeKind {
@@ -696,7 +736,7 @@ pub enum NodeKind {
         run: String,
     },
     Loop {
-        until: String,
+        until: LoopUntil,
         prompt: PromptSource,
         /// Simultaneous `ready` tasks per batch — absent
         /// means the engine's own default, `1` (sequential; the batch
@@ -1290,7 +1330,7 @@ on_failure: { goto: a, max_reroutes: 1 }
 on_interrupt: restart_node
 description: d
 permissions: edit
-network: false
+network: true
 context: [{ command: x }]
 skills: [s]
 interactive: true

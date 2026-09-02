@@ -161,7 +161,7 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
         NodeKind::Bash { run } => ("bash", Some(run.clone()), None, None),
         NodeKind::Loop { until, prompt, .. } => (
             "loop",
-            Some(until.clone()),
+            Some(until.as_str().to_string()),
             Some(resolve_prompt(prompt, workflow_dir)),
             None,
         ),
@@ -180,11 +180,7 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
         hooks_after: after.iter().map(|step| step.run.clone()).collect(),
         prompt,
         context: node.context.iter().map(describe_context).collect(),
-        permissions: node.permissions.map(|p| match p {
-            yunta_core::NodePermissions::ReadOnly => "read-only",
-            yunta_core::NodePermissions::Edit => "edit",
-            yunta_core::NodePermissions::Full => "full",
-        }),
+        permissions: node.permissions.map(yunta_core::NodePermissions::as_str),
         agent: node.agent.clone(),
         mcp_servers: node
             .context

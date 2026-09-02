@@ -55,11 +55,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     let mut replies = Vec::new();
     let mut unanswered: Vec<String> = Vec::new();
     for (relative, file) in &question_files {
-        match ctx
-            .human_interaction
-            .ask(file, node.interactive.unwrap_or(false))
-            .await
-        {
+        match ctx.human_interaction.ask(file, node.interactive).await {
             None => {
                 // No surface (headless, `yunta test`) — cite every id.
                 unanswered.extend(file.questions.iter().map(|q| q.id.to_string()));

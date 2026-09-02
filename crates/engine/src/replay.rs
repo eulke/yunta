@@ -158,7 +158,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
-                    state.total_tokens = sum_tokens(state.total_tokens, p.tokens_used);
+                    state.total_tokens += p.tokens_used;
                     state.nodes.insert(
                         node_id,
                         NodeState::Finished {
@@ -178,7 +178,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
-                    state.total_tokens = sum_tokens(state.total_tokens, p.tokens_used);
+                    state.total_tokens += p.tokens_used;
                     // A node that failed *because its
                     // questions are unanswered* is `waiting`, not
                     // `failed` — the questions artifact preceding it
@@ -294,7 +294,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             // parent's total right here — once per chain member, at its
             // close; the parent node's own `node_finished` deliberately
             // carries none of it (see the payload's doc).
-            state.total_tokens = sum_tokens(state.total_tokens, p.tokens);
+            state.total_tokens += p.tokens;
             Ok(())
         }
         // Every other kind is run-scoped bookkeeping that does not
@@ -343,15 +343,4 @@ fn require_node_id(event: &StoredEvent) -> Result<NodeId, String> {
             event.body.kind_name()
         )
     })
-}
-
-fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
-    TokenUsage {
-        input: a.input + b.input,
-        output: a.output + b.output,
-        cached: match (a.cached, b.cached) {
-            (None, None) => None,
-            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-        },
-    }
 }

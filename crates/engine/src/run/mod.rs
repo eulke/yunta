@@ -492,7 +492,9 @@ pub async fn create_run(
         node_id: None,
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
-            inputs: HashMap::new(), // `inputs:` schema isn't designed yet
+            // The resolved inputs are frozen in the manifest; the
+            // event carries none.
+            inputs: std::collections::BTreeMap::new(),
             mode: mode.clone(),
             promoted_from: promoted_from.cloned(),
             // Resolved once here — declared range as

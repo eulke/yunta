@@ -27,11 +27,11 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }

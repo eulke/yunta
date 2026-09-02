@@ -15,6 +15,7 @@
 use std::process::ExitCode;
 
 use crate::project;
+use yunta_adapters::ProbeReport;
 use yunta_core::AdapterId;
 
 fn command_on_path(command: &str) -> bool {
@@ -53,25 +54,18 @@ pub async fn doctor() -> ExitCode {
         for name in names {
             let adapter = &adapters[name];
             match adapter.probe().await {
-                Ok(report) if report.healthy => {
+                Ok(ProbeReport::Healthy { version }) => {
                     println!(
                         "{name}: healthy{}",
-                        report
-                            .version
+                        version
                             .as_deref()
                             .map(|v| format!(" ({v})"))
                             .unwrap_or_default()
                     );
                 }
-                Ok(report) => {
+                Ok(ProbeReport::Unhealthy { diagnostic }) => {
                     all_healthy = false;
-                    println!(
-                        "{name}: unhealthy — {}",
-                        report
-                            .diagnostic
-                            .as_deref()
-                            .unwrap_or("no diagnostic given")
-                    );
+                    println!("{name}: unhealthy — {diagnostic}");
                 }
                 Err(e) => {
                     all_healthy = false;

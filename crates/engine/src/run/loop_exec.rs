@@ -33,19 +33,9 @@ use super::{RunCtx, RunError};
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
     node: &Node,
-    until: &str,
     prompt: &PromptSource,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    if until != "all_tasks_complete" {
-        return fail(
-            ctx,
-            node,
-            format!("loop until `{until}` is not supported — only `all_tasks_complete` is"),
-            false,
-        )
-        .await;
-    }
     let instruction = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
@@ -285,7 +275,7 @@ pub(super) async fn execute_loop(
                 .await?;
 
             for attempt in report.attempts.drain(..) {
-                tokens = sum_tokens(tokens, attempt.tokens);
+                tokens += attempt.tokens;
                 last_check_seq = ctx
                     .emit(
                         Some(&node.id),
@@ -564,7 +554,7 @@ struct PendingEscalation {
 /// into the request itself.
 fn expansion_escalation(
     pending: &PendingEscalation,
-    mode: yunta_core::events::ScopeExpansionMode,
+    mode: yunta_core::ScopeExpansionMode,
     max_per_run: Option<u32>,
     granted_so_far: u32,
 ) -> yunta_core::events::GateWaitingPayload {
@@ -584,9 +574,9 @@ fn expansion_escalation(
         None => format!("{granted_so_far} grant(s) so far, no cap declared"),
     };
     let mode_name = match mode {
-        yunta_core::events::ScopeExpansionMode::Rules => "rules",
-        yunta_core::events::ScopeExpansionMode::Ask => "ask",
-        yunta_core::events::ScopeExpansionMode::Deny => "deny",
+        yunta_core::ScopeExpansionMode::Rules => "rules",
+        yunta_core::ScopeExpansionMode::Ask => "ask",
+        yunta_core::ScopeExpansionMode::Deny => "deny",
     };
     yunta_core::events::GateWaitingPayload {
         summary: format!(
@@ -1096,18 +1086,6 @@ fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
         })
         .collect()
 }
-
-fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
-    TokenUsage {
-        input: a.input + b.input,
-        output: a.output + b.output,
-        cached: match (a.cached, b.cached) {
-            (None, None) => None,
-            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-        },
-    }
-}
-
 /// Finds the task ledger the run registered: the `kind: task-ledger`
 /// artifact of a node that produced it earlier, re-read from the run's
 /// frozen `artifacts/` — artifacts are immutable once written.

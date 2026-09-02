@@ -280,7 +280,7 @@ fn format_pct(fraction: f64) -> String {
 
 fn currency_line(
     tokens: u64,
-    pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
+    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
 ) -> Option<String> {
     // A currency estimate needs a *model* to price against; with more
     // than one model priced and no per-node attribution surfaced here,
@@ -306,7 +306,7 @@ fn render_run_stats(
     run_id: &RunId,
     mode: &str,
     stats: &RunStats,
-    pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
+    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
 ) {
     println!("run {run_id} — mode {mode}");
     if !stats.unknown_kinds.is_empty() {
@@ -601,7 +601,7 @@ impl RunStatsJson {
         run_id: &RunId,
         mode: &str,
         stats: &RunStats,
-        pricing: Option<&std::collections::HashMap<String, yunta_core::PricingEntry>>,
+        pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
     ) -> Self {
         let total = stats.total_tokens.input + stats.total_tokens.output;
         Self {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
 use yunta_core::{
@@ -40,11 +40,11 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -65,11 +65,11 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -98,11 +98,11 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -131,11 +131,11 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: None,
+        network: false,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: None,
+        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -195,7 +195,7 @@ fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
         })
         .collect();
     ConfigLayer {
-        runners: Some(HashMap::from([(role.into(), list)])),
+        runners: Some(BTreeMap::from([(role.into(), list)])),
         ..Default::default()
     }
 }
@@ -809,7 +809,7 @@ fn context_on_a_prompt_node_is_never_an_error() {
     let errors = check(
         &wf,
         &ConfigLayer {
-            runners: Some(HashMap::from([(
+            runners: Some(BTreeMap::from([(
                 "planner".into(),
                 vec![RunnerCandidate {
                     adapter: "mock".into(),
@@ -847,7 +847,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     let errors = check(
         &wf,
         &ConfigLayer {
-            runners: Some(HashMap::from([(
+            runners: Some(BTreeMap::from([(
                 "planner".into(),
                 vec![RunnerCandidate {
                     adapter: "mock".into(),
@@ -867,35 +867,6 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
 }
 
 // --- inputs: --------------------------------------------------------------
-
-#[test]
-fn required_true_together_with_a_default_is_a_check_error() {
-    let inputs = std::collections::BTreeMap::from([(
-        "idea".to_string(),
-        input_spec("type: string\nrequired: true\ndefault: x\n"),
-    )]);
-    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, CheckError::InputRequiredWithDefault { name } if name == "idea")),
-        "{errors:?}"
-    );
-}
-
-#[test]
-fn required_false_with_no_default_is_a_check_error() {
-    let inputs = std::collections::BTreeMap::from([(
-        "idea".to_string(),
-        input_spec("type: string\nrequired: false\n"),
-    )]);
-    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, CheckError::InputOptionalWithoutDefault { name } if name == "idea")));
-}
 
 #[test]
 fn an_enum_input_with_no_values_is_a_check_error() {

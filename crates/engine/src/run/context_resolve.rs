@@ -319,7 +319,7 @@ async fn resolve_all(
     // same separators, every time) gets its own `segment_hashes` entry
     // — comparing that hash across sessions is the mechanical check
     // that the prefix really held.
-    let mut segment_hashes = std::collections::HashMap::new();
+    let mut segment_hashes = std::collections::BTreeMap::new();
     let mut assembled = Vec::new();
     for (key, class_blocks) in [
         ("stable", &stable_blocks),

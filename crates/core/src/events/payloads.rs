@@ -2,7 +2,7 @@
 //! optionality match the reference event documentation field for field;
 //! anything provisional there carries the same note here.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use crate::ids::{
     AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, Seq,
     SessionId, TaskId,
 };
+use crate::policy::ScopeExpansionMode;
 use crate::Capabilities;
 
 /// A ledger criterion, frozen into `task_registered` — the same shape
@@ -62,40 +63,6 @@ pub enum TaskStatus {
     Done,
     Blocked,
     Failed,
-}
-
-/// Default `Deny`: a node that omits `scope_expansion:` entirely
-/// gets the same behavior as one that declares it with no `mode:` — no
-/// expansions, every request becomes a finding without interrupting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScopeExpansionMode {
-    Rules,
-    Ask,
-    #[default]
-    Deny,
-}
-
-impl ScopeExpansionMode {
-    /// The severity order the layered ceiling compares by —
-    /// `rules` is the most permissive (auto-grants), `deny` the least.
-    /// A higher number never grants what a lower one would refuse.
-    pub fn strictness(self) -> u8 {
-        match self {
-            ScopeExpansionMode::Rules => 0,
-            ScopeExpansionMode::Ask => 1,
-            ScopeExpansionMode::Deny => 2,
-        }
-    }
-
-    /// The YAML spelling, for diagnostics.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ScopeExpansionMode::Rules => "rules",
-            ScopeExpansionMode::Ask => "ask",
-            ScopeExpansionMode::Deny => "deny",
-        }
-    }
 }
 
 /// `decided_by`: `rule | person` plus an identifier for the latter.
@@ -182,6 +149,34 @@ pub struct TokenUsage {
     pub cached: Option<u64>,
 }
 
+/// Field by field; `cached` stays unknown only while nobody reported it.
+impl std::ops::Add for TokenUsage {
+    type Output = TokenUsage;
+
+    fn add(self, other: TokenUsage) -> TokenUsage {
+        TokenUsage {
+            input: self.input + other.input,
+            output: self.output + other.output,
+            cached: match (self.cached, other.cached) {
+                (None, None) => None,
+                (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+            },
+        }
+    }
+}
+
+impl std::ops::AddAssign for TokenUsage {
+    fn add_assign(&mut self, other: TokenUsage) {
+        *self = *self + other;
+    }
+}
+
+impl std::iter::Sum for TokenUsage {
+    fn sum<I: Iterator<Item = TokenUsage>>(iter: I) -> TokenUsage {
+        iter.fold(TokenUsage::default(), |total, usage| total + usage)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiscardedCandidate {
     pub candidate: RunnerCandidate,
@@ -210,7 +205,7 @@ pub struct ContextSourceRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedPayload {
     pub manifest_hash: String,
-    pub inputs: HashMap<String, serde_json::Value>,
+    pub inputs: BTreeMap<String, serde_json::Value>,
     pub mode: ModeName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_from: Option<RunId>,
@@ -312,7 +307,7 @@ pub struct ContextAssembledPayload {
     /// Keys are `"stable" | "run-stable" | "volatile"` (the fixed
     /// stability classes) — kept as plain strings rather than an enum key
     /// to sidestep serde's map-key-as-enum ceremony for no real benefit.
-    pub segment_hashes: HashMap<String, String>,
+    pub segment_hashes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

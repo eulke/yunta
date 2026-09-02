@@ -7,18 +7,22 @@
 //! rather than accepting it and rejecting it later in `check`.
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-/// One entry of `inputs:`. `required` and `default` are
-/// mutually exclusive by convention, not by the type: `required: true`
-/// with no `default` is the ordinary case (and the implicit default when
-/// neither field is given — an input the schema is silent about is
-/// required, since a `default` is the only way to make one optional).
+/// One entry of `inputs:`. An input is required exactly when it has no
+/// `default` — a default is the only way to make one optional. The
+/// authored form may also spell that out as `required: true` or
+/// `required: false`; a value that contradicts the default is refused
+/// where the document is read, and the frozen form carries the default
+/// alone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    try_from = "AuthoredInputSpec"
+)]
 pub enum InputSpec {
     String {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        required: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,8 +34,6 @@ pub enum InputSpec {
     },
     Number {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        required: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
@@ -42,8 +44,6 @@ pub enum InputSpec {
     },
     Boolean {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        required: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
@@ -53,8 +53,6 @@ pub enum InputSpec {
     /// field rather than letting an empty list slip through to `check`.
     Enum {
         values: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        required: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,8 +66,6 @@ pub enum InputSpec {
     /// (an output location) is a `string`, not a `path`.
     Path {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        required: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
@@ -77,31 +73,15 @@ pub enum InputSpec {
 }
 
 impl InputSpec {
-    /// Whether this input has its own default — the one thing every
-    /// variant carries, and the one fact resolution needs before it ever
-    /// looks at the type-specific fields.
-    pub fn has_default(&self) -> bool {
+    /// Whether a run must be given this input: it has no default to
+    /// fall back to.
+    pub fn is_required(&self) -> bool {
         match self {
-            InputSpec::String { default, .. } => default.is_some(),
-            InputSpec::Number { default, .. } => default.is_some(),
-            InputSpec::Boolean { default, .. } => default.is_some(),
-            InputSpec::Enum { default, .. } => default.is_some(),
-            InputSpec::Path { default, .. } => default.is_some(),
-        }
-    }
-
-    /// The `required:` field as written, independent of whether a
-    /// `default` is also present — callers that need to detect the
-    /// contradictory `required: true` + `default: ...` combination read
-    /// this alongside `has_default()` rather than a single collapsed
-    /// bool.
-    pub fn required_field(&self) -> Option<bool> {
-        match self {
-            InputSpec::String { required, .. } => *required,
-            InputSpec::Number { required, .. } => *required,
-            InputSpec::Boolean { required, .. } => *required,
-            InputSpec::Enum { required, .. } => *required,
-            InputSpec::Path { required, .. } => *required,
+            InputSpec::String { default, .. } => default.is_none(),
+            InputSpec::Number { default, .. } => default.is_none(),
+            InputSpec::Boolean { default, .. } => default.is_none(),
+            InputSpec::Enum { default, .. } => default.is_none(),
+            InputSpec::Path { default, .. } => default.is_none(),
         }
     }
 
@@ -113,5 +93,187 @@ impl InputSpec {
             InputSpec::Enum { description, .. } => description.as_deref(),
             InputSpec::Path { description, .. } => description.as_deref(),
         }
+    }
+}
+
+/// `required:` as an author writes it — a statement the `default`
+/// already makes, kept only to be checked against it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(from = "bool")]
+enum Requiredness {
+    #[default]
+    Unspoken,
+    Required,
+    Optional,
+}
+
+impl From<bool> for Requiredness {
+    fn from(required: bool) -> Self {
+        if required {
+            Requiredness::Required
+        } else {
+            Requiredness::Optional
+        }
+    }
+}
+
+impl Requiredness {
+    fn check_against(self, has_default: bool) -> Result<(), InputSpecContradiction> {
+        match (self, has_default) {
+            (Requiredness::Required, true) => Err(InputSpecContradiction::RequiredWithDefault),
+            (Requiredness::Optional, false) => Err(InputSpecContradiction::OptionalWithoutDefault),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// An input whose `required:` says the opposite of its `default`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InputSpecContradiction {
+    /// A `default` is what makes an input optional, so `required: true`
+    /// next to one cannot be honored.
+    #[error(
+        "`required: true` and a `default` contradict each other — the default is what makes \
+         an input optional; drop one of them"
+    )]
+    RequiredWithDefault,
+    /// `required: false` with nothing to fall back to would resolve to
+    /// no value at all, which no `{{inputs.x}}` render site can
+    /// represent.
+    #[error(
+        "`required: false` with no `default` leaves the input without a value — give it a \
+         default, or drop `required: false`"
+    )]
+    OptionalWithoutDefault,
+}
+
+/// The authored form of an input: what the schema accepts, `required:`
+/// included, before the contradiction check turns it into an
+/// [`InputSpec`].
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum AuthoredInputSpec {
+    String {
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
+        #[serde(default)]
+        min_length: Option<u32>,
+    },
+    Number {
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<f64>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+    },
+    Boolean {
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<bool>,
+        #[serde(default)]
+        description: Option<String>,
+    },
+    Enum {
+        values: Vec<String>,
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+    },
+    Path {
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+    },
+}
+
+impl TryFrom<AuthoredInputSpec> for InputSpec {
+    type Error = InputSpecContradiction;
+
+    fn try_from(authored: AuthoredInputSpec) -> Result<Self, Self::Error> {
+        Ok(match authored {
+            AuthoredInputSpec::String {
+                required,
+                default,
+                description,
+                pattern,
+                min_length,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::String {
+                    default,
+                    description,
+                    pattern,
+                    min_length,
+                }
+            }
+            AuthoredInputSpec::Number {
+                required,
+                default,
+                description,
+                min,
+                max,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::Number {
+                    default,
+                    description,
+                    min,
+                    max,
+                }
+            }
+            AuthoredInputSpec::Boolean {
+                required,
+                default,
+                description,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::Boolean {
+                    default,
+                    description,
+                }
+            }
+            AuthoredInputSpec::Enum {
+                values,
+                required,
+                default,
+                description,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::Enum {
+                    values,
+                    default,
+                    description,
+                }
+            }
+            AuthoredInputSpec::Path {
+                required,
+                default,
+                description,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::Path {
+                    default,
+                    description,
+                }
+            }
+        })
     }
 }
