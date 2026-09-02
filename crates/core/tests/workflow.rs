@@ -885,8 +885,8 @@ nodes:
     assert!(workflow.inputs.is_empty());
 }
 
-// --- Reference-schema fields (interactive, fresh_context,
-// yunta_schema, skills, on_finish) --------------------------------------------
+// --- Reference-schema fields (interactive, yunta_schema, skills,
+// on_finish) ------------------------------------------------------------------
 
 #[test]
 fn the_reference_workflow_header_fields_round_trip() {
@@ -904,7 +904,6 @@ nodes:
     kind: loop
     runner: executor
     depends_on: [grill]
-    fresh_context: true
     until: all_tasks_complete
     prompt: "Implement."
 on_finish:
@@ -915,7 +914,6 @@ on_finish:
     assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
     assert_eq!(wf.nodes[0].interactive, Some(true));
-    assert_eq!(wf.nodes[1].fresh_context, Some(true));
     assert_eq!(
         wf.on_finish,
         vec![

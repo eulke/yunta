@@ -98,15 +98,6 @@ pub enum CheckError {
     )]
     DistillUnknownArtifact { path: String },
 
-    /// `fresh_context: false` requires session resume,
-    /// which isn't built — refused up front instead of accepted and
-    /// silently ignored.
-    #[error(
-        "node `{node}` declares `fresh_context: false` but session resume is not supported \
-         yet — remove the field (every session is fresh today) or wait for `resume_session`"
-    )]
-    FreshContextUnsupported { node: NodeId },
-
     /// The workflow demands a schema this binary doesn't
     /// speak, or a range the parser can't read.
     #[error("`yunta_schema: \"{range}\"` — {detail} (this binary speaks schema {binary})")]
@@ -498,7 +489,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 
     check_parallel_scopes(&workflow.nodes, &mut errors);
     check_fanout_scopes(workflow, config, &mut errors);
-    check_fresh_context(workflow, &mut errors);
+    check_resume_session(workflow, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
@@ -1389,18 +1380,11 @@ fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// `fresh_context: false` names a capability (session resume)
-/// that doesn't exist — error, never silent acceptance.
-fn check_fresh_context(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+/// `on_interrupt: resume_session` declared on a node that opens no
+/// session is refused; the *config default* stays legal (it applies
+/// where a session exists and means restart everywhere else).
+fn check_resume_session(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
-        if node.fresh_context == Some(false) {
-            errors.push(CheckError::FreshContextUnsupported {
-                node: node.id.clone(),
-            });
-        }
-        // The explicit declaration is refused where no session
-        // exists; the *config default* stays legal (it applies where a
-        // session exists and means restart everywhere else).
         if node.on_interrupt == Some(yunta_core::OnInterrupt::ResumeSession)
             && !matches!(node.kind, NodeKind::Prompt { .. })
         {

@@ -166,7 +166,6 @@ nodes:
     kind: loop
     runner: executor
     depends_on: [approve-plan]
-    fresh_context: true
     until: all_tasks_complete
     invariant: true
     concurrency: 2                  # tareas simultáneas con scopes disjuntos (§5.5); default 1

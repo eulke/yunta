@@ -45,7 +45,6 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         invariant: false,
         skills: Vec::new(),
         interactive: None,
-        fresh_context: None,
         runners: Vec::new(),
         agent: None,
     }
@@ -71,7 +70,6 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         invariant: false,
         skills: Vec::new(),
         interactive: None,
-        fresh_context: None,
         runners: Vec::new(),
         agent: None,
     }
@@ -105,7 +103,6 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         invariant: false,
         skills: Vec::new(),
         interactive: None,
-        fresh_context: None,
         runners: Vec::new(),
         agent: None,
     }
@@ -139,7 +136,6 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         invariant: false,
         skills: Vec::new(),
         interactive: None,
-        fresh_context: None,
         runners: Vec::new(),
         agent: None,
     }
@@ -1065,29 +1061,7 @@ fn scopeless_independent_writers_warn_once_per_component() {
     assert_eq!(check_warnings(&wf, &config_with_fanout(1)), Vec::new());
 }
 
-// --- fresh_context / yunta_schema ---------------------------------------------
-
-#[test]
-fn fresh_context_false_is_refused_until_session_resume_exists() {
-    let mut node = bash("a", "true", &[]);
-    node.fresh_context = Some(false);
-    let wf = workflow(vec![node]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("fresh_context") && e.to_string().contains("not")),
-        "must refuse with an actionable message: {errors:?}"
-    );
-
-    // `true` and absent are both fine — every session is fresh today.
-    let mut node = bash("a", "true", &[]);
-    node.fresh_context = Some(true);
-    assert_eq!(
-        check(&workflow(vec![node]), &ConfigLayer::default()),
-        Vec::new()
-    );
-}
+// --- yunta_schema ------------------------------------------------------------
 
 #[test]
 fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {

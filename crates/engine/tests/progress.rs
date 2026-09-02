@@ -29,7 +29,6 @@ fn node(id: &str, description: Option<&str>) -> Node {
         invariant: false,
         skills: Vec::new(),
         interactive: None,
-        fresh_context: None,
         runners: Vec::new(),
         agent: None,
     }

@@ -261,13 +261,6 @@ pub struct Node {
     /// conversation when it can. With no surface, nothing changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
-    /// `fresh_context:` — `true` (and absent) means this
-    /// node's session opens fresh, pure rehydration from the log.
-    /// `false` requires session resume, which isn't built:
-    /// `check` refuses it with an actionable error instead of accepting
-    /// it silently.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fresh_context: Option<bool>,
     /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A

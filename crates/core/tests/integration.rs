@@ -54,7 +54,6 @@ fn the_reference_workflow_parses_and_round_trips() {
     assert_eq!(grill.skills, vec!["grill"]);
     assert_eq!(grill.interactive, Some(true));
     let implement = &workflow.nodes[3];
-    assert_eq!(implement.fresh_context, Some(true));
     assert!(implement.invariant);
     let review = workflow
         .nodes
