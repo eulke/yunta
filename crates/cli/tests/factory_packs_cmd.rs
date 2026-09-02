@@ -155,6 +155,17 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     assert!(stdout(&check).contains("OK"));
 }
 
+#[test]
+fn test_dir_runs_a_packs_own_cases_from_outside_its_root() {
+    let (_root, repo, home) = setup_project();
+    let pack = repo_root().join("packs/starter");
+
+    let out = yunta_in(&repo, &home, &["test", "--dir", pack.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("2 case(s), 0 failed"), "{text}");
+}
+
 /// Uninstalling either pack leaves the engine's own capabilities
 /// untouched — checked by structural test in
 /// `crates/cli/tests/factory_packs_structural.rs` (no crate source

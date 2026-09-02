@@ -222,11 +222,12 @@ expect:
   final_state: finished
 ```
 
-Run them from inside the pack's own directory:
+Run them from inside the pack's own directory, or from anywhere with `--dir`:
 
 ```bash
 cd my-pack
 yunta test
+yunta test --dir path/to/my-pack
 ```
 
 This runs entirely against `mock` (see [adapters](adapters.md#mock-not-a-test-helper-a-first-class-adapter))

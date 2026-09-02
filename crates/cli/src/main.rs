@@ -133,7 +133,12 @@ enum Command {
     },
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
-    Test,
+    Test {
+        /// Project root whose `.yunta/` holds the cases, workflows and
+        /// config; defaults to the current directory.
+        #[arg(long, value_name = "path")]
+        dir: Option<PathBuf>,
+    },
     /// Verifies a run's event hash chain: integrity and order,
     /// recomputed from the log as persisted.
     Verify {
@@ -304,7 +309,7 @@ async fn main() -> ExitCode {
         Some(Command::Mcp) => commands::mcp::mcp().await,
         Some(Command::Gc { dry_run }) => commands::gc::gc(dry_run),
         Some(Command::Graph { workflow, run }) => graph::graph(&workflow, run.as_deref()),
-        Some(Command::Test) => commands::test::test().await,
+        Some(Command::Test { dir }) => commands::test::test(dir.as_deref()).await,
         Some(Command::Verify { run_id }) => commands::verify::verify(&run_id),
         Some(Command::Receipt { run_id, json }) => commands::receipt::receipt(&run_id, json),
         Some(Command::Pack { action }) => match action {

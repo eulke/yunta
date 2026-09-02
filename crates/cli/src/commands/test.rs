@@ -1,7 +1,8 @@
-//! `yunta test`: discover cases under `.yunta/tests/`, execute each
-//! workflow with the `mock` adapter driven by the case's fixture,
-//! derive the final state by replay and compare it against `expect`.
-//! No LLM, no network, deterministic.
+//! `yunta test`: discover cases under a project root's `.yunta/tests/`
+//! (the current directory, or `--dir`), execute each workflow with the
+//! `mock` adapter driven by the case's fixture, derive the final state
+//! by replay and compare it against `expect`. No LLM, no network,
+//! deterministic.
 //!
 //! Each case runs in its own sandbox: a fresh git worktree, a fresh runs
 //! root and a fresh event-log DB under a temp dir — a test run never
@@ -10,10 +11,8 @@
 //! session can place artifacts exactly where a real agent (told
 //! `{{run.dir}}` in its prompt) would.
 //!
-//! Current cut of the case format: `workflow`, `fixture` and `expect`
-//! with `final_state` (`finished` | `paused`), `nodes` and `tasks`.
-//! `mode`/`inputs` wait for their schema; `events`/`never` clauses wait
-//! for a fuller case format.
+//! A case names the `workflow`, the `fixture`, and an `expect` block with
+//! `final_state` (`finished` | `paused`), `nodes` and `tasks`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -60,17 +59,17 @@ enum FinalState {
     Promoted,
 }
 
-pub async fn test() -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
+pub async fn test(dir: Option<&Path>) -> ExitCode {
+    let root = match project_root(dir) {
+        Ok(root) => root,
         Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    let tests_dir = cwd.join(".yunta/tests");
-    let Some(case_paths) = discover_case_paths(&cwd) else {
+    let tests_dir = root.join(".yunta/tests");
+    let Some(case_paths) = discover_case_paths(&root) else {
         eprintln!("error: cannot read test cases from {}", tests_dir.display());
         return ExitCode::FAILURE;
     };
@@ -85,7 +84,7 @@ pub async fn test() -> ExitCode {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| case_path.display().to_string());
-        match run_case(&cwd, case_path).await {
+        match run_case(&root, case_path).await {
             Ok(problems) if problems.is_empty() => println!("case {name} ... ok"),
             Ok(problems) => {
                 failures += 1;
@@ -108,6 +107,19 @@ pub async fn test() -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// The project whose `.yunta/` holds the cases: `dir` when given, the
+/// current directory otherwise. Always absolute, so every case's sandbox
+/// and fixture resolve from one fixed root regardless of where the
+/// command was invoked.
+fn project_root(dir: Option<&Path>) -> Result<PathBuf, String> {
+    let root = match dir {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::current_dir()
+            .map_err(|e| format!("cannot determine the current directory: {e}"))?,
+    };
+    std::path::absolute(&root).map_err(|e| format!("cannot resolve `{}`: {e}", root.display()))
 }
 
 /// Every `.yaml`/`.yml` case file directly under `<root>/.yunta/tests/`,
@@ -186,9 +198,8 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         }
     }
 
-    // Test cases don't declare input values yet — every input a tested
-    // workflow declares must have a `default`, same as any other
-    // consumer of `build_manifest` that has none to offer.
+    // A case declares no input values: every input a tested workflow
+    // declares needs a `default`.
     let manifest = yunta_engine::build_manifest(
         &workflow,
         &config,
@@ -198,16 +209,14 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     )
     .map_err(|e| e.to_string())?;
 
-    // `"default"` runs the whole graph unfiltered — a test case doesn't
-    // declare a mode of its own, and exercising the full workflow is
-    // the more useful default for a fixture-driven test than picking
-    // one mode out from under it.
+    // `"default"` runs the whole graph unfiltered.
+    let mode = "default";
     yunta_engine::create_run(
         yunta_engine::CreateRunParams {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "default",
+            mode,
             promoted_from: None,
         },
         &storage,
