@@ -67,8 +67,18 @@ pub async fn scope_check(
     Ok(ScopeCheckResult { diff, violations })
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeCheckError> {
-    crate::git::output(cwd, args)
+async fn git_diff_names(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    let bytes = git_bytes(cwd, &["diff", "--name-only", "-z", "HEAD"]).await?;
+    Ok(nul_separated_paths(&bytes))
+}
+
+async fn git_untracked(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    let bytes = git_bytes(cwd, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+    Ok(nul_separated_paths(&bytes))
+}
+
+async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, ScopeCheckError> {
+    crate::git::output_bytes(cwd, args)
         .await
         .map_err(|e| match e.source {
             Some(source) => ScopeCheckError::Io {
@@ -83,12 +93,15 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeCheckError> {
         })
 }
 
-async fn git_diff_names(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let stdout = run_git(cwd, &["diff", "--name-only", "HEAD"]).await?;
-    Ok(stdout.lines().map(PathBuf::from).collect())
-}
-
-async fn git_untracked(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let stdout = run_git(cwd, &["ls-files", "--others", "--exclude-standard"]).await?;
-    Ok(stdout.lines().map(PathBuf::from).collect())
+/// The paths from a `-z` git listing: NUL-separated, and — because `-z`
+/// turns off git's own path quoting — byte-for-byte, so a non-ASCII path
+/// reaches the globs unescaped instead of as a `"caf\303\251.rs"` string
+/// no glob would match.
+fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| PathBuf::from(std::ffi::OsStr::from_bytes(segment)))
+        .collect()
 }

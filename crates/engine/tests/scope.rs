@@ -121,3 +121,49 @@ async fn a_path_an_adapter_staged_is_never_charged_to_scope() {
         "the diff still records the file; only the verdict leaves it out"
     );
 }
+
+#[tokio::test]
+async fn star_does_not_cross_directories() {
+    // A single `*` never crosses a `/`: `src/*.rs` covers `src/lib.rs`
+    // but not a file one directory deeper, which is therefore a
+    // violation of a scope that only declared the top level.
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    std::fs::create_dir_all(dir.path().join("src/sub")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "// top\n").unwrap();
+    std::fs::write(dir.path().join("src/sub/deep.rs"), "// nested\n").unwrap();
+
+    let result = scope_check(dir.path(), &["src/*.rs".to_string()], &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        result.violations,
+        vec![std::path::PathBuf::from("src/sub/deep.rs")],
+        "the nested file is outside `src/*.rs`; the top-level one is not"
+    );
+}
+
+#[tokio::test]
+async fn non_ascii_paths_match_their_globs() {
+    // `-z` turns off git's path quoting, so a non-ASCII path reaches the
+    // globs byte-for-byte (`src/café.rs`) and matches `src/*.rs` — not as
+    // the escaped `"src/caf\303\251.rs"` string no glob would match.
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/café.rs"), "// unicode\n").unwrap();
+
+    let result = scope_check(dir.path(), &["src/*.rs".to_string()], &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        result.diff,
+        vec![std::path::PathBuf::from("src/café.rs")],
+        "the non-ASCII path is reported unescaped"
+    );
+    assert!(
+        result.violations.is_empty(),
+        "and it matches `src/*.rs`, so it is not a violation: {:?}",
+        result.violations
+    );
+}
