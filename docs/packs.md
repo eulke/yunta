@@ -222,6 +222,11 @@ expect:
   final_state: finished
 ```
 
+A workflow that declares `modes:` or required `inputs:` gets both from the
+case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
+[`packs/fragua/.yunta/tests/`](../packs/fragua/.yunta/tests) for mode-specific
+cases.
+
 Run them from inside the pack's own directory, or from anywhere with `--dir`:
 
 ```bash

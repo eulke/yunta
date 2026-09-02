@@ -11,8 +11,10 @@
 //! session can place artifacts exactly where a real agent (told
 //! `{{run.dir}}` in its prompt) would.
 //!
-//! A case names the `workflow`, the `fixture`, and an `expect` block with
-//! `final_state` (`finished` | `paused`), `nodes` and `tasks`.
+//! A case names the `workflow`, the `mode` it runs in (absent: the whole
+//! graph), the `inputs` it provides (absent: each input's own default),
+//! the `fixture`, and an `expect` block with `final_state` (`finished` |
+//! `paused`), `nodes` and `tasks`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -33,6 +35,15 @@ use crate::project;
 struct TestCase {
     /// Workflow name, resolved to `.yunta/workflows/<name>.yaml`.
     workflow: String,
+    /// Mode the run is created in. Absent runs the whole graph, under
+    /// the same `"default"` a workflow with no `modes:` runs under.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Values for the workflow's declared inputs, by name. Every scalar
+    /// arrives as text and `resolve_inputs` types it against the
+    /// declaration, exactly as `yunta run --input` does.
+    #[serde(default)]
+    inputs: BTreeMap<String, String>,
     /// Fixture path, relative to the case file.
     fixture: PathBuf,
     expect: Expect,
@@ -198,19 +209,19 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         }
     }
 
-    // A case declares no input values: every input a tested workflow
-    // declares needs a `default`.
+    let provided_inputs: HashMap<String, String> = case.inputs.into_iter().collect();
     let manifest = yunta_engine::build_manifest(
         &workflow,
         &config,
         workflow_path.parent().unwrap_or(Path::new(".")),
         &worktree,
-        &HashMap::new(),
+        &provided_inputs,
     )
     .map_err(|e| e.to_string())?;
 
+    // The case's `mode` is frozen into the run the way `--mode` is;
     // `"default"` runs the whole graph unfiltered.
-    let mode = "default";
+    let mode = case.mode.as_deref().unwrap_or("default");
     yunta_engine::create_run(
         yunta_engine::CreateRunParams {
             run_id: &run_id,
@@ -297,4 +308,35 @@ fn init_git(dir: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_case_declares_its_mode_and_reads_every_input_scalar_as_text() {
+        let case: TestCase = serde_yaml::from_str(
+            "workflow: build-feature\n\
+             mode: quick\n\
+             inputs: { idea: add dark mode, retries: 3, dry_run: true }\n\
+             fixture: fixtures/quick.yaml\n\
+             expect:\n  final_state: paused\n",
+        )
+        .unwrap();
+        assert_eq!(case.mode.as_deref(), Some("quick"));
+        assert_eq!(case.inputs["idea"], "add dark mode");
+        assert_eq!(case.inputs["retries"], "3");
+        assert_eq!(case.inputs["dry_run"], "true");
+    }
+
+    #[test]
+    fn a_case_without_mode_or_inputs_runs_the_whole_graph_on_input_defaults() {
+        let case: TestCase = serde_yaml::from_str(
+            "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: finished\n",
+        )
+        .unwrap();
+        assert_eq!(case.mode, None);
+        assert!(case.inputs.is_empty());
+    }
 }
