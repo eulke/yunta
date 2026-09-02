@@ -1,13 +1,9 @@
-//! `yunta graph`: a pure derivation of the DAG from the workflow definition.
-//!
-//! The schema only has `prompt`/`bash`/`loop` nodes with `depends_on`
-//! and `on_failure.goto` — no `parallel`/`gate`/`workflow` composition
-//! (those come later), so this covers exactly
-//! that: a Mermaid `graph TD` with `depends_on` edges, `on_failure.goto`
-//! edges visually differentiated from them, and — given a `--run <id>` —
-//! the same graph with each node's derived state (via
-//! `yunta_engine::derive`) annotated, no new events, no agent involved in
-//! producing the graph itself (pure derivation, same as `status`).
+//! `yunta graph`: a pure derivation of the DAG from the workflow
+//! definition — Mermaid by default, DOT on request — with `depends_on`
+//! edges, `on_failure.goto` edges visually differentiated from them,
+//! and, given a `--run <id>`, each node's derived state (via
+//! `yunta_engine::derive`) annotated: no new events, no agent involved
+//! in producing the graph itself, same as `status`.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -174,4 +170,33 @@ nodes:
 
     let output = yunta_in(&repo, &home, &["graph", "wf.yaml"]);
     assert!(!output.status.success());
+}
+
+#[test]
+fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), WORKFLOW);
+
+    let output = yunta_in(&repo, &home, &["graph", "wf.yaml", "--format", "dot"]);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = stdout(&output);
+    assert!(text.trim_start().starts_with("digraph"), "got: {text}");
+    assert!(
+        text.contains("\"lint\" -> \"tests\";"),
+        "missing dependency edge: {text}"
+    );
+    assert!(
+        text.contains("\"lint\" -> \"fix-lint\" [style=dashed];"),
+        "missing dashed re-route edge: {text}"
+    );
+    assert!(text.trim_end().ends_with('}'), "got: {text}");
 }

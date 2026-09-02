@@ -1,9 +1,9 @@
-//! `yunta graph <workflow> [--run <id>]`: pure derivation of the DAG as
-//! Mermaid — `depends_on` edges, `on_failure.goto` re-route edges
-//! visually differentiated (dashed) from them, and, given `--run`,
-//! each node annotated with its derived state (`yunta_engine::derive`).
-//! No agent involved in producing the graph itself, same shape as
-//! `status`.
+//! `yunta graph <workflow> [--run <id>] [--format mermaid|dot]`: pure
+//! derivation of the DAG — `depends_on` edges, `on_failure.goto`
+//! re-route edges visually differentiated (dashed) from them, and,
+//! given `--run`, each node annotated with its derived state
+//! (`yunta_engine::derive`). No agent involved in producing the graph
+//! itself, same shape as `status`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -18,7 +18,14 @@ use crate::{load_yaml, project};
 
 type Labels = HashMap<NodeId, String>;
 
-pub fn graph(workflow_path: &Path, run_id: Option<&str>) -> ExitCode {
+/// The diagram languages `--format` accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum GraphFormat {
+    Mermaid,
+    Dot,
+}
+
+pub fn graph(workflow_path: &Path, run_id: Option<&str>, format: GraphFormat) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -51,7 +58,11 @@ pub fn graph(workflow_path: &Path, run_id: Option<&str>) -> ExitCode {
         None => None,
     };
 
-    print!("{}", render_mermaid(&workflow, labels.as_ref()));
+    let rendered = match format {
+        GraphFormat::Mermaid => render_mermaid(&workflow, labels.as_ref()),
+        GraphFormat::Dot => render_dot(&workflow, labels.as_ref()),
+    };
+    print!("{rendered}");
     ExitCode::SUCCESS
 }
 
@@ -129,8 +140,50 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
     out
 }
 
+/// The same DAG as Graphviz DOT: `depends_on` edges solid,
+/// `on_failure.goto` edges dashed, node labels quoted.
+fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
+    let mut out = String::from("digraph workflow {\n  rankdir=TB;\n");
+    for node in &workflow.nodes {
+        let text = match labels.and_then(|labels| labels.get(&node.id)) {
+            Some(state) => format!("{}: {}", node.id, state),
+            None => node.id.to_string(),
+        };
+        out.push_str(&format!(
+            "  \"{}\" [label=\"{}\"];\n",
+            escape_dot(node.id.as_str()),
+            escape_dot(&text)
+        ));
+    }
+    for node in &workflow.nodes {
+        for dep in &node.depends_on {
+            out.push_str(&format!(
+                "  \"{}\" -> \"{}\";\n",
+                escape_dot(dep.as_str()),
+                escape_dot(node.id.as_str())
+            ));
+        }
+    }
+    for node in &workflow.nodes {
+        if let Some(on_failure) = &node.on_failure {
+            out.push_str(&format!(
+                "  \"{}\" -> \"{}\" [style=dashed];\n",
+                escape_dot(node.id.as_str()),
+                escape_dot(on_failure.goto.as_str())
+            ));
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// Mermaid node labels are double-quoted text — escape embedded quotes so
 /// an outcome message never breaks the diagram's syntax.
 fn escape_label(text: &str) -> String {
     text.replace('"', "&quot;")
+}
+
+/// DOT quoted strings escape backslashes and double quotes.
+fn escape_dot(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('"', "\\\"")
 }

@@ -66,7 +66,7 @@ must provide — it never assumes a concrete adapter, model or secret. See
 
 ## Where a run's state can pause, and how it resumes
 
-A node can end in one of `done | failed | skipped | waiting`. `waiting` means
+A node can end in one of `finished | failed | skipped | waiting`. `waiting` means
 a `gate` is asking a person for a decision — nothing is running underneath
 it, and it survives the engine restarting exactly like any other state.
 `yunta resolve-gate` (or the MCP `resolve_gate` tool) answers it from a

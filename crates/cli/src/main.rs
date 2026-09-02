@@ -126,14 +126,17 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Renders a workflow's DAG as Mermaid — optionally annotated with a
-    /// run's derived state.
+    /// Renders a workflow's DAG as Mermaid or DOT (`--format`) —
+    /// optionally annotated with a run's derived state.
     Graph {
         /// Path to the workflow YAML file.
         workflow: PathBuf,
         /// Annotate each node with its derived state from this run.
         #[arg(long)]
         run: Option<String>,
+        /// Diagram language: `mermaid` (default) or `dot`.
+        #[arg(long, default_value = "mermaid")]
+        format: graph::GraphFormat,
     },
     /// Runs the workflow test cases under .yunta/tests/ with the mock
     /// adapter.
@@ -315,7 +318,11 @@ async fn main() -> ExitCode {
         Command::Doctor => commands::doctor::doctor().await,
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run),
-        Command::Graph { workflow, run } => graph::graph(&workflow, run.as_deref()),
+        Command::Graph {
+            workflow,
+            run,
+            format,
+        } => graph::graph(&workflow, run.as_deref(), format),
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
         Command::Verify { run_id } => commands::verify::verify(&run_id),
         Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),

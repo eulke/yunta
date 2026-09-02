@@ -179,7 +179,7 @@ Nothing about a run's state lives anywhere else — `status`, `resume` and `stat
 derive their answer by replaying that log, which is what makes killing the process at
 any point and resuming safe.
 
-Each node moves through `pending → ready → running → done | failed | skipped |
+Each node moves through `pending → ready → running → finished | failed | skipped |
 waiting`. `waiting` is a node paused on a gate — a human decision point — with nothing
 running underneath it; it survives the engine restarting just like any other state.
 A failed node either ends the run or, if it declared `on_failure.goto`, re-routes to a
