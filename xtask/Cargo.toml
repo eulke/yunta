@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Repository tooling: `cargo xtask schema` writes and checks the generated JSON Schemas"
+
+[dependencies]
+yunta-core.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

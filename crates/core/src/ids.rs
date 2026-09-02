@@ -244,6 +244,20 @@ macro_rules! string_id {
             }
         }
 
+        impl schemars::JsonSchema for $name {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($name).into()
+            }
+
+            fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({
+                    "type": "string",
+                    "minLength": 1,
+                    "description": format!("A {}: {}", $what, $rule),
+                })
+            }
+        }
+
         /// Test convenience: a literal that breaks the rule panics with
         /// the rule. Production code parses instead; `TryFrom<&str>`
         /// exists only through this impl, so it is not a parser.
@@ -473,6 +487,20 @@ impl<'de> Deserialize<'de> for PackRef {
     }
 }
 
+impl schemars::JsonSchema for PackRef {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PackRef".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^[^/]+/[^/]+$",
+            "description": format!("A pack reference: {}", PACK_REF_RULE),
+        })
+    }
+}
+
 // --- Process ids ---------------------------------------------------------
 
 /// A process id: a positive number, as the kernel hands them out. Zero
@@ -545,6 +573,21 @@ impl<'de> Deserialize<'de> for Pid {
     }
 }
 
+impl schemars::JsonSchema for Pid {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Pid".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "integer",
+            "minimum": 1,
+            "maximum": u32::MAX,
+            "description": format!("A process id: {}", PID_RULE),
+        })
+    }
+}
+
 // --- Sequence numbers ----------------------------------------------------
 
 /// An event's position in its run's log: 1 for the run's first event,
@@ -614,6 +657,20 @@ impl<'de> Deserialize<'de> for Seq {
             })
             .and_then(Seq::try_from)
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for Seq {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Seq".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "integer",
+            "minimum": 1,
+            "description": format!("A position in a run's log: {}", SEQ_RULE),
+        })
     }
 }
 

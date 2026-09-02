@@ -28,7 +28,7 @@ use crate::workflow::NodePermissions;
 /// matches on `publisher` alone) and forcing every caller to split a
 /// combined string back apart would just move the parsing problem
 /// around instead of solving it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackManifest {
     pub name: PackName,
@@ -64,7 +64,7 @@ pub struct PackManifest {
 /// What the installer's own config must provide — never satisfied
 /// by the pack itself; `check`/`add` validate these against the local
 /// merged config, this type only parses what's asked for.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackRequires {
     #[serde(default)]
@@ -81,7 +81,7 @@ pub struct PackRequires {
 /// permissions the pack asks that runner be resolvable with.
 /// `permissions` absent means the pack doesn't care what profile the
 /// runner resolves under, only that the name itself is defined.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequiredRunner {
     pub name: RunnerName,
@@ -93,7 +93,7 @@ pub struct RequiredRunner {
 /// node, hook or criterion inside the pack that would exceed this,
 /// error not warning; this type only carries the declared
 /// values, it enforces nothing itself.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackDeclares {
     pub permissions: NodePermissions,
@@ -114,7 +114,7 @@ pub struct PackDeclares {
 
 /// What the pack physically ships — paths relative to the pack's
 /// own root, resolved by whoever vendors it, not by this type.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackContents {
     #[serde(default)]
@@ -134,7 +134,7 @@ pub struct PackContents {
 /// hash}`. Nothing auto-updates — `update` always names an exact target
 /// ref — so this is purely the record of exactly what got vendored, and
 /// what an offline `add`/CI verifies the vendoring on disk against.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PackLockEntry {
     pub publisher: Publisher,
     pub name: PackName,
@@ -161,7 +161,7 @@ pub struct PackLockEntry {
 /// (`publisher/name`). A `BTreeMap` (not a `Vec`) so the file
 /// serializes in a stable, diffable order regardless of install order —
 /// the same reasoning a `Cargo.lock`-style file always wants.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PackLock {
     #[serde(default)]
     pub packs: BTreeMap<PackRef, PackLockEntry>,

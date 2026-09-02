@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 /// the shape of `agent_session_opened`'s `capabilities` field;
 /// both the event log and the `Adapter` trait
 /// share this one definition instead of duplicating it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(default)]
 pub struct Capabilities {
     /// Can resume a previous conversation via `resume()`.

@@ -165,7 +165,7 @@ impl EventBody {
 /// The wire shape's envelope fields. Kept apart from [`StoredEvent`] so
 /// the body can be flattened beside them by hand: serde's own
 /// `flatten` cannot fall back to an unknown kind.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
 struct Envelope {
     run_id: RunId,
     seq: Seq,
@@ -226,8 +226,25 @@ impl<'de> Deserialize<'de> for StoredEvent {
     }
 }
 
+impl schemars::JsonSchema for StoredEvent {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "StoredEvent".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "One event of a run's log: the envelope and the payload of its \
+                            `kind`, side by side in one object",
+            "allOf": [
+                generator.subschema_for::<Envelope>(),
+                generator.subschema_for::<EventPayload>()
+            ]
+        })
+    }
+}
+
 /// All 31 event kinds, internally tagged by `kind`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
     RunCreated(RunCreatedPayload),

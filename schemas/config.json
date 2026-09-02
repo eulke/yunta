@@ -1,0 +1,822 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta config layer",
+  "description": "One config layer as parsed from a single file (project/user/org), and\nalso the type of the merged result — merging never needs to invent\nfields, only combine what layers actually set.",
+  "type": "object",
+  "properties": {
+    "adapters": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/AdapterSettings"
+      }
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BaselineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "coverage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoverageConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DefaultsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "forge": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ForgeConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "limits": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LimitsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mcp_servers": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/McpServerConfig"
+      }
+    },
+    "paths": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PathsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "permissions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pricing": {
+      "description": "`pricing:` — `{model: cost_per_1k_tokens}`, an\noptional currency conversion `yunta stats` and the receipt add\n*alongside* their token figures, never in place of them. Absent\nmeans everything stays in tokens — the engine has no opinion of\nits own on what a token costs, and never invents one.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/PricingEntry"
+      }
+    },
+    "project": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProjectConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runners": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/RunnerCandidate"
+        }
+      }
+    },
+    "secrets": {
+      "description": "`secrets:` — env var *names* a session may receive; values\nonly ever come from the process environment at spawn time, and\nnothing undeclared reaches a session's env at all.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skills": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SkillsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "storage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StorageConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "telemetry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TelemetryConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "version": {
+      "description": "`version: 1` (reference config) — the layer file's own format\nversion. The loader refuses any value this binary doesn't speak.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "AdapterId": {
+      "description": "A adapter id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "AdapterSettings": {
+      "description": "Adapter-specific settings: a portable binary override plus the\nreference config's opaque `adapter_settings` map — this is\nonly for what has NO portable expression; model/agent/permissions\nare typed request fields precisely so this stays small. Passed\nthrough to `SessionRequest.adapter_settings` untouched; the adapter\nvalidates what it can in `probe()` and rejects what it doesn't know.",
+      "type": "object",
+      "properties": {
+        "adapter_settings": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "binary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentName": {
+      "description": "A agent name: printable ASCII without whitespace",
+      "type": "string",
+      "minLength": 1
+    },
+    "BaselineConfig": {
+      "description": "`baseline:` — backs the `baseline_compare` check kind; the suite the engine\nruns and re-runs to catch regressions (\"cero regresiones\" as a data\ncomparison, never an agent's claim).",
+      "type": "object",
+      "properties": {
+        "suite": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "suite"
+      ]
+    },
+    "CommandPermissions": {
+      "description": "`permissions.commands` — patterns matched against every hook, criterion,\nbash node and executor command right before it runs. Empty\n`allow` = denylist mode (everything not denied runs); a non-empty\n`allow` switches to a strict, opt-in allowlist.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CoverageConfig": {
+      "description": "`coverage:` — backs the `coverage_gate` check kind; `cmd`'s stdout must\ncontain a bare percentage (`NN[.NN]%`); the last match found is taken\nas the measured coverage. Not specified any more precisely than\n\"measured and compared by the engine\" — a permissive,\ndocumented convention rather than inventing a stricter parsing\ncontract with no source to check it against.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "threshold": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cmd",
+        "threshold"
+      ]
+    },
+    "DefaultOnFailure": {
+      "description": "`defaults.on_failure` values (reference schema). Only `Pause` has an\nimplementation — the enum still parses all three so the reference\nconfig round-trips, and `check` names the unimplemented ones.",
+      "type": "string",
+      "enum": [
+        "pause",
+        "abort",
+        "continue"
+      ]
+    },
+    "DefaultsConfig": {
+      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is\nbuilt — `check` refuses the others rather than accepting them\nsilently).",
+      "type": "object",
+      "properties": {
+        "isolation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Isolation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_parallel_nodes": {
+          "description": "How many DAG nodes with no dependency on each other the scheduler\nmay run at once. Absent means the schema's own default of\n`1`, not \"unbounded\" — the same rationale applies to\n`concurrency` in loops: nobody\nshould discover parallel token spend by reading the bill.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "on_failure": {
+          "description": "What a failed node without its own `on_failure:` does. Only\n`pause` (today's behavior) is built; `check` refuses the rest.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultOnFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on_interrupt": {
+          "description": "Fallback `on_interrupt` a node without its own\noverride resolves to. Same default (`restart_node`) as the\nschema's own, so absent here changes nothing either.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnInterrupt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runner": {
+          "description": "The runner a node without `runner:` resolves through.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunnerName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_minutes": {
+          "description": "Per-session wall-clock budget (`Budget.timeout`), in minutes —\nthe granularity the reference schema uses for whole sessions.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExecutorKind": {
+      "description": "Closed at `binary` today — `wasm` is reserved as a future\nadditive variant once demand for it shows up, so this is an enum even\nwith a single variant, not a bare string that would silently accept\nanything.",
+      "type": "string",
+      "enum": [
+        "binary"
+      ]
+    },
+    "ExecutorName": {
+      "description": "A executor name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ExecutorRegistration": {
+      "description": "One `skills.executors:` entry — `name` is what a `kind: executor`\nnode's own `executor:` field references.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ExecutorKind"
+        },
+        "name": {
+          "$ref": "#/$defs/ExecutorName"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "path"
+      ]
+    },
+    "ForgeConfig": {
+      "description": "`forge:` — the team's forge, so `check` can tell a\n`kind: gate` with `external:` apart from one with nowhere to\nactually publish. GitHub only in v1, same \"closed enum over an open\nabstraction\" stance `ForgeKind` takes on the workflow side — a\nsecond forge is a new field here, not a schema break. `token_env`\nnames an env var, never carries the token itself (same\nconvention as `McpServerConfig::auth_env`); its absence at *runtime*\n(not at `check` time — see [`GitHubForgeConfig`]) is exactly what\nmakes a machine with no credentials at all work:\ndegrade to console, don't refuse to exist.",
+      "type": "object",
+      "properties": {
+        "github": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitHubForgeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitHubForgeConfig": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "description": "`owner/name`.",
+          "type": "string"
+        },
+        "token_env": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "token_env"
+      ]
+    },
+    "Isolation": {
+      "description": "How a first-level run isolates its working tree from the checkout\nthat started it. `worktree` (default) gives each run its\nown `git worktree`; `none` operates directly on the given checkout,\nlegitimate for watching an agent edit live or for CI already inside\nan ephemeral container. `inherit` (sub-runs only) isn't a value\nhere — a first-level run has no parent to inherit from — and\n`container` isn't a schema value at all (not yet designed).",
+      "type": "string",
+      "enum": [
+        "worktree",
+        "none"
+      ]
+    },
+    "LimitsConfig": {
+      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`LimitsConfig::resolved_max_loop_iterations`],\n[`LimitsConfig::resolved_inline_context_bytes`]), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nCanonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves\n`2_000_000` as a *string*, which fails the parse loudly instead of\nsilently becoming an unlimited run.",
+      "type": "object",
+      "properties": {
+        "inline_context_bytes": {
+          "description": "Context sources at or under this size are inlined into the\nprompt; larger ones are referenced by path.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_artifact_bytes": {
+          "description": "Guard against runaway artifacts at close: an artifact over\nthis size fails the node with a diagnostic.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_concurrent_runs": {
+          "description": "Best-effort cap on simultaneously non-terminal runs, checked at\nrun creation — a soft budget, not a safety limit (two concurrent\n`yunta run` invocations can both pass the check).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_loop_iterations": {
+          "description": "Ceiling on loop-node iterations — the only net under a ledger\nwhose state oscillates forever.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_tokens_per_run": {
+          "description": "Run-wide token budget: exceeded → escalation\n(`continue`/`abort`), or `run_paused { reason: budget }` with no\nsurface to ask.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_workflow_depth": {
+          "description": "Ceiling on workflow-invoking-workflow nesting.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "McpServerConfig": {
+      "description": "One server in `mcp_servers:` — the reference config's own\nshape: a streamable-HTTP endpoint plus the *name* of an env var\ncarrying the bearer token, never the token itself (secrets are\nenv var names in config, values only ever come from the process\nenvironment at resolve time).",
+      "type": "object",
+      "properties": {
+        "auth_env": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "ModelName": {
+      "description": "A model name: printable ASCII without whitespace",
+      "type": "string",
+      "minLength": 1
+    },
+    "NetworkPermissions": {
+      "description": "`permissions.network` — declarative ONLY: `default: false`\nactivates no sandboxing whatsoever. It exists for policy and audit; an\nexecutor that wants to actually enforce it does so on its own. Policy\n≠ capability ≠ OS enforcement — Yunta core never promises the third.",
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "default"
+      ]
+    },
+    "OnInterrupt": {
+      "description": "A node's crash-recovery policy — the full triple of options.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "restart_node",
+            "fail_if_uncertain"
+          ]
+        },
+        {
+          "description": "Continue the same agent conversation — the\n`session_id` the log recorded (`agent_session_opened`) is\nhanded back to the adapter's `resume`. Only `kind: prompt` opens\na node-scoped session, so `check` refuses the explicit\ndeclaration anywhere else; an adapter without the\n`resume_session` capability — or a crash before any session\nopened — degrades to `restart_node` with an explicit\n`capability_degraded` event, never silently. As a *config default*\n(`defaults.on_interrupt`) it applies where a session exists;\nkinds without one (bash/check/…, and a loop's per-task sessions)\nrestart, which is the only meaning the policy can have there.",
+          "type": "string",
+          "const": "resume_session"
+        }
+      ]
+    },
+    "PackExecutorPolicy": {
+      "description": "`allow | prompt | deny`, strictly ordered: `Deny` is the narrowest,\n`Allow` the loosest — the ceiling merge keeps the strictest across\nlayers. `prompt` asks for confirmation at `yunta pack add`,\nnever mid-run: runs are headless, humans interact through gates only.",
+      "type": "string",
+      "enum": [
+        "allow",
+        "prompt",
+        "deny"
+      ]
+    },
+    "PackPermissions": {
+      "description": "`permissions.packs` — governance over pack contents. Parsed\nand merged here; *enforced* at `pack add`/check once pack support\nlands fully — a key without its consumer yet, kept\nbecause the org ceiling file is one document and its schema shouldn't\ndribble in piecemeal.",
+      "type": "object",
+      "properties": {
+        "executors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackExecutorPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishers": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublisherPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PathsConfig": {
+      "description": "`paths:` — where run/worktree state lives. `YUNTA_HOME` is\nan environment override applied when resolving the merged config, not\na field of it.",
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktrees": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PermissionsConfig": {
+      "description": "`permissions:` — ONE model of ceilings, not\nloose mechanisms: each level may only narrow the one above, never\nloosen it. Unlike every other config group (repo > user > org), the\norg layer rules here and lower layers only restrict further — without\nthat inversion, governance is theater: any repo could undo it.\n\nThis is governance, not a sandbox: an agent\nwith write access can route around a textual pattern by writing a\nscript and running it. The model stops the accident and the careless\npack, and leaves an auditable trail of the deliberate attempt — real\nisolation belongs to the execution environment, never to Yunta.",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "packs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope_expansion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeExpansionPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PricingEntry": {
+      "description": "One `pricing:` entry (reference shape): a struct rather than a\nbare number so a later per-direction price is a field addition, not\na schema break.",
+      "type": "object",
+      "properties": {
+        "cost_per_1k_tokens": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cost_per_1k_tokens"
+      ]
+    },
+    "ProjectConfig": {
+      "description": "`project:` — backs the `{{project.*}}` template namespace, the\nreference config's own three fields. Currently read-only data for\ntemplates, nothing here drives behavior yet (`base_branch` isn't\nconsulted by any re-route/PR logic).",
+      "type": "object",
+      "properties": {
+        "base_branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "branch_prefix": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Publisher": {
+      "description": "A publisher: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`",
+      "type": "string",
+      "minLength": 1
+    },
+    "PublisherPermissions": {
+      "description": "`permissions.packs.publishers` — `allow` empty means every publisher\nis accepted.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Publisher"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RunnerCandidate": {
+      "description": "One binding candidate for a role in `runners:`.",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "$ref": "#/$defs/ModelName"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "adapter",
+        "model"
+      ]
+    },
+    "RunnerName": {
+      "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ScopeExpansionMode": {
+      "description": "How a loop node treats an agent's request to widen its scope.\nDefault `Deny`: a node that omits `scope_expansion:` entirely gets\nthe same behavior as one that declares it with no `mode:` — no\nexpansions, every request becomes a finding without interrupting.",
+      "type": "string",
+      "enum": [
+        "rules",
+        "ask",
+        "deny"
+      ]
+    },
+    "ScopeExpansionPermissions": {
+      "description": "`permissions.scope_expansion`: the layered ceiling\nover how a loop node may let its tasks grow past declared scope.\n`max_mode` is the most *permissive* node-level `scope_expansion.mode`\nthe layer allows (`rules < ask < deny` in severity) — the same\nonly-narrowing model every other `permissions` group follows:\nmerge keeps the strictest declared ceiling, a lower layer softening\nit is a reported conflict, and a node declaring a mode over the\nmerged ceiling fails `check`.",
+      "type": "object",
+      "properties": {
+        "max_mode": {
+          "$ref": "#/$defs/ScopeExpansionMode"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "max_mode"
+      ]
+    },
+    "SkillsConfig": {
+      "description": "`skills:` — currently carries only `executors`, the one\nsub-field `kind: executor` needs to resolve its own `executor:` name\nto a binary on disk. `paths`/`always` (skill discovery and injection\ninto a node's assembled context) are context-assembly work, with\nno consumer yet.",
+      "type": "object",
+      "properties": {
+        "always": {
+          "description": "Skill names mounted on every session, before any node's own\nlist.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "executors": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExecutorRegistration"
+          }
+        },
+        "paths": {
+          "description": "Directories skill names resolve against, in order — repo first,\nper the reference config. Absent means the convention\ndefault, `.yunta/skills` (where `yunta init` installs the\nmechanism skill).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "StorageConfig": {
+      "description": "`storage:` — SQLite is the only backend.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retention_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "TelemetryConfig": {
+      "description": "`telemetry:` — parsed so the reference config round-trips;\n**inert until the OTel exporter is built**, and the reference text itself says so:\nthis is the one sanctioned parse-and-hold group.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelemetryProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "TelemetryProtocol": {
+      "type": "string",
+      "enum": [
+        "grpc",
+        "http"
+      ]
+    }
+  }
+}

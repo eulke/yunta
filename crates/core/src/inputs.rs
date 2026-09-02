@@ -107,6 +107,16 @@ enum Requiredness {
     Optional,
 }
 
+impl schemars::JsonSchema for Requiredness {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Requiredness".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "boolean" })
+    }
+}
+
 impl From<bool> for Requiredness {
     fn from(required: bool) -> Self {
         if required {
@@ -150,7 +160,7 @@ pub enum InputSpecContradiction {
 /// The authored form of an input: what the schema accepts, `required:`
 /// included, before the contradiction check turns it into an
 /// [`InputSpec`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum AuthoredInputSpec {
     String {
@@ -202,6 +212,17 @@ enum AuthoredInputSpec {
         #[serde(default)]
         description: Option<String>,
     },
+}
+
+/// The schema is the authored form, `required:` included.
+impl schemars::JsonSchema for InputSpec {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "InputSpec".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        AuthoredInputSpec::json_schema(generator)
+    }
 }
 
 impl TryFrom<AuthoredInputSpec> for InputSpec {

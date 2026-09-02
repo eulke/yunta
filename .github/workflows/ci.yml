@@ -31,6 +31,9 @@ jobs:
       - name: build (workspace)
         run: cargo build --workspace --locked
 
+      - name: the committed schemas are what the types emit
+        run: cargo xtask schema --check
+
       - name: test (workspace)
         run: cargo test --workspace --locked
 
@@ -46,7 +49,7 @@ jobs:
 
       - name: check each crate in isolation
         run: |
-          for crate in yunta-core yunta-storage yunta-adapters yunta-engine yunta; do
+          for crate in yunta-core yunta-storage yunta-adapters yunta-engine yunta xtask; do
             echo "::group::cargo check -p $crate"
             cargo check -p "$crate" --locked
             echo "::endgroup::"

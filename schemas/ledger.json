@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta task ledger",
+  "description": "A ledger document — the sole top-level key is `tasks:`, with no\nheader metadata alongside it.",
+  "type": "object",
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Task"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "tasks"
+  ],
+  "$defs": {
+    "Criterion": {
+      "description": "One criterion as the ledger declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CriterionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cmd"
+      ]
+    },
+    "CriterionType": {
+      "type": "string",
+      "enum": [
+        "guard"
+      ]
+    },
+    "Task": {
+      "description": "One task. `id`'s pattern isn't enforced by this type — the\nspec treats that as a registration-time rule, not a parse-time\none, so an ill-formed id still parses and gets a proper diagnostic\nnaming the task, field and expectation instead of a raw serde error.",
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          }
+        },
+        "id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "justification": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manual_review": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "scope",
+        "criteria"
+      ]
+    },
+    "TaskId": {
+      "description": "A task id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

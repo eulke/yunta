@@ -21,13 +21,15 @@ cargo test --workspace                 # the whole suite runs against the mock a
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
+cargo xtask schema                     # regenerates schemas/ after a change to a document type
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`; rustup installs it on the
 first build.
 
-CI runs the same checks plus `cargo deny check`, an isolated `cargo check` per
-crate and the self-tests of every pack under `packs/`.
+CI runs the same checks plus `cargo deny check`, `cargo xtask schema --check`
+(the committed schemas must be what the types emit), an isolated `cargo check`
+per crate and the self-tests of every pack under `packs/`.
 
 ## Pull requests
 

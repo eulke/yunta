@@ -19,7 +19,7 @@ use crate::inputs::InputSpec;
 use crate::yaml::{self, Mapping, Value, YamlError};
 
 /// A workflow definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Workflow {
     pub name: String,
@@ -97,7 +97,7 @@ impl<'a> Iterator for NodeIter<'a> {
 
 /// One `on_finish:` entry — discriminated by its own field name, the
 /// same convention `context:` uses.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum OnFinishStep {
     Cleanup {
@@ -128,14 +128,14 @@ impl<'de> Deserialize<'de> for OnFinishStep {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CleanupTarget {
     Worktree,
 }
 
 /// One `modes:` entry's own scope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModeSpec {
     pub include: ModeInclude,
@@ -183,10 +183,26 @@ impl<'de> Deserialize<'de> for ModeInclude {
     }
 }
 
+impl schemars::JsonSchema for ModeInclude {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ModeInclude".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "`all`, or the ids of the nodes the mode includes",
+            "oneOf": [
+                { "const": "all" },
+                { "type": "array", "items": generator.subschema_for::<NodeId>() }
+            ]
+        })
+    }
+}
+
 /// `node_defaults:` — currently carries only `hooks`, the one consumer
 /// needs. Extends when another field needs the same "declare once,
 /// nodes inherit" treatment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -202,7 +218,7 @@ pub struct NodeDefaults {
 /// meaningless without picking a runner, even though the resolution
 /// mechanism itself (`runners:` candidates, capability probing) is
 /// config-layer work handled elsewhere.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Node {
     pub id: NodeId,
     #[serde(flatten)]
@@ -323,7 +339,7 @@ const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
 
 /// The node-level keys as a struct of their own — what [`Node`]'s
 /// deserializer reads once the kind's keys are split off.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct NodeFields {
     id: NodeId,
@@ -466,7 +482,7 @@ impl<'de> Deserialize<'de> for Node {
 /// the schema's YAML — `- files: [...]`, `- command: "..."`,
 /// `- artifact: { node: ..., name: ... }`, and so on; there is no
 /// separate `kind:` key to introduce.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ContextSpec {
     Files {
@@ -549,7 +565,7 @@ impl<'de> Deserialize<'de> for ContextSpec {
 /// to the server as the resolver's own choice of MCP call (currently
 /// `tools/call` on a tool literally named `query`, since the schema
 /// fixes neither the MCP verb nor a tool name).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct McpQueryParams {
     pub server: String,
@@ -568,7 +584,7 @@ pub struct McpQueryParams {
 /// creates no implicit edge (there is no producer to order behind), and
 /// it's what keeps a catalog child parametric: it never has to name a
 /// producer it doesn't have.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactContextRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -580,7 +596,7 @@ pub struct ArtifactContextRef {
 /// own event log. `filter` stays a free-form string (the only reference
 /// example is `filter: failed`, no closed vocabulary given) — the
 /// resolver's own job to interpret, not the schema's.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunEventsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -591,7 +607,7 @@ pub struct RunEventsParams {
 /// (the aggregate ledger/task-status view; see the node's own doc
 /// comment on `context` for the task-scoped variant this doesn't cover
 /// yet).
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LedgerParams {}
 
@@ -600,7 +616,7 @@ pub struct LedgerParams {}
 /// (from pack vendoring) — a same-filename collision between
 /// two packs is a typed error at resolution time, since between packs
 /// there is no precedence to fall back on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeLayer {
     Repo,
@@ -620,7 +636,7 @@ impl std::fmt::Display for KnowledgeLayer {
 
 /// `knowledge: { layers: [...] }` — empty/absent `layers` means
 /// every layer the resolver can see.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KnowledgeParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -629,7 +645,7 @@ pub struct KnowledgeParams {
 
 /// `node-output: { node: ... }` — captured stdout/stderr of a
 /// previously-run node.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeOutputParams {
     pub node: NodeId,
@@ -644,7 +660,7 @@ pub struct NodeOutputParams {
 /// how many expansions this run may grant before exhaustion escalates
 /// ("diez concesiones seguidas no son readecuación, son un plan mal
 /// cortado") — absent means uncapped.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
     #[serde(default)]
@@ -655,7 +671,7 @@ pub struct ScopeExpansion {
     pub max_per_run: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum NodePermissions {
     ReadOnly,
@@ -680,7 +696,9 @@ fn is_false(flag: &bool) -> bool {
 }
 
 /// A node's crash-recovery policy — the full triple of options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OnInterrupt {
     #[default]
@@ -705,7 +723,7 @@ pub enum OnInterrupt {
 /// their own turn.
 /// What a `kind: loop` runs until. One condition exists: the ledger
 /// has no task left to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LoopUntil {
     AllTasksComplete,
@@ -726,7 +744,7 @@ impl std::fmt::Display for LoopUntil {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NodeKind {
     Prompt {
@@ -912,7 +930,7 @@ impl NodeKind {
 /// kept as a named field (not a bare inline struct) so a second source
 /// kind lands as a sibling field with the same untagged-by-field-name
 /// convention `context:`/`on_finish:` already use.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MountSpec {
     pub artifact: MountArtifact,
@@ -923,7 +941,7 @@ pub struct MountSpec {
 /// link (`child_run_finished`) to that child run's artifacts, any other
 /// node to the parent's own `run.dir/artifacts/`. `as:` renames the
 /// copy in the child (absent keeps `name`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MountArtifact {
     pub node: NodeId,
@@ -940,7 +958,9 @@ fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
 /// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
 /// nodes ("`inherit` solo en nodos workflow", the reference config's own
 /// comment), and a run-level `none` is not a per-node choice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowIsolation {
     #[default]
@@ -949,7 +969,7 @@ pub enum WorkflowIsolation {
 }
 
 /// `kind: gate`'s `external:` block.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalGate {
     pub kind: ForgeKind,
@@ -968,7 +988,7 @@ pub struct ExternalGate {
 /// bare string) so a second one lands as a new variant with exhaustive
 /// match-checking everywhere it matters, the same reasoning
 /// `CheckBuiltin`'s own closed list uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ForgeKind {
     PullRequest,
@@ -977,7 +997,7 @@ pub enum ForgeKind {
 /// `kind: check`'s closed builtin list. No budget builtin —
 /// `limits:` already pauses the run on its own; duplicating that
 /// as a check would be redundant.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "builtin", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckBuiltin {
     /// Re-runs `baseline.suite` and fails if something that passed the
@@ -996,7 +1016,9 @@ pub enum CheckBuiltin {
 /// [`NodeKind::Parallel`]. A closed enum, not a bool: a third
 /// coordination shape (if one ever earns an ADR) lands as a variant
 /// with exhaustive match-checking, same reasoning as `JoinPolicy`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Coordination {
     #[default]
@@ -1010,7 +1032,9 @@ pub enum Coordination {
 /// sends the rest `interrupt`, escalating to `kill` if they don't close
 /// in time (same ordered-then-forceful mechanism as an agent session's
 /// own cancellation).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JoinPolicy {
     #[default]
@@ -1035,7 +1059,7 @@ impl<'de> Deserialize<'de> for PromptSource {
     {
         use serde::de::Error;
 
-        #[derive(Deserialize)]
+        #[derive(Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct File {
             file: std::path::PathBuf,
@@ -1073,16 +1097,37 @@ impl Serialize for PromptSource {
     }
 }
 
+impl schemars::JsonSchema for PromptSource {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PromptSource".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "The prompt's text, or `{ file: <path> }` to read it from disk",
+            "oneOf": [
+                { "type": "string" },
+                {
+                    "type": "object",
+                    "properties": { "file": { "type": "string" } },
+                    "required": ["file"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
 /// `artifacts.produces`. `task-ledger`, `findings` and
 /// `questions` are interpreted. A plain string stays
 /// opaque.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Artifacts {
     pub produces: Vec<ArtifactSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ArtifactSpec {
     Plain(String),
@@ -1093,7 +1138,7 @@ impl<'de> Deserialize<'de> for ArtifactSpec {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
 
-        #[derive(Deserialize)]
+        #[derive(Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct Typed {
             name: String,
@@ -1114,7 +1159,7 @@ impl<'de> Deserialize<'de> for ArtifactSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactKind {
     TaskLedger,
@@ -1123,7 +1168,7 @@ pub enum ArtifactKind {
 }
 
 /// `hooks: {before, after}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hooks {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1138,7 +1183,7 @@ pub struct Hooks {
 /// configurable"); seconds fit hook-scale commands better than the
 /// minutes granularity `defaults.timeout_minutes` uses for whole agent
 /// sessions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookStep {
     pub run: String,
@@ -1154,7 +1199,9 @@ fn is_default_hook_failure_policy(policy: &HookFailurePolicy) -> bool {
     *policy == HookFailurePolicy::default()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HookFailurePolicy {
     #[default]
@@ -1166,7 +1213,7 @@ pub enum HookFailurePolicy {
 /// `max_reroutes` is mandatory: a re-route without an explicit cap
 /// is how a correction cycle turns infinite, so the schema refuses it.
 /// Distinct from a hook's own `on_failure: fail|warn`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OnFailure {
     pub goto: NodeId,

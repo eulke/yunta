@@ -10,7 +10,7 @@ use crate::TaskId;
 
 /// A ledger document — the sole top-level key is `tasks:`, with no
 /// header metadata alongside it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Ledger {
     pub tasks: Vec<Task>,
@@ -21,7 +21,7 @@ pub struct Ledger {
 /// criterion (red before, green after). The event log freezes it as
 /// [`events::Criterion`], which reads what a later writer adds; this
 /// type refuses it, because an agent wrote it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Criterion {
     pub cmd: String,
@@ -49,7 +49,7 @@ impl From<&Criterion> for events::Criterion {
 /// spec treats that as a registration-time rule, not a parse-time
 /// one, so an ill-formed id still parses and gets a proper diagnostic
 /// naming the task, field and expectation instead of a raw serde error.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: TaskId,

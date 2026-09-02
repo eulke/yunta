@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::QuestionId;
 
 /// `text | choice | boolean`, verbatim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AnswerType {
     Text,
@@ -18,7 +18,7 @@ pub enum AnswerType {
 
 /// One question: `id`, `text`, `answer_type`, `values` only when
 /// `answer_type` is `choice`, and `required`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Question {
     pub id: QuestionId,
@@ -32,7 +32,7 @@ pub struct Question {
 /// A `kind: questions` artifact's document — sole top-level key
 /// `questions:`, mirroring `Ledger`'s `tasks:`-only shape and
 /// `FindingsFile`'s `findings:`-only shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionsFile {
     pub questions: Vec<Question>,
@@ -44,7 +44,7 @@ pub struct QuestionsFile {
 /// per answer kind: the artifact is what a *following node's session*
 /// reads — meant to be consumed by whatever node comes next — and text
 /// is the only shape every consumer shares.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Answer {
     pub id: QuestionId,
     pub value: String,
@@ -52,7 +52,7 @@ pub struct Answer {
 
 /// The answers artifact's document — written by the ENGINE, never an
 /// agent, next to the questions artifact it answers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AnswersFile {
     pub answers: Vec<Answer>,
 }

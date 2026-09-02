@@ -10,7 +10,7 @@ use crate::ids::FindingId;
 
 /// The artifact's document — sole top-level key `findings:`, mirroring
 /// a ledger's `tasks:`-only shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {
     pub findings: Vec<FindingEntry>,
@@ -27,7 +27,7 @@ impl FindingsFile {
 }
 
 /// One finding as the artifact declares it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingEntry {
     pub id: FindingId,
@@ -40,7 +40,7 @@ pub struct FindingEntry {
 }
 
 /// A criterion the author proposes to verify the finding's fix.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposedCriterionEntry {
     pub cmd: String,

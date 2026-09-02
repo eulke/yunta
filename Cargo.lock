@@ -1547,6 +1547,7 @@ checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap",
  "ref-cast",
  "schemars_derive",
  "serde",
@@ -2477,6 +2478,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yunta-core",
+]
+
+[[package]]
 name = "yoke"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2547,6 +2556,7 @@ dependencies = [
  "chrono",
  "globset",
  "indexmap",
+ "schemars",
  "serde",
  "serde_json",
  "serde_path_to_error",

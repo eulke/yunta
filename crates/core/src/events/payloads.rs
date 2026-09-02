@@ -17,21 +17,21 @@ use crate::Capabilities;
 
 /// A ledger criterion, frozen into `task_registered` — the same shape
 /// the ledger parser produces.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Criterion {
     pub cmd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<CriterionType>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CriterionType {
     Guard,
 }
 
 /// One criterion's outcome inside `criteria_checked.results`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CriterionResult {
     pub cmd: String,
     pub exit_code: i32,
@@ -46,7 +46,7 @@ pub struct CriterionResult {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     Pre,
@@ -54,7 +54,7 @@ pub enum Phase {
 }
 
 /// Exact variant names are provisional.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
@@ -66,19 +66,19 @@ pub enum TaskStatus {
 }
 
 /// `decided_by`: `rule | person` plus an identifier for the latter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Decider {
     Rule,
     Person { id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProposedCriterion {
     pub cmd: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
     Before,
@@ -90,14 +90,14 @@ pub enum HookPhase {
 /// human-facing text, `tradeoff` is mandatory — any option that expands
 /// scope of work must declare what it trades off, and no variant of
 /// this type can omit it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateOption {
     pub id: String,
     pub label: String,
     pub tradeoff: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
     Tty,
@@ -107,7 +107,7 @@ pub enum Channel {
 
 /// `severity`: `blocking | major | minor | note` — confirmed against the
 /// `kind: findings` schema, not inferred.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {
     Blocking,
@@ -116,7 +116,7 @@ pub enum FindingSeverity {
     Note,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Finding {
     pub id: FindingId,
     pub severity: FindingSeverity,
@@ -129,7 +129,7 @@ pub struct Finding {
 
 /// Exact variant names are provisional; a `cancel` command
 /// exists, so `Cancelled` is included alongside the obvious two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalState {
     Done,
@@ -141,7 +141,9 @@ pub enum TerminalState {
     Promoted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct TokenUsage {
     pub input: u64,
     pub output: u64,
@@ -177,7 +179,7 @@ impl std::iter::Sum for TokenUsage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DiscardedCandidate {
     pub candidate: RunnerCandidate,
     pub reason: String,
@@ -193,7 +195,7 @@ pub struct DiscardedCandidate {
 /// the bytes materialized under `context/<content_hash>/` for this
 /// source, so replay can name precisely what a session saw without
 /// re-running anything.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextSourceRef {
     pub source_id: String,
     pub kind: String,
@@ -202,7 +204,7 @@ pub struct ContextSourceRef {
 
 // --- Per-kind payloads ------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
     pub manifest_hash: String,
     pub inputs: BTreeMap<String, serde_json::Value>,
@@ -218,7 +220,7 @@ pub struct RunCreatedPayload {
 /// `runner` names the `runners:` entry the node resolved through. The
 /// reader also accepts `role`, the field's former name, so a log written
 /// under it still replays.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunnerResolvedPayload {
     #[serde(alias = "role")]
     pub runner: RunnerName,
@@ -226,25 +228,25 @@ pub struct RunnerResolvedPayload {
     pub discarded: Vec<DiscardedCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BaselineCapturedPayload {
     pub command: String,
     pub results: BaselineResults,
     pub hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BaselineResults {
     pub exit_code: i32,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeStartedPayload {
     pub attempt: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentSessionOpenedPayload {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,7 +255,7 @@ pub struct AgentSessionOpenedPayload {
     pub capabilities: Capabilities,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMessageType {
     ToolUse,
@@ -261,7 +263,7 @@ pub enum AgentMessageType {
     Note,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentMessagePayload {
     pub message_type: AgentMessageType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,7 +280,7 @@ pub struct AgentMessagePayload {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
     pub content_hash: String,
@@ -294,7 +296,7 @@ pub struct ArtifactWrittenPayload {
     pub artifact_kind: Option<crate::workflow::ArtifactKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextAssembledPayload {
     /// `Some` when this assembly built one *task's* brief inside a loop
     /// node — the same task-vs-node convention
@@ -310,7 +312,7 @@ pub struct ContextAssembledPayload {
     pub segment_hashes: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRegisteredPayload {
     pub task_id: TaskId,
     pub criteria: Vec<Criterion>,
@@ -319,14 +321,14 @@ pub struct TaskRegisteredPayload {
     pub depends_on: Vec<TaskId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CriteriaCheckedPayload {
     pub task_id: TaskId,
     pub phase: Phase,
     pub results: Vec<CriterionResult>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskStatusChangedPayload {
     pub task_id: TaskId,
     pub new_status: TaskStatus,
@@ -337,7 +339,7 @@ pub struct TaskStatusChangedPayload {
 /// `task_id` is present for a task's scope check within a loop node;
 /// absent for a node-level scope check — either way the envelope's own
 /// `node_id` already names the node, so it is not repeated here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeCheckedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
@@ -345,7 +347,7 @@ pub struct ScopeCheckedPayload {
     pub violations: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionRequestedPayload {
     pub task_id: TaskId,
     pub paths: Vec<String>,
@@ -356,12 +358,12 @@ pub struct ScopeExpansionRequestedPayload {
     pub proposed_criterion_precheck: Option<ProposedCriterionPrecheck>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProposedCriterionPrecheck {
     pub exit_code: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionGrantedPayload {
     pub task_id: TaskId,
     pub decided_by: Decider,
@@ -376,7 +378,7 @@ pub struct ScopeExpansionGrantedPayload {
     pub paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionDeniedPayload {
     pub task_id: TaskId,
     pub decided_by: Decider,
@@ -386,20 +388,20 @@ pub struct ScopeExpansionDeniedPayload {
     pub denial_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFinishedPayload {
     pub outcome: String,
     pub tokens_used: TokenUsage,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFailedPayload {
     pub outcome: String,
     pub tokens_used: TokenUsage,
     pub retryable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HookExecutedPayload {
     pub phase: HookPhase,
     pub command: String,
@@ -408,7 +410,7 @@ pub struct HookExecutedPayload {
 
 /// `from_node` is the envelope's own `node_id` (the node that failed) —
 /// only the re-route's destination is extra information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeReroutedPayload {
     pub to_node: NodeId,
     pub cause: String,
@@ -416,7 +418,7 @@ pub struct NodeReroutedPayload {
     pub max_reroutes: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
     pub summary: String,
     pub evidence: String,
@@ -432,7 +434,7 @@ pub struct GateWaitingPayload {
     pub external_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateResolvedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen_option: Option<String>,
@@ -448,7 +450,7 @@ pub struct GateResolvedPayload {
     pub approved_sha: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct QuestionsAnsweredPayload {
     pub answers_hash: String,
     pub channel: Channel,
@@ -456,7 +458,7 @@ pub struct QuestionsAnsweredPayload {
     pub responder: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LoopIterationPayload {
     pub iteration: u32,
     pub until_result: bool,
@@ -464,12 +466,12 @@ pub struct LoopIterationPayload {
 
 /// The finding's author is the envelope's own `node_id` — not repeated
 /// here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindingPostedPayload {
     pub finding: Finding,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PromotionSignaledPayload {
     pub reason: String,
     pub evidence: String,
@@ -477,13 +479,13 @@ pub struct PromotionSignaledPayload {
 }
 
 /// The parent's `kind: workflow` node is the envelope's own `node_id`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunCreatedPayload {
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunFinishedPayload {
     pub child_run_id: RunId,
     pub child_workflow_hash: String,
@@ -499,31 +501,31 @@ pub struct ChildRunFinishedPayload {
     pub tokens: TokenUsage,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityDegradedPayload {
     pub capability: String,
     pub adapter: AdapterId,
     pub policy_applied: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunPausedPayload {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunResumedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_policy_applied: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunFinishedPayload {
     pub terminal_state: TerminalState,
     pub metrics: RunMetrics,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunMetrics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cptv: Option<f64>,

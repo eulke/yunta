@@ -24,7 +24,7 @@ use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 /// `paths.runs`/`paths.worktrees` change can never lose a run that
 /// already exists: everything after the manifest is found reads these,
 /// never the current config.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FrozenPaths {
     pub runs_root: PathBuf,
     pub worktrees_root: PathBuf,
@@ -38,7 +38,7 @@ pub struct FrozenPaths {
 /// pack was vendored without an accompanying `yunta.lock` entry (hand-
 /// placed rather than through `pack add`) — `version` alone still
 /// identifies it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PackProvenance {
     pub publisher: Publisher,
     pub name: PackName,
@@ -50,7 +50,7 @@ pub struct PackProvenance {
 /// Everything a run needs frozen at creation time. The
 /// engine never re-reads workflow, config or prompt files during a run —
 /// resume interprets the run with exactly what it was born with.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Manifest {
     /// Version of this manifest's own schema — everything persisted
     /// is versioned from the first commit.

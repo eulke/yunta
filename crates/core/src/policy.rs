@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 /// Default `Deny`: a node that omits `scope_expansion:` entirely gets
 /// the same behavior as one that declares it with no `mode:` — no
 /// expansions, every request becomes a finding without interrupting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeExpansionMode {
     Rules,

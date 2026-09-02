@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta pack manifest",
+  "description": "The pack's own identity: `publisher/name`, invoked as\n`yunta run acme/review`, composed as `use: acme/qa-review`,\nreferenced as `skills: [acme/review-rubric]`. Kept as two plain\nfields rather than one combined id — `publisher` and `name` are\nindependently meaningful (namespacing, `permissions.packs.publishers`\nmatches on `publisher` alone) and forcing every caller to split a\ncombined string back apart would just move the parsing problem\naround instead of solving it.",
+  "type": "object",
+  "properties": {
+    "contents": {
+      "$ref": "#/$defs/PackContents",
+      "default": {
+        "docs": [],
+        "knowledge": [],
+        "skills": [],
+        "workflows": []
+      }
+    },
+    "declares": {
+      "$ref": "#/$defs/PackDeclares"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "license": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "$ref": "#/$defs/PackName"
+    },
+    "publisher": {
+      "$ref": "#/$defs/Publisher"
+    },
+    "requires": {
+      "$ref": "#/$defs/PackRequires",
+      "default": {
+        "commands": [],
+        "mcp_servers": [],
+        "runners": []
+      }
+    },
+    "version": {
+      "description": "Semver — no comparison logic lives here; a pack's own\nversion is never auto-resolved (`update` always names an exact\ntarget ref), so nothing in v1 needs to *compare* versions,\nonly record and display them. Kept a plain string rather than a\n`semver` dependency for the same reason `yunta_schema` (below)\nstays a hand-rolled range check instead of one (see\n`engine/src/check.rs`'s own `yunta_schema_satisfied` doc comment)\n— add the dependency the day something actually needs to compare\ntwo versions, not ahead of that need.",
+      "type": "string"
+    },
+    "yunta_schema": {
+      "description": "`\">=1 <2\"` — the same comparator-range syntax and the same\nbinary schema major (`yunta_core::YUNTA_SCHEMA`) a workflow's own\n`yunta_schema:` is checked against; `check_yunta_schema`'s\nrange parser is reused verbatim once compatibility is actually\nenforced, not duplicated here.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "publisher",
+    "version",
+    "declares"
+  ],
+  "$defs": {
+    "NodePermissions": {
+      "type": "string",
+      "enum": [
+        "read-only",
+        "edit",
+        "full"
+      ]
+    },
+    "PackContents": {
+      "description": "What the pack physically ships — paths relative to the pack's\nown root, resolved by whoever vendors it, not by this type.",
+      "type": "object",
+      "properties": {
+        "docs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "knowledge": {
+          "description": "A pack can be knowledge-only (an org\nknowledge-pack layer) — an empty `workflows`/`skills` with a\nnon-empty `knowledge` is a legitimate pack, not a degenerate one.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "workflows": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackDeclares": {
+      "description": "The pack's own permissions **ceiling** — `check` rejects any\nnode, hook or criterion inside the pack that would exceed this,\nerror not warning; this type only carries the declared\nvalues, it enforces nothing itself.",
+      "type": "object",
+      "properties": {
+        "executors": {
+          "description": "Executable code shipped with the pack — empty means the pack is\n100% declarative (YAML/prompts/skills only), auditable by\nreading. A non-empty list requires explicit confirmation on\n`add` and gets flagged separately by `pack audit`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "description": "The pack's `bash`/`command` nodes never assume network access —\ndeclarative only, mirrors `NetworkPermissions`'s own \"no\nenforcement, audit-only\" stance: this field is\ncarried for `pack audit` and org policy\n(`permissions.packs`), the engine itself never blocks on it.",
+          "type": "boolean",
+          "default": false
+        },
+        "permissions": {
+          "$ref": "#/$defs/NodePermissions"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "permissions"
+      ]
+    },
+    "PackName": {
+      "description": "A pack name: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`",
+      "type": "string",
+      "minLength": 1
+    },
+    "PackRequires": {
+      "description": "What the installer's own config must provide — never satisfied\nby the pack itself; `check`/`add` validate these against the local\nmerged config, this type only parses what's asked for.",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "description": "Binaries the pack's `bash` nodes assume are on `PATH`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcp_servers": {
+          "description": "Names the installer must define under its own `mcp_servers:`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "runners": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RequiredRunner"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Publisher": {
+      "description": "A publisher: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`",
+      "type": "string",
+      "minLength": 1
+    },
+    "RequiredRunner": {
+      "description": "One entry in `requires.runners` — a runner name plus the ceiling of\npermissions the pack asks that runner be resolvable with.\n`permissions` absent means the pack doesn't care what profile the\nrunner resolves under, only that the name itself is defined.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/RunnerName"
+        },
+        "permissions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodePermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "RunnerName": {
+      "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

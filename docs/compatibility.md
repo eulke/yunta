@@ -118,6 +118,17 @@ reading the run fails naming its position.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
+## The schemas as files
+
+`schemas/workflow.json`, `schemas/config.json`, `schemas/pack.json`,
+`schemas/ledger.json` and `schemas/events.json` are the JSON Schema (draft
+2020-12) of a workflow file, a config layer, a pack manifest, a task ledger
+and one event of the log — the shape of a line of `events.jsonl`. They are
+generated from the types that read those documents: `cargo xtask schema`
+writes them and CI fails when a committed file differs from what the types
+emit, so any change to a format is a visible diff in the pull request that
+makes it. An editor or a validator can use the files as they are.
+
 ## Platforms
 
 Yunta builds and is published for Linux and macOS. The engine's process

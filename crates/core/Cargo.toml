@@ -37,6 +37,10 @@ serde_path_to_error.workspace = true
 # arithmetic and nothing else; its randomness comes from `rand`, already
 # in the workspace graph through `rmcp`.
 ulid.workspace = true
+# The JSON Schema of every document is generated from these types; the
+# crate is already in the workspace graph through `rmcp`, with the same
+# `chrono` support. `indexmap2` describes `modes:`, an ordered map.
+schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
 
 [features]
 # Unchecked `From<&str>`/`From<String>` for identifiers, so a test can

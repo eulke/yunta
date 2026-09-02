@@ -1,0 +1,4 @@
+# `cargo xtask <command>` runs the repository's own tooling (the `xtask`
+# workspace member) — `cargo xtask schema` regenerates `schemas/`.
+[alias]
+xtask = "run --quiet --package xtask --"

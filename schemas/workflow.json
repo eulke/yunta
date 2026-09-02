@@ -1,0 +1,1287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta workflow",
+  "description": "A workflow definition.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "inputs": {
+      "description": "`inputs:` — name is the map key, so the schema's\nown format guarantees uniqueness rather than a validation pass\nover a `[{name, ...}]` list. A `BTreeMap` rather than the\ndeclaration order: nothing about inputs gives that order any\nmeaning (unlike `modes:`, whose declaration order *is* the\npromotion ladder) — sorted iteration only makes catalog\noutput (`list_workflows`, `--help`) and `check` diagnostics\nreproducible.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/InputSpec"
+      }
+    },
+    "modes": {
+      "description": "`modes:` — an ordered map, free in name and count:\nquick/standard/full are the reference workflows' own convention,\nnever reserved schema words. **Declaration order is the\npromotion ladder** — promotion only ever targets a mode\nlater in this map's own iteration order, never an earlier one.\nAbsent entirely means the workflow has no modes at all: every\nnode always runs.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/ModeSpec"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "node_defaults": {
+      "description": "Workflow-level fallbacks a node inherits when it declares none of\nits own — visible in the same file the team reads,\nnever injected from a config layer.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NodeDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Node"
+      }
+    },
+    "on_finish": {
+      "description": "`on_finish:`: close-of-run steps. The engine\nimposes the phase order (distill before any cleanup) —\ndeclaration order in the YAML carries no meaning.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/OnFinishStep"
+      }
+    },
+    "yunta_schema": {
+      "description": "`yunta_schema: \">=1 <2\"` — a version range the\nbinary's own schema major (`YUNTA_SCHEMA`) is checked against at\n`yunta check`, and frozen resolved into `run_created`. Absent\nmeans \"whatever this binary speaks\" (the reference text's own\nrule) — inferred, never an error.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "nodes"
+  ],
+  "$defs": {
+    "AgentName": {
+      "description": "A agent name: printable ASCII without whitespace",
+      "type": "string",
+      "minLength": 1
+    },
+    "ArtifactContextRef": {
+      "description": "`artifact: { node: ..., name: ... }` — the referenced node's own\ndeclared artifact. Reading it creates an *implicit* `depends_on` edge\n(`build_manifest` expands it into the frozen workflow's own\n`depends_on`, so `check`/the scheduler need no separate awareness of\n`context:` at all — by the time either runs, the edge is already\nordinary `depends_on`).\n\n`node` is optional: `artifact: { name }` means \"an artifact of\nthis run's dir, whoever produced it\" — a mounted one included. It\ncreates no implicit edge (there is no producer to order behind), and\nit's what keeps a catalog child parametric: it never has to name a\nproducer it doesn't have.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "ArtifactKind": {
+      "type": "string",
+      "enum": [
+        "task-ledger",
+        "findings",
+        "questions"
+      ]
+    },
+    "ArtifactSpec": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "kind"
+          ]
+        }
+      ]
+    },
+    "Artifacts": {
+      "description": "`artifacts.produces`. `task-ledger`, `findings` and\n`questions` are interpreted. A plain string stays\nopaque.",
+      "type": "object",
+      "properties": {
+        "produces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactSpec"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "produces"
+      ]
+    },
+    "CleanupTarget": {
+      "type": "string",
+      "enum": [
+        "worktree"
+      ]
+    },
+    "ContextSpec": {
+      "description": "One `context:` entry: a builtin `ContextSource` plus its own\nparameters, discriminated by its own field name, exactly matching\nthe schema's YAML — `- files: [...]`, `- command: \"...\"`,\n`- artifact: { node: ..., name: ... }`, and so on; there is no\nseparate `kind:` key to introduce.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "files"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactContextRef"
+            }
+          },
+          "required": [
+            "artifact"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mcp": {
+              "$ref": "#/$defs/McpQueryParams"
+            }
+          },
+          "required": [
+            "mcp"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "run-events": {
+              "$ref": "#/$defs/RunEventsParams"
+            }
+          },
+          "required": [
+            "run-events"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ledger": {
+              "$ref": "#/$defs/LedgerParams"
+            }
+          },
+          "required": [
+            "ledger"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "knowledge": {
+              "$ref": "#/$defs/KnowledgeParams"
+            }
+          },
+          "required": [
+            "knowledge"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "node-output": {
+              "$ref": "#/$defs/NodeOutputParams"
+            }
+          },
+          "required": [
+            "node-output"
+          ]
+        }
+      ]
+    },
+    "Coordination": {
+      "description": "`parallel.coordination` — see the field's own doc on\n[`NodeKind::Parallel`]. A closed enum, not a bool: a third\ncoordination shape (if one ever earns an ADR) lands as a variant\nwith exhaustive match-checking, same reasoning as `JoinPolicy`.",
+      "type": "string",
+      "enum": [
+        "independent",
+        "blackboard"
+      ]
+    },
+    "ExecutorName": {
+      "description": "A executor name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ExternalGate": {
+      "description": "`kind: gate`'s `external:` block.",
+      "type": "object",
+      "properties": {
+        "artifacts": {
+          "description": "Paths (relative to `run.dir`) committed to `branch` for review —\nthe reference example: `[spec.md]`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "branch": {
+          "description": "Template-rendered branch name the artifacts are pushed to and the\nPR is opened from (`{{run.branch}}`, the reference example, resolves\nto `yunta/<run_id>` — a fresh push target, not necessarily the\nworktree's own local checkout branch, since `isolation: none`\nnever creates one).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ForgeKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "artifacts",
+        "branch"
+      ]
+    },
+    "FindingSeverity": {
+      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
+      "type": "string",
+      "enum": [
+        "blocking",
+        "major",
+        "minor",
+        "note"
+      ]
+    },
+    "ForgeKind": {
+      "description": "The only forge integration v1 has — kept as a closed enum (not a\nbare string) so a second one lands as a new variant with exhaustive\nmatch-checking everywhere it matters, the same reasoning\n`CheckBuiltin`'s own closed list uses.",
+      "type": "string",
+      "enum": [
+        "pull_request"
+      ]
+    },
+    "HookFailurePolicy": {
+      "type": "string",
+      "enum": [
+        "fail",
+        "warn"
+      ]
+    },
+    "HookStep": {
+      "description": "One hook command. `timeout_seconds` is unenforced (no timeout) when\nabsent — additive over the earlier engine, which never had one.\nField name/units aren't pinned by the spec's prose (\"timeout corto\nconfigurable\"); seconds fit hook-scale commands better than the\nminutes granularity `defaults.timeout_minutes` uses for whole agent\nsessions.",
+      "type": "object",
+      "properties": {
+        "on_failure": {
+          "description": "Distinct from a node's own `on_failure.goto` re-routing — a hook\nonly ever fails or warns, never re-routes.",
+          "$ref": "#/$defs/HookFailurePolicy"
+        },
+        "run": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "run"
+      ]
+    },
+    "Hooks": {
+      "description": "`hooks: {before, after}`.",
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HookStep"
+          }
+        },
+        "before": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HookStep"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "InputSpec": {
+      "description": "The authored form of an input: what the schema accepts, `required:`\nincluded, before the contradiction check turns it into an\n[`InputSpec`].",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "min_length": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "default": null,
+              "minimum": 0
+            },
+            "pattern": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double",
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "max": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double",
+              "default": null
+            },
+            "min": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double",
+              "default": null
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "number"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "enum"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "values"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "path"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "JoinPolicy": {
+      "description": "`parallel.join`. `all` (default): the group finishes only\nonce every child does, and one failed child fails the group. `any`:\nthe group finishes with the first child to *succeed*; the engine\nsends the rest `interrupt`, escalating to `kill` if they don't close\nin time (same ordered-then-forceful mechanism as an agent session's\nown cancellation).",
+      "type": "string",
+      "enum": [
+        "all",
+        "any"
+      ]
+    },
+    "KnowledgeLayer": {
+      "description": "One layer of `knowledge:`, most to least local. `Org` resolves\nas the union of every installed knowledge pack's declared contents\n(from pack vendoring) — a same-filename collision between\ntwo packs is a typed error at resolution time, since between packs\nthere is no precedence to fall back on.",
+      "type": "string",
+      "enum": [
+        "repo",
+        "user",
+        "org"
+      ]
+    },
+    "KnowledgeParams": {
+      "description": "`knowledge: { layers: [...] }` — empty/absent `layers` means\nevery layer the resolver can see.",
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeLayer"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "LedgerParams": {
+      "description": "`ledger: {}` — no parameters in the current resolution\n(the aggregate ledger/task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "LoopUntil": {
+      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the ledger\nhas no task left to do.",
+      "type": "string",
+      "enum": [
+        "all_tasks_complete"
+      ]
+    },
+    "McpQueryParams": {
+      "description": "`mcp: { server: ..., query: ... }` — `server` names an\nentry in the merged config's `mcp_servers:`; `query` is free-form text\n(the reference example passes `{{inputs.idea}}` verbatim) sent\nto the server as the resolver's own choice of MCP call (currently\n`tools/call` on a tool literally named `query`, since the schema\nfixes neither the MCP verb nor a tool name).",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "server",
+        "query"
+      ]
+    },
+    "ModeInclude": {
+      "description": "`all`, or the ids of the nodes the mode includes",
+      "oneOf": [
+        {
+          "const": "all"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NodeId"
+          }
+        }
+      ]
+    },
+    "ModeSpec": {
+      "description": "One `modes:` entry's own scope.",
+      "type": "object",
+      "properties": {
+        "include": {
+          "$ref": "#/$defs/ModeInclude"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "include"
+      ]
+    },
+    "MountArtifact": {
+      "description": "The mounted artifact: `node` names a node of the *parent's own*\ngraph — a `kind: workflow` sibling resolves through the recorded\nlink (`child_run_finished`) to that child run's artifacts, any other\nnode to the parent's own `run.dir/artifacts/`. `as:` renames the\ncopy in the child (absent keeps `name`).",
+      "type": "object",
+      "properties": {
+        "as": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "node",
+        "name"
+      ]
+    },
+    "MountSpec": {
+      "description": "One `mounts:` entry — `artifact:` is the only mount source there is,\nkept as a named field (not a bare inline struct) so a second source\nkind lands as a sibling field with the same untagged-by-field-name\nconvention `context:`/`on_finish:` already use.",
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/MountArtifact"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "artifact"
+      ]
+    },
+    "Node": {
+      "description": "A single node. Fields here are the ones currently implemented;\n`runner` is included because a `prompt`/`loop` node is\nmeaningless without picking a runner, even though the resolution\nmechanism itself (`runners:` candidates, capability probing) is\nconfig-layer work handled elsewhere.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "`agent:` at node level — overrides the resolved\ncandidate's own agent for this node. Portable field: each\nadapter maps it to its native mechanism, and one without\n`custom_agents` fails the node rather than silently ignoring it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifacts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Artifacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "description": "`context:` — data resolved and materialized\n*before* a session opens, in declaration order. Consumed by\n`kind: prompt` (the node's one session) and `kind: loop` (once\nper task brief, volatile sources fresh and stable ones memoized\nper their stability class); `check` rejects it on any kind that opens\nno session (`bash`/`check`/`executor`/`gate`).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSpec"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NodeId"
+          }
+        },
+        "description": {
+          "description": "One-line summary `progress.md` shows for this node —\na node without one falls back to its own id. Not the same field as\n`Workflow.description` (that one's the whole workflow's own\nsummary).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hooks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hooks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "interactive": {
+          "description": "`interactive: true` — presentation datum for\nthis node's questions: the surface renders them as a live\nconversation when it can. With no surface, nothing changes.\nAbsent means `false`.",
+          "type": "boolean"
+        },
+        "invariant": {
+          "description": "`invariant: true` — this node's verification/scope/\nbaseline/hygiene role is non-negotiable: every declared mode must\ninclude it, checked independent of any mode's name or count. A\nmode narrows deliberation, never verification.",
+          "type": "boolean",
+          "default": false
+        },
+        "network": {
+          "description": "Declarative ONLY: `network: false` activates no\nsandboxing — the engine never blocks a network call over it. It\nexists for policy and audit (a pack declaring it and then curling\nis a detectable contradiction), and an executor may choose to\nactually enforce it on its own. Reading it as a sandbox is reading\na guarantee the system never offered. Absent means `false`.",
+          "type": "boolean"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on_interrupt": {
+          "description": "How a `running` node with no terminal event is treated on resume\nafter a crash. Absent means the schema's own\ndefault (`restart_node`) applies, resolved the same way\n`defaults.isolation` is (config, then hardcoded default) — this\nfield is the node's own override of that default.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnInterrupt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "permissions": {
+          "description": "The node's rung on the permissions ladder: the\nsession profile requested from the adapter for `prompt`/`loop`\nnodes. Absent means the engine's existing default (`edit`). Not\nto be confused with the config-level `permissions:` group — this\nscalar narrows what one node's agent session may do; that group\ngoverns which *commands* run at all.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodePermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunnerName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runners": {
+          "description": "`runners: [name, name]` — static fan-out: the manifest expands\nthis node into one `<id>@<runner>` node per runner before\nanything runs. Mutually exclusive with `runner:` (check).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunnerName"
+          }
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "description": "`skills: [names]` — instructions and capabilities\nthe adapter mounts by its native mechanism: *how* to work, where\n`context:` injects *what* to work on. Resolved against\n`skills.paths` (repo first); an adapter with no native mechanism\ndegrades with `capability_degraded`, never a fatal error.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "prompt"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptSource"
+            }
+          },
+          "required": [
+            "kind",
+            "prompt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "bash"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "concurrency": {
+              "description": "Simultaneous `ready` tasks per batch — absent\nmeans the engine's own default, `1` (sequential; the batch\nmechanism handles both the same way, with no special case).\nDeclared per-node, deliberately: no config-level default\nexists anywhere in the reference schema, since token spend\nmultiplies with it and nobody should discover that from the\nbill instead of the workflow file.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "loop"
+            },
+            "prompt": {
+              "$ref": "#/$defs/PromptSource"
+            },
+            "scope_expansion": {
+              "description": "The agent never widens its own scope — it requests,\nthe engine (or a person, in `ask`) decides. Absent has the\nsame effect as declaring it with no `mode:` — `deny` (the\ndefault): every request becomes a finding, none are\ngranted. Loop-scoped, not workflow- or config-scoped, because\n`scope_expansion_requested`'s own payload is keyed by\n`task_id` — this is ledger-task machinery, the same rung\n`concurrency:` already occupies on this node kind.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ScopeExpansion"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "until": {
+              "$ref": "#/$defs/LoopUntil"
+            }
+          },
+          "required": [
+            "kind",
+            "until",
+            "prompt"
+          ]
+        },
+        {
+          "description": "Nodes named by the author, run at once — distinct\nfrom a loop's own `concurrency:`, whose task count doesn't\nexist until the plan runs. Children are ordinary `Node`s (their\nown hooks/scope/artifacts/runner apply exactly as at the top\nlevel, dispatched through the same `execute_node`); they\nshare the run's one worktree (one per *run*, not per\nnode) and aren't visible to the top-level DAG's own `depends_on`.",
+          "type": "object",
+          "properties": {
+            "coordination": {
+              "description": "`coordination:` — whether this group's\nchildren share a blackboard. `independent` (default): the\nblackboard tools are never even mounted — the right shape\nfor evaluative groups (reviewers), where cross-contamination\nanchors judgments and kills the diversity the fan-out buys.\n`blackboard`: children with `run_tools` get\n`yunta_post_finding`/`yunta_get_blackboard` scoped to this\ngroup (never the whole run); reading siblings' posts still\nwaits for the `join`.",
+              "$ref": "#/$defs/Coordination",
+              "default": "independent"
+            },
+            "join": {
+              "$ref": "#/$defs/JoinPolicy",
+              "default": "all"
+            },
+            "kind": {
+              "type": "string",
+              "const": "parallel"
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Node"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "nodes"
+          ]
+        },
+        {
+          "description": "Automatic verification against data the engine already has —\nnever a person (that's `gate`).\nThe builtin list is closed on purpose: a `check` builtin is by\ndefinition something the engine can already evaluate; anything\nelse is a `bash` node (exit code) or an `executor`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "check"
+            }
+          },
+          "oneOf": [
+            {
+              "description": "Re-runs `baseline.suite` and fails if something that passed the\ncaptured baseline stopped passing.",
+              "type": "object",
+              "properties": {
+                "builtin": {
+                  "type": "string",
+                  "const": "baseline_compare"
+                }
+              },
+              "required": [
+                "builtin"
+              ]
+            },
+            {
+              "description": "Re-runs `coverage.cmd` and fails under `coverage.threshold`.",
+              "type": "object",
+              "properties": {
+                "builtin": {
+                  "type": "string",
+                  "const": "coverage_gate"
+                }
+              },
+              "required": [
+                "builtin"
+              ]
+            },
+            {
+              "description": "Fails if any finding posted so far in this run is at or above\n`max_severity`.",
+              "type": "object",
+              "properties": {
+                "builtin": {
+                  "type": "string",
+                  "const": "findings_gate"
+                },
+                "max_severity": {
+                  "$ref": "#/$defs/FindingSeverity"
+                }
+              },
+              "required": [
+                "builtin",
+                "max_severity"
+              ]
+            }
+          ],
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The contract fixes the high-level shape (JSON in, JSON out,\nexit code is the verdict) but stops short of naming fields,\npending further design.",
+          "type": "object",
+          "properties": {
+            "executor": {
+              "$ref": "#/$defs/ExecutorName"
+            },
+            "kind": {
+              "type": "string",
+              "const": "executor"
+            },
+            "timeout_seconds": {
+              "description": "Absent means unenforced, same convention as `HookStep`'s own\n`timeout_seconds` — the design only calls for an\nengine-enforced timeout, without fixing a default or a field\nname.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "with": {
+              "type": "object",
+              "additionalProperties": true,
+              "default": {}
+            }
+          },
+          "required": [
+            "kind",
+            "executor"
+          ]
+        },
+        {
+          "description": "A human decision resolved outside this process — v1's\nonly shape is `external: {kind: pull_request, ...}`: the engine\ndelegates the multi-person substrate (identity, permissions,\nnotifications) to the team's forge instead of building a serve\nmode early. With `external: None` this is an **internal gate**\n— the shape the reference workflows' own `approve-plan`/\n`ship` use and the mode-coherence rule requiring every mode to\ninclude a gate option: resolved through `HumanInteraction`\n(console today, a richer resolution surface later) with the\ndeclared `options`, and `on:` mapping an option to an\n`on_failure.goto`-style re-route.",
+          "type": "object",
+          "properties": {
+            "assignee": {
+              "description": "Who the escalation names — a human on the forge (external),\nor whoever holds the interactive surface (internal).",
+              "type": "string"
+            },
+            "external": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExternalGate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "gate"
+            },
+            "message": {
+              "description": "The question the internal gate asks — becomes the\nescalation's `summary`. Absent, a default derived from the node\nid is used.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "on": {
+              "description": "Option → re-route target (`on: { ajustar: plan }`): choosing\na mapped option re-routes exactly like `on_failure.goto`\n— the target and its subgraph complete, then the\ngate returns to ready and asks again. Unbounded on purpose:\neach lap is human-driven, not an automatic cycle\n`max_reroutes` exists to cap. An unmapped option resolves\nthe gate and the DAG continues.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/NodeId"
+              }
+            },
+            "options": {
+              "description": "Declared choices, free ids (reference: `[aprobar, ajustar,\nabortar]`). Empty means the single default option `approve`;\nthe engine always appends its own `abort` (aborting is\nalways a valid exit, the same convention every escalation uses).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "assignee"
+          ]
+        },
+        {
+          "description": "`kind: workflow`: runs another workflow as a\nsub-run — a **complete run** with its own run_id, manifest, event\nlog and run.dir, never an inline expansion. The parent freezes\nonly the child's *name and inputs* (these two fields); the child\nresolves and freezes its own workflow file at birth, so a long\nprocess picks up improvements to child workflows between\nexecutions without any individual run losing immutability.",
+          "type": "object",
+          "properties": {
+            "inputs": {
+              "description": "Inputs handed to the child, template-rendered in the\nparent's own scope (`{{inputs.x}}`, `{{run.branch}}`, …)\nbefore the child validates them against its declared\n`inputs:`. Absent means the child must get by on defaults.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "isolation": {
+              "description": "`worktree` (default) gives the child its own tree branched\noff the parent's HEAD; `inherit` shares the parent's tree\nfor phases of one piece of work — parallel `inherit`\nsiblings must declare disjoint `scope` (checked).",
+              "$ref": "#/$defs/WorkflowIsolation"
+            },
+            "kind": {
+              "type": "string",
+              "const": "workflow"
+            },
+            "mounts": {
+              "description": "`mounts:` — artifacts of the parent's own graph\ncopied into the child's `run.dir/artifacts/` at birth: the\npromotion inheritance mechanism generalized (promotion is\njust one particular case of this general mechanism). The parent\ndeclares because the parent is who knows its own topology — a\ncatalog child naming a sibling would be welded to one\nparent's shape and lose its standalone run. Each mount\nimplies `depends_on` on the referenced node, which is what\nguarantees every sibling the child depends on has already\nfinished before the child starts.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MountSpec"
+              }
+            },
+            "use": {
+              "description": "The child workflow's name, resolved at child birth against\nthe repo catalog: `.yunta/workflows/<name>.yaml` in the\nparent run's own working tree (versioned, the same catalog\n`list_workflows` reads).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "use"
+          ]
+        }
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "NodeDefaults": {
+      "description": "`node_defaults:` — currently carries only `hooks`, the one consumer\nneeds. Extends when another field needs the same \"declare once,\nnodes inherit\" treatment.",
+      "type": "object",
+      "properties": {
+        "hooks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hooks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skills": {
+          "description": "Skills every node mounts unless it declares its own list\n— same replace-wholesale inheritance as `hooks`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "NodeId": {
+      "description": "A node id: a letter followed by letters, digits, `_` or `-`; a fan-out sibling adds `@` and its runner's name",
+      "type": "string",
+      "minLength": 1
+    },
+    "NodeOutputParams": {
+      "description": "`node-output: { node: ... }` — captured stdout/stderr of a\npreviously-run node.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "node"
+      ]
+    },
+    "NodePermissions": {
+      "type": "string",
+      "enum": [
+        "read-only",
+        "edit",
+        "full"
+      ]
+    },
+    "OnFailure": {
+      "description": "`on_failure: {goto, max_reroutes}` — node-level re-routing.\n`max_reroutes` is mandatory: a re-route without an explicit cap\nis how a correction cycle turns infinite, so the schema refuses it.\nDistinct from a hook's own `on_failure: fail|warn`.",
+      "type": "object",
+      "properties": {
+        "goto": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "max_reroutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "goto",
+        "max_reroutes"
+      ]
+    },
+    "OnFinishStep": {
+      "description": "One `on_finish:` entry — discriminated by its own field name, the\nsame convention `context:` uses.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cleanup": {
+              "$ref": "#/$defs/CleanupTarget"
+            }
+          },
+          "required": [
+            "cleanup"
+          ]
+        },
+        {
+          "description": "Run artifacts the workflow declares durable: distilled\ndeterministically into `.yunta/knowledge/` at close.",
+          "type": "object",
+          "properties": {
+            "distill": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "distill"
+          ]
+        }
+      ]
+    },
+    "OnInterrupt": {
+      "description": "A node's crash-recovery policy — the full triple of options.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "restart_node",
+            "fail_if_uncertain"
+          ]
+        },
+        {
+          "description": "Continue the same agent conversation — the\n`session_id` the log recorded (`agent_session_opened`) is\nhanded back to the adapter's `resume`. Only `kind: prompt` opens\na node-scoped session, so `check` refuses the explicit\ndeclaration anywhere else; an adapter without the\n`resume_session` capability — or a crash before any session\nopened — degrades to `restart_node` with an explicit\n`capability_degraded` event, never silently. As a *config default*\n(`defaults.on_interrupt`) it applies where a session exists;\nkinds without one (bash/check/…, and a loop's per-task sessions)\nrestart, which is the only meaning the policy can have there.",
+          "type": "string",
+          "const": "resume_session"
+        }
+      ]
+    },
+    "PromptSource": {
+      "description": "The prompt's text, or `{ file: <path> }` to read it from disk",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file"
+          ]
+        }
+      ]
+    },
+    "Requiredness": {
+      "type": "boolean"
+    },
+    "RunEventsParams": {
+      "description": "`run-events: { filter: ... }` — a read-only query into the run's\nown event log. `filter` stays a free-form string (the only reference\nexample is `filter: failed`, no closed vocabulary given) — the\nresolver's own job to interpret, not the schema's.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RunnerName": {
+      "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ScopeExpansion": {
+      "description": "`permissions: read-only | edit | full` at node level — maps 1:1 onto\nthe adapter's session profile. The names come\nstraight from the reference schema's own spelling.\n`scope_expansion:` — governs how a loop's tasks may\ngrow past their own declared scope. `within` is a hard ceiling\n(\"jamás fuera de esto\") checked in `rules` mode; `max_per_run` caps\nhow many expansions this run may grant before exhaustion escalates\n(\"diez concesiones seguidas no son readecuación, son un plan mal\ncortado\") — absent means uncapped.",
+      "type": "object",
+      "properties": {
+        "max_per_run": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "mode": {
+          "$ref": "#/$defs/ScopeExpansionMode",
+          "default": "deny"
+        },
+        "within": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScopeExpansionMode": {
+      "description": "How a loop node treats an agent's request to widen its scope.\nDefault `Deny`: a node that omits `scope_expansion:` entirely gets\nthe same behavior as one that declares it with no `mode:` — no\nexpansions, every request becomes a finding without interrupting.",
+      "type": "string",
+      "enum": [
+        "rules",
+        "ask",
+        "deny"
+      ]
+    },
+    "WorkflowIsolation": {
+      "description": "A `kind: workflow` node's `isolation:` — deliberately its own\nenum, not [`crate::Isolation`]: `inherit` only exists for workflow\nnodes (\"`inherit` solo en nodos workflow\", the reference config's own\ncomment), and a run-level `none` is not a per-node choice.",
+      "type": "string",
+      "enum": [
+        "worktree",
+        "inherit"
+      ]
+    }
+  }
+}

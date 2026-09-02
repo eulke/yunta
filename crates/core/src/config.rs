@@ -23,7 +23,7 @@ use crate::ids::{AdapterId, AgentName, ExecutorName, ModelName, Publisher, Runne
 use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
     pub adapter: AdapterId,
@@ -37,7 +37,7 @@ pub struct RunnerCandidate {
 /// carrying the bearer token, never the token itself (secrets are
 /// env var names in config, values only ever come from the process
 /// environment at resolve time).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerConfig {
     pub url: String,
@@ -55,14 +55,14 @@ pub struct McpServerConfig {
 /// (not at `check` time — see [`GitHubForgeConfig`]) is exactly what
 /// makes a machine with no credentials at all work:
 /// degrade to console, don't refuse to exist.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForgeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubForgeConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GitHubForgeConfig {
     /// `owner/name`.
@@ -76,7 +76,7 @@ pub struct GitHubForgeConfig {
 /// are typed request fields precisely so this stays small. Passed
 /// through to `SessionRequest.adapter_settings` untouched; the adapter
 /// validates what it can in `probe()` and rejects what it doesn't know.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AdapterSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,7 +86,7 @@ pub struct AdapterSettings {
 }
 
 /// `storage:` — SQLite is the only backend.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,7 +99,7 @@ pub struct StorageConfig {
 /// reference config's own three fields. Currently read-only data for
 /// templates, nothing here drives behavior yet (`base_branch` isn't
 /// consulted by any re-route/PR logic).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,7 +113,7 @@ pub struct ProjectConfig {
 /// `paths:` — where run/worktree state lives. `YUNTA_HOME` is
 /// an environment override applied when resolving the merged config, not
 /// a field of it.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,7 +171,9 @@ pub fn user_state_root() -> Option<PathBuf> {
 /// an ephemeral container. `inherit` (sub-runs only) isn't a value
 /// here — a first-level run has no parent to inherit from — and
 /// `container` isn't a schema value at all (not yet designed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     #[default]
@@ -185,7 +187,7 @@ pub enum Isolation {
 /// `timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is
 /// built — `check` refuses the others rather than accepting them
 /// silently).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -218,7 +220,7 @@ pub struct DefaultsConfig {
 /// `defaults.on_failure` values (reference schema). Only `Pause` has an
 /// implementation — the enum still parses all three so the reference
 /// config round-trips, and `check` names the unimplemented ones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnFailure {
     Pause,
@@ -229,7 +231,7 @@ pub enum DefaultOnFailure {
 /// One `pricing:` entry (reference shape): a struct rather than a
 /// bare number so a later per-direction price is a field addition, not
 /// a schema break.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PricingEntry {
     pub cost_per_1k_tokens: f64,
@@ -238,7 +240,7 @@ pub struct PricingEntry {
 /// `telemetry:` — parsed so the reference config round-trips;
 /// **inert until the OTel exporter is built**, and the reference text itself says so:
 /// this is the one sanctioned parse-and-hold group.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TelemetryConfig {
     #[serde(default)]
@@ -249,7 +251,7 @@ pub struct TelemetryConfig {
     pub protocol: Option<TelemetryProtocol>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TelemetryProtocol {
     Grpc,
@@ -267,7 +269,7 @@ pub enum TelemetryProtocol {
 /// Canonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves
 /// `2_000_000` as a *string*, which fails the parse loudly instead of
 /// silently becoming an unlimited run.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
     /// Run-wide token budget: exceeded → escalation
@@ -300,7 +302,7 @@ pub struct LimitsConfig {
 /// `baseline:` — backs the `baseline_compare` check kind; the suite the engine
 /// runs and re-runs to catch regressions ("cero regresiones" as a data
 /// comparison, never an agent's claim).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BaselineConfig {
     pub suite: String,
@@ -312,7 +314,7 @@ pub struct BaselineConfig {
 /// "measured and compared by the engine" — a permissive,
 /// documented convention rather than inventing a stricter parsing
 /// contract with no source to check it against.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CoverageConfig {
     pub cmd: String,
@@ -324,7 +326,7 @@ pub struct CoverageConfig {
 /// to a binary on disk. `paths`/`always` (skill discovery and injection
 /// into a node's assembled context) are context-assembly work, with
 /// no consumer yet.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SkillsConfig {
     #[serde(default)]
@@ -343,7 +345,7 @@ pub struct SkillsConfig {
 
 /// One `skills.executors:` entry — `name` is what a `kind: executor`
 /// node's own `executor:` field references.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutorRegistration {
     pub name: ExecutorName,
@@ -355,7 +357,7 @@ pub struct ExecutorRegistration {
 /// additive variant once demand for it shows up, so this is an enum even
 /// with a single variant, not a bare string that would silently accept
 /// anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorKind {
     Binary,
@@ -372,7 +374,7 @@ pub enum ExecutorKind {
 /// script and running it. The model stops the accident and the careless
 /// pack, and leaves an auditable trail of the deliberate attempt — real
 /// isolation belongs to the execution environment, never to Yunta.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PermissionsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -393,7 +395,7 @@ pub struct PermissionsConfig {
 /// merge keeps the strictest declared ceiling, a lower layer softening
 /// it is a reported conflict, and a node declaring a mode over the
 /// merged ceiling fails `check`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionPermissions {
     pub max_mode: crate::policy::ScopeExpansionMode,
@@ -403,7 +405,7 @@ pub struct ScopeExpansionPermissions {
 /// bash node and executor command right before it runs. Empty
 /// `allow` = denylist mode (everything not denied runs); a non-empty
 /// `allow` switches to a strict, opt-in allowlist.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -417,7 +419,7 @@ pub struct CommandPermissions {
 /// lands fully — a key without its consumer yet, kept
 /// because the org ceiling file is one document and its schema shouldn't
 /// dribble in piecemeal.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackPermissions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -430,7 +432,7 @@ pub struct PackPermissions {
 /// `Allow` the loosest — the ceiling merge keeps the strictest across
 /// layers. `prompt` asks for confirmation at `yunta pack add`,
 /// never mid-run: runs are headless, humans interact through gates only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PackExecutorPolicy {
     Allow,
@@ -450,7 +452,7 @@ impl PackExecutorPolicy {
 
 /// `permissions.packs.publishers` — `allow` empty means every publisher
 /// is accepted.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PublisherPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -461,7 +463,7 @@ pub struct PublisherPermissions {
 /// activates no sandboxing whatsoever. It exists for policy and audit; an
 /// executor that wants to actually enforce it does so on its own. Policy
 /// ≠ capability ≠ OS enforcement — Yunta core never promises the third.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkPermissions {
     pub default: bool,
@@ -470,7 +472,7 @@ pub struct NetworkPermissions {
 /// One config layer as parsed from a single file (project/user/org), and
 /// also the type of the merged result — merging never needs to invent
 /// fields, only combine what layers actually set.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigLayer {
     /// `version: 1` (reference config) — the layer file's own format

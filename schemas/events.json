@@ -1,0 +1,1710 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta event",
+  "description": "One event of a run's log: the envelope and the payload of its `kind`, side by side in one object",
+  "allOf": [
+    {
+      "$ref": "#/$defs/Envelope"
+    },
+    {
+      "$ref": "#/$defs/EventPayload"
+    }
+  ],
+  "$defs": {
+    "AdapterId": {
+      "description": "A adapter id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "AgentMessagePayload": {
+      "type": "object",
+      "properties": {
+        "cached_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "message_type": {
+          "$ref": "#/$defs/AgentMessageType"
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "target_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message_type"
+      ]
+    },
+    "AgentMessageType": {
+      "type": "string",
+      "enum": [
+        "tool_use",
+        "usage",
+        "note"
+      ]
+    },
+    "AgentName": {
+      "description": "A agent name: printable ASCII without whitespace",
+      "type": "string",
+      "minLength": 1
+    },
+    "AgentSessionOpenedPayload": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelName"
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "session_id",
+        "model",
+        "capabilities"
+      ]
+    },
+    "ArtifactKind": {
+      "type": "string",
+      "enum": [
+        "task-ledger",
+        "findings",
+        "questions"
+      ]
+    },
+    "ArtifactWrittenPayload": {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "description": "The artifact's declared `kind:` when it has one — what\nlets `derive()` recognize a `questions` artifact without reading\nany file (state comes from events alone). `None` for opaque\nartifacts and for logs written before the field existed (tolerant\nreader). Named `artifact_kind`, not `kind`: the event\nenvelope's own internally-tagged discriminant already claims\n`kind` in the serialized JSON, and a colliding field name\nsilently corrupts the payload.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content_hash"
+      ]
+    },
+    "BaselineCapturedPayload": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "results": {
+          "$ref": "#/$defs/BaselineResults"
+        }
+      },
+      "required": [
+        "command",
+        "results",
+        "hash"
+      ]
+    },
+    "BaselineResults": {
+      "type": "object",
+      "properties": {
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exit_code",
+        "summary"
+      ]
+    },
+    "Capabilities": {
+      "description": "An adapter's declared capabilities. Constant for the\nlifetime of the adapter — the engine consults this before asking\nfor anything, and never emulates what is not declared.\n\nLives in `yunta-core` rather than `yunta-adapters` because it is also\nthe shape of `agent_session_opened`'s `capabilities` field;\nboth the event log and the `Adapter` trait\nshare this one definition instead of duplicating it.",
+      "type": "object",
+      "properties": {
+        "custom_agents": {
+          "description": "Supports the CLI's own named agents, selectable via the portable\n`agent:` field.",
+          "type": "boolean",
+          "default": false
+        },
+        "edit_hooks": {
+          "description": "Can block edits outside a set of globs as they happen (hot\nenforcement of scope).",
+          "type": "boolean",
+          "default": false
+        },
+        "permission_profiles": {
+          "description": "Distinguishes permission profiles (`read_only`/`edit`/`full`).",
+          "type": "boolean",
+          "default": false
+        },
+        "resume_session": {
+          "description": "Can resume a previous conversation via `resume()`.",
+          "type": "boolean",
+          "default": false
+        },
+        "run_tools": {
+          "description": "Can connect to Yunta's per-run MCP server as a client.",
+          "type": "boolean",
+          "default": false
+        },
+        "skills": {
+          "description": "Can mount skill directories (`SessionRequest.skills`) by the\nCLI's native mechanism. A skill is added instruction,\nnever correctness: absence degrades with `capability_degraded`,\nnever a fatal error.",
+          "type": "boolean",
+          "default": false
+        },
+        "usage_reporting": {
+          "description": "Emits trustworthy token usage in the stream.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "CapabilityDegradedPayload": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "policy_applied": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "adapter",
+        "policy_applied"
+      ]
+    },
+    "Channel": {
+      "type": "string",
+      "enum": [
+        "tty",
+        "mcp",
+        "pr"
+      ]
+    },
+    "ChildRunCreatedPayload": {
+      "description": "The parent's `kind: workflow` node is the envelope's own `node_id`.",
+      "type": "object",
+      "properties": {
+        "child_run_id": {
+          "$ref": "#/$defs/RunId"
+        },
+        "child_workflow_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "child_run_id",
+        "child_workflow_hash"
+      ]
+    },
+    "ChildRunFinishedPayload": {
+      "type": "object",
+      "properties": {
+        "child_run_id": {
+          "$ref": "#/$defs/RunId"
+        },
+        "child_workflow_hash": {
+          "type": "string"
+        },
+        "terminal_state": {
+          "$ref": "#/$defs/TerminalState"
+        },
+        "tokens": {
+          "description": "The child run's whole derived spend at its close — a child\nrun's usage always aggregates up into its parent, so replay adds\nit to the parent's own total. That means a promotion *chain*'s\nevery member counts exactly once, resumes included, and the\nparent node's own `node_finished` carries no child tokens\n(they'd double-count). Additive: events logged before this field\nexisted parse as zero.",
+          "$ref": "#/$defs/TokenUsage",
+          "default": {
+            "input": 0,
+            "output": 0
+          }
+        }
+      },
+      "required": [
+        "child_run_id",
+        "child_workflow_hash",
+        "terminal_state"
+      ]
+    },
+    "ContextAssembledPayload": {
+      "type": "object",
+      "properties": {
+        "segment_hashes": {
+          "description": "Keys are `\"stable\" | \"run-stable\" | \"volatile\"` (the fixed\nstability classes) — kept as plain strings rather than an enum key\nto sidestep serde's map-key-as-enum ceremony for no real benefit.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSourceRef"
+          }
+        },
+        "task_id": {
+          "description": "`Some` when this assembly built one *task's* brief inside a loop\nnode — the same task-vs-node convention\n`ScopeCheckedPayload.task_id` already follows. `None` for a\nnode-level assembly (a `prompt` node's own context). Additive:\nevents logged before this field existed parse with `None`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sources",
+        "segment_hashes"
+      ]
+    },
+    "ContextSourceRef": {
+      "description": "One resolved `ContextSource` reference in `context_assembled.sources`.\n`kind` stays a plain string — the engine fixes the *set* of\nbuiltin source kinds (`files | command | artifact | run-events |\nledger | knowledge | node-output`, `mcp` among them) but never closes\nit into an enum, since a pack can add its own sources without\nthis type needing to change. `content_hash` is what makes every\nresolution's event carry a verifiable hash — the hash of exactly\nthe bytes materialized under `context/<content_hash>/` for this\nsource, so replay can name precisely what a session saw without\nre-running anything.",
+      "type": "object",
+      "properties": {
+        "content_hash": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "content_hash"
+      ]
+    },
+    "CriteriaCheckedPayload": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CriterionResult"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "phase",
+        "results"
+      ]
+    },
+    "Criterion": {
+      "description": "A ledger criterion, frozen into `task_registered` — the same shape\nthe ledger parser produces.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CriterionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cmd"
+      ]
+    },
+    "CriterionResult": {
+      "description": "One criterion's outcome inside `criteria_checked.results`.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "Wall-clock milliseconds this execution took — the datum\nthe learned criterion ordering feeds on. `None` for a `reused: true`\nresult (nothing ran) and for events logged before this field\nexisted (additive, tolerant reader).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "reused": {
+          "type": "boolean"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CriterionType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cmd",
+        "exit_code",
+        "reused"
+      ]
+    },
+    "CriterionType": {
+      "type": "string",
+      "enum": [
+        "guard"
+      ]
+    },
+    "Decider": {
+      "description": "`decided_by`: `rule | person` plus an identifier for the latter.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rule"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "person"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ]
+        }
+      ]
+    },
+    "DiscardedCandidate": {
+      "type": "object",
+      "properties": {
+        "candidate": {
+          "$ref": "#/$defs/RunnerCandidate"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate",
+        "reason"
+      ]
+    },
+    "Envelope": {
+      "description": "The wire shape's envelope fields. Kept apart from [`StoredEvent`] so\nthe body can be flattened beside them by hand: serde's own\n`flatten` cannot fall back to an unknown kind.",
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/RunId"
+        },
+        "schema_version": {
+          "description": "Present only for an unknown kind, whose version has no other\nplace to live on the wire; a known kind's version is its own.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "seq": {
+          "$ref": "#/$defs/Seq"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "timestamp"
+      ]
+    },
+    "EventPayload": {
+      "description": "All 31 event kinds, internally tagged by `kind`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_created"
+            }
+          },
+          "$ref": "#/$defs/RunCreatedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "runner_resolved"
+            }
+          },
+          "$ref": "#/$defs/RunnerResolvedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "baseline_captured"
+            }
+          },
+          "$ref": "#/$defs/BaselineCapturedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node_started"
+            }
+          },
+          "$ref": "#/$defs/NodeStartedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "agent_session_opened"
+            }
+          },
+          "$ref": "#/$defs/AgentSessionOpenedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "agent_message"
+            }
+          },
+          "$ref": "#/$defs/AgentMessagePayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "artifact_written"
+            }
+          },
+          "$ref": "#/$defs/ArtifactWrittenPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "context_assembled"
+            }
+          },
+          "$ref": "#/$defs/ContextAssembledPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "task_registered"
+            }
+          },
+          "$ref": "#/$defs/TaskRegisteredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "criteria_checked"
+            }
+          },
+          "$ref": "#/$defs/CriteriaCheckedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "task_status_changed"
+            }
+          },
+          "$ref": "#/$defs/TaskStatusChangedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "scope_checked"
+            }
+          },
+          "$ref": "#/$defs/ScopeCheckedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "scope_expansion_requested"
+            }
+          },
+          "$ref": "#/$defs/ScopeExpansionRequestedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "scope_expansion_granted"
+            }
+          },
+          "$ref": "#/$defs/ScopeExpansionGrantedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "scope_expansion_denied"
+            }
+          },
+          "$ref": "#/$defs/ScopeExpansionDeniedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node_finished"
+            }
+          },
+          "$ref": "#/$defs/NodeFinishedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node_failed"
+            }
+          },
+          "$ref": "#/$defs/NodeFailedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hook_executed"
+            }
+          },
+          "$ref": "#/$defs/HookExecutedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node_rerouted"
+            }
+          },
+          "$ref": "#/$defs/NodeReroutedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "gate_waiting"
+            }
+          },
+          "$ref": "#/$defs/GateWaitingPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "gate_resolved"
+            }
+          },
+          "$ref": "#/$defs/GateResolvedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "questions_answered"
+            }
+          },
+          "$ref": "#/$defs/QuestionsAnsweredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "loop_iteration"
+            }
+          },
+          "$ref": "#/$defs/LoopIterationPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finding_posted"
+            }
+          },
+          "$ref": "#/$defs/FindingPostedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "promotion_signaled"
+            }
+          },
+          "$ref": "#/$defs/PromotionSignaledPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "child_run_created"
+            }
+          },
+          "$ref": "#/$defs/ChildRunCreatedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "child_run_finished"
+            }
+          },
+          "$ref": "#/$defs/ChildRunFinishedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "capability_degraded"
+            }
+          },
+          "$ref": "#/$defs/CapabilityDegradedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_paused"
+            }
+          },
+          "$ref": "#/$defs/RunPausedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_resumed"
+            }
+          },
+          "$ref": "#/$defs/RunResumedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_finished"
+            }
+          },
+          "$ref": "#/$defs/RunFinishedPayload",
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "Finding": {
+      "type": "object",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "location": {
+          "type": "string"
+        },
+        "proposed_criterion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedCriterion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "title",
+        "location",
+        "detail"
+      ]
+    },
+    "FindingId": {
+      "description": "A finding id: not empty and without control characters",
+      "type": "string",
+      "minLength": 1
+    },
+    "FindingPostedPayload": {
+      "description": "The finding's author is the envelope's own `node_id` — not repeated\nhere.",
+      "type": "object",
+      "properties": {
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        }
+      },
+      "required": [
+        "finding"
+      ]
+    },
+    "FindingSeverity": {
+      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
+      "type": "string",
+      "enum": [
+        "blocking",
+        "major",
+        "minor",
+        "note"
+      ]
+    },
+    "GateOption": {
+      "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back, `label` is the\nhuman-facing text, `tradeoff` is mandatory — any option that expands\nscope of work must declare what it trades off, and no variant of\nthis type can omit it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "tradeoff": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "tradeoff"
+      ]
+    },
+    "GateResolvedPayload": {
+      "type": "object",
+      "properties": {
+        "approved_sha": {
+          "description": "The commit SHA the forge's approval covered —\n`None` for the internal escalation case, which has no SHA to\nspeak of. What a later drift check compares against the PR's\ncurrent head to decide whether the approval still holds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chosen_option": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "free_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "GateWaitingPayload": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "string"
+        },
+        "external_ref": {
+          "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PublishedGate` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GateOption"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "evidence",
+        "options"
+      ]
+    },
+    "HookExecutedPayload": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "phase": {
+          "$ref": "#/$defs/HookPhase"
+        }
+      },
+      "required": [
+        "phase",
+        "command",
+        "exit_code"
+      ]
+    },
+    "HookPhase": {
+      "type": "string",
+      "enum": [
+        "before",
+        "after"
+      ]
+    },
+    "LoopIterationPayload": {
+      "type": "object",
+      "properties": {
+        "iteration": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "until_result": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "iteration",
+        "until_result"
+      ]
+    },
+    "ModeName": {
+      "description": "A mode name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ModelName": {
+      "description": "A model name: printable ASCII without whitespace",
+      "type": "string",
+      "minLength": 1
+    },
+    "NodeFailedPayload": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "tokens_used": {
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "required": [
+        "outcome",
+        "tokens_used",
+        "retryable"
+      ]
+    },
+    "NodeFinishedPayload": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string"
+        },
+        "tokens_used": {
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "required": [
+        "outcome",
+        "tokens_used"
+      ]
+    },
+    "NodeId": {
+      "description": "A node id: a letter followed by letters, digits, `_` or `-`; a fan-out sibling adds `@` and its runner's name",
+      "type": "string",
+      "minLength": 1
+    },
+    "NodeReroutedPayload": {
+      "description": "`from_node` is the envelope's own `node_id` (the node that failed) —\nonly the re-route's destination is extra information.",
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "cause": {
+          "type": "string"
+        },
+        "max_reroutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "to_node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "required": [
+        "to_node",
+        "cause",
+        "attempt",
+        "max_reroutes"
+      ]
+    },
+    "NodeStartedPayload": {
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "attempt"
+      ]
+    },
+    "Phase": {
+      "type": "string",
+      "enum": [
+        "pre",
+        "post"
+      ]
+    },
+    "PromotionSignaledPayload": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "suggested_mode": {
+          "$ref": "#/$defs/ModeName"
+        }
+      },
+      "required": [
+        "reason",
+        "evidence",
+        "suggested_mode"
+      ]
+    },
+    "ProposedCriterion": {
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmd"
+      ]
+    },
+    "ProposedCriterionPrecheck": {
+      "type": "object",
+      "properties": {
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "exit_code"
+      ]
+    },
+    "QuestionsAnsweredPayload": {
+      "type": "object",
+      "properties": {
+        "answers_hash": {
+          "type": "string"
+        },
+        "channel": {
+          "$ref": "#/$defs/Channel"
+        },
+        "responder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "answers_hash",
+        "channel"
+      ]
+    },
+    "RunCreatedPayload": {
+      "type": "object",
+      "properties": {
+        "base_branch": {
+          "type": "string"
+        },
+        "base_commit": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "manifest_hash": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/ModeName"
+        },
+        "promoted_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "yunta_schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "manifest_hash",
+        "inputs",
+        "mode",
+        "base_branch",
+        "base_commit"
+      ]
+    },
+    "RunFinishedPayload": {
+      "type": "object",
+      "properties": {
+        "metrics": {
+          "$ref": "#/$defs/RunMetrics"
+        },
+        "terminal_state": {
+          "$ref": "#/$defs/TerminalState"
+        }
+      },
+      "required": [
+        "terminal_state",
+        "metrics"
+      ]
+    },
+    "RunId": {
+      "description": "A run id: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`",
+      "type": "string",
+      "minLength": 1
+    },
+    "RunMetrics": {
+      "type": "object",
+      "properties": {
+        "cptv": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "required": [
+        "tokens"
+      ]
+    },
+    "RunPausedPayload": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    },
+    "RunResumedPayload": {
+      "type": "object",
+      "properties": {
+        "resume_policy_applied": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RunnerCandidate": {
+      "description": "One binding candidate for a role in `runners:`.",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "$ref": "#/$defs/ModelName"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "adapter",
+        "model"
+      ]
+    },
+    "RunnerName": {
+      "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "RunnerResolvedPayload": {
+      "description": "`runner` names the `runners:` entry the node resolved through. The\nreader also accepts `role`, the field's former name, so a log written\nunder it still replays.",
+      "type": "object",
+      "properties": {
+        "chosen": {
+          "$ref": "#/$defs/RunnerCandidate"
+        },
+        "discarded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscardedCandidate"
+          }
+        },
+        "runner": {
+          "$ref": "#/$defs/RunnerName"
+        }
+      },
+      "required": [
+        "runner",
+        "chosen",
+        "discarded"
+      ]
+    },
+    "ScopeCheckedPayload": {
+      "description": "`task_id` is present for a task's scope check within a loop node;\nabsent for a node-level scope check — either way the envelope's own\n`node_id` already names the node, so it is not repeated here.",
+      "type": "object",
+      "properties": {
+        "diff": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "diff",
+        "violations"
+      ]
+    },
+    "ScopeExpansionDeniedPayload": {
+      "type": "object",
+      "properties": {
+        "count_this_run": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "decided_by": {
+          "$ref": "#/$defs/Decider"
+        },
+        "denial_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/ScopeExpansionMode"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "decided_by",
+        "mode",
+        "count_this_run"
+      ]
+    },
+    "ScopeExpansionGrantedPayload": {
+      "type": "object",
+      "properties": {
+        "count_this_run": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "decided_by": {
+          "$ref": "#/$defs/Decider"
+        },
+        "mode": {
+          "$ref": "#/$defs/ScopeExpansionMode"
+        },
+        "paths": {
+          "description": "The exact paths this grant authorized — self-contained\naudit, and what a later attempt's effective scope derives from\nthe log, instead of re-pairing the grant with the\n`requested` event that preceded it. `default` for logs written\nbefore the field existed (tolerant reader).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "decided_by",
+        "mode",
+        "count_this_run"
+      ]
+    },
+    "ScopeExpansionMode": {
+      "description": "How a loop node treats an agent's request to widen its scope.\nDefault `Deny`: a node that omits `scope_expansion:` entirely gets\nthe same behavior as one that declares it with no `mode:` — no\nexpansions, every request becomes a finding without interrupting.",
+      "type": "string",
+      "enum": [
+        "rules",
+        "ask",
+        "deny"
+      ]
+    },
+    "ScopeExpansionRequestedPayload": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "proposed_criterion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedCriterion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposed_criterion_precheck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedCriterionPrecheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "paths",
+        "reason"
+      ]
+    },
+    "Seq": {
+      "description": "A position in a run's log: a positive number",
+      "type": "integer",
+      "minimum": 1
+    },
+    "SessionId": {
+      "description": "A session id: not empty and without control characters",
+      "type": "string",
+      "minLength": 1
+    },
+    "TaskId": {
+      "description": "A task id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "TaskRegisteredPayload": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          }
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "criteria",
+        "scope"
+      ]
+    },
+    "TaskStatus": {
+      "description": "Exact variant names are provisional.",
+      "type": "string",
+      "enum": [
+        "pending",
+        "ready",
+        "running",
+        "done",
+        "blocked",
+        "failed"
+      ]
+    },
+    "TaskStatusChangedPayload": {
+      "type": "object",
+      "properties": {
+        "caused_by": {
+          "description": "`seq` of the event that justifies this transition.",
+          "$ref": "#/$defs/Seq"
+        },
+        "new_status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "new_status",
+        "caused_by"
+      ]
+    },
+    "TerminalState": {
+      "description": "Exact variant names are provisional; a `cancel` command\nexists, so `Cancelled` is included alongside the obvious two.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        {
+          "description": "The run closed because its own gate accepted promotion\nto a later-declared mode — never because the work itself failed\nor was cancelled.",
+          "type": "string",
+          "const": "promoted"
+        }
+      ]
+    },
+    "TokenUsage": {
+      "type": "object",
+      "properties": {
+        "cached": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "input": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "output": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "input",
+        "output"
+      ]
+    }
+  }
+}

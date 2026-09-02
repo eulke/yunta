@@ -20,6 +20,7 @@ mod manifest;
 mod pack;
 pub mod policy;
 mod questions;
+pub mod schema;
 mod secret;
 mod workflow;
 pub mod yaml;
