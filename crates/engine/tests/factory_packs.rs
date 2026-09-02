@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
@@ -158,7 +158,7 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "quick",
+            mode: &"quick".into(),
             promoted_from: None,
         },
         &storage,
@@ -208,8 +208,8 @@ sessions:
         plan = artifacts.join("plan.yaml"),
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &run_id,
@@ -237,18 +237,18 @@ sessions:
     for node in ["grill", "plan", "implement", "lint", "tests", "ship", "pr"] {
         assert!(
             matches!(
-                report.state.nodes.get(&node.into()),
+                report.state.nodes.get(node),
                 Some(yunta_engine::NodeState::Finished { .. })
             ),
             "node `{node}` did not finish: {:?}",
-            report.state.nodes.get(&node.into())
+            report.state.nodes.get(node)
         );
     }
     // `fix-lint` is only in quick mode's node set as a re-route target —
     // lint passed on the first try, so it must never have run.
     assert!(
-        !report.state.nodes.contains_key(&"fix-lint".into()),
+        !report.state.nodes.contains_key("fix-lint"),
         "fix-lint ran despite lint passing on the first try: {:?}",
-        report.state.nodes.get(&"fix-lint".into())
+        report.state.nodes.get("fix-lint")
     );
 }

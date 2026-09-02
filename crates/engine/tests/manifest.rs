@@ -102,7 +102,7 @@ nodes:
     )
     .unwrap();
     assert_eq!(
-        frozen.prompts.get(&"plan".into()).map(String::as_str),
+        frozen.prompts.get("plan").map(String::as_str),
         Some("first version")
     );
 
@@ -110,7 +110,7 @@ nodes:
     // and a rebuild must see the new content as a different manifest.
     std::fs::write(dir.path().join("prompts/plan.md"), "edited later").unwrap();
     assert_eq!(
-        frozen.prompts.get(&"plan".into()).map(String::as_str),
+        frozen.prompts.get("plan").map(String::as_str),
         Some("first version")
     );
     let rebuilt = build_manifest(
@@ -442,7 +442,10 @@ nodes:
     );
 
     let expanded = &manifest.workflow.nodes[1];
-    assert_eq!(expanded.runner.as_deref(), Some("reviewer"));
+    assert_eq!(
+        expanded.runner.as_ref().map(|value| value.as_str()),
+        Some("reviewer")
+    );
     assert!(expanded.runners.is_empty());
 
     // Downstream dependencies rewire onto every expanded sibling.

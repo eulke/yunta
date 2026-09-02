@@ -32,7 +32,7 @@ use std::path::Path;
 
 use serde::Serialize;
 use yunta_core::events::{Event, EventPayload, Finding, FindingPostedPayload, FindingSeverity};
-use yunta_core::{sha256_hex, Isolation, OnFinishStep};
+use yunta_core::{sha256_hex, FindingId, Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
 
@@ -124,7 +124,7 @@ fn verification(events: &[Event]) -> ProvenanceVerification {
 /// the declared-path findings degrades loudly (a distill problem must
 /// never un-close a run the log is about to close) — except IO on the
 /// destination, which is a real error before `run_finished` exists.
-pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &str) -> Result<(), RunError> {
+pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(), RunError> {
     let declared: Vec<&String> = ctx
         .manifest
         .workflow
@@ -181,7 +181,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &str) -> Result<(), RunE
                     None,
                     EventPayload::FindingPosted(FindingPostedPayload {
                         finding: Finding {
-                            id: format!("distill-missing-{name}"),
+                            id: FindingId::try_from(format!("distill-missing-{name}"))?,
                             severity: FindingSeverity::Minor,
                             title: format!(
                                 "distill: declared artifact `{name}` was never produced"

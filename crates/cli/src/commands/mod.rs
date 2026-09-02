@@ -24,8 +24,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge};
-use yunta_core::{ConfigLayer, Workflow};
+use yunta_adapters::{
+    Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, CLAUDE_CODE_ID, CODEX_ID,
+};
+use yunta_core::{AdapterId, ConfigLayer, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
 
 /// Ctrl-C → the run's root `CancellationToken`. The in-process
@@ -114,17 +116,17 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
 /// `binary` override, if declared). Mock fixtures stay routed through
 /// `yunta test` only — real invocations never touch the mock, and a
 /// real run never gets a simulated agent either.
-pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Adapter>> {
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    let named: Vec<&str> = config
+pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<AdapterId, Arc<dyn Adapter>> {
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    let named: Vec<&AdapterId> = config
         .runners
         .iter()
         .flatten()
         .flat_map(|(_, candidates)| candidates.iter())
-        .map(|candidate| candidate.adapter.as_str())
+        .map(|candidate| &candidate.adapter)
         .collect();
 
-    let settings_for = |id: &str| {
+    let settings_for = |id: &AdapterId| {
         config
             .adapters
             .as_ref()
@@ -133,16 +135,16 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<String, Arc<dyn Ada
             .unwrap_or_default()
     };
 
-    if named.contains(&"claude-code") {
+    if named.contains(&&CLAUDE_CODE_ID) {
         adapters.insert(
-            "claude-code".to_string(),
-            Arc::new(ClaudeCodeAdapter::new(&settings_for("claude-code"))),
+            CLAUDE_CODE_ID.clone(),
+            Arc::new(ClaudeCodeAdapter::new(&settings_for(&CLAUDE_CODE_ID))),
         );
     }
-    if named.contains(&"codex") {
+    if named.contains(&&CODEX_ID) {
         adapters.insert(
-            "codex".to_string(),
-            Arc::new(CodexAdapter::new(&settings_for("codex"))),
+            CODEX_ID.clone(),
+            Arc::new(CodexAdapter::new(&settings_for(&CODEX_ID))),
         );
     }
 
@@ -168,7 +170,7 @@ pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
 /// adapter can provide: an error in check, never emulation at runtime.
 pub(crate) fn refuse_unrunnable(
     workflow: &Workflow,
-    adapters: &HashMap<String, Arc<dyn Adapter>>,
+    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
 ) -> Result<(), ExitCode> {
     let needs_sessions = workflow.nodes.iter().any(|node| {
         matches!(
@@ -195,7 +197,7 @@ pub(crate) fn refuse_unrunnable(
 /// through this helper, since it reports every result rather than
 /// stopping at the first failure.
 pub(crate) async fn probe_or_refuse(
-    adapters: &HashMap<String, Arc<dyn Adapter>>,
+    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
 ) -> Result<(), ExitCode> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {

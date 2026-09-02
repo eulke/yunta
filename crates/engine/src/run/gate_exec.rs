@@ -26,7 +26,7 @@ use yunta_core::events::{
     GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload,
     RunPausedPayload, TokenUsage,
 };
-use yunta_core::{ExternalGate, Node};
+use yunta_core::{ExternalGate, FindingId, Node};
 
 use crate::human_interaction::HumanInteraction;
 
@@ -197,7 +197,7 @@ fn resolve_from_poll(
                     Some(&node.id),
                     EventPayload::FindingPosted(FindingPostedPayload {
                         finding: Finding {
-                            id: format!("{}-review-{i}", node.id),
+                            id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
                             severity: FindingSeverity::Major,
                             title: format!("changes requested by {}", comment.author),
                             location: comment

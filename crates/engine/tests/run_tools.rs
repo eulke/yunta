@@ -63,7 +63,7 @@ impl Bench {
                 payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
                     manifest_hash: "test-manifest".to_string(),
                     inputs: Default::default(),
-                    mode: "default".to_string(),
+                    mode: "default".into(),
                     promoted_from: None,
                     yunta_schema: None,
                     base_branch: "main".to_string(),
@@ -104,7 +104,7 @@ impl Bench {
                 node_id: Some(NodeId::from(node)),
                 payload: EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
                     finding: yunta_core::events::Finding {
-                        id: id.to_string(),
+                        id: id.into(),
                         severity: yunta_core::events::FindingSeverity::Minor,
                         title: format!("seeded {id}"),
                         location: "src/lib.rs".to_string(),
@@ -123,7 +123,7 @@ impl Bench {
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
             .filter_map(|e| match e.payload {
-                EventPayload::FindingPosted(p) => Some(p.finding.id),
+                EventPayload::FindingPosted(p) => Some(p.finding.id.to_string()),
                 _ => None,
             })
             .collect()

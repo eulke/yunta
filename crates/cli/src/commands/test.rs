@@ -27,14 +27,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{RunId, SystemClock, Workflow};
+use yunta_adapters::{Adapter, MockAdapter, MOCK_ID};
+use yunta_core::{AdapterId, ModeName, RunId, SystemClock, Workflow};
 use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
 use super::status::task_status_label;
 use crate::load_yaml;
 use crate::project;
+
+/// The run id every case's single run is created under.
+static TEST_RUN: RunId = RunId::from_static("test-run");
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,7 +47,7 @@ struct TestCase {
     /// Mode the run is created in. Absent runs the whole graph, under
     /// the same `"default"` a workflow with no `modes:` runs under.
     #[serde(default)]
-    mode: Option<String>,
+    mode: Option<ModeName>,
     /// Values for the workflow's declared inputs, by name. Every scalar
     /// arrives as text and `resolve_inputs` types it against the
     /// declaration, exactly as `yunta run --input` does.
@@ -192,7 +195,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let runs_root = sandbox.path().join("runs");
     let storage = Storage::open(&sandbox.path().join("events.db")).map_err(|e| e.to_string())?;
 
-    let run_id = RunId::from("test-run");
+    let run_id = TEST_RUN.clone();
     let run_dir = runs_root.join(run_id.as_str());
 
     let fixture_path = case_path
@@ -213,14 +216,14 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     .map_err(|e| e.to_string())?;
 
     // The case's `mode` is frozen into the run the way `--mode` is;
-    // `"default"` runs the whole graph unfiltered.
-    let mode = case.mode.as_deref().unwrap_or("default");
+    // the default mode runs the whole graph unfiltered.
+    let mode = case.mode.clone().unwrap_or_default();
     yunta_engine::create_run(
         yunta_engine::CreateRunParams {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode,
+            mode: &mode,
             promoted_from: None,
         },
         &storage,
@@ -260,7 +263,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         ));
     }
     for (node_id, expected) in &case.expect.nodes {
-        let got = match report.state.nodes.get(&node_id.as_str().into()) {
+        let got = match report.state.nodes.get(node_id.as_str()) {
             Some(NodeState::Finished { .. }) => "finished",
             Some(NodeState::Failed { .. }) => "failed",
             Some(NodeState::Running { .. }) => "running",
@@ -275,7 +278,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         let got = report
             .state
             .tasks
-            .get(&task_id.as_str().into())
+            .get(task_id.as_str())
             .map(task_status_label)
             .unwrap_or("never registered");
         if got != expected {
@@ -312,9 +315,9 @@ pub(crate) fn load_mock_fixture(
 pub(crate) fn mock_adapters(
     config: &yunta_core::ConfigLayer,
     mock: Arc<MockAdapter>,
-) -> HashMap<String, Arc<dyn Adapter>> {
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), mock.clone());
+) -> HashMap<AdapterId, Arc<dyn Adapter>> {
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert(MOCK_ID.clone(), mock.clone());
     if let Some(runners) = &config.runners {
         for candidate in runners.values().flatten() {
             adapters
@@ -379,7 +382,10 @@ mod tests {
              expect:\n  final_state: paused\n",
         )
         .unwrap();
-        assert_eq!(case.mode.as_deref(), Some("quick"));
+        assert_eq!(
+            case.mode.as_ref().map(|value| value.as_str()),
+            Some("quick")
+        );
         assert_eq!(case.inputs["idea"], "add dark mode");
         assert_eq!(case.inputs["retries"], "3");
         assert_eq!(case.inputs["dry_run"], "true");

@@ -41,6 +41,6 @@ impl CodexSettings {
     pub(super) const KNOWN: &'static [&'static str] = &["sandbox"];
 
     pub(super) fn read(settings: &AdapterSettings) -> Result<Self> {
-        typed_settings("codex", settings.adapter_settings.as_ref(), Self::KNOWN)
+        typed_settings(&super::ID, settings.adapter_settings.as_ref(), Self::KNOWN)
     }
 }

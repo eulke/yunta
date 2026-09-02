@@ -99,7 +99,7 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.model = Some("gpt-5-codex".to_string());
+    req.model = Some("gpt-5-codex".into());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
@@ -370,7 +370,7 @@ async fn model_is_passed_through_as_its_own_flag() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.model = Some("gpt-5-codex".to_string());
+    req.model = Some("gpt-5-codex".into());
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),

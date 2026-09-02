@@ -18,7 +18,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, McpServerConfig, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
     DEFAULT_MAX_RETRIES,
@@ -156,7 +156,7 @@ async fn run_with_config(
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &storage,
@@ -165,8 +165,8 @@ async fn run_with_config(
     .unwrap();
 
     let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &run_id,
@@ -192,10 +192,10 @@ async fn run_with_config(
 fn config_with_server(url: &str, auth_env: Option<&str>) -> ConfigLayer {
     ConfigLayer {
         runners: Some(HashMap::from([(
-            "executor".to_string(),
+            "executor".into(),
             vec![yunta_core::RunnerCandidate {
-                adapter: "mock".to_string(),
-                model: "mock-model".to_string(),
+                adapter: "mock".into(),
+                model: "mock-model".into(),
                 agent: None,
             }],
         )])),
@@ -247,10 +247,10 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
 async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
     let config = ConfigLayer {
         runners: Some(HashMap::from([(
-            "executor".to_string(),
+            "executor".into(),
             vec![yunta_core::RunnerCandidate {
-                adapter: "mock".to_string(),
-                model: "mock-model".to_string(),
+                adapter: "mock".into(),
+                model: "mock-model".into(),
                 agent: None,
             }],
         )])),

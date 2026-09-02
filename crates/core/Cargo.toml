@@ -32,3 +32,11 @@ globset.workspace = true
 # Names the path of a value that failed inside an already-buffered
 # `Value` — the one place the parser's own path tracking cannot reach.
 serde_path_to_error.workspace = true
+
+[features]
+# Unchecked `From<&str>`/`From<String>` for identifiers, so a test can
+# write a literal; production code parses.
+testkit = []
+
+[dev-dependencies]
+yunta-core = { path = ".", features = ["testkit"] }

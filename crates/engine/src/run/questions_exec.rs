@@ -62,7 +62,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         {
             None => {
                 // No surface (headless, `yunta test`) — cite every id.
-                unanswered.extend(file.questions.iter().map(|q| q.id.clone()));
+                unanswered.extend(file.questions.iter().map(|q| q.id.to_string()));
             }
             Some(reply) => {
                 let violations = yunta_core::validate_answers(file, &reply.answers);

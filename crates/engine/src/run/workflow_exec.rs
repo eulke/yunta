@@ -334,11 +334,11 @@ pub(super) async fn execute_workflow(
     // `<parent>-<node>`; a re-route running the node again (or a
     // superseded dangling reference) counts up.
     let ordinal = created.len() + 1;
-    let child_id = if ordinal == 1 {
-        RunId::from(format!("{}-{}", ctx.run_id, node.id))
+    let child_id = RunId::try_from(if ordinal == 1 {
+        format!("{}-{}", ctx.run_id, node.id)
     } else {
-        RunId::from(format!("{}-{}-{ordinal}", ctx.run_id, node.id))
-    };
+        format!("{}-{}-{ordinal}", ctx.run_id, node.id)
+    })?;
 
     let child_tree = match isolation {
         WorkflowIsolation::Inherit => ctx.worktree.to_path_buf(),
@@ -411,7 +411,7 @@ pub(super) async fn execute_workflow(
         .modes
         .as_ref()
         .and_then(|modes| modes.keys().next().cloned())
-        .unwrap_or_else(|| "default".to_string());
+        .unwrap_or_default();
     let child_run_dir = super::create_run(
         CreateRunParams {
             run_id: &child_id,

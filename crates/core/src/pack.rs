@@ -4,20 +4,20 @@
 //! the engine already knows how to run, the same relationship a Helm
 //! chart or a Terraform module has to its runtime.
 //!
-//! Normative split this type exists to enforce: a pack **declares**
-//! roles (capabilities + permissions it needs) and a permissions
-//! **ceiling** (`declares`) it promises never to exceed — never a
-//! runner, a binding, a concrete model or a secret. The installing team
-//! resolves those roles against its own `runners:`; `declares` is
-//! validated as a hard ceiling by `check`, not just documented
-//! here. This module only parses the manifest — resolving `requires`
-//! against local config and enforcing `declares` are
-//! the engine's own, separate jobs.
+//! Normative split this type exists to enforce: a pack **requires**
+//! runners by name (with the permissions each needs) and **declares** a
+//! permissions ceiling it promises never to exceed — never a binding, a
+//! concrete model or a secret. The installing team resolves those names
+//! against its own `runners:`; `declares` is validated as a hard
+//! ceiling by `check`, not just documented here. This module only
+//! parses the manifest — resolving `requires` against local config and
+//! enforcing `declares` are the engine's own, separate jobs.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ids::{PackName, PackRef, Publisher, RunnerName};
 use crate::workflow::NodePermissions;
 
 /// The pack's own identity: `publisher/name`, invoked as
@@ -31,8 +31,8 @@ use crate::workflow::NodePermissions;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackManifest {
-    pub name: String,
-    pub publisher: String,
+    pub name: PackName,
+    pub publisher: Publisher,
     /// Semver — no comparison logic lives here; a pack's own
     /// version is never auto-resolved (`update` always names an exact
     /// target ref), so nothing in v1 needs to *compare* versions,
@@ -68,7 +68,7 @@ pub struct PackManifest {
 #[serde(deny_unknown_fields)]
 pub struct PackRequires {
     #[serde(default)]
-    pub roles: Vec<RequiredRole>,
+    pub runners: Vec<RequiredRunner>,
     /// Names the installer must define under its own `mcp_servers:`.
     #[serde(default)]
     pub mcp_servers: Vec<String>,
@@ -77,14 +77,14 @@ pub struct PackRequires {
     pub commands: Vec<String>,
 }
 
-/// One entry in `requires.roles` — a role name plus the ceiling of
-/// permissions the pack asks that role be resolvable with. `permissions`
-/// absent means the pack doesn't care what profile the role resolves
-/// under, only that the role itself exists.
+/// One entry in `requires.runners` — a runner name plus the ceiling of
+/// permissions the pack asks that runner be resolvable with.
+/// `permissions` absent means the pack doesn't care what profile the
+/// runner resolves under, only that the name itself is defined.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RequiredRole {
-    pub name: String,
+pub struct RequiredRunner {
+    pub name: RunnerName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<NodePermissions>,
 }
@@ -136,8 +136,8 @@ pub struct PackContents {
 /// what an offline `add`/CI verifies the vendoring on disk against.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackLockEntry {
-    pub publisher: String,
-    pub name: String,
+    pub publisher: Publisher,
+    pub name: PackName,
     /// The clone URL `add` was given — remembered so `update
     /// publisher/name@newref` never needs the URL
     /// repeated; only the ref changes.
@@ -157,46 +157,22 @@ pub struct PackLockEntry {
     pub content_hash: String,
 }
 
-/// `yunta.lock` — every vendored pack, keyed by `"publisher/name"`.
-/// A `BTreeMap` (not a `Vec`) so the file serializes in a stable,
-/// diffable order regardless of install order — the same reasoning a
-/// `Cargo.lock`-style file always wants.
+/// `yunta.lock` — every vendored pack, keyed by its [`PackRef`]
+/// (`publisher/name`). A `BTreeMap` (not a `Vec`) so the file
+/// serializes in a stable, diffable order regardless of install order —
+/// the same reasoning a `Cargo.lock`-style file always wants.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PackLock {
     #[serde(default)]
-    pub packs: BTreeMap<String, PackLockEntry>,
-}
-
-impl PackLock {
-    /// The `"publisher/name"` key a [`PackLockEntry`] is stored/looked
-    /// up under — one place spelling out the convention so `add`,
-    /// `remove`, `update` and `list` can never disagree on it.
-    pub fn key(publisher: &str, name: &str) -> String {
-        format!("{publisher}/{name}")
-    }
+    pub packs: BTreeMap<PackRef, PackLockEntry>,
 }
 
 /// A manifest field whose value would reach outside the pack once it
 /// is vendored under `.yunta/packs/<publisher>/<name>/`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PackManifestError {
-    #[error(
-        "`{field}` is `{value}` — a publisher or pack name is one path segment: no `/`, no `\\`, \
-         not `.` or `..`, not empty"
-    )]
-    NotASegment { field: &'static str, value: String },
     #[error("`{field}` names `{value}` — every path in `contents` stays inside the pack: relative, with no `..` component")]
     PathEscapes { field: &'static str, value: String },
-}
-
-/// Whether `value` is a single path segment — what `publisher` and
-/// `name` must be to serve as directory names under `.yunta/packs/`.
-pub fn is_path_segment(value: &str) -> bool {
-    !value.is_empty()
-        && value != "."
-        && value != ".."
-        && !value.contains('/')
-        && !value.contains('\\')
 }
 
 /// Whether `path` stays inside the directory it is relative to: not
@@ -210,18 +186,16 @@ pub fn stays_inside(path: &str) -> bool {
 }
 
 impl PackManifest {
-    /// Every name and path the manifest declares, checked against the
-    /// place the pack is vendored to — all violations at once.
+    /// The pack's identity, `publisher/name`.
+    pub fn reference(&self) -> PackRef {
+        PackRef::new(self.publisher.clone(), self.name.clone())
+    }
+
+    /// Every path the manifest declares, checked against the place the
+    /// pack is vendored to — all violations at once. `publisher` and
+    /// `name` are checked by their own types when the manifest parses.
     pub fn validate(&self) -> Vec<PackManifestError> {
         let mut errors = Vec::new();
-        for (field, value) in [("publisher", &self.publisher), ("name", &self.name)] {
-            if !is_path_segment(value) {
-                errors.push(PackManifestError::NotASegment {
-                    field,
-                    value: value.clone(),
-                });
-            }
-        }
         let contents = &self.contents;
         for (field, paths) in [
             ("contents.workflows", &contents.workflows),

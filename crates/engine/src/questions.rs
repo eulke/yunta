@@ -9,28 +9,28 @@
 use std::collections::HashSet;
 
 use thiserror::Error;
-use yunta_core::{AnswerType, QuestionsFile};
+use yunta_core::{AnswerType, QuestionId, QuestionsFile};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum QuestionsError {
     #[error("{id}: duplicate question id")]
-    DuplicateId { id: String },
+    DuplicateId { id: QuestionId },
 
     #[error("{id}: `text` is empty")]
-    EmptyText { id: String },
+    EmptyText { id: QuestionId },
 
     #[error("{id}: answer_type is `choice` but `values` is empty")]
-    MissingValues { id: String },
+    MissingValues { id: QuestionId },
 }
 
 /// Validates a parsed questions file, collecting every violation rather
 /// than stopping at the first.
 pub fn register(file: &QuestionsFile) -> Vec<QuestionsError> {
     let mut errors = Vec::new();
-    let mut known_ids: HashSet<&str> = HashSet::new();
+    let mut known_ids: HashSet<&QuestionId> = HashSet::new();
 
     for question in &file.questions {
-        if !known_ids.insert(question.id.as_str()) {
+        if !known_ids.insert(&question.id) {
             errors.push(QuestionsError::DuplicateId {
                 id: question.id.clone(),
             });

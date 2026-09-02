@@ -14,9 +14,6 @@ use yunta_core::{Ledger, Task, TaskId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LedgerError {
-    #[error("{id}: id does not match the required pattern `^[A-Za-z][A-Za-z0-9_-]*$`")]
-    InvalidId { id: String },
-
     #[error("{id}: duplicate task id")]
     DuplicateId { id: TaskId },
 
@@ -61,11 +58,6 @@ pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
 
     let mut known_ids: HashSet<TaskId> = HashSet::new();
     for task in &ledger.tasks {
-        if !is_valid_id(task.id.as_str()) {
-            errors.push(LedgerError::InvalidId {
-                id: task.id.as_str().to_string(),
-            });
-        }
         if !known_ids.insert(task.id.clone()) {
             errors.push(LedgerError::DuplicateId {
                 id: task.id.clone(),
@@ -132,15 +124,6 @@ pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
     errors.extend(overlapping_scopes(&ledger.tasks));
 
     errors
-}
-
-fn is_valid_id(id: &str) -> bool {
-    let mut chars = id.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 fn find_cycle(tasks: &[Task]) -> Option<Vec<TaskId>> {

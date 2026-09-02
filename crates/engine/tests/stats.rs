@@ -20,7 +20,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         },
         depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
         scope: Vec::new(),
-        runner: Some("implementer".to_string()),
+        runner: Some("implementer".into()),
         artifacts: None,
         hooks: None,
         on_failure: None,
@@ -39,7 +39,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
-        name: "fixture".to_string(),
+        name: "fixture".into(),
         modes: None,
         description: None,
         inputs: Default::default(),
@@ -66,8 +66,8 @@ fn event(seq: u64, offset_secs: i64, node_id: Option<&str>, payload: EventPayloa
 
 fn candidate() -> RunnerCandidate {
     RunnerCandidate {
-        adapter: "mock".to_string(),
-        model: "mock-model".to_string(),
+        adapter: "mock".into(),
+        model: "mock-model".into(),
         agent: None,
     }
 }
@@ -93,7 +93,7 @@ fn fixture_events() -> Vec<Event> {
             EventPayload::RunCreated(RunCreatedPayload {
                 manifest_hash: "h".to_string(),
                 inputs: Default::default(),
-                mode: "default".to_string(),
+                mode: "default".into(),
                 promoted_from: None,
                 yunta_schema: None,
                 base_branch: "main".to_string(),
@@ -105,7 +105,7 @@ fn fixture_events() -> Vec<Event> {
             0,
             Some("a"),
             EventPayload::RunnerResolved(RunnerResolvedPayload {
-                role: "implementer".to_string(),
+                runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
             }),
@@ -130,7 +130,7 @@ fn fixture_events() -> Vec<Event> {
             10,
             Some("b"),
             EventPayload::RunnerResolved(RunnerResolvedPayload {
-                role: "implementer".to_string(),
+                runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
             }),
@@ -169,7 +169,7 @@ fn fixture_events() -> Vec<Event> {
             26,
             Some("b"),
             EventPayload::RunnerResolved(RunnerResolvedPayload {
-                role: "implementer".to_string(),
+                runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
             }),
@@ -302,7 +302,7 @@ fn tokens_by_role_groups_every_node_under_its_resolved_role() {
     let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
     let stats = compute_run_stats(&wf, &fixture_events());
 
-    let by_role = stats.tokens_by_role();
+    let by_role = stats.tokens_by_runner();
     assert_eq!(by_role.len(), 1);
     let (role, tokens) = &by_role[0];
     assert_eq!(role, "implementer");
@@ -327,7 +327,7 @@ fn a_node_that_never_started_is_absent_from_the_node_list() {
 fn summary(tokens: u64, wall_clock_secs: u64, tasks_total: usize) -> RunSummary {
     RunSummary {
         run_id: "r".into(),
-        mode: "default".to_string(),
+        mode: "default".into(),
         workflow_hash: "h".to_string(),
         tokens,
         wall_clock: Some(std::time::Duration::from_secs(wall_clock_secs)),
@@ -363,7 +363,7 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     let events = fixture_events();
     let summary = run_summary(
         "run-1".into(),
-        "default".to_string(),
+        "default".into(),
         "workflow-hash".to_string(),
         &wf,
         &events,

@@ -26,7 +26,7 @@ fn sample_events() -> Vec<Event> {
             EventPayload::RunCreated(RunCreatedPayload {
                 manifest_hash: "deadbeef".to_string(),
                 inputs: Default::default(),
-                mode: "default".to_string(),
+                mode: "default".into(),
                 promoted_from: None,
                 yunta_schema: None,
                 base_branch: "main".to_string(),

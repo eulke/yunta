@@ -16,7 +16,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use thiserror::Error;
-use yunta_core::{Capabilities, Result, Secret, SessionId, YuntaError};
+use yunta_core::{
+    AdapterId, AgentName, Capabilities, ModelName, Pid, Result, Secret, SessionId, YuntaError,
+};
 
 /// A node's declared write scope, passed through to an adapter with
 /// `edit_hooks` so it can block edits outside it as they happen.
@@ -43,10 +45,10 @@ pub struct SessionRequest {
     pub prompt: String,
     /// The run's worktree.
     pub cwd: PathBuf,
-    pub model: Option<String>,
+    pub model: Option<ModelName>,
     /// Portable named-agent selection; only populated if
     /// `capabilities().custom_agents`.
-    pub agent: Option<String>,
+    pub agent: Option<AgentName>,
     pub permissions: PermissionProfile,
     /// Secrets arrive here, already resolved from the manifest — never
     /// any other way — and stay wrapped until the child process is
@@ -95,20 +97,20 @@ pub struct RunToolsEndpoint {
 /// values. The one place a setting name is checked, so an unknown key
 /// is always the same error whichever adapter it reaches.
 pub fn typed_settings<T: serde::de::DeserializeOwned>(
-    adapter: &'static str,
+    adapter: &'static AdapterId,
     raw: Option<&serde_json::Map<String, serde_json::Value>>,
     known: &'static [&'static str],
 ) -> Result<T> {
     let raw = raw.cloned().unwrap_or_default();
     if let Some(key) = raw.keys().find(|key| !known.contains(&key.as_str())) {
         return Err(YuntaError::UnknownSetting {
-            adapter: adapter.to_string(),
+            adapter: adapter.clone(),
             key: key.clone(),
             known: known.to_vec(),
         });
     }
     serde_json::from_value(serde_json::Value::Object(raw)).map_err(|e| YuntaError::Adapter {
-        adapter: adapter.to_string(),
+        adapter: adapter.clone(),
         message: format!("`adapter_settings`: {e}"),
     })
 }
@@ -123,12 +125,12 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
 pub async fn write_prompt(
     mut stdin: tokio::process::ChildStdin,
     prompt: &str,
-    adapter: &'static str,
+    adapter: &'static AdapterId,
 ) -> Result<()> {
     use tokio::io::AsyncWriteExt;
 
     let io_error = |action: &str, source: std::io::Error| YuntaError::AdapterIo {
-        adapter: adapter.to_string(),
+        adapter: adapter.clone(),
         action: action.to_string(),
         source,
     };
@@ -176,7 +178,7 @@ pub enum AgentEvent {
     /// Mandatory first event of every session.
     SessionOpened {
         session_id: SessionId,
-        model: String,
+        model: ModelName,
     },
     ToolUse {
         name: String,
@@ -204,7 +206,7 @@ pub enum AgentEvent {
 /// construction and never require I/O to report.
 #[async_trait]
 pub trait Adapter: Send + Sync {
-    fn id(&self) -> &'static str;
+    fn id(&self) -> &'static AdapterId;
 
     fn capabilities(&self) -> Capabilities;
 
@@ -219,7 +221,7 @@ pub trait Adapter: Send + Sync {
         _req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
         Err(YuntaError::Unsupported {
-            adapter: self.id().to_string(),
+            adapter: self.id().clone(),
             what: "resume_session",
         })
     }
@@ -245,7 +247,7 @@ pub trait AgentSession: Send {
     /// `run.dir/scratch/engine.json` so a *separate* process (`yunta
     /// cancel` after a crash) can still exterminate the tree.
     /// `None` for sessions with no subprocess of their own (mock).
-    fn pgid(&self) -> Option<u32> {
+    fn pgid(&self) -> Option<Pid> {
         None
     }
 }

@@ -16,8 +16,9 @@ use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 
 use super::test::{discover_case_paths, run_case};
 use crate::pack::{packs_root, read_manifest, vendor_dir};
+use yunta_core::PackRef;
 
-pub async fn audit(publisher_name: &str) -> ExitCode {
+pub async fn audit(pack: &PackRef) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -25,14 +26,10 @@ pub async fn audit(publisher_name: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let Some((publisher, name)) = publisher_name.split_once('/') else {
-        eprintln!("error: `{publisher_name}` isn't `publisher/name`");
-        return ExitCode::FAILURE;
-    };
-    let pack_dir = vendor_dir(&cwd, publisher, name);
+    let pack_dir = vendor_dir(&cwd, pack);
     if !pack_dir.is_dir() {
         eprintln!(
-            "error: `{publisher_name}` isn't installed under {}",
+            "error: `{pack}` isn't installed under {}",
             packs_root(&cwd).display()
         );
         return ExitCode::FAILURE;
@@ -67,17 +64,17 @@ pub fn print_report(report: &PackAudit) {
             m.declares.executors.join(", ")
         }
     );
-    if !m.requires.roles.is_empty() {
-        let roles: Vec<String> = m
+    if !m.requires.runners.is_empty() {
+        let runners: Vec<String> = m
             .requires
-            .roles
+            .runners
             .iter()
             .map(|r| match &r.permissions {
                 Some(p) => format!("{}({:?})", r.name, p),
-                None => r.name.clone(),
+                None => r.name.to_string(),
             })
             .collect();
-        println!("requires roles: {}", roles.join(", "));
+        println!("requires runners: {}", runners.join(", "));
     }
     if !m.requires.mcp_servers.is_empty() {
         println!(

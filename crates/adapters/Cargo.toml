@@ -43,5 +43,6 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }

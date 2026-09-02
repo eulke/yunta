@@ -39,7 +39,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{Event, EventPayload, TaskStatus, TokenUsage};
-use yunta_core::{Node, NodeId, RunId, Workflow};
+use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
 
 use crate::replay::{derive, RunState};
 
@@ -48,10 +48,10 @@ use crate::replay::{derive, RunState};
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeStat {
     pub node_id: NodeId,
-    /// The role its `runner:` resolved through (`runner_resolved.role`) —
+    /// The runner the node resolved through (`runner_resolved.runner`) —
     /// `None` only for a node that never reached that point (fails before
     /// its runner resolves).
-    pub role: Option<String>,
+    pub runner: Option<RunnerName>,
     /// Tokens across every attempt, first and retries alike.
     pub tokens: TokenUsage,
     /// The highest `attempt` number this node reached — `1` for a node
@@ -118,16 +118,16 @@ impl RunStats {
     /// implemented yet — nothing to break out per role *and* per mode
     /// within one run until it is; `--workflow`'s history view is where
     /// mode comparison lives).
-    pub fn tokens_by_role(&self) -> Vec<(String, TokenUsage)> {
-        let mut by_role: Vec<(String, TokenUsage)> = Vec::new();
+    pub fn tokens_by_runner(&self) -> Vec<(RunnerName, TokenUsage)> {
+        let mut by_runner: Vec<(RunnerName, TokenUsage)> = Vec::new();
         for node in &self.nodes {
-            let Some(role) = &node.role else { continue };
-            match by_role.iter_mut().find(|(r, _)| r == role) {
+            let Some(runner) = &node.runner else { continue };
+            match by_runner.iter_mut().find(|(r, _)| r == runner) {
                 Some((_, tokens)) => *tokens = sum_tokens(*tokens, node.tokens),
-                None => by_role.push((role.clone(), node.tokens)),
+                None => by_runner.push((runner.clone(), node.tokens)),
             }
         }
-        by_role
+        by_runner
     }
 }
 
@@ -166,7 +166,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
     let mut acc = AttemptAccumulators::default();
     let mut first_started: HashMap<NodeId, DateTime<Utc>> = HashMap::new();
     let mut node_max_attempt: HashMap<NodeId, u32> = HashMap::new();
-    let mut node_role: HashMap<NodeId, String> = HashMap::new();
+    let mut node_runner: HashMap<NodeId, RunnerName> = HashMap::new();
 
     for event in events {
         match &event.payload {
@@ -197,7 +197,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
             }
             EventPayload::RunnerResolved(p) => {
                 if let Some(node_id) = &event.node_id {
-                    node_role.insert(node_id.clone(), p.role.clone());
+                    node_runner.insert(node_id.clone(), p.runner.clone());
                 }
             }
             _ => {}
@@ -227,7 +227,7 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[Event]) -> RunStats {
         };
         nodes.push(NodeStat {
             node_id: node.id.clone(),
-            role: node_role.get(&node.id).cloned(),
+            runner: node_runner.get(&node.id).cloned(),
             tokens: acc.node_tokens.get(&node.id).copied().unwrap_or_default(),
             attempts,
             active: acc
@@ -324,7 +324,7 @@ fn sum_tokens(a: TokenUsage, b: TokenUsage) -> TokenUsage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSummary {
     pub run_id: RunId,
-    pub mode: String,
+    pub mode: ModeName,
     pub workflow_hash: String,
     pub tokens: u64,
     pub wall_clock: Option<Duration>,
@@ -336,7 +336,7 @@ pub struct RunSummary {
 /// unit `--workflow`'s aggregate views fold over.
 pub fn run_summary(
     run_id: RunId,
-    mode: String,
+    mode: ModeName,
     workflow_hash: String,
     workflow: &Workflow,
     events: &[Event],

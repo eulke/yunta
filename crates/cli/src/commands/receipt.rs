@@ -13,7 +13,7 @@ use yunta_core::{Manifest, RunId};
 use yunta_engine::{build_receipt, render_receipt_json, render_receipt_markdown, EventChainStatus};
 use yunta_storage::{ChainVerification, Storage};
 
-pub fn receipt(run_id: &str, json: bool) -> ExitCode {
+pub fn receipt(run_id: &RunId, json: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -35,9 +35,7 @@ pub fn receipt(run_id: &str, json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
-    let events = match storage.events_for_run(&run_id) {
+    let events = match storage.events_for_run(run_id) {
         Ok(events) => events,
         Err(e) => {
             eprintln!("error: {e}");
@@ -60,7 +58,7 @@ pub fn receipt(run_id: &str, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
-    let chain = match storage.verify_chain(&run_id) {
+    let chain = match storage.verify_chain(run_id) {
         Ok(ChainVerification::Intact { events }) => EventChainStatus::Intact { events },
         Ok(ChainVerification::Broken { seq, detail }) => EventChainStatus::Broken { seq, detail },
         Err(e) => {
@@ -69,7 +67,7 @@ pub fn receipt(run_id: &str, json: bool) -> ExitCode {
         }
     };
 
-    let receipt = match build_receipt(&run_id, &manifest, &events, chain) {
+    let receipt = match build_receipt(run_id, &manifest, &events, chain) {
         Ok(receipt) => receipt,
         Err(e) => {
             eprintln!("error: {e}");

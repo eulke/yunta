@@ -8,7 +8,13 @@ fn the_reference_config_parses_and_round_trips() {
 
     assert_eq!(layer.version, Some(1));
     assert_eq!(
-        layer.defaults.as_ref().unwrap().runner.as_deref(),
+        layer
+            .defaults
+            .as_ref()
+            .unwrap()
+            .runner
+            .as_ref()
+            .map(|runner| runner.as_str()),
         Some("executor")
     );
     assert_eq!(layer.defaults.as_ref().unwrap().timeout_minutes, Some(45));

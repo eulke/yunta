@@ -206,7 +206,7 @@ async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
         .unwrap();
     match prepared {
         yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid: reported } => {
-            assert_eq!(reported, dead_pid);
+            assert_eq!(reported.as_u32(), dead_pid);
         }
         other => panic!("expected the stale lock to be stolen, got {other:?}"),
     }

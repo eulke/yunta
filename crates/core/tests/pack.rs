@@ -1,6 +1,6 @@
 //! `pack.yaml` — schema and parsing.
 
-use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest};
+use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest, PackRef};
 
 #[test]
 fn the_reference_pack_parses_and_round_trips() {
@@ -18,14 +18,14 @@ fn the_reference_pack_parses_and_round_trips() {
     assert_eq!(pack.license.as_deref(), Some("MIT"));
     assert_eq!(pack.yunta_schema.as_deref(), Some(">=1 <2"));
 
-    assert_eq!(pack.requires.roles.len(), 2);
-    assert_eq!(pack.requires.roles[0].name, "reviewer");
+    assert_eq!(pack.requires.runners.len(), 2);
+    assert_eq!(pack.requires.runners[0].name, "reviewer");
     assert_eq!(
-        pack.requires.roles[0].permissions,
+        pack.requires.runners[0].permissions,
         Some(NodePermissions::ReadOnly)
     );
-    assert_eq!(pack.requires.roles[1].name, "mechanical");
-    assert_eq!(pack.requires.roles[1].permissions, None);
+    assert_eq!(pack.requires.runners[1].name, "mechanical");
+    assert_eq!(pack.requires.runners[1].permissions, None);
     assert_eq!(pack.requires.mcp_servers, vec!["internal-docs"]);
     assert_eq!(pack.requires.commands, vec!["gh", "cargo"]);
 
@@ -76,7 +76,7 @@ declares:
 "#;
     let pack: PackManifest =
         serde_yaml::from_str(yaml).expect("declares is the only hard requirement beyond identity");
-    assert!(pack.requires.roles.is_empty());
+    assert!(pack.requires.runners.is_empty());
     assert!(pack.requires.mcp_servers.is_empty());
     assert!(pack.requires.commands.is_empty());
     assert!(pack.contents.workflows.is_empty());
@@ -99,13 +99,13 @@ version: 0.1.0
 #[test]
 fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
     let mut lock = PackLock::default();
-    let key = PackLock::key("acme", "review-pack");
-    assert_eq!(key, "acme/review-pack");
+    let key: PackRef = "acme/review-pack".parse().unwrap();
+    assert_eq!(key.to_string(), "acme/review-pack");
     lock.packs.insert(
         key.clone(),
         PackLockEntry {
-            publisher: "acme".to_string(),
-            name: "review-pack".to_string(),
+            publisher: "acme".into(),
+            name: "review-pack".into(),
             source: "https://github.com/acme/review-pack".to_string(),
             r#ref: "v1.2.0".to_string(),
             commit: "abc123def456".to_string(),

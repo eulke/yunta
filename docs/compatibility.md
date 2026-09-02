@@ -73,6 +73,28 @@ with a literal separator: `*` never crosses a `/`, so `src/*.rs` names the
 files directly under `src/` and `src/**` names everything beneath it. A
 workflow that expects `*` to descend into subdirectories writes `**`.
 
+## Identifiers
+
+Every identifier is checked when it is read, and a value that breaks its
+rule is refused with the value, what it was meant to be and the rule:
+
+- A node id, a runner name, a mode name, a task id, a question id, an
+  adapter id and an executor name are a letter followed by letters, digits,
+  `_` or `-`. A fan-out sibling the manifest expands `runners:` into adds
+  `@` and its runner's name; authored YAML never spells that form.
+- A model name and an agent name are one printable word without whitespace,
+  as the adapter's CLI accepts them.
+- A run id, a publisher and a pack name are one path segment: printable,
+  without whitespace, `/` or `\`, and not `.` or `..`. A pack reference is
+  `publisher/name`.
+- A finding id is any printable label; a session id is whatever the
+  adapter's CLI issued, as long as it is not empty.
+
+A pack manifest names the runners it needs under `requires.runners`. The
+`runner_resolved` event names its runner under `runner`; the log reader also
+accepts `role`, the field's former name, so a log written under it still
+replays. `stats --json` and the JSON receipt name the same value `runner`.
+
 ## Platforms
 
 Yunta builds and is published for Linux and macOS. The engine's process

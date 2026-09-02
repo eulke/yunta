@@ -146,7 +146,7 @@ declares:
   network: false
   executors: []
 requires:
-  roles:
+  runners:
     - name: reviewer
     - name: reviewer-alt
 contents:
@@ -178,8 +178,8 @@ Field by field:
   and prompts, auditable by reading) — a non-empty list makes `add`/`update`
   require confirmation on the installing side by default.
 - **`requires`** — the floor the installing team's config must provide:
-  `roles` (role names your workflows use in `runner:`, optionally with the
-  permission profile you expect them resolvable at), `mcp_servers` (names
+  `runners` (the runner names your workflows use in `runner:`, optionally
+  with the permission profile you expect them resolvable at), `mcp_servers` (names
   your workflows reference under `context: { mcp: ... }`), `commands`
   (binaries your `bash`/hook steps assume are on `PATH`). None of this is
   enforced at install time — `yunta doctor` reports gaps, naming your pack,

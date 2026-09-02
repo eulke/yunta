@@ -7,7 +7,7 @@ use yunta_engine::{dedup_findings, derive, NodeState};
 
 fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> Finding {
     Finding {
-        id: id.to_string(),
+        id: id.into(),
         severity,
         title: title.to_string(),
         location: location.to_string(),
@@ -55,7 +55,7 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
     let state = derive(&events);
     assert_eq!(state.broken, None);
     assert_eq!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(&NodeState::Finished {
             outcome: "criteria green".to_string(),
             tokens: tokens(10, 5),
@@ -99,7 +99,7 @@ fn a_retryable_failure_can_restart_and_then_finish() {
     let state = derive(&events);
     assert_eq!(state.broken, None);
     assert_eq!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(&NodeState::Finished {
             outcome: "criteria green".to_string(),
             tokens: tokens(3, 1),
@@ -147,7 +147,7 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
     let state = derive(&events);
     assert!(state.broken.is_none());
     assert!(matches!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(yunta_engine::NodeState::Running { attempt: 2 })
     ));
 }
@@ -203,10 +203,7 @@ fn task_lifecycle_derives_its_latest_status() {
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
-    assert_eq!(
-        state.tasks.get(&"graph-cmd".into()),
-        Some(&TaskStatus::Done)
-    );
+    assert_eq!(state.tasks.get("graph-cmd"), Some(&TaskStatus::Done));
 }
 
 #[test]

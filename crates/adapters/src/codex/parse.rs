@@ -37,11 +37,15 @@
 //! could be, not wider than what's confirmed.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, SessionId};
+use yunta_core::{sha256_hex, ModelName, SessionId};
 
 use crate::session::{AgentError, AgentEvent, AgentOutcome};
 
-pub(super) fn parse_line(line: &str, requested_model: &str, last_message: &str) -> Vec<AgentEvent> {
+pub(super) fn parse_line(
+    line: &str,
+    requested_model: &ModelName,
+    last_message: &str,
+) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
@@ -59,11 +63,22 @@ pub(super) fn parse_line(line: &str, requested_model: &str, last_message: &str) 
     }
 }
 
-fn thread_started(value: &Value, requested_model: &str) -> Option<AgentEvent> {
-    let thread_id = value.get("thread_id")?.as_str()?.to_string();
-    Some(AgentEvent::SessionOpened {
-        session_id: SessionId::from(thread_id),
-        model: requested_model.to_string(),
+/// `thread.started` names the session; a thread id that cannot be one
+/// fails the session explicitly instead of opening it under a name
+/// nothing can resume.
+fn thread_started(value: &Value, requested_model: &ModelName) -> Option<AgentEvent> {
+    let thread_id = value.get("thread_id")?.as_str()?;
+    Some(match thread_id.parse::<SessionId>() {
+        Ok(session_id) => AgentEvent::SessionOpened {
+            session_id,
+            model: requested_model.clone(),
+        },
+        Err(error) => AgentEvent::Failed {
+            error: AgentError {
+                message: format!("the CLI's `thread.started` line is malformed: {error}"),
+            },
+            retryable: false,
+        },
     })
 }
 

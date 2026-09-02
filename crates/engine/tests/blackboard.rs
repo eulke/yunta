@@ -10,7 +10,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::EventPayload;
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
@@ -81,7 +81,7 @@ impl Bench {
                 run_id: &run_id,
                 manifest: &manifest,
                 runs_root: &runs_root,
-                mode: "default",
+                mode: &"default".into(),
                 promoted_from: None,
             },
             &storage,
@@ -90,8 +90,8 @@ impl Bench {
         .unwrap();
 
         let mock = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), mock.clone());
+        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), mock.clone());
 
         let report = execute_run(RunEnv {
             run_id: &run_id,
@@ -129,7 +129,7 @@ impl Bench {
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
             .filter_map(|e| match e.payload {
-                EventPayload::FindingPosted(p) => Some(p.finding.id),
+                EventPayload::FindingPosted(p) => Some(p.finding.id.to_string()),
                 _ => None,
             })
             .collect()
@@ -193,10 +193,7 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     // in the node state this message carries.
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     assert!(
-        matches!(
-            state.nodes.get(&"review".into()),
-            Some(NodeState::Finished { .. })
-        ),
+        matches!(state.nodes.get("review"), Some(NodeState::Finished { .. })),
         "state: {state:?}"
     );
     // Each post is a finding_posted authored by the session's own node,
@@ -276,7 +273,7 @@ sessions:
 "#;
     let (terminal, state, _bench) = Bench::run(workflow, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get(&"rev-a".into()) {
+    match state.nodes.get("rev-a") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("blackboard"), "got: {outcome}");
         }
@@ -357,7 +354,7 @@ sessions:
 "#;
     let (terminal, state, _bench) = Bench::run(BLACKBOARD_WORKFLOW, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get(&"rev-a".into()) {
+    match state.nodes.get("rev-a") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(
                 outcome.contains("run_tools") && outcome.contains("blackboard"),
@@ -374,7 +371,7 @@ sessions:
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {
     use yunta_core::events::{Event, Finding, FindingPostedPayload, FindingSeverity};
     let finding = |id: &str| Finding {
-        id: id.to_string(),
+        id: id.into(),
         severity: FindingSeverity::Minor,
         title: format!("title {id}"),
         location: "src/x.rs".to_string(),

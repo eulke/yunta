@@ -11,13 +11,15 @@ mod forge;
 mod mock;
 mod session;
 
-pub use claude_code::ClaudeCodeAdapter;
-pub use codex::CodexAdapter;
+pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
+pub use codex::{CodexAdapter, ID as CODEX_ID};
 pub use forge::{
     Forge, ForgeError, GitHubForge, MockForge, MockForgeState, PolledGate, PublishRequest,
     PublishedGate, ReviewComment, ReviewOutcome,
 };
-pub use mock::{MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript};
+pub use mock::{
+    MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, SessionScript, ID as MOCK_ID,
+};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
     ProbeReport, RunToolsEndpoint, SessionRequest,

@@ -82,6 +82,7 @@ indexmap.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
 # Tests write their workflows and fixtures as YAML literals.
 serde_yaml.workspace = true
 tempfile.workspace = true

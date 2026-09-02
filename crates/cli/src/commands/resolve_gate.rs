@@ -19,7 +19,7 @@ use crate::load_yaml;
 use crate::project;
 
 pub async fn resolve_gate(
-    run_id: &str,
+    run_id: &RunId,
     option_id: &str,
     resolved_by: Option<&str>,
     free_text: Option<&str>,
@@ -38,8 +38,6 @@ pub async fn resolve_gate(
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
     let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
         eprintln!(
             "error: no run `{run_id}` under {} (or the default state root)",
@@ -63,7 +61,7 @@ pub async fn resolve_gate(
     if let Err(e) = yunta_engine::resolve_gate(
         &manifest,
         &storage,
-        &run_id,
+        run_id,
         &SystemClock,
         option_id,
         resolved_by.map(str::to_string),

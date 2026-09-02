@@ -42,11 +42,20 @@ use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use yunta_core::{AdapterSettings, Capabilities, Result, SessionId, YuntaError};
+use yunta_core::{
+    AdapterId, AdapterSettings, Capabilities, ModelName, Pid, Result, SessionId, YuntaError,
+};
 
 use crate::session::{
     write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
 };
+
+/// The id config names this adapter by.
+pub static ID: AdapterId = AdapterId::from_static("codex");
+
+/// What `SessionOpened.model` reports for a request that names no
+/// model: the CLI picks its own and never says which.
+static DEFAULT_MODEL: ModelName = ModelName::from_static("default");
 
 pub struct CodexAdapter {
     binary: PathBuf,
@@ -76,7 +85,7 @@ impl CodexAdapter {
         }
         if let Some(model) = &req.model {
             args.push("--model".to_string());
-            args.push(model.clone());
+            args.push(model.to_string());
         }
         let edit_sandbox = self
             .settings
@@ -102,7 +111,7 @@ impl CodexAdapter {
         // used (confirmed gap in the CLI — openai/codex#14736, still
         // open) — the request's own model is the only source `parse.rs`
         // has for `SessionOpened.model`, which must always report one.
-        let requested_model = req.model.clone().unwrap_or_else(|| "default".to_string());
+        let requested_model = req.model.clone().unwrap_or_else(|| DEFAULT_MODEL.clone());
         let args = self.build_args(&req, resume);
 
         let mut std_cmd = std::process::Command::new(&self.binary);
@@ -124,27 +133,30 @@ impl CodexAdapter {
         let mut child = tokio::process::Command::from(std_cmd)
             .spawn()
             .map_err(|source| YuntaError::AdapterIo {
-                adapter: "codex".to_string(),
+                adapter: ID.clone(),
                 action: "spawn the codex subprocess".to_string(),
                 source,
             })?;
 
-        let pid = child.id().ok_or_else(|| YuntaError::Adapter {
-            adapter: "codex".to_string(),
-            message: "the codex subprocess exited before it could be tracked".to_string(),
-        })?;
+        let pid = child
+            .id()
+            .and_then(|id| Pid::try_from(id).ok())
+            .ok_or_else(|| YuntaError::Adapter {
+                adapter: ID.clone(),
+                message: "the codex subprocess exited before it could be tracked".to_string(),
+            })?;
 
         let stdin = child.stdin.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "codex".to_string(),
+            adapter: ID.clone(),
             message: "the codex subprocess has no stdin pipe".to_string(),
         })?;
 
         let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "codex".to_string(),
+            adapter: ID.clone(),
             message: "the codex subprocess has no stdout pipe".to_string(),
         })?;
         let stderr = child.stderr.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "codex".to_string(),
+            adapter: ID.clone(),
             message: "the codex subprocess has no stderr pipe".to_string(),
         })?;
 
@@ -178,7 +190,7 @@ impl CodexAdapter {
             let _ = child.wait().await;
         });
         tokio::spawn(drain_stderr(stderr));
-        write_prompt(stdin, &req.prompt, "codex").await?;
+        write_prompt(stdin, &req.prompt, &ID).await?;
 
         Ok(Box::new(CodexSession {
             pid,
@@ -196,8 +208,8 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
 
 #[async_trait]
 impl Adapter for CodexAdapter {
-    fn id(&self) -> &'static str {
-        "codex"
+    fn id(&self) -> &'static AdapterId {
+        &ID
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -226,7 +238,7 @@ impl Adapter for CodexAdapter {
     async fn probe(&self) -> Result<ProbeReport> {
         if let Err(e) = &self.settings {
             return Err(YuntaError::Adapter {
-                adapter: "codex".to_string(),
+                adapter: ID.clone(),
                 message: e.to_string(),
             });
         }
@@ -267,7 +279,7 @@ impl Adapter for CodexAdapter {
 }
 
 pub struct CodexSession {
-    pid: u32,
+    pid: Pid,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
 }
 
@@ -290,7 +302,7 @@ impl AgentSession for CodexSession {
         signal_group(self.pid, "-KILL").await
     }
 
-    fn pgid(&self) -> Option<u32> {
+    fn pgid(&self) -> Option<Pid> {
         // Spawned with `process_group(0)`, so the child's pid is its
         // process-group id.
         Some(self.pid)
@@ -300,7 +312,7 @@ impl AgentSession for CodexSession {
 /// Sends `signal` to the whole process group — identical mechanism
 /// to `claude_code`'s own, see that module's doc comment for why the
 /// `--` before the negative pid is load-bearing.
-async fn signal_group(pid: u32, signal: &str) -> Result<()> {
+async fn signal_group(pid: Pid, signal: &str) -> Result<()> {
     let _ = tokio::process::Command::new("kill")
         .arg(signal)
         .arg("--")
@@ -308,7 +320,7 @@ async fn signal_group(pid: u32, signal: &str) -> Result<()> {
         .status()
         .await
         .map_err(|source| YuntaError::AdapterIo {
-            adapter: "codex".to_string(),
+            adapter: ID.clone(),
             action: format!("send {signal} to the session's process group"),
             source,
         })?;

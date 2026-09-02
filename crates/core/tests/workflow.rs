@@ -14,7 +14,10 @@ fn parses_the_m0_schema_recorte_without_loss() {
 
     let implement = &workflow.nodes[0];
     assert_eq!(implement.id.as_str(), "implement");
-    assert_eq!(implement.runner.as_deref(), Some("executor"));
+    assert_eq!(
+        implement.runner.as_ref().map(|runner| runner.as_str()),
+        Some("executor")
+    );
     match &implement.kind {
         NodeKind::Loop { until, prompt, .. } => {
             assert_eq!(until, "all_tasks_complete");
@@ -117,7 +120,7 @@ nodes:
         .as_ref()
         .unwrap()
         .keys()
-        .map(String::as_str)
+        .map(|name| name.as_str())
         .collect();
     assert_eq!(names, vec!["hotfix", "standard"]);
     assert!(first.nodes[0].invariant);

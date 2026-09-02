@@ -45,7 +45,7 @@ fn prompt_node(id: &str) -> Node {
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
-        name: "fixture".to_string(),
+        name: "fixture".into(),
         modes: None,
         description: None,
         inputs: Default::default(),

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{Event, TerminalState, TokenUsage};
-use yunta_core::{Clock, ConfigLayer, NodeId, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
     render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry,
@@ -30,7 +30,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
     Receipt {
         run_id: RunId::from("run-2026-08-21-0001"),
         workflow: "release-cycle".to_string(),
-        mode: "default".to_string(),
+        mode: "default".into(),
         terminal_state: TerminalState::Done,
         criteria: CriteriaSummary {
             total: 3,
@@ -66,15 +66,15 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         runners: vec![
             RunnerUsage {
                 node_id: NodeId::from("review@reviewer"),
-                role: "reviewer".to_string(),
-                adapter: "claude-code".to_string(),
-                model: "claude-sonnet-4-6".to_string(),
+                runner: "reviewer".into(),
+                adapter: "claude-code".into(),
+                model: "claude-sonnet-4-6".into(),
             },
             RunnerUsage {
                 node_id: NodeId::from("review@reviewer-alt"),
-                role: "reviewer-alt".to_string(),
-                adapter: "codex".to_string(),
-                model: "gpt-5-codex".to_string(),
+                runner: "reviewer-alt".into(),
+                adapter: "codex".into(),
+                model: "gpt-5-codex".into(),
             },
         ],
         cost: CostSummary {
@@ -337,7 +337,7 @@ impl Bench {
                 run_id: &self.run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
-                mode: "default",
+                mode: &"default".into(),
                 promoted_from: None,
             },
             &self.storage,
@@ -346,8 +346,8 @@ impl Bench {
         .unwrap();
 
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), Arc::new(adapter));
 
         execute_run(RunEnv {
             run_id: &self.run_id,
@@ -444,14 +444,14 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
         &FixedClock,
     )
     .unwrap();
-    let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,

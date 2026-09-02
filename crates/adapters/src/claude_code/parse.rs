@@ -14,7 +14,7 @@
 //! atomic-turn execution model can't reliably support anyway.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, SessionId};
+use yunta_core::{sha256_hex, ModelName, SessionId};
 
 use crate::session::{AgentError, AgentEvent, AgentOutcome};
 
@@ -34,13 +34,23 @@ fn is_init(value: &Value) -> bool {
     value.get("subtype").and_then(Value::as_str) == Some("init")
 }
 
+/// The init line names the session and the model; a value that cannot
+/// be one fails the session explicitly instead of opening it under a
+/// name nothing can resume.
 fn session_opened(value: &Value) -> Option<AgentEvent> {
-    let session_id = value.get("session_id")?.as_str()?.to_string();
-    let model = value.get("model")?.as_str()?.to_string();
-    Some(AgentEvent::SessionOpened {
-        session_id: SessionId::from(session_id),
-        model,
-    })
+    let session_id = value.get("session_id")?.as_str()?;
+    let model = value.get("model")?.as_str()?;
+    Some(
+        match (session_id.parse::<SessionId>(), model.parse::<ModelName>()) {
+            (Ok(session_id), Ok(model)) => AgentEvent::SessionOpened { session_id, model },
+            (Err(error), _) | (_, Err(error)) => AgentEvent::Failed {
+                error: AgentError {
+                    message: format!("the CLI's init line is malformed: {error}"),
+                },
+                retryable: false,
+            },
+        },
+    )
 }
 
 fn assistant_message(value: &Value) -> Vec<AgentEvent> {

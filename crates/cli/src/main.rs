@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use yunta_core::{ConfigLayer, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, ModeName, PackRef, RunId, Workflow};
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -44,7 +44,7 @@ enum Command {
         /// the log records every candidate passed over. `mock` needs
         /// `--fixture`.
         #[arg(long)]
-        adapter: Option<String>,
+        adapter: Option<AdapterId>,
         /// With `--adapter mock`: the fixture that scripts every session,
         /// in the same format a `.yunta/tests/` fixture uses.
         #[arg(long, requires = "adapter")]
@@ -53,7 +53,7 @@ enum Command {
         /// defaults to the first declared mode; a workflow with no
         /// `modes:` at all ignores this entirely.
         #[arg(long)]
-        mode: Option<String>,
+        mode: Option<ModeName>,
         /// Prints progress as the run advances, polling the event log
         /// every 500ms instead of only at the end.
         #[arg(long)]
@@ -71,12 +71,12 @@ enum Command {
     /// Shows a run's derived state: nodes, tasks and tokens.
     Status {
         /// The run id (as printed by `yunta run`).
-        run_id: String,
+        run_id: RunId,
     },
     /// Resumes a run from its event log, restarting orphaned nodes.
     Resume {
         /// The run id to resume.
-        run_id: String,
+        run_id: RunId,
     },
     /// Answers a paused run's gate decision from a separate process — no
     /// live surface attached to the run itself. Records the decision
@@ -86,7 +86,7 @@ enum Command {
     /// pause reason; the option must be on that decision's own menu.
     ResolveGate {
         /// The run id waiting on a decision.
-        run_id: String,
+        run_id: RunId,
         /// The chosen option id, as printed by `yunta status`.
         option: String,
         /// Who's answering, for the audit trail (`gate_resolved.resolved_by`).
@@ -100,7 +100,7 @@ enum Command {
     /// escalating to `kill` if it doesn't close in time.
     Cancel {
         /// The run id to cancel.
-        run_id: String,
+        run_id: RunId,
     },
     /// Lists workflows under `.yunta/workflows/`, or local runs with
     /// `--runs`.
@@ -133,7 +133,7 @@ enum Command {
         workflow: PathBuf,
         /// Annotate each node with its derived state from this run.
         #[arg(long)]
-        run: Option<String>,
+        run: Option<RunId>,
         /// Diagram language: `mermaid` (default) or `dot`.
         #[arg(long, default_value = "mermaid")]
         format: graph::GraphFormat,
@@ -150,14 +150,14 @@ enum Command {
     /// recomputed from the log as persisted.
     Verify {
         /// The run id to verify.
-        run_id: String,
+        run_id: RunId,
     },
     /// Generates a Verified Work Receipt for a finished run: markdown
     /// and JSON derived entirely from the event log, written to
     /// the run's own directory and printed to stdout.
     Receipt {
         /// The run id to generate a receipt for.
-        run_id: String,
+        run_id: RunId,
         /// Prints the JSON receipt instead of the markdown one.
         #[arg(long)]
         json: bool,
@@ -171,7 +171,7 @@ enum Command {
     /// own history (`--workflow`), never both.
     Stats {
         /// The run id to inspect.
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         /// Aggregates every past run of this workflow instead of one run.
         #[arg(long, conflicts_with = "run_id")]
         workflow: Option<String>,
@@ -231,7 +231,7 @@ enum PackAction {
     /// Re-clones an installed pack at a new ref and re-vendors it.
     Update {
         /// `publisher/name`.
-        publisher_name: String,
+        pack: PackRef,
         r#ref: String,
         /// Confirms updating to a ref that declares executors — same
         /// gate as `add`: a new ref is where new executable code first
@@ -243,7 +243,7 @@ enum PackAction {
     /// Removes a pack's vendored directory and its lock entry.
     Remove {
         /// `publisher/name`.
-        publisher_name: String,
+        pack: PackRef,
     },
     /// Lists every locked pack, verifying its vendored content against
     /// the lock.
@@ -256,7 +256,7 @@ enum PackAction {
     /// on-demand form.
     Audit {
         /// `publisher/name`.
-        publisher_name: String,
+        pack: PackRef,
     },
 }
 
@@ -283,9 +283,9 @@ async fn main() -> ExitCode {
             commands::run::run(
                 &workflow,
                 &input,
-                adapter.as_deref(),
+                adapter.as_ref(),
                 fixture.as_deref(),
-                mode.as_deref(),
+                mode.as_ref(),
                 follow,
                 detach,
             )
@@ -322,7 +322,7 @@ async fn main() -> ExitCode {
             workflow,
             run,
             format,
-        } => graph::graph(&workflow, run.as_deref(), format),
+        } => graph::graph(&workflow, run.as_ref(), format),
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
         Command::Verify { run_id } => commands::verify::verify(&run_id),
         Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
@@ -332,22 +332,18 @@ async fn main() -> ExitCode {
                 yes,
                 run_tests,
             } => commands::pack::add(&source, yes, run_tests).await,
-            PackAction::Update {
-                publisher_name,
-                r#ref,
-                yes,
-            } => commands::pack::update(&publisher_name, &r#ref, yes).await,
-            PackAction::Remove { publisher_name } => commands::pack::remove(&publisher_name),
-            PackAction::List => commands::pack::list(),
-            PackAction::Audit { publisher_name } => {
-                commands::pack_audit::audit(&publisher_name).await
+            PackAction::Update { pack, r#ref, yes } => {
+                commands::pack::update(&pack, &r#ref, yes).await
             }
+            PackAction::Remove { pack } => commands::pack::remove(&pack),
+            PackAction::List => commands::pack::list(),
+            PackAction::Audit { pack } => commands::pack_audit::audit(&pack).await,
         },
         Command::Stats {
             run_id,
             workflow,
             json,
-        } => commands::stats::stats(run_id.as_deref(), workflow.as_deref(), json),
+        } => commands::stats::stats(run_id.as_ref(), workflow.as_deref(), json),
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
         Command::New {
             name,

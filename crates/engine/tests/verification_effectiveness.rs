@@ -70,7 +70,7 @@ fn gate_node(id: &str) -> Node {
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
-        name: "fixture".to_string(),
+        name: "fixture".into(),
         modes: None,
         description: None,
         inputs: Default::default(),
@@ -181,7 +181,7 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
         .collect();
     let findings = analyze(&wf, &history);
     assert_eq!(findings.never_triggered_reroutes.len(), 1);
-    assert_eq!(findings.never_triggered_reroutes[0].node, "lint".into());
+    assert_eq!(findings.never_triggered_reroutes[0].node, "lint");
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
         .collect();
     let findings = analyze(&wf, &history);
     assert_eq!(findings.always_approved_gates.len(), 1);
-    assert_eq!(findings.always_approved_gates[0].node, "approve".into());
+    assert_eq!(findings.always_approved_gates[0].node, "approve");
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn post_check_run(task_attempts: &[u32]) -> Vec<Event> {
                     (i as u64) * 10 + a as u64,
                     None,
                     EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-                        task_id: format!("T{i:03}").into(),
+                        task_id: format!("T{i:03}").parse().unwrap(),
                         phase: Phase::Post,
                         results: vec![criterion("test -f done", 0)],
                     }),
@@ -373,7 +373,7 @@ fn run_created_in_mode(mode: &str) -> Vec<Event> {
         EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
             manifest_hash: "h".to_string(),
             inputs: HashMap::new(),
-            mode: mode.to_string(),
+            mode: mode.into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),
@@ -389,7 +389,7 @@ fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
             .iter()
             .map(|name| {
                 (
-                    name.to_string(),
+                    yunta_core::ModeName::from(*name),
                     yunta_core::ModeSpec {
                         include: yunta_core::ModeInclude::All,
                     },

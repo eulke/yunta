@@ -9,31 +9,31 @@
 use std::collections::HashSet;
 
 use thiserror::Error;
-use yunta_core::FindingsFile;
+use yunta_core::{FindingId, FindingsFile};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum FindingsError {
     #[error("{id}: duplicate finding id")]
-    DuplicateId { id: String },
+    DuplicateId { id: FindingId },
 
     #[error("{id}: `title` is empty")]
-    EmptyTitle { id: String },
+    EmptyTitle { id: FindingId },
 
     #[error("{id}: `location` is empty")]
-    EmptyLocation { id: String },
+    EmptyLocation { id: FindingId },
 
     #[error("{id}: `detail` is empty")]
-    EmptyDetail { id: String },
+    EmptyDetail { id: FindingId },
 }
 
 /// Validates a parsed findings file, collecting every violation rather
 /// than stopping at the first.
 pub fn register(file: &FindingsFile) -> Vec<FindingsError> {
     let mut errors = Vec::new();
-    let mut known_ids: HashSet<&str> = HashSet::new();
+    let mut known_ids: HashSet<&FindingId> = HashSet::new();
 
     for finding in &file.findings {
-        if !known_ids.insert(finding.id.as_str()) {
+        if !known_ids.insert(&finding.id) {
             errors.push(FindingsError::DuplicateId {
                 id: finding.id.clone(),
             });

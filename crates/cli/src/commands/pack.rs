@@ -14,7 +14,9 @@
 
 use std::process::ExitCode;
 
-use yunta_core::{ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest};
+use yunta_core::{
+    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher,
+};
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
@@ -32,7 +34,7 @@ use crate::pack::{
 struct PackPolicy {
     /// Non-empty allow-list, with the declaring layer names — `None`
     /// when no layer restricts publishers (empty = everyone).
-    publishers_allow: Option<(Vec<String>, Vec<&'static str>)>,
+    publishers_allow: Option<(Vec<Publisher>, Vec<&'static str>)>,
     /// The merged (strictest-wins) executor policy; `Prompt` when no
     /// layer declares one — the longstanding default behavior.
     executors: PackExecutorPolicy,
@@ -100,7 +102,7 @@ fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, ExitCode> {
 /// The publisher allow-list gate: a non-empty
 /// `permissions.packs.publishers.allow` in the merged config refuses
 /// any publisher outside it, naming the declaring layer(s).
-fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &str) -> Result<(), ExitCode> {
+fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &Publisher) -> Result<(), ExitCode> {
     let Some((allow, declared_by)) = &policy.publishers_allow else {
         return Ok(());
     };
@@ -113,7 +115,11 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &str) -> Result<(),
          install a pack from an allowed publisher.",
         declared_by.join("/"),
         if declared_by.len() == 1 { "" } else { "s" },
-        allow.join(", ")
+        allow
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     Err(ExitCode::FAILURE)
 }
@@ -204,13 +210,12 @@ pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool) -> Ex
         }
     };
 
-    let dest = vendor_dir(&cwd, &manifest.publisher, &manifest.name);
+    let pack = manifest.reference();
+    let dest = vendor_dir(&cwd, &pack);
     if dest.exists() {
         eprintln!(
-            "error: `{}/{}` is already installed at {} — use `yunta pack update` to change its \
+            "error: `{pack}` is already installed at {} — use `yunta pack update` to change its \
              ref, or `yunta pack remove` first",
-            manifest.publisher,
-            manifest.name,
             dest.display()
         );
         return ExitCode::FAILURE;
@@ -268,7 +273,7 @@ pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool) -> Ex
         }
     };
 
-    let staging = staging_dir(&cwd, &manifest.publisher, &manifest.name);
+    let staging = staging_dir(&cwd, &pack);
     if let Err(e) = vendor_into_place(clone_dir.path(), &staging, &dest) {
         eprintln!(
             "error: could not vendor the pack into {}: {e}",
@@ -285,9 +290,8 @@ pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool) -> Ex
         }
     };
 
-    let key = yunta_core::PackLock::key(&manifest.publisher, &manifest.name);
     lock.packs.insert(
-        key,
+        pack.clone(),
         PackLockEntry {
             publisher: manifest.publisher.clone(),
             name: manifest.name.clone(),
@@ -336,7 +340,7 @@ fn roll_back_vendored(dest: &std::path::Path) {
     }
 }
 
-pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bool) -> ExitCode {
+pub async fn update(pack: &PackRef, new_ref: &str, confirmed_executors: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -344,11 +348,6 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
             return ExitCode::FAILURE;
         }
     };
-    let Some((publisher, name)) = publisher_name.split_once('/') else {
-        eprintln!("error: `{publisher_name}` isn't `publisher/name`");
-        return ExitCode::FAILURE;
-    };
-
     let mut lock = match load_lock(&cwd) {
         Ok(lock) => lock,
         Err(e) => {
@@ -356,11 +355,8 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
             return ExitCode::FAILURE;
         }
     };
-    let key = yunta_core::PackLock::key(publisher, name);
-    let Some(entry) = lock.packs.get(&key).cloned() else {
-        eprintln!(
-            "error: `{publisher_name}` isn't installed — `yunta pack add` it first, not update"
-        );
+    let Some(entry) = lock.packs.get(pack).cloned() else {
+        eprintln!("error: `{pack}` isn't installed — `yunta pack add` it first, not update");
         return ExitCode::FAILURE;
     };
 
@@ -385,9 +381,9 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
             return ExitCode::FAILURE;
         }
     };
-    if manifest.publisher != publisher || manifest.name != name {
+    if manifest.reference() != *pack {
         eprintln!(
-            "error: `{new_ref}` of `{}` identifies itself as `{}/{}`, not `{publisher_name}` — \
+            "error: `{new_ref}` of `{}` identifies itself as `{}/{}`, not `{pack}` — \
              refusing to update a pack into a different one",
             entry.source, manifest.publisher, manifest.name
         );
@@ -401,7 +397,7 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
         Ok(policy) => policy,
         Err(code) => return code,
     };
-    if let Err(code) = enforce_publisher_allowed(&policy, publisher) {
+    if let Err(code) = enforce_publisher_allowed(&policy, pack.publisher()) {
         return code;
     }
     if !manifest.declares.executors.is_empty() {
@@ -426,8 +422,8 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
     // The new ref is vendored beside the installed tree and swapped in
     // only once it is complete: a ref that cannot be vendored leaves the
     // installed pack, and the lock, exactly as they were.
-    let dest = vendor_dir(&cwd, publisher, name);
-    let staging = staging_dir(&cwd, publisher, name);
+    let dest = vendor_dir(&cwd, pack);
+    let staging = staging_dir(&cwd, pack);
     if let Err(e) = vendor_into_place(clone_dir.path(), &staging, &dest) {
         eprintln!(
             "error: could not vendor the pack into {}: {e}",
@@ -444,10 +440,10 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
     };
 
     lock.packs.insert(
-        key,
+        pack.clone(),
         PackLockEntry {
-            publisher: publisher.to_string(),
-            name: name.to_string(),
+            publisher: pack.publisher().clone(),
+            name: pack.name().clone(),
             source: entry.source,
             r#ref: new_ref.to_string(),
             commit: commit.clone(),
@@ -460,13 +456,13 @@ pub async fn update(publisher_name: &str, new_ref: &str, confirmed_executors: bo
     }
 
     println!(
-        "updated {publisher}/{name} -> {new_ref} ({})",
+        "updated {pack} -> {new_ref} ({})",
         &commit[..commit.len().min(12)]
     );
     ExitCode::SUCCESS
 }
 
-pub fn remove(publisher_name: &str) -> ExitCode {
+pub fn remove(pack: &PackRef) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -474,11 +470,6 @@ pub fn remove(publisher_name: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let Some((publisher, name)) = publisher_name.split_once('/') else {
-        eprintln!("error: `{publisher_name}` isn't `publisher/name`");
-        return ExitCode::FAILURE;
-    };
-
     let mut lock = match load_lock(&cwd) {
         Ok(lock) => lock,
         Err(e) => {
@@ -486,13 +477,12 @@ pub fn remove(publisher_name: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let key = yunta_core::PackLock::key(publisher, name);
-    if lock.packs.remove(&key).is_none() {
-        eprintln!("error: `{publisher_name}` isn't installed");
+    if lock.packs.remove(pack).is_none() {
+        eprintln!("error: `{pack}` isn't installed");
         return ExitCode::FAILURE;
     }
 
-    let dest = vendor_dir(&cwd, publisher, name);
+    let dest = vendor_dir(&cwd, pack);
     if let Err(e) = std::fs::remove_dir_all(&dest) {
         if e.kind() != std::io::ErrorKind::NotFound {
             eprintln!("error: could not remove {}: {e}", dest.display());
@@ -504,7 +494,7 @@ pub fn remove(publisher_name: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    println!("removed {publisher_name}");
+    println!("removed {pack}");
     ExitCode::SUCCESS
 }
 
@@ -533,7 +523,7 @@ pub fn list() -> ExitCode {
     // longer matches what the lock recorded, rather than just trusting
     // the lock's own numbers back at the user.
     for (key, entry) in &lock.packs {
-        let dest = vendor_dir(&cwd, &entry.publisher, &entry.name);
+        let dest = vendor_dir(&cwd, key);
         let status = match hash_tree(&dest) {
             Ok(hash) if hash == entry.content_hash => "ok".to_string(),
             Ok(_) => "MODIFIED (vendored content no longer matches the lock)".to_string(),

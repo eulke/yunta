@@ -9,7 +9,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, current_escalation, execute_run, CreateRunParams, NoInteraction,
     RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
@@ -75,7 +75,7 @@ async fn paused_manifest_and_events(
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &storage,
@@ -84,8 +84,8 @@ async fn paused_manifest_and_events(
     .unwrap();
 
     let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-    let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), std::sync::Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &run_id,
@@ -249,7 +249,7 @@ impl GateBench {
                 run_id: &run_id,
                 manifest: &manifest,
                 runs_root: &runs_root,
-                mode: "default",
+                mode: &"default".into(),
                 promoted_from: None,
             },
             &storage,
@@ -272,8 +272,8 @@ impl GateBench {
         interaction: &dyn yunta_engine::HumanInteraction,
     ) -> (RunTerminal, RunState) {
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), std::sync::Arc::new(adapter));
         let report = execute_run(RunEnv {
             run_id: &self.run_id,
             manifest: &self.manifest,
@@ -341,7 +341,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     let (terminal, state) = bench.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     // The consuming engine never re-emits the recorded pair.
@@ -394,7 +394,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &root.path().join("runs"),
-            mode: "quick",
+            mode: &"quick".into(),
             promoted_from: None,
         },
         &storage,
@@ -409,8 +409,8 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
         storage: &Storage,
     ) -> yunta_engine::RunReport {
         let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
-        let mut adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), std::sync::Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), std::sync::Arc::new(adapter));
         execute_run(RunEnv {
             run_id,
             manifest,
@@ -447,7 +447,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     assert_eq!(
         report.terminal,
         RunTerminal::Promoted {
-            suggested_mode: "full".to_string()
+            suggested_mode: "full".into()
         }
     );
     let events = storage.events_for_run(&run_id).unwrap();
@@ -495,7 +495,7 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
     let (terminal, state) = bench.execute("sessions: []\n", &NoInteraction).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get(&"approve".into()) {
+    match state.nodes.get("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }

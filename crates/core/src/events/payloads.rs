@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
-use crate::ids::{NodeId, RunId, TaskId};
+use crate::ids::{
+    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, SessionId,
+    TaskId,
+};
 use crate::Capabilities;
 
 /// A ledger criterion, frozen into `task_registered` — the same shape
@@ -148,7 +151,7 @@ pub enum FindingSeverity {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Finding {
-    pub id: String,
+    pub id: FindingId,
     pub severity: FindingSeverity,
     pub title: String,
     pub location: String,
@@ -208,7 +211,7 @@ pub struct ContextSourceRef {
 pub struct RunCreatedPayload {
     pub manifest_hash: String,
     pub inputs: HashMap<String, serde_json::Value>,
-    pub mode: String,
+    pub mode: ModeName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,9 +220,13 @@ pub struct RunCreatedPayload {
     pub base_commit: String,
 }
 
+/// `runner` names the `runners:` entry the node resolved through. The
+/// reader also accepts `role`, the field's former name, so a log written
+/// under it still replays.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunnerResolvedPayload {
-    pub role: String,
+    #[serde(alias = "role")]
+    pub runner: RunnerName,
     pub chosen: RunnerCandidate,
     pub discarded: Vec<DiscardedCandidate>,
 }
@@ -244,10 +251,10 @@ pub struct NodeStartedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionOpenedPayload {
-    pub session_id: crate::ids::SessionId,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
-    pub model: String,
+    pub agent: Option<AgentName>,
+    pub model: ModelName,
     pub capabilities: Capabilities,
 }
 
@@ -471,7 +478,7 @@ pub struct FindingPostedPayload {
 pub struct PromotionSignaledPayload {
     pub reason: String,
     pub evidence: String,
-    pub suggested_mode: String,
+    pub suggested_mode: ModeName,
 }
 
 /// The parent's `kind: workflow` node is the envelope's own `node_id`.
@@ -500,7 +507,7 @@ pub struct ChildRunFinishedPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityDegradedPayload {
     pub capability: String,
-    pub adapter: String,
+    pub adapter: AdapterId,
     pub policy_applied: String,
 }
 

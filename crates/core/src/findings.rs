@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::{self, FindingSeverity};
+use crate::ids::FindingId;
 
 /// The artifact's document — sole top-level key `findings:`, mirroring
 /// a ledger's `tasks:`-only shape.
@@ -29,7 +30,7 @@ impl FindingsFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FindingEntry {
-    pub id: String,
+    pub id: FindingId,
     pub severity: FindingSeverity,
     pub title: String,
     pub location: String,

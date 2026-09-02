@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
-use yunta_core::{ExecutorKind, ExecutorRegistration, Node};
+use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
 
 use super::node_exec::{close_node, fail, kill_process_group, NodeEnd};
 use super::{RunCtx, RunError};
@@ -66,7 +66,7 @@ enum WaitOutcome {
 pub(super) async fn execute_executor(
     ctx: &RunCtx<'_>,
     node: &Node,
-    executor: &str,
+    executor: &ExecutorName,
     with: &serde_json::Map<String, serde_json::Value>,
     timeout_seconds: Option<u64>,
     cancel: &CancellationToken,
@@ -76,7 +76,7 @@ pub(super) async fn execute_executor(
         .config
         .skills
         .as_ref()
-        .and_then(|skills| skills.executors.iter().find(|e| e.name == executor))
+        .and_then(|skills| skills.executors.iter().find(|e| e.name == *executor))
     else {
         return fail(
             ctx,
@@ -133,8 +133,10 @@ pub(super) async fn execute_executor(
             context: format!("spawn executor `{executor}` for node `{}`", node.id),
             source,
         })?;
-    let _pgid_registration =
-        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
+    let _pgid_registration = crate::process_registry::register(
+        ctx.process_registry.as_ref(),
+        crate::process_registry::child_pid(&child),
+    );
 
     let Some(mut stdin) = child.stdin.take() else {
         // Unreachable given `Stdio::piped()` above, but a typed error
@@ -192,14 +194,14 @@ pub(super) async fn execute_executor(
 
     let status = match outcome {
         WaitOutcome::Cancelled => {
-            if let Some(pid) = child.id() {
+            if let Some(pid) = crate::process_registry::child_pid(&child) {
                 kill_process_group(pid).await;
             }
             let _ = child.wait().await;
             return super::node_exec::cancelled_end(ctx, node);
         }
         WaitOutcome::TimedOut => {
-            if let Some(pid) = child.id() {
+            if let Some(pid) = crate::process_registry::child_pid(&child) {
                 kill_process_group(pid).await;
             }
             let _ = child.wait().await;

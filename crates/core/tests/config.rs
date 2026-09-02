@@ -10,8 +10,8 @@ use yunta_core::{
 
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
     RunnerCandidate {
-        adapter: adapter.to_string(),
-        model: model.to_string(),
+        adapter: adapter.into(),
+        model: model.into(),
         agent: None,
     }
 }
@@ -20,20 +20,14 @@ fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
 fn repo_replaces_a_runners_array_wholesale_instead_of_concatenating() {
     let org = ConfigLayer {
         runners: Some(HashMap::from([
-            (
-                "planner".to_string(),
-                vec![candidate("codex", "gpt-5-codex")],
-            ),
-            (
-                "reviewer".to_string(),
-                vec![candidate("codex", "gpt-5-codex")],
-            ),
+            ("planner".into(), vec![candidate("codex", "gpt-5-codex")]),
+            ("reviewer".into(), vec![candidate("codex", "gpt-5-codex")]),
         ])),
         ..Default::default()
     };
     let repo = ConfigLayer {
         runners: Some(HashMap::from([(
-            "planner".to_string(),
+            "planner".into(),
             vec![candidate("claude-code", "claude-opus-4-8")],
         )])),
         ..Default::default()
@@ -56,7 +50,7 @@ fn repo_replaces_a_runners_array_wholesale_instead_of_concatenating() {
 fn user_wins_over_org_for_a_field_repo_never_sets() {
     let org = ConfigLayer {
         adapters: Some(HashMap::from([(
-            "claude-code".to_string(),
+            "claude-code".into(),
             AdapterSettings {
                 binary: Some(PathBuf::from("/usr/bin/claude")),
                 adapter_settings: None,
@@ -66,7 +60,7 @@ fn user_wins_over_org_for_a_field_repo_never_sets() {
     };
     let user = ConfigLayer {
         adapters: Some(HashMap::from([(
-            "claude-code".to_string(),
+            "claude-code".into(),
             AdapterSettings {
                 binary: Some(PathBuf::from("~/.local/bin/claude")),
                 adapter_settings: None,
@@ -176,7 +170,8 @@ paths:
     assert_eq!(
         layer.runners.as_ref().unwrap()["reviewer"][0]
             .agent
-            .as_deref(),
+            .as_ref()
+            .map(|agent| agent.as_str()),
         Some("benito")
     );
     assert_eq!(
@@ -433,7 +428,7 @@ fn skills_executors_parses_name_kind_and_path() {
     assert_eq!(
         executors,
         vec![ExecutorRegistration {
-            name: "coverage-gate".to_string(),
+            name: "coverage-gate".into(),
             kind: ExecutorKind::Binary,
             path: PathBuf::from(".yunta/bin/coverage-gate"),
         }]
@@ -455,7 +450,7 @@ fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
     let org = ConfigLayer {
         skills: Some(SkillsConfig {
             executors: vec![ExecutorRegistration {
-                name: "org-tool".to_string(),
+                name: "org-tool".into(),
                 kind: ExecutorKind::Binary,
                 path: PathBuf::from("org-tool"),
             }],
@@ -467,7 +462,7 @@ fn repo_replaces_skills_executors_wholesale_instead_of_concatenating() {
     let repo = ConfigLayer {
         skills: Some(SkillsConfig {
             executors: vec![ExecutorRegistration {
-                name: "repo-tool".to_string(),
+                name: "repo-tool".into(),
                 kind: ExecutorKind::Binary,
                 path: PathBuf::from("repo-tool"),
             }],

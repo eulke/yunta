@@ -13,11 +13,12 @@ for installing, creating, or publishing one.
 
 ## Node kinds
 
-Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`. Every key
-is checked: a key the schema does not know — a typo, or a key that belongs to
-another kind — is refused by `yunta check` and by every command that reads the
-file, with the key, where it sits and the keys that are valid there. A mistyped
-key never silently becomes a default.
+Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`. An `id`
+is a letter followed by letters, digits, `_` or `-` — the same rule names runners,
+modes, tasks and questions. Every key is checked: a key the schema does not know —
+a typo, or a key that belongs to another kind — is refused by `yunta check` and by
+every command that reads the file, with the key, where it sits and the keys that
+are valid there. A mistyped key never silently becomes a default.
 
 - **`bash`** — `run: "<command>"`. Exit code is the verdict; no session, no agent.
 - **`prompt`** — `prompt: "<text>"` (or `prompt: { file: path/to/prompt.md }` for

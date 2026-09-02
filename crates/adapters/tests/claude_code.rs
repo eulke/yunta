@@ -267,8 +267,8 @@ async fn capability_custom_agents_passes_the_agent_as_its_own_flag() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.model = Some("claude-opus-5".to_string());
-    req.agent = Some("benito".to_string());
+    req.model = Some("claude-opus-5".into());
+    req.agent = Some("benito".into());
     req.env.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),

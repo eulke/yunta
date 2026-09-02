@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{ConfigLayer, Isolation, NodeId, Workflow};
+use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// Absolute, fully-resolved state roots at run creation —
 /// post `YUNTA_HOME`, post config layers. Frozen so a later
@@ -40,8 +40,8 @@ pub struct FrozenPaths {
 /// identifies it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackProvenance {
-    pub publisher: String,
-    pub name: String,
+    pub publisher: Publisher,
+    pub name: PackName,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,

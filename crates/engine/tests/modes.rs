@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunError, RunTerminal, DEFAULT_MAX_RETRIES,
@@ -122,7 +122,7 @@ impl Bench {
                 run_id: &run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
-                mode,
+                mode: &ModeName::from(mode),
                 promoted_from: None,
             },
             &self.storage,
@@ -130,8 +130,8 @@ impl Bench {
         )?;
 
         let adapter = MockAdapter::from_yaml(FIXTURE).unwrap();
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), Arc::new(adapter));
 
         let report = execute_run(RunEnv {
             run_id: &run_id,
@@ -159,15 +159,15 @@ async fn quick_mode_skips_the_excluded_node_and_still_finishes() {
     let (terminal, state) = bench.run("run-quick", "quick").await.unwrap();
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"start".into()),
+        state.nodes.get("start"),
         Some(NodeState::Finished { .. })
     ));
     assert!(matches!(
-        state.nodes.get(&"ship".into()),
+        state.nodes.get("ship"),
         Some(NodeState::Finished { .. })
     ));
     assert!(
-        !state.nodes.contains_key(&"extra".into()),
+        !state.nodes.contains_key("extra"),
         "a node excluded from the run's mode must never be scheduled at all"
     );
 }
@@ -179,12 +179,9 @@ async fn full_mode_runs_every_node() {
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(
-            matches!(
-                state.nodes.get(&id.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
             "node `{id}` should have finished under `full`, got {:?}",
-            state.nodes.get(&id.into())
+            state.nodes.get(id)
         );
     }
 }
@@ -199,7 +196,7 @@ async fn the_default_sentinel_ignores_modes_and_runs_everything() {
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(matches!(
-            state.nodes.get(&id.into()),
+            state.nodes.get(id),
             Some(NodeState::Finished { .. })
         ));
     }
@@ -309,11 +306,8 @@ async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() 
         "expected the unanswered gate to pause the run, got {terminal:?}"
     );
     assert!(
-        matches!(
-            state.nodes.get(&"start".into()),
-            Some(NodeState::Finished { .. })
-        ),
+        matches!(state.nodes.get("start"), Some(NodeState::Finished { .. })),
         "`start` must finish before the gate that transitively depends on it is asked; got {:?}",
-        state.nodes.get(&"start".into())
+        state.nodes.get("start")
     );
 }

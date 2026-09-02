@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use yunta_core::Pid;
 
 /// The file's whole content — small enough that every mutation rewrites
 /// it atomically (tempfile + rename) rather than patching in place.
@@ -24,11 +25,11 @@ pub struct EngineProcessFile {
     /// The `yunta` process driving the run — signal it first (`yunta
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
-    pub engine_pid: u32,
+    pub engine_pid: Pid,
     pub started_at: String,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
-    pub process_groups: Vec<u32>,
+    pub process_groups: Vec<Pid>,
 }
 
 /// Handle the run's imperative shell holds for the registry file.
@@ -43,7 +44,7 @@ impl ProcessRegistry {
     /// new engine owns the run now.
     pub fn create(
         run_dir: &Path,
-        engine_pid: u32,
+        engine_pid: Pid,
         started_at: String,
     ) -> std::io::Result<ProcessRegistry> {
         let state = EngineProcessFile {
@@ -61,24 +62,24 @@ impl ProcessRegistry {
 
     /// Registers a spawned process group. Failures warn, never fail the
     /// run — see the module doc.
-    pub fn add(&self, pgid: u32) {
+    pub fn add(&self, pgid: Pid) {
         let mut state = lock(&self.state);
         if !state.process_groups.contains(&pgid) {
             state.process_groups.push(pgid);
         }
         drop(state);
         if let Err(e) = self.persist() {
-            tracing::warn!(pgid, error = %e, "failed to register a process group in engine.json");
+            tracing::warn!(pgid = %pgid, error = %e, "failed to register a process group in engine.json");
         }
     }
 
     /// Unregisters a closed process group.
-    pub fn remove(&self, pgid: u32) {
+    pub fn remove(&self, pgid: Pid) {
         let mut state = lock(&self.state);
         state.process_groups.retain(|existing| *existing != pgid);
         drop(state);
         if let Err(e) = self.persist() {
-            tracing::warn!(pgid, error = %e, "failed to unregister a process group in engine.json");
+            tracing::warn!(pgid = %pgid, error = %e, "failed to unregister a process group in engine.json");
         }
     }
 
@@ -107,7 +108,7 @@ impl ProcessRegistry {
 /// cancellation and error included.
 pub struct PgidRegistration<'a> {
     registry: &'a ProcessRegistry,
-    pgid: u32,
+    pgid: Pid,
 }
 
 impl Drop for PgidRegistration<'_> {
@@ -121,7 +122,7 @@ impl Drop for PgidRegistration<'_> {
 /// nothing, so call sites never branch.
 pub fn register<'a>(
     registry: Option<&'a ProcessRegistry>,
-    pgid: Option<u32>,
+    pgid: Option<Pid>,
 ) -> Option<PgidRegistration<'a>> {
     match (registry, pgid) {
         (Some(registry), Some(pgid)) => {
@@ -156,9 +157,14 @@ pub fn read_registry(run_dir: &Path) -> Option<EngineProcessFile> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// The pid of a spawned child, or `None` once it has been reaped.
+pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
+    child.id().and_then(|id| Pid::try_from(id).ok())
+}
+
 /// `kill -0 <pid>` — POSIX liveness without `libc` or unsafe (Windows
 /// is out of scope). Lives in the imperative shell only.
-pub fn process_alive(pid: u32) -> bool {
+pub fn process_alive(pid: Pid) -> bool {
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())

@@ -53,7 +53,7 @@ fn write_pack_with_requires(dir: &Path) {
          publisher: acme\n\
          version: 1.0.0\n\
          requires:\n  \
-           roles: [{ name: reviewer }]\n  \
+           runners: [{ name: reviewer }]\n  \
            mcp_servers: [internal-docs]\n  \
            commands: [this-binary-almost-certainly-does-not-exist-anywhere]\n\
          declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
@@ -99,7 +99,7 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     assert!(!doctor_out.status.success());
     let text = stdout(&doctor_out);
     assert!(text.contains("pack acme/review-pack requires"), "{text}");
-    assert!(text.contains("role `reviewer`"), "{text}");
+    assert!(text.contains("runner `reviewer`"), "{text}");
     assert!(text.contains("mcp_server `internal-docs`"), "{text}");
     assert!(
         text.contains("command `this-binary-almost-certainly-does-not-exist-anywhere`"),

@@ -38,7 +38,7 @@ fn a_required_input_with_no_value_fails_naming_it() {
     assert_eq!(
         err,
         InputsError::Missing {
-            name: "idea".to_string()
+            name: "idea".into()
         }
     );
 }
@@ -51,7 +51,7 @@ fn an_undeclared_provided_input_is_an_error() {
     assert_eq!(
         err,
         InputsError::Unknown {
-            name: "ghost".to_string()
+            name: "ghost".into()
         }
     );
 }

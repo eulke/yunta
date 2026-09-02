@@ -17,10 +17,6 @@ impl ClaudeSettings {
     pub(super) const KNOWN: &'static [&'static str] = &[];
 
     pub(super) fn read(settings: &AdapterSettings) -> Result<Self> {
-        typed_settings(
-            "claude-code",
-            settings.adapter_settings.as_ref(),
-            Self::KNOWN,
-        )
+        typed_settings(&super::ID, settings.adapter_settings.as_ref(), Self::KNOWN)
     }
 }

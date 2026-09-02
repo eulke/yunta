@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, Forge};
-use yunta_core::{Manifest, RunId, SystemClock};
+use yunta_core::{AdapterId, Manifest, RunId, SystemClock};
 use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
@@ -28,7 +28,7 @@ pub(crate) struct PromotionEnv<'a> {
     pub cwd: &'a Path,
     pub project: &'a Project,
     pub storage: &'a Storage,
-    pub adapters: &'a HashMap<String, Arc<dyn Adapter>>,
+    pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
 }
@@ -177,7 +177,7 @@ nodes:
             storage_path: root.path().join("yunta.db"),
         };
         let storage = Storage::open(&project.storage_path).unwrap();
-        let adapters: HashMap<String, std::sync::Arc<dyn Adapter>> = HashMap::new();
+        let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
         let manifest =
@@ -199,7 +199,7 @@ nodes:
                 run_id: &run_id,
                 manifest: &manifest,
                 runs_root: &project.runs_root,
-                mode: "quick",
+                mode: &"quick".into(),
                 promoted_from: None,
             },
             &storage,

@@ -13,7 +13,10 @@
 
 use std::path::Path;
 
-use yunta_core::{ContextSpec, Hooks, Node, NodeKind, PackManifest, PromptSource, Workflow};
+use yunta_core::{
+    AgentName, ContextSpec, ExecutorName, Hooks, Node, NodeKind, PackManifest, PromptSource,
+    Workflow,
+};
 
 /// The full inventory of one installed (or freshly cloned, pre-vendor)
 /// pack directory.
@@ -57,13 +60,13 @@ pub struct NodeAudit {
     /// and exactly what it points at.
     pub context: Vec<String>,
     pub permissions: Option<&'static str>,
-    pub agent: Option<String>,
+    pub agent: Option<AgentName>,
     /// MCP server names reached by this node's own `context: - mcp:`
     /// entries.
     pub mcp_servers: Vec<String>,
     /// `kind: executor`'s own name — code, not declarative content;
     /// flagged separately from everything else in the inventory.
-    pub executor: Option<String>,
+    pub executor: Option<ExecutorName>,
 }
 
 /// Audits every workflow the manifest declares under `contents.workflows`,

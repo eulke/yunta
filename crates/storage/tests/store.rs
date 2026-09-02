@@ -222,7 +222,7 @@ fn created_event(run_id: &str) -> Event {
         payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
             manifest_hash: "abc123manifest".to_string(),
             inputs: Default::default(),
-            mode: "default".to_string(),
+            mode: "default".into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),

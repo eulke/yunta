@@ -45,7 +45,7 @@ use yunta_core::events::{
     Event, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
     RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, TerminalState,
 };
-use yunta_core::{AdapterId, Clock, Manifest, NodeId, RunId, YuntaError};
+use yunta_core::{AdapterId, Clock, Manifest, ModeName, NodeId, Pid, RunId, YuntaError};
 use yunta_storage::{Storage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -76,8 +76,16 @@ pub enum RunError {
     #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
     UnknownMode {
         workflow: String,
-        mode: String,
+        mode: ModeName,
         declared: String,
+    },
+
+    /// An identifier the engine composed breaks its own rule — an
+    /// invariant of the composition, reported rather than assumed.
+    #[error("an identifier the engine composed is not valid: {source}")]
+    Id {
+        #[from]
+        source: yunta_core::InvalidId,
     },
 
     #[error("failed to {context}")]
@@ -124,7 +132,7 @@ pub(crate) struct RunCtx<'a> {
     pub manifest: &'a Manifest,
     pub run_dir: &'a Path,
     pub worktree: &'a Path,
-    pub adapters: &'a HashMap<String, Arc<dyn Adapter>>,
+    pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a Storage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
@@ -269,7 +277,7 @@ impl RunCtx<'_> {
     /// — passed through to the request untouched.
     pub(crate) fn adapter_settings(
         &self,
-        adapter: &str,
+        adapter: &AdapterId,
     ) -> serde_json::Map<String, serde_json::Value> {
         self.manifest
             .config
@@ -315,7 +323,7 @@ pub enum RunTerminal {
     /// original repo checkout (`cwd`) to prepare a worktree, which
     /// `execute_run` was never given (only ever an *existing* worktree).
     Promoted {
-        suggested_mode: String,
+        suggested_mode: ModeName,
     },
 }
 
@@ -334,7 +342,7 @@ pub struct CreateRunParams<'a> {
     pub manifest: &'a Manifest,
     pub runs_root: &'a Path,
     /// Frozen into `run_created.mode` and never re-resolved.
-    pub mode: &'a str,
+    pub mode: &'a ModeName,
     /// The predecessor this run inherits from, if any.
     pub promoted_from: Option<&'a RunId>,
 }
@@ -363,20 +371,24 @@ pub fn create_run(
         mode,
         promoted_from,
     } = params;
-    if mode != "default" {
+    if *mode != ModeName::default() {
         match &manifest.workflow.modes {
             Some(modes) if !modes.contains_key(mode) => {
                 return Err(RunError::UnknownMode {
                     workflow: manifest.workflow.name.clone(),
-                    mode: mode.to_string(),
-                    declared: modes.keys().cloned().collect::<Vec<_>>().join(", "),
+                    mode: mode.clone(),
+                    declared: modes
+                        .keys()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                 });
             }
             Some(_) => {}
             None => {
                 return Err(RunError::UnknownMode {
                     workflow: manifest.workflow.name.clone(),
-                    mode: mode.to_string(),
+                    mode: mode.clone(),
                     declared: "(none — this workflow declares no modes:)".to_string(),
                 });
             }
@@ -413,7 +425,7 @@ pub fn create_run(
         payload: EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
             inputs: HashMap::new(), // `inputs:` schema isn't designed yet
-            mode: mode.to_string(),
+            mode: mode.clone(),
             promoted_from: promoted_from.cloned(),
             // Resolved once here — declared range as
             // written, or the binary's own schema when absent (the
@@ -444,7 +456,7 @@ pub struct RunEnv<'a> {
     pub manifest: &'a Manifest,
     pub run_dir: &'a Path,
     pub worktree: &'a Path,
-    pub adapters: &'a HashMap<String, Arc<dyn Adapter>>,
+    pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a Storage,
     pub clock: &'a dyn Clock,
     pub max_task_retries: u32,
@@ -506,7 +518,7 @@ pub(crate) async fn execute_run_at_depth(
         budget_lifted: std::sync::atomic::AtomicBool::new(false),
         process_registry: match crate::process_registry::ProcessRegistry::create(
             run_dir,
-            std::process::id(),
+            Pid::current(),
             clock.now().to_rfc3339(),
         ) {
             Ok(registry) => Some(registry),
@@ -583,7 +595,7 @@ pub(crate) async fn execute_run_at_depth(
     // reads the same name back off the log rather than re-deriving it,
     // same "resolved once, reused forever" discipline runner resolution
     // already follows.
-    let mode_name = yunta_core::events::run_mode(&events).to_string();
+    let mode_name = yunta_core::events::run_mode(&events);
     let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
 
     loop {

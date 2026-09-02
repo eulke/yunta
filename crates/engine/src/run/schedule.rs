@@ -23,7 +23,7 @@
 use std::collections::HashSet;
 
 use yunta_core::events::{Event, EventPayload};
-use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::{ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState};
@@ -37,7 +37,7 @@ use crate::replay::{derive, NodeState};
 /// isn't one of them (the `"default"` sentinel, or a stale/renamed
 /// mode), or it's already the last one declared — nothing to promote
 /// to, so promotion is never offered.
-pub fn next_mode_after(workflow: &Workflow, mode_name: &str) -> Option<String> {
+pub fn next_mode_after(workflow: &Workflow, mode_name: &ModeName) -> Option<ModeName> {
     let modes = workflow.modes.as_ref()?;
     let index = modes.get_index_of(mode_name)?;
     modes.get_index(index + 1).map(|(name, _)| name.clone())

@@ -1,5 +1,5 @@
 use thiserror::Error;
-use yunta_core::RunId;
+use yunta_core::{InvalidId, RunId};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -45,6 +45,20 @@ pub enum StorageError {
         seq: u64,
         #[source]
         source: chrono::ParseError,
+    },
+
+    #[error("stored node id for run `{run_id}` seq {seq} is not a node id")]
+    CorruptNodeId {
+        run_id: RunId,
+        seq: u64,
+        #[source]
+        source: InvalidId,
+    },
+
+    #[error("a stored run id is not a run id")]
+    CorruptRunId {
+        #[source]
+        source: InvalidId,
     },
 
     #[error("failed to list runs")]

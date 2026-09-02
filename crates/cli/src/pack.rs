@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{sha256_hex, PackLock, PackManifest};
+use yunta_core::{sha256_hex, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
@@ -255,19 +255,21 @@ pub fn packs_root(cwd: &Path) -> PathBuf {
     cwd.join(".yunta/packs")
 }
 
-pub fn vendor_dir(cwd: &Path, publisher: &str, name: &str) -> PathBuf {
-    packs_root(cwd).join(publisher).join(name)
+pub fn vendor_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
+    packs_root(cwd)
+        .join(pack.publisher().as_str())
+        .join(pack.name().as_str())
 }
 
 /// Where a pack is vendored before it is moved into place: a sibling of
 /// its final directory, so the final move is a rename on one
 /// filesystem, and a name no pack can have (`.staging-` is not a path
-/// segment `PackManifest::validate` lets through as a pack name's
-/// start — it would begin with a dot the catalog never lists).
-pub fn staging_dir(cwd: &Path, publisher: &str, name: &str) -> PathBuf {
+/// segment a pack name can start with — it would begin with a dot the
+/// catalog never lists).
+pub fn staging_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
     packs_root(cwd)
-        .join(publisher)
-        .join(format!(".staging-{name}-{}", std::process::id()))
+        .join(pack.publisher().as_str())
+        .join(format!(".staging-{}-{}", pack.name(), std::process::id()))
 }
 
 /// Vendors `src` into `dest` through a staging directory beside it:

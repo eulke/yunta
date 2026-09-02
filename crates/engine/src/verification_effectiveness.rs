@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use yunta_core::events::{Event, EventPayload, Phase};
-use yunta_core::{NodeId, Workflow};
+use yunta_core::{ModeName, NodeId, Workflow};
 
 /// Below this many independent samples, a signal says nothing — a
 /// number without a distribution behind it is a guess wearing a data
@@ -63,7 +63,7 @@ pub struct AlwaysFirstTryTasks {
 /// existed a long time".
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnusedMode {
-    pub name: String,
+    pub name: ModeName,
     pub runs_observed: usize,
 }
 
@@ -107,18 +107,18 @@ fn unused_modes(workflow: &Workflow, history: &[Vec<Event>]) -> Vec<UnusedMode> 
     if history.len() < MIN_SAMPLES {
         return Vec::new();
     }
-    let used: std::collections::HashSet<&str> = history
+    let used: std::collections::HashSet<&ModeName> = history
         .iter()
         .filter_map(|events| {
             events.iter().find_map(|e| match &e.payload {
-                EventPayload::RunCreated(p) => Some(p.mode.as_str()),
+                EventPayload::RunCreated(p) => Some(&p.mode),
                 _ => None,
             })
         })
         .collect();
     modes
         .keys()
-        .filter(|name| !used.contains(name.as_str()))
+        .filter(|name| !used.contains(name))
         .map(|name| UnusedMode {
             name: name.clone(),
             runs_observed: history.len(),

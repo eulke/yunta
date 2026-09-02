@@ -52,17 +52,6 @@ fn a_well_formed_ledger_has_no_errors() {
 }
 
 #[test]
-fn invalid_id_pattern_is_reported() {
-    let ledger = Ledger {
-        tasks: vec![task("1-bad-id", &["src/**"], vec![cmd("true")], &[])],
-    };
-    let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::InvalidId {
-        id: "1-bad-id".to_string()
-    }));
-}
-
-#[test]
 fn duplicate_id_is_reported() {
     let ledger = Ledger {
         tasks: vec![

@@ -8,7 +8,7 @@ license: MIT
 yunta_schema: ">=1 <2"
 
 requires:
-  roles:
+  runners:
     - { name: reviewer, permissions: read-only }
     - { name: mechanical }
   mcp_servers: [internal-docs]

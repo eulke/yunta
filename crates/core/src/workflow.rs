@@ -14,7 +14,7 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ids::NodeId;
+use crate::ids::{AgentName, ExecutorName, ModeName, NodeId, RunnerName};
 use crate::inputs::InputSpec;
 use crate::yaml::{self, Mapping, Value, YamlError};
 
@@ -33,7 +33,7 @@ pub struct Workflow {
     /// Absent entirely means the workflow has no modes at all: every
     /// node always runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modes: Option<IndexMap<String, ModeSpec>>,
+    pub modes: Option<IndexMap<ModeName, ModeSpec>>,
     /// `inputs:` — name is the map key, so the schema's
     /// own format guarantees uniqueness rather than a validation pass
     /// over a `[{name, ...}]` list. A `BTreeMap` rather than the
@@ -212,18 +212,18 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scope: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runner: Option<String>,
-    /// `runners: [role, role]` — static fan-out: the
-    /// manifest expands this node into one `<id>@<role>` node per role
-    /// before anything runs. Mutually exclusive with `runner:` (check).
+    pub runner: Option<RunnerName>,
+    /// `runners: [name, name]` — static fan-out: the manifest expands
+    /// this node into one `<id>@<runner>` node per runner before
+    /// anything runs. Mutually exclusive with `runner:` (check).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub runners: Vec<String>,
+    pub runners: Vec<RunnerName>,
     /// `agent:` at node level — overrides the resolved
     /// candidate's own agent for this node. Portable field: each
     /// adapter maps it to its native mechanism, and one without
     /// `custom_agents` fails the node rather than silently ignoring it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
+    pub agent: Option<AgentName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Artifacts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -331,11 +331,11 @@ struct NodeFields {
     #[serde(default)]
     scope: Vec<String>,
     #[serde(default)]
-    runner: Option<String>,
+    runner: Option<RunnerName>,
     #[serde(default)]
-    runners: Vec<String>,
+    runners: Vec<RunnerName>,
     #[serde(default)]
-    agent: Option<String>,
+    agent: Option<AgentName>,
     #[serde(default)]
     artifacts: Option<Artifacts>,
     #[serde(default)]
@@ -428,6 +428,13 @@ impl<'de> Deserialize<'de> for Node {
 
         let fields: NodeFields = yaml::from_value(Value::Mapping(own))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
+        if fields.id.is_fan_out() {
+            return Err(D::Error::custom(format!(
+                "{subject}: `@` is reserved for the fan-out siblings the manifest expands \
+                 `runners:` into; an authored id is a letter followed by letters, digits, `_` \
+                 or `-`"
+            )));
+        }
         let kind: NodeKind = yaml::from_value(Value::Mapping(kind_part))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
         Ok(Node {
@@ -748,7 +755,7 @@ pub enum NodeKind {
     /// exit code is the verdict) but stops short of naming fields,
     /// pending further design.
     Executor {
-        executor: String,
+        executor: ExecutorName,
         #[serde(default)]
         with: serde_json::Map<String, serde_json::Value>,
         /// Absent means unenforced, same convention as `HookStep`'s own

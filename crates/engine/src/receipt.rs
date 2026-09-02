@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use yunta_core::events::{Event, EventPayload, Phase, TerminalState, TokenUsage};
-use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId};
+use yunta_core::{
+    AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
+};
 
 use crate::replay::{derive, NodeState};
 
@@ -66,9 +68,9 @@ pub struct ScopeSummary {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RunnerUsage {
     pub node_id: NodeId,
-    pub role: String,
-    pub adapter: String,
-    pub model: String,
+    pub runner: RunnerName,
+    pub adapter: AdapterId,
+    pub model: ModelName,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -95,7 +97,7 @@ pub enum EventChainStatus {
 pub struct Receipt {
     pub run_id: RunId,
     pub workflow: String,
-    pub mode: String,
+    pub mode: ModeName,
     pub terminal_state: TerminalState,
     pub criteria: CriteriaSummary,
     pub baseline: Option<BaselineSummary>,
@@ -133,7 +135,7 @@ pub fn build_receipt(
     Ok(Receipt {
         run_id: run_id.clone(),
         workflow: manifest.workflow.name.clone(),
-        mode: yunta_core::events::run_mode(events).to_string(),
+        mode: yunta_core::events::run_mode(events),
         terminal_state,
         criteria,
         baseline,
@@ -236,8 +238,8 @@ fn runner_usage(events: &[Event]) -> Vec<RunnerUsage> {
         .iter()
         .filter_map(|e| match &e.payload {
             EventPayload::RunnerResolved(p) => Some(RunnerUsage {
-                node_id: e.node_id.clone().unwrap_or_else(|| NodeId::from("")),
-                role: p.role.clone(),
+                node_id: e.node_id.clone()?,
+                runner: p.runner.clone(),
                 adapter: p.chosen.adapter.clone(),
                 model: p.chosen.model.clone(),
             }),
@@ -246,19 +248,20 @@ fn runner_usage(events: &[Event]) -> Vec<RunnerUsage> {
         .collect()
 }
 
-/// Fan-out siblings share a `<base>@<role>` id (see `manifest.rs`) —
-/// grouped here purely for the markdown's "reviewed by N independent
-/// runners" line; the JSON receipt exposes the flat `runners` list
-/// instead and leaves grouping to whoever consumes it.
-pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(String, Vec<&RunnerUsage>)> {
-    let mut groups: Vec<(String, Vec<&RunnerUsage>)> = Vec::new();
+/// Fan-out siblings share their base id (`<base>@<runner>`, see
+/// `manifest.rs`) — grouped here purely for the markdown's "reviewed by
+/// N independent runners" line; the JSON receipt exposes the flat
+/// `runners` list instead and leaves grouping to whoever consumes it.
+pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>)> {
+    let mut groups: Vec<(NodeId, Vec<&RunnerUsage>)> = Vec::new();
     for usage in runners {
-        let Some((base, _)) = usage.node_id.as_str().split_once('@') else {
+        if !usage.node_id.is_fan_out() {
             continue;
-        };
-        match groups.iter_mut().find(|(b, _)| b == base) {
+        }
+        let base = usage.node_id.base();
+        match groups.iter_mut().find(|(b, _)| *b == base) {
             Some((_, members)) => members.push(usage),
-            None => groups.push((base.to_string(), vec![usage])),
+            None => groups.push((base, vec![usage])),
         }
     }
     groups.retain(|(_, members)| members.len() > 1);

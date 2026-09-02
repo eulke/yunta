@@ -8,17 +8,17 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: "sha256:abc".to_string(),
             inputs: HashMap::new(),
-            mode: "default".to_string(),
+            mode: "default".into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".to_string(),
         }),
         EventPayload::RunnerResolved(RunnerResolvedPayload {
-            role: "executor".to_string(),
+            runner: "executor".into(),
             chosen: RunnerCandidate {
-                adapter: "mock".to_string(),
-                model: "mock-model".to_string(),
+                adapter: "mock".into(),
+                model: "mock-model".into(),
                 agent: None,
             },
             discarded: vec![],
@@ -35,7 +35,7 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
-            model: "mock-model".to_string(),
+            model: "mock-model".into(),
             capabilities: Capabilities::default(),
         }),
         EventPayload::AgentMessage(AgentMessagePayload {
@@ -165,7 +165,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::FindingPosted(FindingPostedPayload {
             finding: Finding {
-                id: "f-1".to_string(),
+                id: "f-1".into(),
                 severity: FindingSeverity::Major,
                 title: "missing error handling".to_string(),
                 location: "crates/cli/src/main.rs:10".to_string(),
@@ -176,7 +176,7 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
             evidence: "criteria log".to_string(),
-            suggested_mode: "standard".to_string(),
+            suggested_mode: "standard".into(),
         }),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {
             child_run_id: "run-child-1".into(),
@@ -190,7 +190,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
             capability: "resume_session".to_string(),
-            adapter: "mock".to_string(),
+            adapter: "mock".into(),
             policy_applied: "on_interrupt: resume_session degraded to restart_node".to_string(),
         }),
         EventPayload::RunPaused(RunPausedPayload {

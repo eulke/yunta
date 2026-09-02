@@ -17,11 +17,14 @@ use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use yunta_core::{AdapterSettings, Capabilities, Result, SessionId, YuntaError};
+use yunta_core::{AdapterId, AdapterSettings, Capabilities, Pid, Result, SessionId, YuntaError};
 
 use crate::session::{
     write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
 };
+
+/// The id config names this adapter by.
+pub static ID: AdapterId = AdapterId::from_static("claude-code");
 
 pub struct ClaudeCodeAdapter {
     binary: PathBuf,
@@ -55,12 +58,12 @@ impl ClaudeCodeAdapter {
         }
         if let Some(model) = &req.model {
             args.push("--model".to_string());
-            args.push(model.clone());
+            args.push(model.to_string());
         }
         // Only populated if capabilities().custom_agents — true here.
         if let Some(agent) = &req.agent {
             args.push("--agent".to_string());
-            args.push(agent.clone());
+            args.push(agent.to_string());
         }
         args.extend(permissions::permission_args(req.permissions));
         if let Some(max_turns) = req.budget.max_turns {
@@ -102,27 +105,30 @@ impl ClaudeCodeAdapter {
         let mut child = tokio::process::Command::from(std_cmd)
             .spawn()
             .map_err(|source| YuntaError::AdapterIo {
-                adapter: "claude-code".to_string(),
+                adapter: ID.clone(),
                 action: "spawn the claude subprocess".to_string(),
                 source,
             })?;
 
-        let pid = child.id().ok_or_else(|| YuntaError::Adapter {
-            adapter: "claude-code".to_string(),
-            message: "the claude subprocess exited before it could be tracked".to_string(),
-        })?;
+        let pid = child
+            .id()
+            .and_then(|id| Pid::try_from(id).ok())
+            .ok_or_else(|| YuntaError::Adapter {
+                adapter: ID.clone(),
+                message: "the claude subprocess exited before it could be tracked".to_string(),
+            })?;
 
         let stdin = child.stdin.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "claude-code".to_string(),
+            adapter: ID.clone(),
             message: "the claude subprocess has no stdin pipe".to_string(),
         })?;
 
         let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "claude-code".to_string(),
+            adapter: ID.clone(),
             message: "the claude subprocess has no stdout pipe".to_string(),
         })?;
         let stderr = child.stderr.take().ok_or_else(|| YuntaError::Adapter {
-            adapter: "claude-code".to_string(),
+            adapter: ID.clone(),
             message: "the claude subprocess has no stderr pipe".to_string(),
         })?;
 
@@ -150,7 +156,7 @@ impl ClaudeCodeAdapter {
             let _ = child.wait().await;
         });
         tokio::spawn(drain_stderr(stderr));
-        write_prompt(stdin, &req.prompt, "claude-code").await?;
+        write_prompt(stdin, &req.prompt, &ID).await?;
 
         Ok(Box::new(ClaudeCodeSession {
             pid,
@@ -168,8 +174,8 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
 
 #[async_trait]
 impl Adapter for ClaudeCodeAdapter {
-    fn id(&self) -> &'static str {
-        "claude-code"
+    fn id(&self) -> &'static AdapterId {
+        &ID
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -194,7 +200,7 @@ impl Adapter for ClaudeCodeAdapter {
     async fn probe(&self) -> Result<ProbeReport> {
         if let Err(e) = &self.settings {
             return Err(YuntaError::Adapter {
-                adapter: "claude-code".to_string(),
+                adapter: ID.clone(),
                 message: e.to_string(),
             });
         }
@@ -235,7 +241,7 @@ impl Adapter for ClaudeCodeAdapter {
 }
 
 pub struct ClaudeCodeSession {
-    pid: u32,
+    pid: Pid,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
 }
 
@@ -260,7 +266,7 @@ impl AgentSession for ClaudeCodeSession {
         signal_group(self.pid, "-KILL").await
     }
 
-    fn pgid(&self) -> Option<u32> {
+    fn pgid(&self) -> Option<Pid> {
         // Spawned with `process_group(0)`, so the child's pid is its
         // process-group id.
         Some(self.pid)
@@ -277,7 +283,7 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
         return Ok(());
     }
     let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
-        adapter: "claude-code".to_string(),
+        adapter: ID.clone(),
         action,
         source,
     };
@@ -309,7 +315,7 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
 /// signal plus a process-group target. `kill` exiting nonzero because
 /// the group is already gone is the desired end state, not a failure
 /// worth reporting.
-async fn signal_group(pid: u32, signal: &str) -> Result<()> {
+async fn signal_group(pid: Pid, signal: &str) -> Result<()> {
     let _ = tokio::process::Command::new("kill")
         .arg(signal)
         .arg("--")
@@ -317,7 +323,7 @@ async fn signal_group(pid: u32, signal: &str) -> Result<()> {
         .status()
         .await
         .map_err(|source| YuntaError::AdapterIo {
-            adapter: "claude-code".to_string(),
+            adapter: ID.clone(),
             action: format!("send {signal} to the session's process group"),
             source,
         })?;

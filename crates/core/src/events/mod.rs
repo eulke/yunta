@@ -23,7 +23,7 @@ pub use crate::Capabilities;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{NodeId, RunId};
+use crate::ids::{ModeName, NodeId, RunId};
 
 /// One event as persisted.
 /// `kind` and `schema_version` are not separate fields here: `payload`'s
@@ -80,14 +80,15 @@ pub enum EventPayload {
     RunFinished(RunFinishedPayload),
 }
 
-/// The mode `run_created` froze for this log — always the
-/// log's own first event; `"default"` for a log without one (pre-modes,
-/// or truncated). This is the one place that mode is derived: `execute_run`'s
-/// resume and the stats surfaces must never disagree about a run's mode.
-pub fn run_mode(events: &[Event]) -> &str {
+/// The mode `run_created` froze for this log — always the log's own
+/// first event; the default mode for a log without one (written before
+/// modes existed, or truncated). This is the one place that mode is
+/// derived: `execute_run`'s resume and the stats surfaces must never
+/// disagree about a run's mode.
+pub fn run_mode(events: &[Event]) -> ModeName {
     match events.first().map(|event| &event.payload) {
-        Some(EventPayload::RunCreated(p)) => &p.mode,
-        _ => "default",
+        Some(EventPayload::RunCreated(p)) => p.mode.clone(),
+        _ => ModeName::default(),
     }
 }
 

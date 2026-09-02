@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::PackManifest;
+use yunta_core::{PackManifest, PackName, Publisher};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CatalogError {
@@ -56,8 +56,8 @@ pub enum CatalogError {
 pub enum WorkflowOrigin {
     Repo,
     Pack {
-        publisher: String,
-        pack_name: String,
+        publisher: Publisher,
+        pack_name: PackName,
     },
 }
 
@@ -75,7 +75,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
     // would walk out of the catalog instead of naming something in it.
     let well_formed = match name.split_once('/') {
         Some((publisher, workflow)) => {
-            yunta_core::is_path_segment(publisher) && yunta_core::is_path_segment(workflow)
+            publisher.parse::<Publisher>().is_ok() && yunta_core::is_path_segment(workflow)
         }
         None => yunta_core::is_path_segment(name),
     };
@@ -100,6 +100,11 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
             repo_path,
         });
     };
+    let Ok(publisher_id) = publisher.parse::<Publisher>() else {
+        return Err(CatalogError::InvalidName {
+            name: name.to_string(),
+        });
+    };
 
     let publisher_dir = repo_root.join(".yunta/packs").join(publisher);
     let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
@@ -111,7 +116,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
         });
     };
 
-    let mut candidates: Vec<(String, PathBuf)> = Vec::new();
+    let mut candidates: Vec<(PackName, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
         let pack_dir = entry.path();
         if !pack_dir.is_dir() {
@@ -146,7 +151,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
             Ok(ResolvedWorkflow {
                 path,
                 origin: WorkflowOrigin::Pack {
-                    publisher: publisher.to_string(),
+                    publisher: publisher_id,
                     pack_name,
                 },
             })
@@ -169,8 +174,11 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
 /// parses — `yunta list`'s own catalog view walks every publisher
 /// directory and calls this per publisher, same resolver both surfaces
 /// share.
-pub fn packs_for_publisher(repo_root: &Path, publisher: &str) -> Vec<(PathBuf, PackManifest)> {
-    let publisher_dir = repo_root.join(".yunta/packs").join(publisher);
+pub fn packs_for_publisher(
+    repo_root: &Path,
+    publisher: &Publisher,
+) -> Vec<(PathBuf, PackManifest)> {
+    let publisher_dir = repo_root.join(".yunta/packs").join(publisher.as_str());
     let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
         return Vec::new();
     };
@@ -212,22 +220,36 @@ pub fn origin_of(repo_root: &Path, workflow_path: &Path) -> WorkflowOrigin {
     let (Some(publisher), Some(pack_name)) = (components.next(), components.next()) else {
         return WorkflowOrigin::Repo;
     };
-    WorkflowOrigin::Pack {
-        publisher: publisher.as_os_str().to_string_lossy().into_owned(),
-        pack_name: pack_name.as_os_str().to_string_lossy().into_owned(),
+    // A directory pair that is not a `publisher/name` was never vendored
+    // by `pack add`; it is not a pack origin.
+    let parsed = (
+        publisher.as_os_str().to_str().and_then(|s| s.parse().ok()),
+        pack_name.as_os_str().to_str().and_then(|s| s.parse().ok()),
+    );
+    match parsed {
+        (Some(publisher), Some(pack_name)) => WorkflowOrigin::Pack {
+            publisher,
+            pack_name,
+        },
+        _ => WorkflowOrigin::Repo,
     }
 }
 
 /// Every installed publisher — top-level names under `.yunta/packs/`.
-pub fn installed_publishers(repo_root: &Path) -> Vec<String> {
+pub fn installed_publishers(repo_root: &Path) -> Vec<Publisher> {
     let packs_root = repo_root.join(".yunta/packs");
     let Ok(entries) = std::fs::read_dir(&packs_root) else {
         return Vec::new();
     };
-    let mut publishers: Vec<String> = entries
+    let mut publishers: Vec<Publisher> = entries
         .flatten()
         .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse().ok())
+        })
         .collect();
     publishers.sort();
     publishers

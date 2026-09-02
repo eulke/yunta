@@ -4,20 +4,25 @@
 use std::collections::HashMap;
 
 use yunta_core::{
-    ConfigLayer, PackDeclares, PackManifest, PackRequires, RequiredRole, RunnerCandidate,
+    ConfigLayer, PackDeclares, PackManifest, PackRequires, RequiredRunner, RunnerCandidate,
+    RunnerName,
 };
 use yunta_engine::check_pack_requires;
 
-fn manifest(roles: Vec<RequiredRole>, mcp_servers: Vec<&str>, commands: Vec<&str>) -> PackManifest {
+fn manifest(
+    runners: Vec<RequiredRunner>,
+    mcp_servers: Vec<&str>,
+    commands: Vec<&str>,
+) -> PackManifest {
     PackManifest {
-        name: "review-pack".to_string(),
-        publisher: "acme".to_string(),
+        name: "review-pack".into(),
+        publisher: "acme".into(),
         version: "1.0.0".to_string(),
         description: None,
         license: None,
         yunta_schema: None,
         requires: PackRequires {
-            roles,
+            runners,
             mcp_servers: mcp_servers.into_iter().map(str::to_string).collect(),
             commands: commands.into_iter().map(str::to_string).collect(),
         },
@@ -33,8 +38,8 @@ fn manifest(roles: Vec<RequiredRole>, mcp_servers: Vec<&str>, commands: Vec<&str
 #[test]
 fn a_role_missing_from_runners_is_flagged() {
     let manifest = manifest(
-        vec![RequiredRole {
-            name: "reviewer".to_string(),
+        vec![RequiredRunner {
+            name: "reviewer".into(),
             permissions: None,
         }],
         vec![],
@@ -43,35 +48,35 @@ fn a_role_missing_from_runners_is_flagged() {
     let config = ConfigLayer::default();
 
     let gap = check_pack_requires(&manifest, &config);
-    assert_eq!(gap.pack, "acme/review-pack");
-    assert_eq!(gap.missing_roles, vec!["reviewer".to_string()]);
+    assert_eq!(gap.pack.to_string(), "acme/review-pack");
+    assert_eq!(gap.missing_runners, vec![RunnerName::from("reviewer")]);
     assert!(!gap.is_satisfied());
 }
 
 #[test]
 fn a_role_with_zero_candidates_is_also_flagged() {
     let manifest = manifest(
-        vec![RequiredRole {
-            name: "reviewer".to_string(),
+        vec![RequiredRunner {
+            name: "reviewer".into(),
             permissions: None,
         }],
         vec![],
         vec![],
     );
     let config = ConfigLayer {
-        runners: Some(HashMap::from([("reviewer".to_string(), Vec::new())])),
+        runners: Some(HashMap::from([("reviewer".into(), Vec::new())])),
         ..Default::default()
     };
 
     let gap = check_pack_requires(&manifest, &config);
-    assert_eq!(gap.missing_roles, vec!["reviewer".to_string()]);
+    assert_eq!(gap.missing_runners, vec![RunnerName::from("reviewer")]);
 }
 
 #[test]
 fn a_role_with_at_least_one_candidate_resolves() {
     let manifest = manifest(
-        vec![RequiredRole {
-            name: "reviewer".to_string(),
+        vec![RequiredRunner {
+            name: "reviewer".into(),
             permissions: None,
         }],
         vec![],
@@ -79,10 +84,10 @@ fn a_role_with_at_least_one_candidate_resolves() {
     );
     let config = ConfigLayer {
         runners: Some(HashMap::from([(
-            "reviewer".to_string(),
+            "reviewer".into(),
             vec![RunnerCandidate {
-                adapter: "claude-code".to_string(),
-                model: "sonnet".to_string(),
+                adapter: "claude-code".into(),
+                model: "sonnet".into(),
                 agent: None,
             }],
         )])),
@@ -90,7 +95,7 @@ fn a_role_with_at_least_one_candidate_resolves() {
     };
 
     let gap = check_pack_requires(&manifest, &config);
-    assert!(gap.missing_roles.is_empty());
+    assert!(gap.missing_runners.is_empty());
     assert!(gap.is_satisfied());
 }
 
@@ -145,6 +150,6 @@ fn a_fully_satisfied_pack_reports_nothing_missing() {
 
     let gap = check_pack_requires(&manifest, &config);
     assert!(gap.is_satisfied());
-    assert!(gap.missing_roles.is_empty());
+    assert!(gap.missing_runners.is_empty());
     assert!(gap.missing_mcp_servers.is_empty());
 }

@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{Clock, Isolation, Manifest, RunId};
+use yunta_core::{Clock, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::Storage;
 
 use super::{create_run, CreateRunParams, RunError};
@@ -46,7 +46,7 @@ pub struct Predecessor<'a> {
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
     repo: &Path,
-    suggested_mode: &str,
+    suggested_mode: &ModeName,
     runs_root: &Path,
     worktrees_root: &Path,
     storage: &Storage,
@@ -58,7 +58,7 @@ pub async fn create_promotion_successor(
         worktree: predecessor_worktree,
         run_dir: predecessor_run_dir,
     } = predecessor;
-    let successor_id = RunId::from(format!("{predecessor_id}-promoted"));
+    let successor_id = RunId::try_from(format!("{predecessor_id}-promoted"))?;
 
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own

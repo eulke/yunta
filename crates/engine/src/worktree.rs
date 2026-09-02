@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_core::Isolation;
+use yunta_core::{Isolation, Pid};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -67,7 +67,7 @@ pub enum WorktreeError {
     )]
     MutationLockTimeout {
         lock_path: PathBuf,
-        owner_pid: Option<u32>,
+        owner_pid: Option<Pid>,
     },
 }
 
@@ -86,7 +86,7 @@ pub enum WorktreePrepared {
     /// The previous owner was dead — its lock was stolen. Explicit
     /// degradation: report it, never steal silently.
     StoleStaleLock {
-        dead_pid: u32,
+        dead_pid: Pid,
     },
 }
 
@@ -283,7 +283,7 @@ async fn lock_worktree_mutations(
         source,
     };
     let owner_json = serde_json::to_string(&LockOwner {
-        pid: std::process::id(),
+        pid: Pid::current(),
     })
     .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
 
@@ -334,7 +334,7 @@ async fn lock_worktree_mutations(
 /// there is no timestamp here.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LockOwner {
-    pid: u32,
+    pid: Pid,
 }
 
 async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
@@ -347,7 +347,7 @@ async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
         source,
     };
     let owner_json = serde_json::to_string(&LockOwner {
-        pid: std::process::id(),
+        pid: Pid::current(),
     })
     .map_err(|e| write_err(std::io::Error::other(e), lock_path.clone()))?;
 

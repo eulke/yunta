@@ -36,13 +36,16 @@ pub use config::{
 pub use error::{Result, YuntaError};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
-pub use ids::{AdapterId, NodeId, RunId, SessionId, TaskId};
+pub use ids::{
+    is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName,
+    NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, SessionId, TaskId,
+};
 pub use inputs::InputSpec;
 pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
 pub use pack::{
-    is_path_segment, stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry,
-    PackManifest, PackManifestError, PackRequires, RequiredRole,
+    stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
+    PackManifestError, PackRequires, RequiredRunner,
 };
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use secret::Secret;

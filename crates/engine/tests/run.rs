@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
@@ -144,7 +144,7 @@ impl Bench {
                 run_id: &self.run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
-                mode: "default",
+                mode: &"default".into(),
                 promoted_from: None,
             },
             &self.storage,
@@ -153,8 +153,8 @@ impl Bench {
         .unwrap();
 
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), Arc::new(adapter));
 
         let report = execute_run(RunEnv {
             run_id: &self.run_id,
@@ -231,20 +231,17 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
         assert!(
-            matches!(
-                state.nodes.get(&node.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(&node.into())
+            state.nodes.get(node)
         );
     }
     assert_eq!(
-        state.tasks.get(&"T001".into()),
+        state.tasks.get("T001"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get(&"T002".into()),
+        state.tasks.get("T002"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
     // Tokens from both executor sessions were attributed to the run.
@@ -283,11 +280,11 @@ sessions:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(NodeState::Finished { .. })
     ));
     assert!(matches!(
-        state.nodes.get(&"fix-lint".into()),
+        state.nodes.get("fix-lint"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -326,11 +323,11 @@ sessions: []
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(NodeState::Finished { .. })
     ));
     assert_eq!(
-        state.nodes.get(&"fix-lint".into()),
+        state.nodes.get("fix-lint"),
         None,
         "fix-lint has no depends_on and lint never failed — it must never have started"
     );
@@ -366,7 +363,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.nodes.get(&"redo-node".into()),
+        state.nodes.get("redo-node"),
         None,
         "redo-node has no depends_on and the gate never mapped to it — it must never have started"
     );
@@ -425,7 +422,7 @@ nodes:
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get(&"build".into()),
+        state.nodes.get("build"),
         Some(NodeState::Failed { .. })
     ));
 }
@@ -456,7 +453,7 @@ sessions:
     let (terminal, state) = bench.run(workflow, fixture).await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get(&"plan".into()) {
+    match state.nodes.get("plan") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("plan.yaml"), "got: {outcome}");
         }
@@ -807,7 +804,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -816,8 +813,8 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     .unwrap();
 
     let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
-    let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
+    let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first_report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -841,8 +838,8 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
 
     // No `sessions:` at all — any attempt to dispatch a new session errors.
     let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
-    let mut resume_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    resume_adapters.insert("mock".to_string(), Arc::new(empty_adapter));
+    let mut resume_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    resume_adapters.insert("mock".into(), Arc::new(empty_adapter));
     let resumed_report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -898,7 +895,7 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
 
 fn answer(id: &str, value: &str) -> yunta_core::Answer {
     yunta_core::Answer {
-        id: id.to_string(),
+        id: id.into(),
         value: value.to_string(),
     }
 }
@@ -922,7 +919,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"ask".into()),
+        state.nodes.get("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
 
@@ -997,7 +994,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1007,8 +1004,8 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
 
     // First invocation: headless — asks, pauses.
     let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
-    let mut first_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    first_adapters.insert("mock".to_string(), Arc::new(first_adapter));
+    let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -1029,18 +1026,18 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     // The paused node derives `waiting`, never "absent" or failed.
     assert!(
         matches!(
-            first.state.nodes.get(&"ask".into()),
+            first.state.nodes.get("ask"),
             Some(yunta_engine::NodeState::Waiting { .. })
         ),
         "got {:?}",
-        first.state.nodes.get(&"ask".into())
+        first.state.nodes.get("ask")
     );
 
     // Second invocation: a live surface, an empty fixture — answering
     // needs no new session, only the log and the artifact on disk.
     let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
-    let mut resume_adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    resume_adapters.insert("mock".to_string(), Arc::new(empty_adapter));
+    let mut resume_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    resume_adapters.insert("mock".into(), Arc::new(empty_adapter));
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "production")],
     };
@@ -1063,7 +1060,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
 
     assert_eq!(resumed.terminal, RunTerminal::Finished);
     assert!(matches!(
-        resumed.state.nodes.get(&"ask".into()),
+        resumed.state.nodes.get("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     let raw = std::fs::read_to_string(artifacts_dir.join("questions.yaml.answers.yaml")).unwrap();
@@ -1152,7 +1149,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1215,7 +1212,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1275,7 +1272,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1363,7 +1360,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1458,7 +1455,7 @@ sessions:
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert_eq!(
-        state.tasks.get(&"T001".into()),
+        state.tasks.get("T001"),
         Some(&yunta_core::events::TaskStatus::Blocked)
     );
 }
@@ -1486,12 +1483,9 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["pre-launch", "write-docs", "load-test"] {
         assert!(
-            matches!(
-                state.nodes.get(&id.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
             "expected `{id}` finished, got {:?}",
-            state.nodes.get(&id.into())
+            state.nodes.get(id)
         );
     }
     assert!(bench.worktree.join("docs.txt").exists());
@@ -1523,7 +1517,7 @@ nodes:
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get(&"load-test".into()),
+        state.nodes.get("load-test"),
         Some(NodeState::Failed { .. })
     ));
 }
@@ -1557,7 +1551,7 @@ nodes:
         "expected join: any to return as soon as `fast` won, took {elapsed:?}"
     );
     assert!(matches!(
-        state.nodes.get(&"fast".into()),
+        state.nodes.get("fast"),
         Some(NodeState::Finished { .. })
     ));
     // The slow sibling was interrupted before its own `touch` ran — proof
@@ -1598,7 +1592,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -1988,7 +1982,7 @@ nodes:
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get(&"probe".into()) {
+    match state.nodes.get("probe") {
         Some(NodeState::Finished { outcome, .. }) => {
             assert_eq!(outcome, "threshold was 80");
         }
@@ -2426,7 +2420,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     assert_eq!(terminal_par, RunTerminal::Finished);
 
     for n in 1..=8 {
-        let id: yunta_core::TaskId = format!("task-{n}").into();
+        let id: yunta_core::TaskId = format!("task-{n}").parse().unwrap();
         assert_eq!(
             state_seq.tasks.get(&id),
             Some(&yunta_core::events::TaskStatus::Done)
@@ -2520,10 +2514,7 @@ nodes:
 
     // task-a must have succeeded and stayed succeeded, unaffected by
     // task-b's fate.
-    assert_eq!(
-        state.nodes.get(&"implement".into()),
-        state.nodes.get(&"implement".into()),
-    );
+    assert_eq!(state.nodes.get("implement"), state.nodes.get("implement"),);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let a_statuses: Vec<_> = events
         .iter()
@@ -2608,11 +2599,11 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get(&"task-x".into()),
+        state.tasks.get("task-x"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get(&"task-y".into()),
+        state.tasks.get("task-y"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
 
@@ -2654,7 +2645,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -2802,8 +2793,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
 
     let fixture = "sessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
     let adapter = yunta_adapters::MockAdapter::from_yaml(fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
@@ -2839,7 +2830,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         "an already-Done task must never be re-dispatched on resume"
     );
     assert_eq!(
-        report.state.tasks.get(&"task-q".into()),
+        report.state.tasks.get("task-q"),
         Some(&yunta_core::events::TaskStatus::Done),
         "the orphaned task must be re-run to completion"
     );
@@ -2957,7 +2948,7 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     let (terminal, state) = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
-        state.tasks.get(&"task-s".into()),
+        state.tasks.get("task-s"),
         Some(&yunta_core::events::TaskStatus::Blocked),
         "an out-of-scope write with no request must block the task, never silently pass"
     );
@@ -3007,7 +2998,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         "an auto-rejected request must never pause the run, even under ask mode"
     );
     assert_eq!(
-        state.tasks.get(&"task-p".into()),
+        state.tasks.get("task-p"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
 
@@ -3065,7 +3056,7 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get(&"task-d".into()),
+        state.tasks.get("task-d"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
 
@@ -3126,7 +3117,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
         granted_bench.run(&granted_workflow, &granted_fixture).await;
     assert_eq!(granted_terminal, RunTerminal::Finished);
     assert_eq!(
-        granted_state.tasks.get(&"task-w".into()),
+        granted_state.tasks.get("task-w"),
         Some(&yunta_core::events::TaskStatus::Done),
         "a granted expansion must let b.txt through the final scope check"
     );
@@ -3144,7 +3135,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let (_denied_terminal, denied_state) =
         denied_bench.run(&denied_workflow, &denied_fixture).await;
     assert_eq!(
-        denied_state.tasks.get(&"task-w".into()),
+        denied_state.tasks.get("task-w"),
         Some(&yunta_core::events::TaskStatus::Blocked),
         "without a grant, b.txt stays a scope violation on the same diff"
     );
@@ -3260,7 +3251,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "grant must unblock the run"
     );
     assert_eq!(
-        state.tasks.get(&"task-h".into()),
+        state.tasks.get("task-h"),
         Some(&yunta_core::events::TaskStatus::Done),
         "the retry's b.txt write must pass the widened scope check"
     );
@@ -3333,7 +3324,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get(&"task-n".into()),
+        state.tasks.get("task-n"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
 
@@ -3485,11 +3476,11 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get(&"task-a".into()),
+        state.tasks.get("task-a"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get(&"task-c".into()),
+        state.tasks.get("task-c"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
 
@@ -3694,7 +3685,7 @@ nodes:
     let fixture = "sessions: []";
 
     let (terminal, state) = bench.run(workflow, fixture).await;
-    match &state.nodes.get(&"plan".into()) {
+    match &state.nodes.get("plan") {
         Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("brief.md"), "got: {outcome}");
         }
@@ -4236,7 +4227,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     let fixture = "sessions: []";
 
     let (terminal, state) = bench.run(&workflow, fixture).await;
-    match &state.nodes.get(&"ask".into()) {
+    match &state.nodes.get("ask") {
         Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("conventions.md"), "got: {outcome}");
             assert!(outcome.contains("acme/pack-a"), "got: {outcome}");
@@ -4362,7 +4353,7 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"lint".into()),
+        state.nodes.get("lint"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
 
@@ -4514,7 +4505,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get(&"approve".into()) {
+    match state.nodes.get("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
             assert_eq!(outcome, "aprobar")
         }
@@ -4551,7 +4542,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"approve".into()),
+        state.nodes.get("approve"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     assert_eq!(
@@ -4588,7 +4579,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -4596,8 +4587,8 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     )
     .unwrap();
 
-    let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::from([(
-        "mock".to_string(),
+    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::from([(
+        "mock".into(),
         Arc::new(MockAdapter::from_yaml("sessions: []").unwrap()) as Arc<dyn Adapter>,
     )]);
     let first = execute_run(RunEnv {
@@ -4704,10 +4695,10 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
     // The corrective node never started — the cap is checked before the
     // re-route hands it work.
     assert!(matches!(
-        state.nodes.get(&"first".into()),
+        state.nodes.get("first"),
         Some(NodeState::Failed { .. })
     ));
-    assert_eq!(state.nodes.get(&"fix".into()), None);
+    assert_eq!(state.nodes.get("fix"), None);
     // Unresolved: nothing recorded (resume re-asks, same convention as
     // every other gate).
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -4729,12 +4720,9 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
     // on its retry — all of it past the cap, under the one authorization.
     for node in ["first", "fix"] {
         assert!(
-            matches!(
-                state.nodes.get(&node.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(&node.into())
+            state.nodes.get(node)
         );
     }
 
@@ -4770,7 +4758,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
         RunTerminal::Paused { reason } => assert!(reason.contains("budget"), "got: {reason}"),
         other => panic!("abort must pause the run, got {other:?}"),
     }
-    assert_eq!(state.nodes.get(&"fix".into()), None);
+    assert_eq!(state.nodes.get("fix"), None);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         events.iter().any(|e| matches!(
@@ -4823,7 +4811,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -4831,8 +4819,8 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(BUDGET_FIXTURE).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let first = execute_run(RunEnv {
         run_id: &bench.run_id,
@@ -4957,13 +4945,13 @@ async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless(
         other => panic!("an exhausted iteration cap with no surface must pause, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get(&"implement".into()),
+        state.nodes.get("implement"),
         Some(NodeState::Failed { .. })
     ));
     // T003 never ran: iteration 3 was refused, so it stays registered
     // but untouched.
     assert_eq!(
-        state.tasks.get(&"T003".into()),
+        state.tasks.get("T003"),
         Some(&yunta_core::events::TaskStatus::Pending)
     );
 }
@@ -4979,7 +4967,7 @@ async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get(&"T003".into()),
+        state.tasks.get("T003"),
         Some(&yunta_core::events::TaskStatus::Done)
     );
     // One authorization covers the whole invocation — the script had a
@@ -5212,10 +5200,10 @@ sessions:
     );
 
     assert!(matches!(
-        state.nodes.get(&"race".into()),
+        state.nodes.get("race"),
         Some(NodeState::Finished { .. })
     ));
-    match state.nodes.get(&"slow-loop".into()) {
+    match state.nodes.get("slow-loop") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("interrupted"), "got: {outcome}");
         }
@@ -5258,7 +5246,7 @@ nodes:
         "the check must die with the race: {:?}",
         started.elapsed()
     );
-    match state.nodes.get(&"slow-check".into()) {
+    match state.nodes.get("slow-check") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("interrupted"), "got: {outcome}");
         }
@@ -5316,7 +5304,7 @@ async fn run_with_recording_mock(
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -5324,8 +5312,8 @@ async fn run_with_recording_mock(
     )
     .unwrap();
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), adapter.clone());
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), adapter.clone());
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -5391,7 +5379,7 @@ sessions:
         other => panic!("a missing skill must fail the node, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get(&"work".into()),
+        state.nodes.get("work"),
         Some(NodeState::Failed { .. })
     ));
     assert!(adapter.skills_seen().is_empty(), "no session was spawned");
@@ -5566,7 +5554,7 @@ sessions:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "quick",
+            mode: &"quick".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -5574,8 +5562,8 @@ sessions:
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -5693,7 +5681,7 @@ sessions:
             run_id: &second_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -5701,8 +5689,8 @@ sessions:
     )
     .unwrap();
     let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
     let report = execute_run(RunEnv {
         run_id: &second_id,
         manifest: &manifest,
@@ -5768,12 +5756,9 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["review@reviewer", "review@reviewer-alt"] {
         assert!(
-            matches!(
-                state.nodes.get(&node.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(&node.into())
+            state.nodes.get(node)
         );
     }
     // The templated artifact names rendered per expanded node.
@@ -5807,7 +5792,7 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
         adapter.agents_seen(),
-        vec![Some("security-auditor".to_string())],
+        vec![Some("security-auditor".into())],
         "the node's own agent wins over the candidate's"
     );
 }
@@ -5996,7 +5981,7 @@ nodes:
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -6019,7 +6004,7 @@ nodes:
         })
         .unwrap();
 
-    let adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
+    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     let result = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -6078,7 +6063,7 @@ async fn resume_orphan_with_mock(
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &bench.storage,
@@ -6110,7 +6095,7 @@ async fn resume_orphan_with_mock(
                 yunta_core::events::AgentSessionOpenedPayload {
                     session_id: session_id.into(),
                     agent: None,
-                    model: "mock-model".to_string(),
+                    model: "mock-model".into(),
                     capabilities: yunta_core::Capabilities::default(),
                 },
             ),
@@ -6118,8 +6103,8 @@ async fn resume_orphan_with_mock(
     }
 
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), adapter.clone());
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), adapter.clone());
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,

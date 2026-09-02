@@ -6,14 +6,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use yunta_core::{ModeInclude, Node, NodeId, Workflow};
+use yunta_core::{ModeInclude, ModeName, Node, NodeId, Workflow};
 
 /// The top-level node ids `mode_name` makes schedulable, or `None` when
 /// nothing narrows the graph — no `modes:` declared at all, or the
 /// resolved mode's own `include: all`. A name with no matching entry in
 /// `modes:` never reaches this function — `create_run` already refused
 /// it before the run existed.
-pub fn mode_included_nodes(workflow: &Workflow, mode_name: &str) -> Option<HashSet<NodeId>> {
+pub fn mode_included_nodes(workflow: &Workflow, mode_name: &ModeName) -> Option<HashSet<NodeId>> {
     let spec = workflow.modes.as_ref()?.get(mode_name)?;
     match &spec.include {
         ModeInclude::All => None,
@@ -115,7 +115,7 @@ nodes:
     #[test]
     fn an_excluded_dependency_is_replaced_by_its_own_included_dependencies_transitively() {
         let workflow = workflow();
-        let included = mode_included_nodes(&workflow, "quick");
+        let included = mode_included_nodes(&workflow, &"quick".into());
         let deps = dependencies_in_mode(&workflow, included.as_ref());
         // `ship` -> `extra` (excluded) -> `review` (excluded) -> `start`, plus
         // `extra`'s own direct `start`, which collapses into one entry.

@@ -300,7 +300,9 @@ async fn tool_resolve_gate(
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
     let project = project::resolve(cwd).map_err(|e| e.to_string())?;
-    let run_id_typed = yunta_core::RunId::from(run_id);
+    let run_id_typed = run_id
+        .parse::<yunta_core::RunId>()
+        .map_err(|e| e.to_string())?;
     let run_dir = project::find_run_dir(&project, run_id)
         .ok_or_else(|| format!("no run `{run_id}` under {}", project.runs_root.display()))?;
     let manifest: yunta_core::Manifest = std::fs::read_to_string(run_dir.join("manifest.yaml"))

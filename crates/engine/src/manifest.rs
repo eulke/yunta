@@ -106,7 +106,10 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
     else {
         return None;
     };
-    let pack_dir = repo.join(".yunta/packs").join(&publisher).join(&pack_name);
+    let pack_dir = repo
+        .join(".yunta/packs")
+        .join(publisher.as_str())
+        .join(pack_name.as_str());
     let manifest_text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
     let manifest: yunta_core::PackManifest = yunta_core::yaml::parse(&manifest_text).ok()?;
 
@@ -115,7 +118,10 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
         .and_then(|text| yunta_core::yaml::parse::<yunta_core::PackLock>(&text).ok())
         .and_then(|lock| {
             lock.packs
-                .get(&yunta_core::PackLock::key(&publisher, &pack_name))
+                .get(&yunta_core::PackRef::new(
+                    publisher.clone(),
+                    pack_name.clone(),
+                ))
                 .map(|entry| entry.commit.clone())
         });
 
@@ -137,8 +143,8 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
 /// caught statically rather than deadlocking a real run. Idempotent: a
 /// node that already lists the referenced node explicitly gets no
 /// duplicate.
-/// A node with `runners: [a, b]` becomes one `<id>@<role>`
-/// node per role — **statically, in the manifest**, before anything
+/// A node with `runners: [a, b]` becomes one `<id>@<runner>`
+/// node per runner — **statically, in the manifest**, before anything
 /// runs: the fan-out is visible in `status`, each expanded node
 /// resolves its own runner and renders its own `{{runner.role}}`, and
 /// the scheduler needs zero fan-out awareness. Every reference to the
@@ -158,10 +164,10 @@ pub(crate) fn expand_runner_fanout(workflow: &mut Workflow) {
             continue;
         }
         let mut expanded_ids = Vec::new();
-        for role in &node.runners {
+        for runner in &node.runners {
             let mut sibling = node.clone();
-            sibling.id = format!("{}@{role}", node.id).into();
-            sibling.runner = Some(role.clone());
+            sibling.id = yunta_core::NodeId::fan_out(&node.id, runner);
+            sibling.runner = Some(runner.clone());
             sibling.runners = Vec::new();
             expanded_ids.push(sibling.id.clone());
             nodes.push(sibling);

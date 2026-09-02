@@ -10,7 +10,8 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use yunta_core::{Isolation, Manifest, RunId, SystemClock, Workflow};
+use yunta_adapters::MOCK_ID;
+use yunta_core::{AdapterId, Isolation, Manifest, ModeName, RunId, SystemClock, Workflow};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::Storage;
 
@@ -45,8 +46,8 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
 /// must be one `real_adapters` constructed from the config. `mock` is
 /// handled before this: it needs a fixture, never a real binary.
 fn validate_adapter_flag(
-    name: &str,
-    adapters: &HashMap<String, std::sync::Arc<dyn yunta_adapters::Adapter>>,
+    name: &AdapterId,
+    adapters: &HashMap<AdapterId, std::sync::Arc<dyn yunta_adapters::Adapter>>,
 ) -> Result<(), String> {
     if !adapters.contains_key(name) {
         return Err(format!(
@@ -54,7 +55,7 @@ fn validate_adapter_flag(
             if adapters.is_empty() {
                 "(none configured — `runners:` names no adapter this build supports)".to_string()
             } else {
-                let mut names: Vec<&str> = adapters.keys().map(String::as_str).collect();
+                let mut names: Vec<&str> = adapters.keys().map(AdapterId::as_str).collect();
                 names.sort();
                 names.join(", ")
             }
@@ -130,9 +131,9 @@ fn count_non_terminal_runs(storage: &Storage) -> Result<usize, yunta_storage::St
 pub async fn run(
     workflow_path: &Path,
     raw_inputs: &[String],
-    adapter: Option<&str>,
+    adapter: Option<&AdapterId>,
     fixture: Option<&Path>,
-    mode: Option<&str>,
+    mode: Option<&ModeName>,
     follow: bool,
     detach: bool,
 ) -> ExitCode {
@@ -188,8 +189,8 @@ pub async fn run(
     // no real adapter is constructed or probed. Any other `--adapter`
     // is an override every role resolves through.
     let mock_fixture = match (adapter, fixture) {
-        (Some("mock"), Some(path)) => Some(path),
-        (Some("mock"), None) => {
+        (Some(id), Some(path)) if *id == MOCK_ID => Some(path),
+        (Some(id), None) if *id == MOCK_ID => {
             eprintln!(
                 "error: `--adapter mock` runs the workflow against a scripted fixture — pass \
                  `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
@@ -203,10 +204,7 @@ pub async fn run(
         }
         _ => None,
     };
-    let adapter_override = match adapter {
-        Some("mock") | None => None,
-        Some(name) => Some(yunta_core::AdapterId::from(name)),
-    };
+    let adapter_override = adapter.filter(|id| **id != MOCK_ID).cloned();
     let real_adapters = if mock_fixture.is_some() {
         HashMap::new()
     } else {
@@ -304,11 +302,17 @@ pub async fn run(
         }
     }
 
-    let run_id = RunId::from(format!(
+    let run_id = match RunId::try_from(format!(
         "run-{}-{}",
         chrono::Utc::now().format("%Y%m%d-%H%M%S"),
         std::process::id()
-    ));
+    )) {
+        Ok(run_id) => run_id,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => project.worktrees_root.join(run_id.as_str()),
@@ -344,14 +348,14 @@ pub async fn run(
     // escalates forward, so starting at the floor is the one default
     // that can never need walking back. A workflow with no
     // `modes:` at all keeps running everything, unaffected.
-    let resolved_mode = mode.map(str::to_string).unwrap_or_else(|| {
+    let resolved_mode = mode.cloned().unwrap_or_else(|| {
         manifest
             .workflow
             .modes
             .as_ref()
             .and_then(|modes| modes.keys().next())
             .cloned()
-            .unwrap_or_else(|| "default".to_string())
+            .unwrap_or_default()
     });
 
     let run_dir = match yunta_engine::create_run(

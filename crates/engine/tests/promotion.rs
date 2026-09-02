@@ -16,7 +16,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{EventPayload, GateResolvedPayload};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
     RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
@@ -163,7 +163,7 @@ async fn run_with_mode_and_findings(
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode,
+            mode: &ModeName::from(mode),
             promoted_from: None,
         },
         &storage,
@@ -186,8 +186,8 @@ async fn run_with_mode_and_findings(
     }
 
     let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &run_id,
@@ -281,7 +281,7 @@ async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
 
 fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding {
     yunta_core::events::Finding {
-        id: id.to_string(),
+        id: id.into(),
         severity: yunta_core::events::FindingSeverity::Major,
         title: title.to_string(),
         location: location.to_string(),

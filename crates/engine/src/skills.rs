@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Node, Workflow};
+use yunta_core::{ConfigLayer, Node, Publisher, Workflow};
 
 /// The names one node mounts: `skills.always` first, then the node's
 /// own list (or `node_defaults.skills` when the node declares none —
@@ -102,8 +102,9 @@ pub fn resolve_skills(
 /// `check`-time diagnostic surface of its own).
 fn resolve_pack_skill(worktree: &Path, name: &str) -> Option<PathBuf> {
     let (publisher, skill) = name.split_once('/')?;
+    let publisher = publisher.parse::<Publisher>().ok()?;
     let mut found: Option<PathBuf> = None;
-    for (pack_dir, manifest) in crate::catalog::packs_for_publisher(worktree, publisher) {
+    for (pack_dir, manifest) in crate::catalog::packs_for_publisher(worktree, &publisher) {
         for declared in &manifest.contents.skills {
             let trimmed = declared.trim_end_matches('/');
             let stem = Path::new(trimmed).file_name().and_then(|s| s.to_str());

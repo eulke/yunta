@@ -14,7 +14,7 @@ declares:
   network: false
   executors: []
 requires:
-  roles:
+  runners:
     - name: planner
     - name: executor
     - name: mechanical

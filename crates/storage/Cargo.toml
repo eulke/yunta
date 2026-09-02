@@ -18,4 +18,5 @@ thiserror.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, check, create_run, execute_run, CreateRunParams, HumanInteraction,
     NoInteraction, NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
@@ -143,7 +143,7 @@ async fn an_approved_gate_publishes_the_new_version() {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &storage,
@@ -167,8 +167,8 @@ sessions:
         notes = notes_path,
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     let report = execute_run(RunEnv {
         run_id: &run_id,
@@ -194,7 +194,7 @@ sessions:
         report.state
     );
     assert!(matches!(
-        report.state.nodes.get(&"publish".into()),
+        report.state.nodes.get("publish"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -225,7 +225,7 @@ async fn an_unresolved_gate_never_publishes_anything() {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
-            mode: "default",
+            mode: &"default".into(),
             promoted_from: None,
         },
         &storage,
@@ -244,8 +244,8 @@ sessions:
         notes = notes_path,
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".to_string(), Arc::new(adapter));
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert("mock".into(), Arc::new(adapter));
 
     // No surface to ask — the same conservative default `yunta test`
     // and headless CI use: a gate no one can answer must pause, never
@@ -274,9 +274,9 @@ sessions:
         report.terminal
     );
     assert!(
-        !report.state.nodes.contains_key(&"publish".into()),
+        !report.state.nodes.contains_key("publish"),
         "publish ran despite the gate never being resolved: {:?}",
-        report.state.nodes.get(&"publish".into())
+        report.state.nodes.get("publish")
     );
 
     let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();

@@ -439,11 +439,20 @@ impl Storage {
                 })?
                 .with_timezone(&chrono::Utc);
 
+            let node_id = node_id
+                .map(NodeId::try_from)
+                .transpose()
+                .map_err(|source| StorageError::CorruptNodeId {
+                    run_id: run_id.clone(),
+                    seq,
+                    source,
+                })?;
+
             events.push(Event {
                 run_id: run_id.clone(),
                 seq,
                 timestamp,
-                node_id: node_id.map(Into::into),
+                node_id,
                 payload,
             });
         }
@@ -486,7 +495,9 @@ impl Storage {
         let mut run_ids = Vec::new();
         for row in rows {
             let run_id = row.map_err(|source| StorageError::ListRuns { source })?;
-            run_ids.push(RunId::from(run_id));
+            run_ids.push(
+                RunId::try_from(run_id).map_err(|source| StorageError::CorruptRunId { source })?,
+            );
         }
         Ok(run_ids)
     }

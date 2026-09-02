@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use yunta_core::events::Event;
-use yunta_core::{Manifest, RunId};
+use yunta_core::{Manifest, ModeName, RunId};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
 };
@@ -20,7 +20,7 @@ use yunta_storage::Storage;
 
 use crate::project::{self, Project};
 
-pub fn stats(run_id: Option<&str>, workflow: Option<&str>, json: bool) -> ExitCode {
+pub fn stats(run_id: Option<&RunId>, workflow: Option<&str>, json: bool) -> ExitCode {
     match (run_id, workflow) {
         (Some(run_id), None) => stats_run(run_id, json),
         (None, Some(workflow)) => stats_workflow(workflow, json),
@@ -47,7 +47,7 @@ fn resolve(cwd: &std::path::Path) -> Result<(Project, Storage), ExitCode> {
     Ok((project, storage))
 }
 
-fn stats_run(run_id: &str, json: bool) -> ExitCode {
+fn stats_run(run_id: &RunId, json: bool) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -59,9 +59,7 @@ fn stats_run(run_id: &str, json: bool) -> ExitCode {
         Ok(pair) => pair,
         Err(code) => return code,
     };
-
-    let run_id = RunId::from(run_id);
-    let events = match storage.events_for_run(&run_id) {
+    let events = match storage.events_for_run(run_id) {
         Ok(events) => events,
         Err(e) => {
             eprintln!("error: {e}");
@@ -87,14 +85,14 @@ fn stats_run(run_id: &str, json: bool) -> ExitCode {
     };
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
-    let mode = yunta_core::events::run_mode(&events).to_string();
+    let mode = yunta_core::events::run_mode(&events);
     let pricing = project.config.pricing.clone();
 
     if json {
-        let dto = RunStatsJson::from(&run_id, &mode, &run_stats, pricing.as_ref());
+        let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
         println!("{}", serde_json::to_string_pretty(&dto).unwrap());
     } else {
-        render_run_stats(&run_id, &mode, &run_stats, pricing.as_ref());
+        render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
     }
     ExitCode::SUCCESS
 }
@@ -174,7 +172,7 @@ pub(crate) fn collect_history(
         if manifest.workflow.name != workflow_name {
             continue;
         }
-        let mode = yunta_core::events::run_mode(&events).to_string();
+        let mode = yunta_core::events::run_mode(&events);
         let summary = run_summary(
             run_id,
             mode,
@@ -351,20 +349,20 @@ fn render_run_stats(
         }
     }
 
-    let by_role = stats.tokens_by_role();
-    if !by_role.is_empty() {
-        println!("\nroles:");
-        let max_role_tokens = by_role
+    let by_runner = stats.tokens_by_runner();
+    if !by_runner.is_empty() {
+        println!("\nrunners:");
+        let max_runner_tokens = by_runner
             .iter()
             .map(|(_, t)| t.input + t.output)
             .max()
             .unwrap_or(0);
-        for (role, tokens) in &by_role {
+        for (runner, tokens) in &by_runner {
             let total = tokens.input + tokens.output;
             println!(
                 "  {} {}  {total:>8} tok",
-                truncate(role, LABEL_WIDTH),
-                bar(total, max_role_tokens),
+                truncate(runner.as_str(), LABEL_WIDTH),
+                bar(total, max_runner_tokens),
             );
         }
     }
@@ -403,7 +401,7 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         println!(
             "  {} {:>3} run(s)   median CPTV {}   median tokens {}",
-            truncate(&mode, LABEL_WIDTH),
+            truncate(mode.as_str(), LABEL_WIDTH),
             runs,
             median_cptv
                 .map(|v| format!("{v:.1}"))
@@ -500,8 +498,8 @@ fn sparkline(values: &[f64]) -> String {
 /// [`yunta_engine::MIN_SAMPLES_FOR_ESTIMATION`] the way
 /// [`prior_estimation`] does: a mode with one run still gets a row, just
 /// with that run's own numbers as its "median".
-fn mode_table(history: &[RunSummary]) -> Vec<(String, usize, Option<f64>, Option<f64>)> {
-    let mut modes: Vec<String> = history.iter().map(|r| r.mode.clone()).collect();
+fn mode_table(history: &[RunSummary]) -> Vec<(ModeName, usize, Option<f64>, Option<f64>)> {
+    let mut modes: Vec<ModeName> = history.iter().map(|r| r.mode.clone()).collect();
     modes.sort();
     modes.dedup();
 
@@ -542,7 +540,7 @@ pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation)
 #[derive(Serialize)]
 struct NodeStatJson {
     node_id: String,
-    role: Option<String>,
+    runner: Option<String>,
     tokens_input: u64,
     tokens_output: u64,
     tokens_cached: Option<u64>,
@@ -556,7 +554,7 @@ impl From<&NodeStat> for NodeStatJson {
     fn from(n: &NodeStat) -> Self {
         Self {
             node_id: n.node_id.to_string(),
-            role: n.role.clone(),
+            runner: n.runner.as_ref().map(ToString::to_string),
             tokens_input: n.tokens.input,
             tokens_output: n.tokens.output,
             tokens_cached: n.tokens.cached,
@@ -626,7 +624,7 @@ impl From<&RunSummary> for RunSummaryJson {
     fn from(r: &RunSummary) -> Self {
         Self {
             run_id: r.run_id.to_string(),
-            mode: r.mode.clone(),
+            mode: r.mode.to_string(),
             workflow_hash: r.workflow_hash.clone(),
             tokens: r.tokens,
             wall_clock_secs: r.wall_clock.map(|d| d.as_secs_f64()),
@@ -754,7 +752,7 @@ impl VerificationFindingsJson {
                 .unused_modes
                 .iter()
                 .map(|m| UnusedModeJson {
-                    name: m.name.clone(),
+                    name: m.name.to_string(),
                     runs_observed: m.runs_observed,
                 })
                 .collect(),

@@ -3,7 +3,7 @@ use yunta_core::YuntaError;
 #[test]
 fn unsupported_displays_adapter_and_capability() {
     let err = YuntaError::Unsupported {
-        adapter: "mock".to_string(),
+        adapter: "mock".into(),
         what: "resume_session",
     };
     assert_eq!(
@@ -15,7 +15,7 @@ fn unsupported_displays_adapter_and_capability() {
 #[test]
 fn unsupported_is_a_std_error() {
     let err = YuntaError::Unsupported {
-        adapter: "mock".to_string(),
+        adapter: "mock".into(),
         what: "resume_session",
     };
     let _: &dyn std::error::Error = &err;

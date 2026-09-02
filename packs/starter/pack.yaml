@@ -12,7 +12,7 @@ declares:
   network: false
   executors: []
 requires:
-  roles:
+  runners:
     - name: executor
     - name: reviewer
     - name: reviewer-alt

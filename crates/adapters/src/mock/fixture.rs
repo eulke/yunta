@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use yunta_core::yaml::{self, Value};
-use yunta_core::Capabilities;
+use yunta_core::{AgentName, Capabilities, ModelName};
 
 /// A parsed fixture: adapter-level capabilities plus one script per
 /// expected `spawn()`, in order.
@@ -114,9 +114,9 @@ impl From<FixtureCapabilities> for Capabilities {
 #[serde(deny_unknown_fields)]
 pub struct SessionScript {
     #[serde(default = "default_model")]
-    pub model: String,
+    pub model: ModelName,
     #[serde(default)]
-    pub agent: Option<String>,
+    pub agent: Option<AgentName>,
     #[serde(default)]
     pub steps: Vec<MockStep>,
     #[serde(default)]
@@ -133,8 +133,8 @@ pub struct SessionScript {
     pub match_prompt_contains: Option<String>,
 }
 
-fn default_model() -> String {
-    "mock-model".to_string()
+fn default_model() -> ModelName {
+    ModelName::from_static("mock-model")
 }
 
 /// One progress event the session emits before its outcome, with an

@@ -18,8 +18,8 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use yunta_core::events::EventPayload;
 use yunta_core::RunId;
+use yunta_core::{events::EventPayload, Pid};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
@@ -30,7 +30,7 @@ use crate::project;
 /// mid-batch engine finishes killing its sessions before it pauses.
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub async fn cancel(run_id: &str) -> ExitCode {
+pub async fn cancel(run_id: &RunId) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -52,9 +52,7 @@ pub async fn cancel(run_id: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
-    let events = match storage.events_for_run(&run_id) {
+    let events = match storage.events_for_run(run_id) {
         Ok(events) => events,
         Err(e) => {
             eprintln!("error: {e}");
@@ -116,7 +114,7 @@ pub async fn cancel(run_id: &str) -> ExitCode {
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            let events = match storage.events_for_run(&run_id) {
+            let events = match storage.events_for_run(run_id) {
                 Ok(events) => events,
                 Err(e) => {
                     eprintln!("error: {e}");
@@ -183,7 +181,7 @@ pub async fn cancel(run_id: &str) -> ExitCode {
 /// SIGKILL to a whole process group — the `--` before the negative pid
 /// is load-bearing (procps-ng parses `-KILL -123` as two flags without
 /// it). A group already gone is the desired end state, not an error.
-fn kill_group(pgid: u32) {
+fn kill_group(pgid: Pid) {
     let _ = std::process::Command::new("kill")
         .args(["-KILL", "--", &format!("-{pgid}")])
         .status();

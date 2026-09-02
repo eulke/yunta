@@ -9,7 +9,7 @@ use yunta_storage::{ChainVerification, Storage};
 
 use crate::project;
 
-pub fn verify(run_id: &str) -> ExitCode {
+pub fn verify(run_id: &RunId) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -31,9 +31,7 @@ pub fn verify(run_id: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
-    match storage.verify_chain(&run_id) {
+    match storage.verify_chain(run_id) {
         Ok(ChainVerification::Intact { events }) => {
             println!("run {run_id}: chain intact — {events} event(s) verified");
             ExitCode::SUCCESS

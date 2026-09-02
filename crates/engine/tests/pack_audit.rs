@@ -57,7 +57,7 @@ fn write_full_pack(root: &Path) {
          \x20     - mcp: { server: internal-docs, query: \"{{inputs.idea}}\" }\n\
          \x20 - id: package\n\
          \x20   kind: executor\n\
-         \x20   executor: runner.py\n",
+         \x20   executor: runner\n",
     );
     write(
         &root.join("prompts/draft.md"),
@@ -94,7 +94,10 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
     let draft = &workflow.nodes[2];
     assert_eq!(draft.kind, "prompt");
     assert_eq!(draft.permissions, Some("read-only"));
-    assert_eq!(draft.agent.as_deref(), Some("reviewer-agent"));
+    assert_eq!(
+        draft.agent.as_ref().map(|value| value.as_str()),
+        Some("reviewer-agent")
+    );
     assert_eq!(draft.context.len(), 3);
     assert!(draft.context[0].contains("src/lib.rs"));
     assert!(draft.context[1].contains("git log -1"));
@@ -103,7 +106,10 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
 
     let package = &workflow.nodes[3];
     assert_eq!(package.kind, "executor");
-    assert_eq!(package.executor.as_deref(), Some("runner.py"));
+    assert_eq!(
+        package.executor.as_ref().map(|value| value.as_str()),
+        Some("runner")
+    );
 
     // Manifest-level declares/requires stay visible on the report too —
     // nothing about the audit is workflow-only.

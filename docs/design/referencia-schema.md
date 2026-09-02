@@ -125,7 +125,7 @@ node_defaults:
     after:
       - run: "cargo fmt"
 
-nodes:
+nodes:                              # id: letra seguida de letras, dígitos, `_` o `-`
   - id: grill
     kind: prompt
     runner: planner

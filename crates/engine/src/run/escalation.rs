@@ -8,7 +8,7 @@
 //! that could drift apart.
 
 use yunta_core::events::{Event, EventPayload, GateOption, GateWaitingPayload};
-use yunta_core::{Manifest, NodeId, NodeKind, RunId, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 
@@ -17,7 +17,7 @@ use super::schedule::{self, ScheduleStep};
 /// — promote.
 pub(crate) fn build_reroute_escalation(
     workflow: &Workflow,
-    mode_name: &str,
+    mode_name: &ModeName,
     node: &NodeId,
     goto: &NodeId,
     max_reroutes: u32,
@@ -175,7 +175,7 @@ pub fn current_escalation(
     }
 }
 
-fn current_mode_name(events: &[Event]) -> Option<String> {
+fn current_mode_name(events: &[Event]) -> Option<ModeName> {
     match events.first().map(|e| &e.payload) {
         Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
         _ => None,

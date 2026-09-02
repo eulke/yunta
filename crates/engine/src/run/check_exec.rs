@@ -80,8 +80,10 @@ async fn run_command(
             context: format!("run check command `{cmd}`"),
             source,
         })?;
-    let _pgid_registration =
-        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
+    let _pgid_registration = crate::process_registry::register(
+        ctx.process_registry.as_ref(),
+        crate::process_registry::child_pid(&child),
+    );
 
     let stdout_task = child.stdout.take().map(|mut pipe| {
         tokio::spawn(async move {
@@ -94,7 +96,7 @@ async fn run_command(
 
     tokio::select! {
         _ = cancel.cancelled() => {
-            if let Some(pid) = child.id() {
+            if let Some(pid) = crate::process_registry::child_pid(&child) {
                 super::node_exec::kill_process_group(pid).await;
             }
             let _ = child.wait().await;

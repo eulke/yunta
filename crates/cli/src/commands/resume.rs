@@ -16,7 +16,7 @@ use yunta_storage::Storage;
 use crate::load_yaml;
 use crate::project;
 
-pub async fn resume(run_id: &str) -> ExitCode {
+pub async fn resume(run_id: &RunId) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -31,8 +31,6 @@ pub async fn resume(run_id: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
     let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
         eprintln!(
             "error: no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
@@ -81,7 +79,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();
     let outcome = yunta_engine::execute_run(RunEnv {
-        run_id: &run_id,
+        run_id,
         manifest: &manifest,
         run_dir: &run_dir,
         worktree: &worktree,
@@ -107,7 +105,7 @@ pub async fn resume(run_id: &str) -> ExitCode {
                     forge: forge.as_deref(),
                     cancel: Some(&root_cancel),
                 },
-                run_id,
+                run_id.clone(),
                 manifest,
                 worktree,
                 report,

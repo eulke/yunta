@@ -15,6 +15,7 @@
 use std::process::ExitCode;
 
 use crate::project;
+use yunta_core::AdapterId;
 
 fn command_on_path(command: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
@@ -47,7 +48,7 @@ pub async fn doctor() -> ExitCode {
              supports (only `claude-code` and `codex` are built)"
         );
     } else {
-        let mut names: Vec<&String> = adapters.keys().collect();
+        let mut names: Vec<&AdapterId> = adapters.keys().collect();
         names.sort();
         for name in names {
             let adapter = &adapters[name];
@@ -112,11 +113,11 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
             }
             all_satisfied = false;
             println!("pack {} requires:", gap.pack);
-            for role in &gap.missing_roles {
+            for runner in &gap.missing_runners {
                 println!(
-                    "  role `{role}` — not resolvable: `runners:` doesn't define it, or defines \
-                     it with zero candidates; add e.g.:\n      runners:\n        {role}:\n          \
-                     - {{ adapter: claude-code, model: <model> }}"
+                    "  runner `{runner}` — not resolvable: `runners:` doesn't define it, or \
+                     defines it with zero candidates; add e.g.:\n      runners:\n        \
+                     {runner}:\n          - {{ adapter: claude-code, model: <model> }}"
                 );
             }
             for server in &gap.missing_mcp_servers {

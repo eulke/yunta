@@ -19,16 +19,17 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ids::{AdapterId, AgentName, ExecutorName, ModelName, Publisher, RunnerName};
 use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
-    pub adapter: String,
-    pub model: String,
+    pub adapter: AdapterId,
+    pub model: ModelName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
+    pub agent: Option<AgentName>,
 }
 
 /// One server in `mcp_servers:` — the reference config's own
@@ -189,9 +190,9 @@ pub enum Isolation {
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Isolation>,
-    /// The role a node without `runner:` resolves through.
+    /// The runner a node without `runner:` resolves through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runner: Option<String>,
+    pub runner: Option<RunnerName>,
     /// Per-session wall-clock budget (`Budget.timeout`), in minutes —
     /// the granularity the reference schema uses for whole sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -345,7 +346,7 @@ pub struct SkillsConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutorRegistration {
-    pub name: String,
+    pub name: ExecutorName,
     pub kind: ExecutorKind,
     pub path: PathBuf,
 }
@@ -453,7 +454,7 @@ impl PackExecutorPolicy {
 #[serde(deny_unknown_fields)]
 pub struct PublisherPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allow: Vec<String>,
+    pub allow: Vec<Publisher>,
 }
 
 /// `permissions.network` — declarative ONLY: `default: false`
@@ -477,9 +478,9 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runners: Option<HashMap<String, Vec<RunnerCandidate>>>,
+    pub runners: Option<HashMap<RunnerName, Vec<RunnerCandidate>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapters: Option<HashMap<String, AdapterSettings>>,
+    pub adapters: Option<HashMap<AdapterId, AdapterSettings>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

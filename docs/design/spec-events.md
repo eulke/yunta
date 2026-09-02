@@ -138,7 +138,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `role` | string | sí | nombre del runner (`runner:`) |
+| `runner` | string | sí | nombre del runner (`runner:`); el lector acepta también `role`, el nombre anterior del campo |
 | `chosen` | `{adapter, model, agent?}` | sí | binding resuelto y congelado |
 | `discarded` | lista de `{candidate, reason}` | sí (puede ser vacía) | candidatos no elegidos y por qué — nunca vacío sin motivo si hubo &gt;1 candidato |
 

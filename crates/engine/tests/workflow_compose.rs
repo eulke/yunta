@@ -13,7 +13,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{EventPayload, TerminalState};
-use yunta_core::{Clock, ConfigLayer, Manifest, RunId, Workflow};
+use yunta_core::{AdapterId, Clock, ConfigLayer, Manifest, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
@@ -131,7 +131,7 @@ impl Bench {
                 run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
-                mode: "default",
+                mode: &"default".into(),
                 promoted_from: None,
             },
             &self.storage,
@@ -149,8 +149,8 @@ impl Bench {
         human_interaction: &dyn yunta_engine::HumanInteraction,
     ) -> (RunTerminal, yunta_engine::RunState) {
         let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<String, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".to_string(), Arc::new(adapter));
+        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+        adapters.insert("mock".into(), Arc::new(adapter));
         let run_dir = self.runs_root.join(run_id.as_str());
         let report = execute_run(RunEnv {
             run_id,
@@ -246,7 +246,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"feat".into()),
+        state.nodes.get("feat"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -337,7 +337,7 @@ sessions:
     // deliberately carries none — it would double-count.
     assert_eq!(state.total_tokens.input, 100);
     assert_eq!(state.total_tokens.output, 20);
-    match state.nodes.get(&"feat".into()) {
+    match state.nodes.get("feat") {
         Some(NodeState::Finished { tokens, .. }) => {
             assert_eq!(
                 tokens.input, 0,
@@ -423,7 +423,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"feat".into()),
+        state.nodes.get("feat"),
         Some(NodeState::Finished { .. })
     ));
     assert_eq!(bench.children_created(&run_id).len(), 1);
@@ -614,12 +614,9 @@ sessions:
         "ship",
     ] {
         assert!(
-            matches!(
-                state.nodes.get(&node.into()),
-                Some(NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(&node.into())
+            state.nodes.get(node)
         );
     }
     let created = bench.children_created(&run_id);
@@ -723,7 +720,7 @@ nodes:
         )
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get(&"feat".into()) {
+    match state.nodes.get("feat") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(
                 outcome.contains(".yunta/workflows/nope.yaml"),
@@ -800,7 +797,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"feat".into()),
+        state.nodes.get("feat"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -913,7 +910,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"cons".into()),
+        state.nodes.get("cons"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -971,7 +968,7 @@ nodes:
         )
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get(&"cons".into()) {
+    match state.nodes.get("cons") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(
                 outcome.contains("plan.yaml") && outcome.contains("plan"),
@@ -1032,7 +1029,7 @@ sessions:
     // clean finish is the proof the mount fed the context.
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get(&"cons".into()),
+        state.nodes.get("cons"),
         Some(NodeState::Finished { .. })
     ));
 }

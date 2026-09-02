@@ -8,7 +8,7 @@
 use std::process::ExitCode;
 
 use yunta_core::events::{Event, EventPayload, TaskStatus};
-use yunta_core::{Manifest, NodeId, RunId};
+use yunta_core::{Manifest, ModeName, NodeId, RunId};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
@@ -24,7 +24,7 @@ use crate::project;
 /// so status can never disagree with what actually ran.
 fn mode_included_ids(
     workflow: &yunta_core::Workflow,
-    mode: &str,
+    mode: &ModeName,
 ) -> Option<std::collections::HashSet<NodeId>> {
     yunta_engine::mode_included_nodes(workflow, mode)
 }
@@ -89,7 +89,7 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
             EventPayload::RunCreated(p) => Some(p.mode.clone()),
             _ => None,
         })
-        .unwrap_or_else(|| "default".to_string());
+        .unwrap_or_default();
     let included = mode_included_ids(&manifest.workflow, &mode);
     let skipped = match &included {
         Some(included) => declared_nodes
@@ -118,7 +118,7 @@ pub(crate) fn progress_summary(events: &[Event], manifest: &Manifest) -> String 
     summary
 }
 
-pub fn status(run_id: &str) -> ExitCode {
+pub fn status(run_id: &RunId) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -140,9 +140,7 @@ pub fn status(run_id: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    let run_id = RunId::from(run_id);
-    let events = match storage.events_for_run(&run_id) {
+    let events = match storage.events_for_run(run_id) {
         Ok(events) => events,
         Err(e) => {
             eprintln!("error: {e}");

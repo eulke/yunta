@@ -17,13 +17,16 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
-use yunta_core::{Capabilities, Result, SessionId, YuntaError};
+use yunta_core::{AdapterId, AgentName, Capabilities, Result, SessionId, YuntaError};
 
 use crate::session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, ProbeReport, SessionRequest,
 };
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// The id config names this adapter by.
+pub static ID: AdapterId = AdapterId::from_static("mock");
 
 pub struct MockAdapter {
     fixture: MockFixture,
@@ -39,7 +42,7 @@ pub struct MockAdapter {
     skills_seen: Mutex<Vec<Vec<std::path::PathBuf>>>,
     /// Every `spawn()`'s `req.agent`, in claim order — same
     /// record-the-mount principle as `skills_seen`.
-    agents_seen: Mutex<Vec<Option<String>>>,
+    agents_seen: Mutex<Vec<Option<AgentName>>>,
     /// Every `resume()`'s session id, in call order: the mock's
     /// "resume" is serving the next script under the SAME session id —
     /// recording which one proves the engine handed back the
@@ -74,7 +77,7 @@ impl MockAdapter {
     }
 
     /// The `agent` of every session spawned so far, in claim order.
-    pub fn agents_seen(&self) -> Vec<Option<String>> {
+    pub fn agents_seen(&self) -> Vec<Option<AgentName>> {
         self.agents_seen
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -124,7 +127,7 @@ impl MockAdapter {
             }
             let full_path = cwd.join(&effect.path);
             let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
-                adapter: "mock".to_string(),
+                adapter: ID.clone(),
                 action,
                 source,
             };
@@ -142,8 +145,8 @@ impl MockAdapter {
 
 #[async_trait]
 impl Adapter for MockAdapter {
-    fn id(&self) -> &'static str {
-        "mock"
+    fn id(&self) -> &'static AdapterId {
+        &ID
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -225,7 +228,7 @@ impl MockAdapter {
             });
             let Some(index) = claim else {
                 return Err(YuntaError::Adapter {
-                    adapter: "mock".to_string(),
+                    adapter: ID.clone(),
                     message: format!(
                         "fixture exhausted: {} scripted session(s), none left unconsumed and \
                          matching this request — add a session to the fixture for every \
@@ -241,12 +244,17 @@ impl MockAdapter {
 
         self.apply_effects(script, &req)?;
 
-        let session_id = resume_as.unwrap_or_else(|| {
-            SessionId::from(format!(
+        let session_id = match resume_as {
+            Some(session_id) => session_id,
+            None => SessionId::try_from(format!(
                 "mock-session-{}",
                 SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
             ))
-        });
+            .map_err(|error| YuntaError::Adapter {
+                adapter: ID.clone(),
+                message: error.to_string(),
+            })?,
+        };
 
         let blocked_markers: Vec<PathBuf> = script
             .effects

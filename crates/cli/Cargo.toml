@@ -48,6 +48,7 @@ async-trait.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true
 # Tests write their workflows and configs as YAML literals.
 serde_yaml.workspace = true

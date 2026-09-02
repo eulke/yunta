@@ -2,17 +2,17 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use yunta_core::{
-    ConfigLayer, JoinPolicy, ModeInclude, ModeSpec, Node, NodeKind, OnFailure, PromptSource,
-    RunnerCandidate, Workflow,
+    ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind, OnFailure,
+    PromptSource, RunnerCandidate, Workflow,
 };
 use yunta_engine::{check, check_warnings, CheckError, CheckWarning};
 
-fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<String, ModeSpec> {
+fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<ModeName, ModeSpec> {
     entries
         .iter()
         .map(|(name, include)| {
             (
-                (*name).to_string(),
+                (*name).into(),
                 ModeSpec {
                     include: include.clone(),
                 },
@@ -58,7 +58,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         },
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         scope: Vec::new(),
-        runner: Some(runner.to_string()),
+        runner: Some(runner.into()),
         artifacts: None,
         hooks: None,
         on_failure: None,
@@ -155,7 +155,7 @@ fn config_with_forge() -> ConfigLayer {
 
 fn workflow(nodes: Vec<Node>) -> Workflow {
     Workflow {
-        name: "fixture".to_string(),
+        name: "fixture".into(),
         modes: None,
         description: None,
         inputs: Default::default(),
@@ -171,7 +171,7 @@ fn workflow_with_inputs(
     inputs: std::collections::BTreeMap<String, yunta_core::InputSpec>,
 ) -> Workflow {
     Workflow {
-        name: "fixture".to_string(),
+        name: "fixture".into(),
         modes: None,
         description: None,
         inputs,
@@ -189,13 +189,13 @@ fn input_spec(yaml: &str) -> yunta_core::InputSpec {
 fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
     let list = (0..candidates)
         .map(|_| RunnerCandidate {
-            adapter: "mock".to_string(),
-            model: "mock-model".to_string(),
+            adapter: "mock".into(),
+            model: "mock-model".into(),
             agent: None,
         })
         .collect();
     ConfigLayer {
-        runners: Some(HashMap::from([(role.to_string(), list)])),
+        runners: Some(HashMap::from([(role.into(), list)])),
         ..Default::default()
     }
 }
@@ -273,14 +273,14 @@ fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
         .runners
         .as_mut()
         .unwrap()
-        .insert("mechanical".to_string(), vec![]);
+        .insert("mechanical".into(), vec![]);
     // give mechanical a real candidate too, so this test isolates the
     // cycle question rather than tripping the runner checks.
     config.runners.as_mut().unwrap().insert(
-        "mechanical".to_string(),
+        "mechanical".into(),
         vec![RunnerCandidate {
-            adapter: "mock".to_string(),
-            model: "mock-model".to_string(),
+            adapter: "mock".into(),
+            model: "mock-model".into(),
             agent: None,
         }],
     );
@@ -295,7 +295,7 @@ fn runner_not_declared_in_config_is_reported() {
     let errors = check(&wf, &ConfigLayer::default());
     assert!(errors.contains(&CheckError::UnknownRunner {
         node: "plan".into(),
-        runner: "planner".to_string(),
+        runner: "planner".into(),
     }));
 }
 
@@ -305,7 +305,7 @@ fn runner_declared_with_zero_candidates_is_reported() {
     let errors = check(&wf, &config_with_runner("planner", 0));
     assert!(errors.contains(&CheckError::RunnerHasNoCandidates {
         node: "plan".into(),
-        runner: "planner".to_string(),
+        runner: "planner".into(),
     }));
 }
 
@@ -330,7 +330,7 @@ fn external_gate_with_forge_configured_is_accepted() {
     );
 }
 
-fn workflow_with_modes(nodes: Vec<Node>, modes: IndexMap<String, ModeSpec>) -> Workflow {
+fn workflow_with_modes(nodes: Vec<Node>, modes: IndexMap<ModeName, ModeSpec>) -> Workflow {
     let mut wf = workflow(nodes);
     wf.modes = Some(modes);
     wf
@@ -673,7 +673,7 @@ fn every_error_message_names_its_rule() {
     assert_eq!(
         CheckError::UnknownRunner {
             node: "a".into(),
-            runner: "planner".to_string()
+            runner: "planner".into()
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` does not define"
@@ -681,7 +681,7 @@ fn every_error_message_names_its_rule() {
     assert_eq!(
         CheckError::RunnerHasNoCandidates {
             node: "a".into(),
-            runner: "planner".to_string()
+            runner: "planner".into()
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` defines with zero candidates"
@@ -810,10 +810,10 @@ fn context_on_a_prompt_node_is_never_an_error() {
         &wf,
         &ConfigLayer {
             runners: Some(HashMap::from([(
-                "planner".to_string(),
+                "planner".into(),
                 vec![RunnerCandidate {
-                    adapter: "mock".to_string(),
-                    model: "mock-model".to_string(),
+                    adapter: "mock".into(),
+                    model: "mock-model".into(),
                     agent: None,
                 }],
             )])),
@@ -833,14 +833,14 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     a.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
             node: Some("b".into()),
-            name: "b.md".to_string(),
+            name: "b.md".into(),
         },
     }];
     let mut b = prompt("b", "planner", &[]);
     b.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
             node: Some("a".into()),
-            name: "a.md".to_string(),
+            name: "a.md".into(),
         },
     }];
     let wf = workflow(vec![a, b]);
@@ -848,10 +848,10 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
         &wf,
         &ConfigLayer {
             runners: Some(HashMap::from([(
-                "planner".to_string(),
+                "planner".into(),
                 vec![RunnerCandidate {
-                    adapter: "mock".to_string(),
-                    model: "mock-model".to_string(),
+                    adapter: "mock".into(),
+                    model: "mock-model".into(),
                     agent: None,
                 }],
             )])),

@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ids::QuestionId;
+
 /// `text | choice | boolean`, verbatim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,7 +21,7 @@ pub enum AnswerType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Question {
-    pub id: String,
+    pub id: QuestionId,
     pub text: String,
     pub answer_type: AnswerType,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -44,7 +46,7 @@ pub struct QuestionsFile {
 /// is the only shape every consumer shares.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Answer {
-    pub id: String,
+    pub id: QuestionId,
     pub value: String,
 }
 

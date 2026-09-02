@@ -12,7 +12,10 @@ use yunta_core::events::{
     EventPayload, HookExecutedPayload, HookPhase, NodeFailedPayload, NodeFinishedPayload,
     RunnerResolvedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
-use yunta_core::{HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind, PromptSource};
+use yunta_core::{
+    AdapterId, AgentName, HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind, Pid,
+    PromptSource,
+};
 
 use crate::artifacts::close_artifacts;
 use crate::replay::{derive, NodeState};
@@ -386,7 +389,7 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
         ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
     ]);
     if let Some(role) = &node.runner {
-        vars.insert("runner.role".to_string(), role.clone());
+        vars.insert("runner.role".to_string(), role.to_string());
     }
     if let Some(project) = &ctx.manifest.config.project {
         if let Some(name) = &project.name {
@@ -481,8 +484,10 @@ async fn run_hook(
             context: format!("spawn hook `{rendered}`"),
             source,
         })?;
-    let _pgid_registration =
-        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
+    let _pgid_registration = crate::process_registry::register(
+        ctx.process_registry.as_ref(),
+        crate::process_registry::child_pid(&child),
+    );
 
     let exit_code = match step.timeout_seconds.map(std::time::Duration::from_secs) {
         None => child
@@ -503,7 +508,7 @@ async fn run_hook(
                 .code()
                 .unwrap_or(-1),
             Err(_elapsed) => {
-                if let Some(pid) = child.id() {
+                if let Some(pid) = crate::process_registry::child_pid(&child) {
                     kill_process_group(pid).await;
                 }
                 let _ = child.wait().await;
@@ -540,7 +545,7 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
 /// Sends `SIGKILL` to `pid`'s whole process group — the `--` before
 /// the negative pid is load-bearing, see `claude_code::signal_group`'s
 /// doc comment for the procps-ng behavior this avoids.
-pub(super) async fn kill_process_group(pid: u32) {
+pub(super) async fn kill_process_group(pid: Pid) {
     let _ = tokio::process::Command::new("kill")
         .arg("-KILL")
         .arg("--")
@@ -759,7 +764,7 @@ pub(super) async fn close_node(
                 .iter()
                 .filter_map(|artifact| artifact.questions.as_deref())
                 .flatten()
-                .map(|q| q.id.clone())
+                .map(|q| q.id.to_string())
                 .collect();
             if !pending.is_empty() {
                 return fail_with_tokens(
@@ -882,8 +887,10 @@ async fn execute_bash(
             context: format!("spawn bash node `{}`", node.id),
             source,
         })?;
-    let _pgid_registration =
-        crate::process_registry::register(ctx.process_registry.as_ref(), child.id());
+    let _pgid_registration = crate::process_registry::register(
+        ctx.process_registry.as_ref(),
+        crate::process_registry::child_pid(&child),
+    );
 
     let stderr_task = child.stderr.take().map(|mut pipe| {
         tokio::spawn(async move {
@@ -904,7 +911,7 @@ async fn execute_bash(
 
     tokio::select! {
         _ = cancel.cancelled() => {
-            if let Some(pid) = child.id() {
+            if let Some(pid) = crate::process_registry::child_pid(&child) {
                 kill_process_group(pid).await;
             }
             let _ = child.wait().await;
@@ -1041,7 +1048,7 @@ pub(super) fn resolve_node_runner(
                              `custom_agents` — pick a candidate on an adapter that does, or \
                              drop the agent",
                             node.id,
-                            chosen.agent.as_deref().unwrap_or(""),
+                            chosen.agent.as_ref().map_or("", AgentName::as_str),
                             chosen.adapter
                         ),
                         false,
@@ -1052,7 +1059,7 @@ pub(super) fn resolve_node_runner(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::RunnerResolved(RunnerResolvedPayload {
-                    role: resolved.role.clone(),
+                    runner: resolved.runner.clone(),
                     chosen: chosen.clone(),
                     discarded: resolved.discarded.clone(),
                 }),
@@ -1077,7 +1084,7 @@ pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_adapters::Adapter,
-    adapter_id: &str,
+    adapter_id: &AdapterId,
     task: Option<&yunta_core::TaskId>,
 ) -> Result<Option<crate::run_tools::RunToolsSession>, String> {
     let needs_blackboard = ctx

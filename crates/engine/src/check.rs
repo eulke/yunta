@@ -22,7 +22,13 @@
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
-use yunta_core::{ConfigLayer, InputSpec, Node, NodeId, NodeKind, Workflow};
+use yunta_core::{ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind, RunnerName, Workflow};
+
+/// The pseudo-node a finding about `node_defaults:` is attributed to.
+static NODE_DEFAULTS: NodeId = NodeId::from_static("node_defaults");
+
+/// The pseudo-node a finding about the config's `defaults:` is attributed to.
+static DEFAULTS: NodeId = NodeId::from_static("defaults");
 
 use crate::ledger::globs_might_overlap;
 use crate::template::template_variables;
@@ -42,12 +48,12 @@ pub enum CheckError {
     DependsOnCycle { path: String },
 
     #[error("node `{node}` references runner `{runner}`, which `runners:` does not define")]
-    UnknownRunner { node: NodeId, runner: String },
+    UnknownRunner { node: NodeId, runner: RunnerName },
 
     #[error(
         "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
     )]
-    RunnerHasNoCandidates { node: NodeId, runner: String },
+    RunnerHasNoCandidates { node: NodeId, runner: RunnerName },
 
     /// `parallel`'s children share one worktree — a scope
     /// overlap between two of them is a verifiable-in-advance write
@@ -233,12 +239,12 @@ pub enum CheckError {
     /// catching it here means the run never starts with a mode that
     /// silently omits work its own author meant to include.
     #[error("mode `{mode}` includes unknown node `{node}`")]
-    ModeReferencesUnknownNode { mode: String, node: NodeId },
+    ModeReferencesUnknownNode { mode: ModeName, node: NodeId },
 
     /// A mode trims deliberation, never verification — checked
     /// independent of the mode's name or count.
     #[error("node `{node}` is `invariant: true` but mode `{mode}` doesn't include it")]
-    InvariantNodeExcludedFromMode { node: NodeId, mode: String },
+    InvariantNodeExcludedFromMode { node: NodeId, mode: ModeName },
 
     /// A mode's own coherence rule, made an error rather than a warning
     /// for the same reason: it's the same broken-goto class
@@ -250,7 +256,7 @@ pub enum CheckError {
          include `{goto}` in `{mode}`, or drop the re-route there"
     )]
     RerouteTargetExcludedFromMode {
-        mode: String,
+        mode: ModeName,
         node: NodeId,
         goto: NodeId,
     },
@@ -517,7 +523,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
                     crate::permissions::command_violation(&step.run, Some(permissions))
                 {
                     errors.push(CheckError::CommandDenied {
-                        node: "node_defaults".into(),
+                        node: NODE_DEFAULTS.clone(),
                         rule,
                     });
                 }
@@ -746,7 +752,7 @@ fn check_input_references(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     if let Some(defaults) = &workflow.node_defaults {
         if let Some(hooks) = &defaults.hooks {
             for step in hooks.before.iter().chain(&hooks.after) {
-                check_template_text(&"node_defaults".into(), &step.run, workflow, errors);
+                check_template_text(&NODE_DEFAULTS, &step.run, workflow, errors);
             }
         }
     }
@@ -1382,7 +1388,7 @@ fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
             .is_some_and(|candidates| !candidates.is_empty());
         if !defined {
             errors.push(CheckError::UnknownRunner {
-                node: "defaults".into(),
+                node: DEFAULTS.clone(),
                 runner: runner.clone(),
             });
         }
@@ -1652,8 +1658,8 @@ fn check_declares_ceiling(
     };
     let manifest_path = repo_root
         .join(".yunta/packs")
-        .join(publisher)
-        .join(pack_name)
+        .join(publisher.as_str())
+        .join(pack_name.as_str())
         .join("pack.yaml");
     let Ok(text) = std::fs::read_to_string(&manifest_path) else {
         return Vec::new();

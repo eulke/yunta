@@ -25,7 +25,7 @@ pub enum GraphFormat {
     Dot,
 }
 
-pub fn graph(workflow_path: &Path, run_id: Option<&str>, format: GraphFormat) -> ExitCode {
+pub fn graph(workflow_path: &Path, run_id: Option<&RunId>, format: GraphFormat) -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(e) => {
@@ -69,14 +69,12 @@ pub fn graph(workflow_path: &Path, run_id: Option<&str>, format: GraphFormat) ->
 /// Derives run state from the event log (`yunta_engine::derive`) and
 /// reduces it to one display label per node — the same source
 /// `status` reads, just formatted for a Mermaid node instead of a list.
-fn derive_labels(project: &project::Project, run_id: &str) -> Result<Labels, ExitCode> {
+fn derive_labels(project: &project::Project, run_id: &RunId) -> Result<Labels, ExitCode> {
     let storage = Storage::open(&project.storage_path).map_err(|e| {
         eprintln!("error: {e}");
         ExitCode::FAILURE
     })?;
-
-    let run_id = RunId::from(run_id);
-    let events = storage.events_for_run(&run_id).map_err(|e| {
+    let events = storage.events_for_run(run_id).map_err(|e| {
         eprintln!("error: {e}");
         ExitCode::FAILURE
     })?;

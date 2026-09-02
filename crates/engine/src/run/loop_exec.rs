@@ -15,7 +15,7 @@ use yunta_core::events::{
     ScopeCheckedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
     ScopeExpansionRequestedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
-use yunta_core::{Isolation, Ledger, Node, NodeKind, PromptSource, Task};
+use yunta_core::{FindingId, Isolation, Ledger, Node, NodeKind, PromptSource, Task};
 
 use crate::replay::{derive, RunState};
 use crate::scope::scope_check;
@@ -477,10 +477,10 @@ pub(super) async fn execute_loop(
                         Some(&node.id),
                         EventPayload::FindingPosted(FindingPostedPayload {
                             finding: Finding {
-                                id: format!(
+                                id: FindingId::try_from(format!(
                                     "scope-expansion-{}-{}",
                                     pending.task_id, pending.attempt_no
-                                ),
+                                ))?,
                                 severity: FindingSeverity::Minor,
                                 title: format!(
                                     "scope expansion denied for task `{}`",
@@ -1019,7 +1019,9 @@ fn emit_scope_expansion_events(
                 Some(&node.id),
                 EventPayload::FindingPosted(FindingPostedPayload {
                     finding: Finding {
-                        id: format!("scope-expansion-{task_id}-{attempt_number}"),
+                        id: FindingId::try_from(format!(
+                            "scope-expansion-{task_id}-{attempt_number}"
+                        ))?,
                         // Denied is a routine control-flow outcome, not
                         // evidence the run itself is broken — `Minor` by
                         // default, distinct from whatever severity the
