@@ -1,0 +1,14 @@
+# Two keys a workflow author reaches for and the schema never accepts:
+# `depend_on` (a typo of `depends_on`) and `role` (the concept is spelled
+# `runner:` in YAML).
+name: typo-keys
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    prompt: "Write the brief."
+  - id: plan
+    kind: prompt
+    role: planner
+    depend_on: [grill]
+    prompt: "Write the plan."

@@ -5,7 +5,8 @@
 
 use std::path::Path;
 
-use yunta_core::events::{ProposedCriterion, ScopeExpansionMode};
+use yunta_core::events::ScopeExpansionMode;
+use yunta_core::ProposedCriterionEntry;
 use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -32,7 +33,7 @@ fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
     ScopeExpansionRequest {
         paths: paths.iter().map(|s| s.to_string()).collect(),
         reason: "small adjacent fix".to_string(),
-        proposed_criterion: criterion.map(|cmd| ProposedCriterion {
+        proposed_criterion: criterion.map(|cmd| ProposedCriterionEntry {
             cmd: cmd.to_string(),
         }),
     }

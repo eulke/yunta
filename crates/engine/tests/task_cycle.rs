@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
-use yunta_core::events::Criterion;
+use yunta_core::Criterion;
 use yunta_core::Task;
 use yunta_engine::{
     run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,

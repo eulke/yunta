@@ -13,7 +13,8 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_core::events::{Finding, FindingsFile};
+use yunta_core::events::Finding;
+use yunta_core::FindingsFile;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, Ledger, Node, NodeId, Question, QuestionsFile,
 };
@@ -234,7 +235,7 @@ fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding
 
     let violations = crate::findings::register(&file);
     if violations.is_empty() {
-        Ok(file.findings)
+        Ok(file.findings.into_iter().map(Finding::from).collect())
     } else {
         Err(ArtifactError::InvalidFindings {
             node: node.clone(),

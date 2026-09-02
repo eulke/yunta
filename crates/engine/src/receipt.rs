@@ -190,12 +190,7 @@ fn baseline_summary(manifest: &Manifest, events: &[Event]) -> Option<BaselineSum
     let mut compared = 0usize;
     let mut regressions = 0usize;
     for node in manifest.workflow.iter_nodes() {
-        if !matches!(
-            &node.kind,
-            NodeKind::Check {
-                builtin: CheckBuiltin::BaselineCompare
-            }
-        ) {
+        if !matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)) {
             continue;
         }
         match state.nodes.get(&node.id) {

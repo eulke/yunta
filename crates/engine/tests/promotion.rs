@@ -317,7 +317,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 
     let path = run_dir.join("artifacts/findings-inherited.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
-    let file: yunta_core::events::FindingsFile = serde_yaml::from_slice(&bytes).unwrap();
+    let file: yunta_core::FindingsFile = serde_yaml::from_slice(&bytes).unwrap();
     assert!(
         yunta_engine::register_findings(&file).is_empty(),
         "the derived file must satisfy the findings-file parser"

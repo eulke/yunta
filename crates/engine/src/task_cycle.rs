@@ -19,7 +19,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
-use yunta_core::events::{Criterion, CriterionType, EventPayload, TokenUsage};
+use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
+use yunta_core::Criterion;
 use yunta_core::{Task, TaskId, YuntaError};
 
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};

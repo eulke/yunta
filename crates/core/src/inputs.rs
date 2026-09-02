@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// neither field is given — an input the schema is silent about is
 /// required, since a `default` is the only way to make one optional).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputSpec {
     String {
         #[serde(default, skip_serializing_if = "Option::is_none")]

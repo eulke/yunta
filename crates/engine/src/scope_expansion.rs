@@ -41,7 +41,8 @@ use std::path::Path;
 use globset::{Glob, GlobSetBuilder};
 use serde::Deserialize;
 use thiserror::Error;
-use yunta_core::events::{ProposedCriterion, ScopeExpansionMode};
+use yunta_core::events::ScopeExpansionMode;
+use yunta_core::ProposedCriterionEntry;
 
 /// The well-known path, relative to a task's own isolated worktree, an
 /// agent writes to request an expansion — mirrors `findings.yaml`'s role
@@ -84,11 +85,12 @@ pub enum ScopeExpansionError {
 /// The request object required to be identical across all three
 /// modes: paths, reason, and a verifiable criterion the agent proposes.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScopeExpansionRequest {
     pub paths: Vec<String>,
     pub reason: String,
     #[serde(default)]
-    pub proposed_criterion: Option<ProposedCriterion>,
+    pub proposed_criterion: Option<ProposedCriterionEntry>,
 }
 
 /// Reads and parses the task's own request file, if the agent wrote one

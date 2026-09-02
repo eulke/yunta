@@ -157,13 +157,6 @@ pub struct Finding {
     pub proposed_criterion: Option<ProposedCriterion>,
 }
 
-/// A `kind: findings` artifact's document — sole top-level key `findings:`,
-/// mirroring `Ledger`'s `tasks:`-only shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FindingsFile {
-    pub findings: Vec<Finding>,
-}
-
 /// Exact variant names are provisional; a `cancel` command
 /// exists, so `Cancelled` is included alongside the obvious two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -334,7 +334,7 @@ builtin: baseline_compare
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     match node.kind {
-        NodeKind::Check { builtin } => assert_eq!(builtin, CheckBuiltin::BaselineCompare),
+        NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::BaselineCompare),
         other => panic!("expected Check, got {other:?}"),
     }
 }
@@ -348,7 +348,7 @@ builtin: coverage_gate
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     match node.kind {
-        NodeKind::Check { builtin } => assert_eq!(builtin, CheckBuiltin::CoverageGate),
+        NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::CoverageGate),
         other => panic!("expected Check, got {other:?}"),
     }
 }
@@ -363,7 +363,7 @@ max_severity: major
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     match node.kind {
-        NodeKind::Check { builtin } => assert_eq!(
+        NodeKind::Check(builtin) => assert_eq!(
             builtin,
             CheckBuiltin::FindingsGate {
                 max_severity: yunta_core::events::FindingSeverity::Major,
@@ -754,14 +754,14 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [galaxy] }
 "#;
-    // `ContextSpec` is untagged — serde_yaml doesn't surface which
-    // variant's inner field rejected an unknown enum value, only that
-    // none matched. It is still, correctly, a parse-time error rather
-    // than something `resolve_knowledge` discovers at run time.
-    let err = serde_yaml::from_str::<yunta_core::Node>(yaml).unwrap_err();
+    // A parse-time error — never something `resolve_knowledge` discovers
+    // at run time — that names the field, the value and the layers that
+    // exist.
+    let err = yunta_core::yaml::parse::<yunta_core::Node>(yaml).unwrap_err();
+    let text = err.to_string();
     assert!(
-        err.to_string().contains("did not match any variant"),
-        "error was: {err}"
+        text.contains("layers") && text.contains("`galaxy`") && text.contains("`repo`"),
+        "error was: {text}"
     );
 }
 

@@ -1386,7 +1386,6 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
 fn context_on_a_loop_node_is_accepted_and_on_bash_still_refused() {
     let looped = r#"
 name: ctx
-runners: {}
 nodes:
   - id: implement
     kind: loop

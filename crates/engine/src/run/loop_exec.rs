@@ -495,7 +495,8 @@ pub(super) async fn execute_loop(
                                     .outcome
                                     .request
                                     .proposed_criterion
-                                    .clone(),
+                                    .clone()
+                                    .map(Into::into),
                             },
                         }),
                     )?;
@@ -982,7 +983,7 @@ fn emit_scope_expansion_events(
             task_id: task_id.clone(),
             paths: outcome.request.paths.clone(),
             reason: outcome.request.reason.clone(),
-            proposed_criterion: outcome.request.proposed_criterion.clone(),
+            proposed_criterion: outcome.request.proposed_criterion.clone().map(Into::into),
             proposed_criterion_precheck: outcome
                 .precheck_exit
                 .map(|exit_code| ProposedCriterionPrecheck { exit_code }),
@@ -1031,7 +1032,11 @@ fn emit_scope_expansion_events(
                             "{reason} — agent's stated reason: {}",
                             outcome.request.reason
                         ),
-                        proposed_criterion: outcome.request.proposed_criterion.clone(),
+                        proposed_criterion: outcome
+                            .request
+                            .proposed_criterion
+                            .clone()
+                            .map(Into::into),
                     },
                 }),
             )?;

@@ -803,9 +803,7 @@ pub(crate) async fn execute_run_at_depth(
                     let events_for_close = ctx.load_events()?;
                     let inherited = crate::findings::inherited_findings(&events_for_close);
                     if !inherited.is_empty() {
-                        let file = yunta_core::events::FindingsFile {
-                            findings: inherited,
-                        };
+                        let file = yunta_core::FindingsFile::from_findings(inherited);
                         let yaml =
                             yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
                                 diagnostic: format!("failed to serialize inherited findings: {e}"),

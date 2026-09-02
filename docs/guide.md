@@ -13,7 +13,11 @@ for installing, creating, or publishing one.
 
 ## Node kinds
 
-Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`:
+Every node has an `id`, an optional `depends_on: [ids]`, and one `kind`. Every key
+is checked: a key the schema does not know — a typo, or a key that belongs to
+another kind — is refused by `yunta check` and by every command that reads the
+file, with the key, where it sits and the keys that are valid there. A mistyped
+key never silently becomes a default.
 
 - **`bash`** — `run: "<command>"`. Exit code is the verdict; no session, no agent.
 - **`prompt`** — `prompt: "<text>"` (or `prompt: { file: path/to/prompt.md }` for
@@ -224,5 +228,5 @@ This guide covers what's needed to write and reason about a workflow. See
 [the documentation index](README.md) for adapters, troubleshooting, and the
 compatibility policy. The full normative schema — every field, every
 validation rule `yunta check` enforces, the event log's exact payloads, and
-the rationale behind design choices — lives in the project's internal
-engineering specs, not in this guide.
+the rationale behind design choices — lives in the design corpus under
+[`docs/design/`](design/README.md).

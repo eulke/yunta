@@ -1,4 +1,5 @@
-use yunta_core::events::{Criterion, CriterionType};
+use yunta_core::events::CriterionType;
+use yunta_core::Criterion;
 use yunta_core::{Ledger, Task};
 use yunta_engine::{register, LedgerError};
 

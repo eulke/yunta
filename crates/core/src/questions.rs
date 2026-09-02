@@ -17,6 +17,7 @@ pub enum AnswerType {
 /// One question: `id`, `text`, `answer_type`, `values` only when
 /// `answer_type` is `choice`, and `required`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Question {
     pub id: String,
     pub text: String,
@@ -30,6 +31,7 @@ pub struct Question {
 /// `questions:`, mirroring `Ledger`'s `tasks:`-only shape and
 /// `FindingsFile`'s `findings:`-only shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QuestionsFile {
     pub questions: Vec<Question>,
 }

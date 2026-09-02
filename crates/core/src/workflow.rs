@@ -1,24 +1,26 @@
-//! Serde types for the workflow schema.
+//! The workflow schema: what `.yunta/workflows/<name>.yaml` declares,
+//! parsed once at the frontier.
 //!
-//! The full schema covers every node `kind`, `runners:`/`agent:`
-//! resolution, `context:`, `skills:`, `modes:`, `inputs:`, gates and
-//! composition. What's implemented today is deliberately narrower: only
-//! `prompt`/`bash`/`loop` nodes, `depends_on`,
-//! `scope`, `artifacts`, `hooks: {before, after}` and `on_failure.goto` —
-//! just enough for the implement → compile → correct cycle the bootstrap
-//! needs to validate. Every other workflow field is out of scope here and
-//! will extend these types when its own support lands, not before.
+//! A person writes these files, so every type here refuses a key it
+//! does not know and names the keys it does. The values the schema
+//! discriminates by a field name instead of a tag — a `context:` entry,
+//! an `on_finish:` step, an artifact, a prompt, a mode's `include` —
+//! read that name explicitly and say which names exist when it is
+//! missing or wrong, instead of reporting that nothing matched.
 
 use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ids::NodeId;
 use crate::inputs::InputSpec;
+use crate::yaml::{self, Mapping, Value, YamlError};
 
 /// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Workflow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,8 +96,8 @@ impl<'a> Iterator for NodeIter<'a> {
 }
 
 /// One `on_finish:` entry — discriminated by its own field name, the
-/// same untagged convention `context:` uses.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// same convention `context:` uses.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum OnFinishStep {
     Cleanup {
@@ -108,6 +110,24 @@ pub enum OnFinishStep {
     },
 }
 
+impl OnFinishStep {
+    const KEYS: &'static [&'static str] = &["cleanup", "distill"];
+}
+
+impl<'de> Deserialize<'de> for OnFinishStep {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (key, value) = keyed_entry(deserializer, "an `on_finish` step", Self::KEYS)?;
+        match key.as_str() {
+            "cleanup" => Ok(OnFinishStep::Cleanup {
+                cleanup: nested::<D, _>(&key, value)?,
+            }),
+            _ => Ok(OnFinishStep::Distill {
+                distill: nested::<D, _>(&key, value)?,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CleanupTarget {
@@ -116,6 +136,7 @@ pub enum CleanupTarget {
 
 /// One `modes:` entry's own scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModeSpec {
     pub include: ModeInclude,
 }
@@ -148,20 +169,16 @@ impl Serialize for ModeInclude {
 
 impl<'de> Deserialize<'de> for ModeInclude {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Raw {
-            All(AllLiteral),
-            Nodes(Vec<NodeId>),
-        }
-        #[derive(Deserialize)]
-        enum AllLiteral {
-            #[serde(rename = "all")]
-            All,
-        }
-        match Raw::deserialize(deserializer)? {
-            Raw::All(AllLiteral::All) => Ok(ModeInclude::All),
-            Raw::Nodes(nodes) => Ok(ModeInclude::Nodes(nodes)),
+        use serde::de::Error;
+        match Value::deserialize(deserializer)? {
+            Value::String(word) if word == "all" => Ok(ModeInclude::All),
+            sequence @ Value::Sequence(_) => {
+                Ok(ModeInclude::Nodes(nested::<D, _>("include", sequence)?))
+            }
+            other => Err(D::Error::custom(format!(
+                "`include` is `all` or a list of node ids, not {}",
+                describe(&other)
+            ))),
         }
     }
 }
@@ -170,6 +187,7 @@ impl<'de> Deserialize<'de> for ModeInclude {
 /// needs. Extends when another field needs the same "declare once,
 /// nodes inherit" treatment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<Hooks>,
@@ -184,7 +202,7 @@ pub struct NodeDefaults {
 /// meaningless without picking a runner, even though the resolution
 /// mechanism itself (`runners:` candidates, capability probing) is
 /// config-layer work handled elsewhere.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Node {
     pub id: NodeId,
     #[serde(flatten)]
@@ -269,12 +287,178 @@ pub struct Node {
     pub invariant: bool,
 }
 
+/// The keys every node accepts at its own level; `kind` and the keys
+/// that belong to the kind are [`NodeKind`]'s.
+const NODE_KEYS: &[&str] = &[
+    "id",
+    "depends_on",
+    "scope",
+    "runner",
+    "runners",
+    "agent",
+    "artifacts",
+    "hooks",
+    "on_failure",
+    "on_interrupt",
+    "description",
+    "permissions",
+    "network",
+    "context",
+    "skills",
+    "interactive",
+    "invariant",
+];
+
+/// Keys an author reaches for that no node accepts, each with the key
+/// that expresses the intent.
+const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
+    ("role", "a node names its runner with `runner:`"),
+    (
+        "fresh_context",
+        "every session starts fresh; `on_interrupt: resume_session` reuses one only when a \
+         run resumes",
+    ),
+];
+
+/// The node-level keys as a struct of their own — what [`Node`]'s
+/// deserializer reads once the kind's keys are split off.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NodeFields {
+    id: NodeId,
+    #[serde(default)]
+    depends_on: Vec<NodeId>,
+    #[serde(default)]
+    scope: Vec<String>,
+    #[serde(default)]
+    runner: Option<String>,
+    #[serde(default)]
+    runners: Vec<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    artifacts: Option<Artifacts>,
+    #[serde(default)]
+    hooks: Option<Hooks>,
+    #[serde(default)]
+    on_failure: Option<OnFailure>,
+    #[serde(default)]
+    on_interrupt: Option<OnInterrupt>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    permissions: Option<NodePermissions>,
+    #[serde(default)]
+    network: Option<bool>,
+    #[serde(default)]
+    context: Vec<ContextSpec>,
+    #[serde(default)]
+    skills: Vec<String>,
+    #[serde(default)]
+    interactive: Option<bool>,
+    #[serde(default)]
+    invariant: bool,
+}
+
+impl<'de> Deserialize<'de> for Node {
+    /// A node is one mapping holding its own keys and its kind's keys
+    /// side by side. The keys are split by name before either part is
+    /// parsed, so every unknown key is reported at once — with the kind
+    /// it was judged against, the keys that are valid there and, for a
+    /// key the schema retired, the key that replaces it.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let mut own = Mapping::new();
+        let mut kind_part = Mapping::new();
+        for (key, value) in Mapping::deserialize(deserializer)? {
+            let Some(name) = key.as_str() else {
+                return Err(D::Error::custom(format!(
+                    "a node's keys are strings, not {}",
+                    describe(&key)
+                )));
+            };
+            if NODE_KEYS.contains(&name) {
+                own.insert(key, value);
+            } else {
+                kind_part.insert(key, value);
+            }
+        }
+        let subject = match own.get("id").and_then(Value::as_str) {
+            Some(id) => format!("node `{id}`"),
+            None => "node".to_string(),
+        };
+
+        let Some(kind_name) = kind_part.get("kind").and_then(Value::as_str) else {
+            return Err(D::Error::custom(format!(
+                "{subject}: `kind` is missing or not a string; one of {}",
+                list(NodeKind::KINDS)
+            )));
+        };
+        let Some(kind_keys) = NodeKind::keys(kind_name) else {
+            return Err(D::Error::custom(format!(
+                "{subject}: unknown kind `{kind_name}`; one of {}",
+                list(NodeKind::KINDS)
+            )));
+        };
+        let unknown: Vec<&str> = kind_part
+            .iter()
+            .filter_map(|(key, _)| key.as_str())
+            .filter(|key| *key != "kind" && !kind_keys.contains(key))
+            .collect();
+        if !unknown.is_empty() {
+            let valid: Vec<&str> = NODE_KEYS
+                .iter()
+                .chain(std::iter::once(&"kind"))
+                .chain(kind_keys.iter())
+                .copied()
+                .collect();
+            let mut message = format!(
+                "{subject}: unknown key(s) {} for a `{kind_name}` node; valid keys: {}",
+                list(&unknown),
+                list(&valid)
+            );
+            for (key, hint) in RETIRED_NODE_KEYS {
+                if unknown.contains(key) {
+                    message.push_str(&format!("; `{key}`: {hint}"));
+                }
+            }
+            return Err(D::Error::custom(message));
+        }
+
+        let fields: NodeFields = yaml::from_value(Value::Mapping(own))
+            .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
+        let kind: NodeKind = yaml::from_value(Value::Mapping(kind_part))
+            .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
+        Ok(Node {
+            id: fields.id,
+            kind,
+            depends_on: fields.depends_on,
+            scope: fields.scope,
+            runner: fields.runner,
+            runners: fields.runners,
+            agent: fields.agent,
+            artifacts: fields.artifacts,
+            hooks: fields.hooks,
+            on_failure: fields.on_failure,
+            on_interrupt: fields.on_interrupt,
+            description: fields.description,
+            permissions: fields.permissions,
+            network: fields.network,
+            context: fields.context,
+            skills: fields.skills,
+            interactive: fields.interactive,
+            invariant: fields.invariant,
+        })
+    }
+}
+
 /// One `context:` entry: a builtin `ContextSource` plus its own
-/// parameters. Untagged: each variant's own (unique) field name is the
-/// discriminant, exactly matching the schema's own YAML — `- files:
-/// [...]`, `- command: "..."`, `- artifact: { node: ..., name: ... }`,
-/// and so on; there is no separate `kind:` key to introduce.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// parameters, discriminated by its own field name, exactly matching
+/// the schema's YAML — `- files: [...]`, `- command: "..."`,
+/// `- artifact: { node: ..., name: ... }`, and so on; there is no
+/// separate `kind:` key to introduce.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ContextSpec {
     Files {
@@ -305,6 +489,52 @@ pub enum ContextSpec {
     },
 }
 
+impl ContextSpec {
+    const KEYS: &'static [&'static str] = &[
+        "files",
+        "command",
+        "artifact",
+        "mcp",
+        "run-events",
+        "ledger",
+        "knowledge",
+        "node-output",
+    ];
+}
+
+impl<'de> Deserialize<'de> for ContextSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (key, value) = keyed_entry(deserializer, "a context source", Self::KEYS)?;
+        let spec = match key.as_str() {
+            "files" => ContextSpec::Files {
+                files: nested::<D, _>(&key, value)?,
+            },
+            "command" => ContextSpec::Command {
+                command: nested::<D, _>(&key, value)?,
+            },
+            "artifact" => ContextSpec::Artifact {
+                artifact: nested::<D, _>(&key, value)?,
+            },
+            "mcp" => ContextSpec::Mcp {
+                mcp: nested::<D, _>(&key, value)?,
+            },
+            "run-events" => ContextSpec::RunEvents {
+                run_events: nested::<D, _>(&key, value)?,
+            },
+            "ledger" => ContextSpec::Ledger {
+                ledger: nested::<D, _>(&key, value)?,
+            },
+            "knowledge" => ContextSpec::Knowledge {
+                knowledge: nested::<D, _>(&key, value)?,
+            },
+            _ => ContextSpec::NodeOutput {
+                node_output: nested::<D, _>(&key, value)?,
+            },
+        };
+        Ok(spec)
+    }
+}
+
 /// `mcp: { server: ..., query: ... }` — `server` names an
 /// entry in the merged config's `mcp_servers:`; `query` is free-form text
 /// (the reference example passes `{{inputs.idea}}` verbatim) sent
@@ -312,6 +542,7 @@ pub enum ContextSpec {
 /// `tools/call` on a tool literally named `query`, since the schema
 /// fixes neither the MCP verb nor a tool name).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McpQueryParams {
     pub server: String,
     pub query: String,
@@ -330,6 +561,7 @@ pub struct McpQueryParams {
 /// it's what keeps a catalog child parametric: it never has to name a
 /// producer it doesn't have.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ArtifactContextRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeId>,
@@ -341,6 +573,7 @@ pub struct ArtifactContextRef {
 /// example is `filter: failed`, no closed vocabulary given) — the
 /// resolver's own job to interpret, not the schema's.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunEventsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
@@ -351,6 +584,7 @@ pub struct RunEventsParams {
 /// comment on `context` for the task-scoped variant this doesn't cover
 /// yet).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LedgerParams {}
 
 /// One layer of `knowledge:`, most to least local. `Org` resolves
@@ -379,6 +613,7 @@ impl std::fmt::Display for KnowledgeLayer {
 /// `knowledge: { layers: [...] }` — empty/absent `layers` means
 /// every layer the resolver can see.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KnowledgeParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<KnowledgeLayer>,
@@ -387,6 +622,7 @@ pub struct KnowledgeParams {
 /// `node-output: { node: ... }` — captured stdout/stderr of a
 /// previously-run node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeOutputParams {
     pub node: NodeId,
 }
@@ -401,6 +637,7 @@ pub struct NodeOutputParams {
 /// ("diez concesiones seguidas no son readecuación, son un plan mal
 /// cortado") — absent means uncapped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
     #[serde(default)]
     pub mode: crate::events::ScopeExpansionMode,
@@ -443,7 +680,7 @@ pub enum OnInterrupt {
 /// `workflow` are the rest of the full catalogue and stay out until
 /// their own turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NodeKind {
     Prompt {
         prompt: PromptSource,
@@ -502,10 +739,7 @@ pub enum NodeKind {
     /// The builtin list is closed on purpose: a `check` builtin is by
     /// definition something the engine can already evaluate; anything
     /// else is a `bash` node (exit code) or an `executor`.
-    Check {
-        #[serde(flatten)]
-        builtin: CheckBuiltin,
-    },
+    Check(CheckBuiltin),
     /// The extension point when neither `bash` (exit code only, no
     /// structured input) nor `check`'s closed builtin list covers it —
     /// external code, a JSON contract over stdio. `executor` names an
@@ -602,11 +836,37 @@ pub enum NodeKind {
     },
 }
 
+impl NodeKind {
+    /// Every `kind:` a node can declare, as written in YAML.
+    pub const KINDS: &'static [&'static str] = &[
+        "prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow",
+    ];
+
+    /// The keys a node of `kind` accepts besides the node-level ones,
+    /// or `None` for a kind that does not exist. The lists mirror the
+    /// variants above; a test serializes each kind with every field set
+    /// and checks nothing falls outside its list.
+    pub fn keys(kind: &str) -> Option<&'static [&'static str]> {
+        Some(match kind {
+            "prompt" => &["prompt"],
+            "bash" => &["run"],
+            "loop" => &["until", "prompt", "concurrency", "scope_expansion"],
+            "parallel" => &["join", "coordination", "nodes"],
+            "check" => &["builtin", "max_severity"],
+            "executor" => &["executor", "with", "timeout_seconds"],
+            "gate" => &["assignee", "message", "options", "on", "external"],
+            "workflow" => &["use", "inputs", "isolation", "mounts"],
+            _ => return None,
+        })
+    }
+}
+
 /// One `mounts:` entry — `artifact:` is the only mount source there is,
 /// kept as a named field (not a bare inline struct) so a second source
 /// kind lands as a sibling field with the same untagged-by-field-name
 /// convention `context:`/`on_finish:` already use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MountSpec {
     pub artifact: MountArtifact,
 }
@@ -617,6 +877,7 @@ pub struct MountSpec {
 /// node to the parent's own `run.dir/artifacts/`. `as:` renames the
 /// copy in the child (absent keeps `name`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MountArtifact {
     pub node: NodeId,
     pub name: String,
@@ -642,6 +903,7 @@ pub enum WorkflowIsolation {
 
 /// `kind: gate`'s `external:` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExternalGate {
     pub kind: ForgeKind,
     /// Paths (relative to `run.dir`) committed to `branch` for review —
@@ -669,7 +931,7 @@ pub enum ForgeKind {
 /// `limits:` already pauses the run on its own; duplicating that
 /// as a check would be redundant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "builtin", rename_all = "snake_case")]
+#[serde(tag = "builtin", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckBuiltin {
     /// Re-runs `baseline.suite` and fails if something that passed the
     /// captured baseline stopped passing.
@@ -724,16 +986,24 @@ impl<'de> Deserialize<'de> for PromptSource {
     where
         D: Deserializer<'de>,
     {
+        use serde::de::Error;
+
         #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Raw {
-            Scalar(String),
-            File { file: std::path::PathBuf },
+        #[serde(deny_unknown_fields)]
+        struct File {
+            file: std::path::PathBuf,
         }
 
-        match Raw::deserialize(deserializer)? {
-            Raw::Scalar(text) => Ok(PromptSource::Inline(text)),
-            Raw::File { file } => Ok(PromptSource::File(file)),
+        match Value::deserialize(deserializer)? {
+            Value::String(text) => Ok(PromptSource::Inline(text)),
+            mapping @ Value::Mapping(_) => {
+                let File { file } = nested::<D, _>("prompt", mapping)?;
+                Ok(PromptSource::File(file))
+            }
+            other => Err(D::Error::custom(format!(
+                "a prompt is text or `{{ file: <path> }}`, not {}",
+                describe(&other)
+            ))),
         }
     }
 }
@@ -760,15 +1030,41 @@ impl Serialize for PromptSource {
 /// `questions` are interpreted. A plain string stays
 /// opaque.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Artifacts {
     pub produces: Vec<ArtifactSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ArtifactSpec {
     Plain(String),
     Typed { name: String, kind: ArtifactKind },
+}
+
+impl<'de> Deserialize<'de> for ArtifactSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Typed {
+            name: String,
+            kind: ArtifactKind,
+        }
+
+        match Value::deserialize(deserializer)? {
+            Value::String(name) => Ok(ArtifactSpec::Plain(name)),
+            mapping @ Value::Mapping(_) => {
+                let Typed { name, kind } = nested::<D, _>("artifact", mapping)?;
+                Ok(ArtifactSpec::Typed { name, kind })
+            }
+            other => Err(D::Error::custom(format!(
+                "an artifact is a name or `{{ name: <name>, kind: <kind> }}`, not {}",
+                describe(&other)
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -781,6 +1077,7 @@ pub enum ArtifactKind {
 
 /// `hooks: {before, after}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Hooks {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub before: Vec<HookStep>,
@@ -795,6 +1092,7 @@ pub struct Hooks {
 /// minutes granularity `defaults.timeout_minutes` uses for whole agent
 /// sessions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HookStep {
     pub run: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -822,7 +1120,191 @@ pub enum HookFailurePolicy {
 /// is how a correction cycle turns infinite, so the schema refuses it.
 /// Distinct from a hook's own `on_failure: fail|warn`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OnFailure {
     pub goto: NodeId,
     pub max_reroutes: u32,
+}
+
+/// Reads a mapping that holds exactly one entry whose key is one of
+/// `keys` — the shape of every value this schema discriminates by a
+/// field name. `what` names the value in the error.
+fn keyed_entry<'de, D: Deserializer<'de>>(
+    deserializer: D,
+    what: &str,
+    keys: &[&str],
+) -> Result<(String, Value), D::Error> {
+    use serde::de::Error;
+
+    let mut entries = Mapping::deserialize(deserializer)?.into_iter();
+    let (key, value) = match (entries.next(), entries.next()) {
+        (Some(entry), None) => entry,
+        _ => {
+            return Err(D::Error::custom(format!(
+                "{what} is a mapping with exactly one key, one of {}",
+                list(keys)
+            )))
+        }
+    };
+    let Some(key) = key.as_str() else {
+        return Err(D::Error::custom(format!(
+            "{what} is keyed by a string, one of {}",
+            list(keys)
+        )));
+    };
+    if !keys.contains(&key) {
+        return Err(D::Error::custom(format!(
+            "unknown key `{key}` for {what}; one of {}",
+            list(keys)
+        )));
+    }
+    Ok((key.to_string(), value))
+}
+
+/// Parses the value found under `key`, keeping `key` in the error's
+/// path so the location stays complete once the parser adds its own.
+fn nested<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    key: &str,
+    value: Value,
+) -> Result<T, D::Error> {
+    use serde::de::Error;
+
+    yaml::from_value(value).map_err(|error| {
+        D::Error::custom(match error {
+            YamlError::Parse { path, message } if path.is_empty() || path == "." => {
+                format!("{key}: {message}")
+            }
+            YamlError::Parse { path, message } => format!("{key}.{path}: {message}"),
+            other => other.to_string(),
+        })
+    })
+}
+
+/// `` `a`, `b`, `c` `` — how every error here lists keys.
+fn list<S: AsRef<str>>(keys: &[S]) -> String {
+    keys.iter()
+        .map(|key| format!("`{}`", key.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What kind of YAML value `value` is, for an error that expected another.
+fn describe(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Sequence(_) => "a list",
+        Value::Mapping(_) => "a mapping",
+        Value::Tagged(_) => "a tagged value",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One node per kind with every key its kind accepts, so that
+    /// serializing it shows exactly which keys the variant owns.
+    const EVERY_KIND: &str = r#"
+name: kinds
+nodes:
+  - { id: p, kind: prompt, prompt: x }
+  - { id: b, kind: bash, run: x }
+  - id: l
+    kind: loop
+    until: all_tasks_complete
+    prompt: x
+    concurrency: 2
+    scope_expansion: { mode: ask, within: ["src/**"], max_per_run: 1 }
+  - id: g
+    kind: parallel
+    join: any
+    coordination: blackboard
+    nodes: [{ id: c, kind: bash, run: x }]
+  - { id: k, kind: check, builtin: findings_gate, max_severity: major }
+  - { id: e, kind: executor, executor: lint, with: { a: 1 }, timeout_seconds: 5 }
+  - id: t
+    kind: gate
+    assignee: lead
+    message: m
+    options: [approve]
+    on: { approve: p }
+    external: { kind: pull_request, artifacts: [a], branch: b }
+  - id: w
+    kind: workflow
+    use: child
+    inputs: { a: b }
+    isolation: inherit
+    mounts: [{ artifact: { node: p, name: n, as: m } }]
+"#;
+
+    #[test]
+    fn every_kind_lists_exactly_the_keys_its_variant_serializes() {
+        let workflow: Workflow = yaml::parse(EVERY_KIND).unwrap();
+        assert_eq!(workflow.nodes.len(), NodeKind::KINDS.len());
+        for node in &workflow.nodes {
+            let text = yaml::to_string(node).unwrap();
+            let mapping: Mapping = yaml::parse(&text).unwrap();
+            let kind = mapping["kind"].as_str().unwrap().to_string();
+            let listed =
+                NodeKind::keys(&kind).unwrap_or_else(|| panic!("`{kind}` has no key list"));
+            let mut serialized: Vec<String> = mapping
+                .keys()
+                .filter_map(Value::as_str)
+                .filter(|key| *key != "kind" && !NODE_KEYS.contains(key))
+                .map(str::to_string)
+                .collect();
+            serialized.sort();
+            let mut expected: Vec<String> = listed.iter().map(|key| key.to_string()).collect();
+            expected.sort();
+            assert_eq!(serialized, expected, "kind `{kind}` serializes keys its list does not name, or lists keys it never writes");
+        }
+    }
+
+    #[test]
+    fn the_node_level_keys_are_exactly_what_the_node_fields_accept() {
+        // Every node-level key must be one `NodeFields` reads, or a node
+        // written with it would be refused; every field must be listed,
+        // or it would be handed to the kind and refused there.
+        let full: Node = yaml::parse(
+            r#"
+id: n
+kind: prompt
+prompt: x
+depends_on: [a]
+scope: ["src/**"]
+runners: [r1, r2]
+agent: a
+artifacts: { produces: [x] }
+hooks: { before: [{ run: x }] }
+on_failure: { goto: a, max_reroutes: 1 }
+on_interrupt: restart_node
+description: d
+permissions: edit
+network: false
+context: [{ command: x }]
+skills: [s]
+interactive: true
+invariant: true
+"#,
+        )
+        .unwrap();
+        let text = yaml::to_string(&full).unwrap();
+        let mapping: Mapping = yaml::parse(&text).unwrap();
+        let mut serialized: Vec<&str> = mapping
+            .keys()
+            .filter_map(Value::as_str)
+            .filter(|key| *key != "kind" && *key != "prompt")
+            .collect();
+        serialized.sort_unstable();
+        let mut listed: Vec<&str> = NODE_KEYS
+            .iter()
+            .copied()
+            .filter(|key| *key != "runner")
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(serialized, listed);
+    }
 }

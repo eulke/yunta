@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use thiserror::Error;
-use yunta_core::events::FindingsFile;
+use yunta_core::FindingsFile;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum FindingsError {

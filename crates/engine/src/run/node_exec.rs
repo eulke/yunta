@@ -128,7 +128,7 @@ pub(super) async fn execute_node(
             }
             end
         }
-        NodeKind::Check { builtin } => {
+        NodeKind::Check(builtin) => {
             super::check_exec::execute_check(ctx, node, builtin, cancel).await?
         }
         NodeKind::Executor {
@@ -709,19 +709,21 @@ pub(super) async fn close_node(
                 )?;
                 if let Some(ledger) = &artifact.ledger {
                     for task in &ledger.tasks {
+                        let criteria: Vec<yunta_core::events::Criterion> =
+                            task.criteria.iter().map(Into::into).collect();
                         let registered_seq = ctx.emit(
                             Some(&node.id),
                             EventPayload::TaskRegistered(
                                 yunta_core::events::TaskRegisteredPayload {
                                     task_id: task.id.clone(),
-                                    criteria: task.criteria.clone(),
+                                    criteria: criteria.clone(),
                                     scope: task.scope.clone(),
                                     depends_on: task.depends_on.clone(),
                                 },
                             ),
                         )?;
                         let changed_identity = previous_registrations.get(&task.id).is_some_and(
-                            |(criteria, scope)| *criteria != task.criteria || *scope != task.scope,
+                            |(previous, scope)| *previous != criteria || *scope != task.scope,
                         );
                         if changed_identity {
                             ctx.emit(

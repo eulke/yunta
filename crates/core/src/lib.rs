@@ -10,6 +10,7 @@ mod clock;
 mod config;
 mod error;
 pub mod events;
+mod findings;
 mod ids;
 mod inputs;
 mod ledger;
@@ -30,9 +31,10 @@ pub use config::{
     SkillsConfig, StorageConfig, TelemetryConfig, TelemetryProtocol,
 };
 pub use error::{Result, YuntaError};
+pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use ids::{NodeId, RunId, SessionId, TaskId};
 pub use inputs::InputSpec;
-pub use ledger::{Ledger, Task};
+pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
 pub use pack::{
     PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackRequires, RequiredRole,

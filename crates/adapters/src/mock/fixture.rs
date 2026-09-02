@@ -10,11 +10,13 @@
 //!   for a one-entry `sessions:`.
 //!
 //! Spawning past the end of the script is an explicit adapter error,
-//! never a silent replay of the last session.
+//! never a silent replay of the last session. A person writes fixtures,
+//! so every shape here refuses a key it does not know.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
+use yunta_core::yaml::{self, Value};
 use yunta_core::Capabilities;
 
 /// A parsed fixture: adapter-level capabilities plus one script per
@@ -34,36 +36,74 @@ impl<'de> Deserialize<'de> for MockFixture {
 
         // The two forms are told apart structurally — by the presence of
         // a `sessions` key — never by guessing from what parses.
-        let value = yunta_core::yaml::Value::deserialize(deserializer)?;
+        let value = Value::deserialize(deserializer)?;
         let has_sessions = value
             .as_mapping()
-            .is_some_and(|m| m.contains_key(yunta_core::yaml::Value::from("sessions")));
+            .is_some_and(|m| m.contains_key(Value::from("sessions")));
 
         if has_sessions {
             #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
             struct Multi {
                 #[serde(default)]
-                capabilities: Capabilities,
+                capabilities: FixtureCapabilities,
                 sessions: Vec<SessionScript>,
             }
-            let multi: Multi = yunta_core::yaml::from_value(value).map_err(D::Error::custom)?;
+            let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
             Ok(MockFixture {
-                capabilities: multi.capabilities,
+                capabilities: multi.capabilities.into(),
                 sessions: multi.sessions,
             })
         } else {
-            #[derive(Deserialize)]
-            struct Single {
-                #[serde(default)]
-                capabilities: Capabilities,
-                #[serde(flatten)]
-                script: SessionScript,
-            }
-            let single: Single = yunta_core::yaml::from_value(value).map_err(D::Error::custom)?;
+            // The single-session form is a script with `capabilities`
+            // alongside it: that key is taken out first, so the script
+            // itself is read as strictly as in the `sessions:` form.
+            let Value::Mapping(mut mapping) = value else {
+                return Err(D::Error::custom(
+                    "a fixture is a mapping: `sessions:` with one script per session, or \
+                     one session's own fields",
+                ));
+            };
+            let capabilities: FixtureCapabilities = match mapping.remove("capabilities") {
+                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
+                None => FixtureCapabilities::default(),
+            };
+            let script: SessionScript =
+                yaml::from_value(Value::Mapping(mapping)).map_err(D::Error::custom)?;
             Ok(MockFixture {
-                capabilities: single.capabilities,
-                sessions: vec![single.script],
+                capabilities: capabilities.into(),
+                sessions: vec![script],
             })
+        }
+    }
+}
+
+/// The capabilities a fixture declares — [`Capabilities`] flag for
+/// flag. The event log embeds `Capabilities` and reads what a later
+/// writer adds; a fixture is authored, so this twin refuses a flag it
+/// does not know.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FixtureCapabilities {
+    pub resume_session: bool,
+    pub edit_hooks: bool,
+    pub permission_profiles: bool,
+    pub custom_agents: bool,
+    pub usage_reporting: bool,
+    pub skills: bool,
+    pub run_tools: bool,
+}
+
+impl From<FixtureCapabilities> for Capabilities {
+    fn from(fixture: FixtureCapabilities) -> Self {
+        Capabilities {
+            resume_session: fixture.resume_session,
+            edit_hooks: fixture.edit_hooks,
+            permission_profiles: fixture.permission_profiles,
+            custom_agents: fixture.custom_agents,
+            usage_reporting: fixture.usage_reporting,
+            skills: fixture.skills,
+            run_tools: fixture.run_tools,
         }
     }
 }
@@ -71,6 +111,7 @@ impl<'de> Deserialize<'de> for MockFixture {
 /// What one spawned session does: its announced model/agent, the events
 /// it emits, the files it writes, and how its stream ends.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionScript {
     #[serde(default = "default_model")]
     pub model: String,
@@ -99,7 +140,7 @@ fn default_model() -> String {
 /// One progress event the session emits before its outcome, with an
 /// optional delay before it — the fixture's way of injecting latency.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MockStep {
     ToolUse {
         name: String,
@@ -150,6 +191,7 @@ impl MockStep {
 /// outside the node's declared scope — see `MockFixture`'s doc on how
 /// `edit_hooks` changes what happens to it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MockEffect {
     pub path: PathBuf,
     pub content: String,
@@ -162,7 +204,7 @@ pub struct MockEffect {
 /// event, and of interrupt/kill — a mock terminal `Completed`/`Failed`
 /// on its own can't test either.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MockOutcome {
     Completed {
         summary: String,

@@ -23,6 +23,7 @@ use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
     pub adapter: String,
     pub model: String,
@@ -36,6 +37,7 @@ pub struct RunnerCandidate {
 /// env var names in config, values only ever come from the process
 /// environment at resolve time).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McpServerConfig {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,12 +55,14 @@ pub struct McpServerConfig {
 /// makes a machine with no credentials at all work:
 /// degrade to console, don't refuse to exist.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForgeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubForgeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitHubForgeConfig {
     /// `owner/name`.
     pub repo: String,
@@ -72,6 +76,7 @@ pub struct GitHubForgeConfig {
 /// through to `SessionRequest.adapter_settings` untouched; the adapter
 /// validates what it can in `probe()` and rejects what it doesn't know.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdapterSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary: Option<PathBuf>,
@@ -81,6 +86,7 @@ pub struct AdapterSettings {
 
 /// `storage:` — SQLite is the only backend.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -93,6 +99,7 @@ pub struct StorageConfig {
 /// templates, nothing here drives behavior yet (`base_branch` isn't
 /// consulted by any re-route/PR logic).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -106,6 +113,7 @@ pub struct ProjectConfig {
 /// an environment override applied when resolving the merged config, not
 /// a field of it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PathsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runs: Option<PathBuf>,
@@ -147,6 +155,7 @@ pub enum Isolation {
 /// built — `check` refuses the others rather than accepting them
 /// silently).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Isolation>,
@@ -190,6 +199,7 @@ pub enum DefaultOnFailure {
 /// bare number so a later per-direction price is a field addition, not
 /// a schema break.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PricingEntry {
     pub cost_per_1k_tokens: f64,
 }
@@ -198,6 +208,7 @@ pub struct PricingEntry {
 /// **inert until the OTel exporter is built**, and the reference text itself says so:
 /// this is the one sanctioned parse-and-hold group.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TelemetryConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -226,6 +237,7 @@ pub enum TelemetryProtocol {
 /// `2_000_000` as a *string*, which fails the parse loudly instead of
 /// silently becoming an unlimited run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
     /// Run-wide token budget: exceeded → escalation
     /// (`continue`/`abort`), or `run_paused { reason: budget }` with no
@@ -258,6 +270,7 @@ pub struct LimitsConfig {
 /// runs and re-runs to catch regressions ("cero regresiones" as a data
 /// comparison, never an agent's claim).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BaselineConfig {
     pub suite: String,
 }
@@ -269,6 +282,7 @@ pub struct BaselineConfig {
 /// documented convention rather than inventing a stricter parsing
 /// contract with no source to check it against.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageConfig {
     pub cmd: String,
     pub threshold: f64,
@@ -280,6 +294,7 @@ pub struct CoverageConfig {
 /// into a node's assembled context) are context-assembly work, with
 /// no consumer yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SkillsConfig {
     #[serde(default)]
     pub executors: Vec<ExecutorRegistration>,
@@ -298,6 +313,7 @@ pub struct SkillsConfig {
 /// One `skills.executors:` entry — `name` is what a `kind: executor`
 /// node's own `executor:` field references.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutorRegistration {
     pub name: String,
     pub kind: ExecutorKind,
@@ -326,6 +342,7 @@ pub enum ExecutorKind {
 /// pack, and leaves an auditable trail of the deliberate attempt — real
 /// isolation belongs to the execution environment, never to Yunta.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PermissionsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commands: Option<CommandPermissions>,
@@ -346,6 +363,7 @@ pub struct PermissionsConfig {
 /// it is a reported conflict, and a node declaring a mode over the
 /// merged ceiling fails `check`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScopeExpansionPermissions {
     pub max_mode: crate::events::ScopeExpansionMode,
 }
@@ -355,6 +373,7 @@ pub struct ScopeExpansionPermissions {
 /// `allow` = denylist mode (everything not denied runs); a non-empty
 /// `allow` switches to a strict, opt-in allowlist.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommandPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deny: Vec<String>,
@@ -368,6 +387,7 @@ pub struct CommandPermissions {
 /// because the org ceiling file is one document and its schema shouldn't
 /// dribble in piecemeal.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackPermissions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executors: Option<PackExecutorPolicy>,
@@ -400,6 +420,7 @@ impl PackExecutorPolicy {
 /// `permissions.packs.publishers` — `allow` empty means every publisher
 /// is accepted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublisherPermissions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
@@ -410,6 +431,7 @@ pub struct PublisherPermissions {
 /// executor that wants to actually enforce it does so on its own. Policy
 /// ≠ capability ≠ OS enforcement — Yunta core never promises the third.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NetworkPermissions {
     pub default: bool,
 }
@@ -418,6 +440,7 @@ pub struct NetworkPermissions {
 /// also the type of the merged result — merging never needs to invent
 /// fields, only combine what layers actually set.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigLayer {
     /// `version: 1` (reference config) — the layer file's own format
     /// version. The loader refuses any value this binary doesn't speak.

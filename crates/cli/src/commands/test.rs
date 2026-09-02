@@ -37,6 +37,7 @@ use crate::load_yaml;
 use crate::project;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TestCase {
     /// Workflow name, resolved to `.yunta/workflows/<name>.yaml`.
     workflow: String,
@@ -59,6 +60,7 @@ struct TestCase {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Expect {
     final_state: FinalState,
     #[serde(default)]

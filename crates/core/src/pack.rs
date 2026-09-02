@@ -29,6 +29,7 @@ use crate::workflow::NodePermissions;
 /// combined string back apart would just move the parsing problem
 /// around instead of solving it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackManifest {
     pub name: String,
     pub publisher: String,
@@ -64,6 +65,7 @@ pub struct PackManifest {
 /// by the pack itself; `check`/`add` validate these against the local
 /// merged config, this type only parses what's asked for.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackRequires {
     #[serde(default)]
     pub roles: Vec<RequiredRole>,
@@ -80,6 +82,7 @@ pub struct PackRequires {
 /// absent means the pack doesn't care what profile the role resolves
 /// under, only that the role itself exists.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RequiredRole {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +94,7 @@ pub struct RequiredRole {
 /// error not warning; this type only carries the declared
 /// values, it enforces nothing itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackDeclares {
     pub permissions: NodePermissions,
     /// The pack's `bash`/`command` nodes never assume network access —
@@ -111,6 +115,7 @@ pub struct PackDeclares {
 /// What the pack physically ships — paths relative to the pack's
 /// own root, resolved by whoever vendors it, not by this type.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackContents {
     #[serde(default)]
     pub workflows: Vec<String>,

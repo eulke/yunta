@@ -163,7 +163,7 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
             None,
         ),
         NodeKind::Parallel { .. } => ("parallel", None, None, None),
-        NodeKind::Check { .. } => ("check", None, None, None),
+        NodeKind::Check(_) => ("check", None, None, None),
         NodeKind::Executor { executor, .. } => ("executor", None, None, Some(executor.clone())),
         NodeKind::Gate { .. } => ("gate", None, None, None),
         NodeKind::Workflow { .. } => ("workflow", None, None, None),
