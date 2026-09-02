@@ -52,3 +52,10 @@ uuid = "1"
 # workspace = true` in each manifest.
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# The static binary is a feature of the product: every release build
+# pays for whole-program optimization and ships without symbols.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
