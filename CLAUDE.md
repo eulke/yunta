@@ -1,197 +1,136 @@
 # CLAUDE.md — Yunta
 
-Yunta es un workflow engine determinista en Rust para agentes de código: los flujos se
-definen en YAML y el engine los ejecuta con verificación mecánica, estado externo y
-auditoría total. Vos estás construyendo el engine — y las reglas que el engine le
-impone a sus agentes también te aplican a vos como implementador.
+Yunta es un motor de workflows determinista para agentes de código: un workflow se
+declara en YAML, el engine lo ejecuta, verifica cada resultado mecánicamente y deriva
+todo el estado por replay de un log de eventos append-only. Lo que el engine exige a
+sus agentes, este repo te lo exige a vos.
 
-## Fuentes de verdad (en este orden)
+## El ciclo de una tarea
 
-1. `docs/contrato-del-run.md` — documento normativo central del comportamiento del
-   engine, con sus invariantes.
-2. `docs/spec-adapter.md` — trait `Adapter`/`AgentSession`, capacidades y
-   obligaciones de un adapter.
-3. `internal/spec-ledger.md` — schema formal del ledger de tareas; se escribe a mano,
-   así que precede leerla antes de tocar el ciclo de tareas.
-4. `docs/adrs.md` — decisiones con racionales y alternativas descartadas. **Fuente de
-   desempate: ante cualquier ambigüedad, buscá acá antes de decidir.**
-5. `docs/rfc-0001-vision.md`, `docs/rfc-0002-packs.md`, `docs/rfc-0003-producto.md` y
-   `docs/rfc-0004-distribucion.md` — arquitectura, packs, diferenciales de producto y
-   distribución.
-6. `docs/referencia-schema.md` — config y workflows canónicos (los fixtures de parseo
-   salen de acá).
-7. `docs/deuda.md` — lo deliberadamente NO resuelto.
+Una tarea está terminada cuando cada paso cumplió su "Listo cuando". Se recorren en
+orden; ninguno se cierra antes.
 
-La documentación canónica vive en Notion (página "Yunta", BD Docs); `docs/` es su
-espejo en el repo. Si encontrás una contradicción entre código y docs, la doc gana y el
-código se corrige — salvo que un ADR diga lo contrario.
+1. **Ubicá la tarea.** Qué pide, qué archivos toca, qué criterio la cierra, qué
+   decisión registrada la respalda.
+   Listo cuando enunciás las cuatro cosas con evidencia del repo, sin adivinar.
 
-## Cómo pensar (juicios que este proyecto exige)
+2. **Levantá lo que cambia el plan.** Una contradicción, una imposibilidad, un diseño
+   mejor, una dependencia oculta o un alcance mayor del previsto frenan la tarea:
+   describís el problema con evidencia, las alternativas y tu recomendación, y el
+   humano decide.
+   Listo cuando avanzás sobre una decisión registrada, o la duda quedó descartada con
+   evidencia.
 
-- **Tu palabra no es evidencia.** El principio rector del engine te aplica: nada está
-  "hecho" porque lo digas — está hecho cuando el criterio de aceptación de la tarea
-  pasa en verde y lo verificaste ejecutándolo. Nunca reportes completado sin correr
-  los tests.
-- **Test-first en rojo.** Antes de implementar, escribí o identificá el test que hoy
-  falla. Si el test ya pasa antes de tu cambio, no prueba nada: repensá el criterio.
-- **Ante ambigüedad: ADRs → preguntar. Jamás inventar.** Si los docs no resuelven algo,
-  no lo resuelvas vos silenciosamente: es un ítem para `docs/deuda.md` o una pregunta
-  al humano. La deuda consciente NUNCA se resuelve implícitamente — cada ítem requiere
-  decisión explícita registrada como ADR antes de codearse.
-- **Degradación explícita, nunca emulación.** Si algo no se puede hacer (capacidad
-  ausente, límite excedido, fuente caída), el sistema lo dice con evento y diagnóstico.
-  Nunca simules la capacidad, nunca degrades en silencio, nunca tragues un error. Este
-  juicio aplica al engine que construís y a cómo trabajás.
-- **Scope chico y declarado.** Cada tarea toca lo suyo. Si encontrás un problema fuera
-  de tu alcance, registralo (issue/nota), no lo parchees al pasar. Si tu cambio
-  "necesita" tocar medio repo, la tarea está mal cortada: frená y replanteá.
-- **Las specs no se "mejoran" al pasar.** Si implementando ves algo mejorable del
-  diseño, proponélo como cambio de spec (ADR nuevo o modificación con racional) — no lo
-  implementés distinto de lo escrito y lo dejés como sorpresa.
+3. **Ponelo en rojo.** El test que falla por la razón exacta que la tarea corrige.
+   Listo cuando corre, falla, y falla por esa razón.
 
-## Terminología obligatoria
+4. **Construí lo ideal.** La solución completa tal como está planificada, con el
+   diseño que tendría en un repo nuevo, tocando todo lo que haga falta.
+   Listo cuando el diff no contiene ningún atajo, duplicado ni pieza "para después".
 
-| Usá | Nunca | Por qué |
-|---|---|---|
-| adapter | driver, backend | integración con un CLI |
-| runner | agente (para bindings) | binding \{adapter, model, agent?\} |
-| agente | subagente, persona | agente nombrado DEL adapter |
-| `runner:` | `role:` | `role:` no existe en el schema |
-| pack | plugin | "plugin" no existe en el vocabulario |
-| executor | plugin | extensión de código del engine |
+5. **Ponelo en verde.** El criterio de la tarea y los mismos checks que corre CI,
+   ejecutados por vos.
+   Listo cuando viste pasar cada uno; un resultado que no ejecutaste no existe.
 
-"Rol" solo como palabra descriptiva en prosa/docs, jamás como clave YAML.
+6. **Dejá el texto en presente.** Rustdoc, ayuda, guía y mensajes describen lo que el
+   código hace ahora, para un tercero.
+   Listo cuando ningún texto del diff nombra la tarea, un plan, lo que había antes ni
+   lo que vendrá.
 
-## Reglas de código
+7. **Commiteá un tema.** Mensaje convencional; el porqué cuando el diff no lo dice.
+   Listo cuando el commit se entiende sin esta conversación.
 
-- **Estructura**: workspace de Cargo — `crates/{core,storage,adapters,engine,cli}`,
-  packages `yunta-core`, `yunta-storage`, `yunta-adapters`, `yunta-engine` y `yunta`
-  (el binario). Dependencias unidireccionales: core ← storage/adapters ← engine ←
-  cli; jamás ciclos, jamás dependencias hacia arriba. **Si te encontrás queriendo
-  agregar una dependencia que rompe ese orden, el diseño de lo que estás escribiendo
-  está mal, no el layout.** `yunta-engine` no depende de rusqlite/sqlx ni de ningún
-  CLI concreto — lo impone el compilador, no el checklist. Sin features opcionales:
-  no hay `serve` (proyecto separado) ni `postgres`.
-- **Calidad**: `cargo clippy --workspace -- -D warnings` limpio, `cargo fmt` aplicado,
-  errores con `thiserror` (nada de `unwrap()`/`expect()` fuera de tests),
-  observabilidad con `tracing`. `#![forbid(unsafe_code)]` en todos los crates.
-- **Tests**: cada crate tiene sus tests de integración en su propio `tests/`,
-  ejercitando el engine con el adapter `mock` — nunca un LLM real en CI. Todo
-  camino del engine debe ser ejercitable con mock; si no podés testear algo sin un
-  LLM, el diseño de ese algo está mal.
-- **Eventos**: todo evento y payload lleva `schema_version`. El event log es
-  append-only; el estado se deriva por replay — si te encontrás guardando estado
-  derivado como fuente de verdad, pará.
-- **Secretos**: jamás en el event log, en eventos de adapter ni en fixtures. Solo
-  env vars declaradas.
+## Juicio
 
-## Checklist de PR (definition of done)
+Los criterios con los que se decide. Entre dos opciones, gana la que los cumple
+mejor.
 
-1. El criterio de aceptación de la tarea pasa, ejecutado, no supuesto.
-2. Tests verdes en CI con mock; clippy sin warnings; fmt aplicado.
-3. Ningún invariante del Contrato del Run ni obligación del Adapter violado —
-   repasá la lista completa en la fuente de verdad correspondiente, están para eso.
-4. Terminología de la tabla respetada en código, docs y mensajes de commit.
-5. Documentación de módulo actualizada si cambió comportamiento público.
-6. Redacción nativa: sin referencias históricas, cada mecanismo justificado desde
-   primeros principios.
+- **Evidencia.** Hecho es lo que corre y pasa. El agente nunca marca su propio
+  trabajo; vos tampoco.
+- **Ideal.** Arquitectónicamente correcto, ergonómico, con separación de capas,
+  idiomático, escalable. El esfuerzo y la cantidad de archivos no son criterio: un
+  atajo es una tarea sin terminar.
+- **Levantar.** Lo que ningún diseño ni decisión registrada fija (un umbral, un
+  nombre, un comportamiento, un alcance) se levanta con alternativas y
+  recomendación; decide el humano. Un comentario que admite "no hay número en ningún
+  lado" es una decisión que alguien tomó solo.
+- **Replay.** Todo estado se deriva del event log. Un evento registra lo que pasó con
+  el valor real; el estado en memoria es una cache de una sola invocación.
+- **Degradación explícita.** Lo que no se puede hacer se dice con un evento y un
+  diagnóstico que nombran qué faltó y qué se hizo en su lugar. Un archivo inválido
+  se reporta como inválido. Una capacidad ausente falla.
+- **Parsear es validar.** Lo inválido es irrepresentable por tipo: identificadores
+  con newtype y constructor validado, enums exhaustivos, YAML de autor que rechaza
+  claves desconocidas nombrándolas. La tolerancia vive solo en lo persistido y
+  versionado, donde un lector viejo lee a un escritor nuevo y marca lo que no
+  entendió.
+- **Núcleo puro.** Decidir (derivar estado, elegir el próximo paso) es una función
+  pura; ejecutar es la cáscara. Reloj, ids y azar entran inyectados.
+- **Frontera.** El engine conoce a un adapter solo por lo que declara; un path, un
+  flag o un nombre de CLI dentro del engine es una capacidad que falta. Un adapter
+  declara exactamente lo que construyó.
+- **Dueño.** Cada subproceso nace en su process group, queda registrado y muere con
+  el árbol completo en todo camino de cancelación; cada task de tokio conserva su
+  handle.
+- **Secreto.** La config nombra variables de entorno; los valores viven solo en el
+  entorno del hijo; `Debug` los redacta; el prompt viaja por stdin.
+- **Un lugar.** Cada convención, umbral, mensaje y helper vive en un único sitio y
+  todo lo demás lo consume. La segunda copia señala el lugar que falta, y se crea en
+  el mismo PR.
+- **La documentación gana** al código cuando difieren, salvo decisión registrada en
+  contra. Su silencio es un paso 2.
 
-## Comandos
+## Fronteras
 
-```bash
-cargo test --workspace                 # suite completa (usa adapter mock)
-cargo clippy --workspace -- -D warnings   # obligatorio antes de commit
-cargo fmt --all
-cargo run -p yunta -- check <workflow>    # validación estática
-cargo run -p yunta -- run <wf> --adapter mock   # correr un workflow sin LLM
-```
+- Las dependencias entre crates van estrictamente hacia abajo; el engine desconoce
+  SQLite y a cada CLI concreto, y el compilador lo impone.
+- Un trait existe donde hay una frontera real con más de una implementación.
+- Una dependencia nueva se defiende en el PR (compilación, tamaño del binario,
+  superficie de auditoría) y entra en el crate que la necesita: el binario estático
+  chico es una feature.
 
-## Qué NO hacer (resumen de trampas conocidas)
+## Código
 
-- No introducir `role:` ni "plugin" en schema, código o docs.
-- No emular capacidades ausentes de un adapter — error en check o degradación con
-  evento.
-- No darle a ningún agente (ni al mock) una vía para marcar estado de tareas.
-- No mutar artifacts ni manifests — el progreso son eventos.
-- No resolver ítems de `docs/deuda.md` de facto.
-- No agregar conocimiento específico de un CLI fuera de `yunta-adapters` — si
-  `yunta-engine` necesita saber qué adapter tiene enfrente, falta una capacidad, no
-  un branch.
-- No dejar procesos huérfanos: todo camino de cancelación extermina el árbol
-  completo.
+- Errores tipados por módulo con la causa conservada; el texto para humanos se
+  produce una sola vez, en el borde, y dice qué hacer. En código de producción todo
+  camino de fallo devuelve un error; los tests son el único lugar donde algo entra
+  en pánico.
+- En código async, disco y base de datos van por la vía async o por
+  `spawn_blocking`; los subprocesos son de tokio y nacen gobernados.
+- Un span por run y por nodo, con `run_id` y `node_id` como campos.
+- Un archivo cerca de 500 líneas o una función cerca de 50 es una señal que se
+  atiende en el PR que la cruza.
+- Tests que nombran el comportamiento que prueban; la infraestructura de test vive
+  en el crate de soporte; el entorno (home, PATH, proxy) se inyecta; la sincronización
+  es explícita, nunca un sleep; property tests para replay, idempotencia y resume.
 
-## Diseño y patrones del codebase
+## Expresión
 
-- **Parse, don't validate.** Los estados inválidos deben ser irrepresentables por
-  tipo, no rechazados por chequeos dispersos. Newtypes para todo identificador
-  (`RunId`, `NodeId`, `TaskId`, `SessionId` — nunca `String` pelada); enums
-  exhaustivos sin variante `Other`; el schema YAML se parsea a tipos de dominio una
-  sola vez en la frontera y de ahí en más el código opera sobre tipos que ya no
-  pueden estar mal.
-- **Functional core, imperative shell.** La derivación de estado por replay
-  (`fn derive(events: &[Event]) -> RunState`) es una función pura sin IO — es lo que
-  hace el replay determinista y testeable por property tests. Lo mismo para
-  decisiones del scheduler (`fn ready_nodes(state) -> Vec<NodeId>`): decidir es puro,
-  ejecutar es la cáscara con tokio. Si una función de decisión necesita IO, está mal
-  cortada.
-- **Determinismo inyectado.** Reloj (`Clock` trait), generación de IDs y cualquier
-  aleatoriedad se inyectan — jamás `SystemTime::now()` o entropía directa en el core.
-  Es la diferencia entre tests reproducibles y tests flaky, y en un sistema
-  event-sourced es innegociable.
-- **Máquinas de estado como enums, no booleanos.** El estado de un nodo es
-  `enum NodeState { Pending, Ready, Running, ... }` con transiciones como métodos que
-  devuelven `Result` — nunca tres flags booleanos cuya combinación inválida nadie
-  previó.
-- **Traits solo en fronteras reales.** `Adapter`, `AgentSession`, `ContextSource`,
-  `HumanInteraction`, `Clock`, storage. No abstraer "por las dudas": una abstracción
-  sin segunda implementación real (o mock con propósito) es costo sin beneficio. La
-  señal de que falta un trait es un `if adapter.id() == "claude-code"` en el engine —
-  eso viola la frontera adapter/engine y se corrige con capacidad, no con branch.
-- **Concurrencia estructurada.** Toda task de tokio tiene dueño (el scheduler retiene
-  los `JoinHandle`); nada se spawnea y se olvida. Cancelación por `CancellationToken`
-  propagado, y el camino de cancelación se testea con la misma seriedad que el camino
-  feliz — la limpieza completa del árbol de procesos ante una cancelación depende
-  de esto.
-- **Errores tipados en la lib, contexto en el borde.** `thiserror` con enums por
-  módulo; el `main` traduce a mensajes accionables. Un error debe decir qué hacer:
-  "workflow `x` referencia el rol `planner` que ninguna capa de config define —
-  agregalo a `runners:`" y no "invalid config".
+Todo texto del repo lo lee un tercero que no estuvo en ninguna conversación.
 
-## Higiene
+- **Presente.** El código dice lo que hace ahora; la documentación describe lo que el
+  sistema hace ahora; lo que existe se describe como definitivo y una limitación se
+  declara como límite del sistema. Dos únicas excepciones al presente: una decisión
+  registrada cita la alternativa que descartó; un cambio visible para el usuario va
+  al changelog.
+- **Lo que el lector necesita.** Un comentario existe cuando el código no puede
+  decirlo solo: la razón de un mecanismo desde primeros principios, un invariante que
+  el tipo no expresa, una trampa que no se ve.
+- **Autocontenido.** Un texto se entiende con lo que está en el repo.
+- **Accionable.** Un error dice qué pasó y qué hacer; una ayuda dice qué hace el
+  comando; un rustdoc dice qué garantiza el ítem y qué exige de quien lo usa.
+- **Inglés** en todo lo que un usuario o un tercero lee; español solo en los
+  documentos de diseño internos.
 
-- **Idioma: inglés en TODA superficie que toque al usuario.** Identificadores,
-  comentarios, rustdoc, commits — y además README, documentación de uso, guías,
-  textos de ayuda del CLI, mensajes de error, salida de `status`/`stats`/`--follow`/
-  `graph`. El ecosistema al que Yunta aspira (packs compartidos, adapters
-  de terceros) lo exige y los términos del glosario mapean 1:1: `Runner`, `Adapter`,
-  `Pack`, `Ledger`, `Scope`. Única excepción: los documentos de diseño internos
-  (corpus en Notion), que son del equipo y permanecen en español. Si escribís algo
-  que un usuario de la herramienta va a leer, es en inglés — sin excepciones ad hoc.
-- **`#![forbid(unsafe_code)]`** en todos los crates. No hay nada en Yunta que lo
-  justifique; si algún día lo hay, es un ADR.
-- **Dependencias con justificación, y en el crate correcto.** Cada crate nuevo se
-  defiende en el PR (¿qué costo de compilación/binario/superficie de audit trae?,
-  ¿alcanza std o algo ya presente?) y se agrega al crate que realmente lo necesita —
-  nunca al workspace entero ni a `yunta-core` "para tenerlo a mano". `cargo-deny` en
-  CI para licencias y duplicados. El binario estático chico es una feature del
-  producto — cada dependencia la erosiona.
-- **Tests que documentan.** Nombres que describen comportamiento
-  (`resume_after_crash_mid_node_reaches_same_final_state`), fixtures golden en
-  `tests/fixtures/` (los YAML de referencia de la doc SON fixtures), property tests
-  para replay e idempotencia. Un bug corregido = un test que lo hubiera atrapado,
-  siempre.
-- **Sin código en suspenso.** Ni TODOs sin issue vinculado, ni código comentado, ni
-  `#[allow(dead_code)]` "temporal". Lo que no se usa se borra — git lo recuerda.
-- **Observabilidad desde el día uno.** `tracing` con spans por run y por nodo
-  (run_id/node_id como campos estructurados); nunca `println!` fuera del CLI. Los
-  tests pueden asertar sobre spans cuando el comportamiento observable es el
-  contrato.
-- **Archivos y funciones con techo blando.** Un archivo que pasa ~500 líneas o una
-  función que pasa ~50 es una señal para repensar el corte, no una regla mecánica —
-  pero la señal se atiende en el PR, no "después".
-- **Commits atómicos con mensaje convencional** (`feat:`, `fix:`, `test:`, `docs:`,
-  `refactor:`); un tema por commit; el cuerpo explica el porqué cuando no es obvio.
-  El historial es documentación.
-- **CI compila el workspace completo** y cada crate de forma aislada
-  (`cargo check -p <crate>`) — un crate que no compila solo tiene una dependencia mal
-  ubicada.
+## Vocabulario
+
+| Usá | En lugar de |
+|---|---|
+| adapter | driver, backend |
+| runner (binding adapter + modelo + agente) | agente |
+| agente (nombrado, del adapter) | subagente, persona |
+| `runner:` | `role:` |
+| pack | plugin |
+| executor | plugin |
+
+"Rol" es una palabra de prosa; en YAML, JSON y código el concepto se llama runner.
