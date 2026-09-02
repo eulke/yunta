@@ -19,9 +19,10 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
-use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
+use yunta_core::events::{CapabilityDegradedPayload, CriterionType, EventPayload, TokenUsage};
 use yunta_core::Criterion;
 use yunta_core::{AdapterError, Task, TaskId};
+use yunta_storage::StorageError;
 
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
@@ -40,6 +41,12 @@ pub enum TaskCycleError {
         task: TaskId,
         #[source]
         source: AdapterError,
+    },
+    #[error("failed to append a session audit event for task `{task}`")]
+    Audit {
+        task: TaskId,
+        #[source]
+        source: StorageError,
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
@@ -439,8 +446,28 @@ impl SessionSetup {
 /// real implementor.
 #[async_trait::async_trait]
 pub trait SessionObserver: Sync {
-    async fn emit_session_event(&self, node_id: &yunta_core::NodeId, payload: EventPayload);
+    /// Appends one session audit event to the run's log. The storage
+    /// cause travels back on failure so the dispatch fails the node
+    /// rather than dropping the event — a lost audit event thins the
+    /// trail `status` and replay read.
+    async fn emit_session_event(
+        &self,
+        node_id: &yunta_core::NodeId,
+        payload: EventPayload,
+    ) -> Result<(), StorageError>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
+}
+
+/// How [`dispatch_session`] failed: the adapter refused, or a session
+/// audit event could not be appended. The two have different owners —
+/// the adapter boundary versus the run's own storage — so callers route
+/// each to its own node/run failure.
+#[derive(Debug, Error)]
+pub enum DispatchError {
+    #[error(transparent)]
+    Adapter(#[from] AdapterError),
+    #[error("failed to append a session audit event")]
+    Audit(#[source] StorageError),
 }
 
 /// The only shape of a note the log ever carries: its size and
@@ -473,7 +500,7 @@ pub(crate) async fn dispatch_session(
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     resume: Option<&yunta_core::SessionId>,
-) -> Result<(DispatchOutcome, TokenUsage), AdapterError> {
+) -> Result<(DispatchOutcome, TokenUsage), DispatchError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
     // `Some` continues an interrupted conversation instead of
@@ -489,12 +516,14 @@ pub(crate) async fn dispatch_session(
     );
     // The session's own audit trail (`agent_session_opened` /
     // `agent_message`), emitted as the stream arrives so a concurrent
-    // `status` sees the live session. A failed append warns instead of
-    // aborting the stream — the run's next mandatory event hits the same
-    // storage and fails the run properly if it's really down.
+    // `status` sees the live session. A failed append is not swallowed:
+    // its storage cause ends the dispatch (via `?` at each call site) so
+    // the node fails with the cause rather than the trail losing an
+    // event nobody can recover.
     let audit_emit = |payload: yunta_core::events::EventPayload| async move {
-        if let Some((observer, node_id)) = audit {
-            observer.emit_session_event(node_id, payload).await;
+        match audit {
+            Some((observer, node_id)) => observer.emit_session_event(node_id, payload).await,
+            None => Ok(()),
         }
     };
 
@@ -557,7 +586,8 @@ pub(crate) async fn dispatch_session(
                             capabilities: adapter.capabilities(),
                         },
                     ))
-                    .await;
+                    .await
+                    .map_err(DispatchError::Audit)?;
                 }
                 AgentEvent::ToolUse {
                     name,
@@ -574,7 +604,8 @@ pub(crate) async fn dispatch_session(
                             text: None,
                         },
                     ))
-                    .await;
+                    .await
+                    .map_err(DispatchError::Audit)?;
                 }
                 AgentEvent::Note { text } => {
                     audit_emit(yunta_core::events::EventPayload::AgentMessage(
@@ -591,7 +622,8 @@ pub(crate) async fn dispatch_session(
                             text: Some(note_summary(&text)),
                         },
                     ))
-                    .await;
+                    .await
+                    .map_err(DispatchError::Audit)?;
                 }
                 AgentEvent::Usage {
                     input_tokens,
@@ -609,7 +641,8 @@ pub(crate) async fn dispatch_session(
                             text: None,
                         },
                     ))
-                    .await;
+                    .await
+                    .map_err(DispatchError::Audit)?;
                     tokens.input += input_tokens;
                     tokens.output += output_tokens;
                     if let Some(cached) = cached_input_tokens {
@@ -780,18 +813,39 @@ pub async fn run_task(
         // attempt: the tools are an offer, the task's own criteria are
         // the contract.
         let run_tools = match &setup.run_tools {
-            Some((host, node_id)) => crate::run_tools::open_session_listener(
+            Some((host, node_id)) => match crate::run_tools::open_session_listener(
                 host.clone(),
                 node_id.clone(),
                 Some(task.id.clone()),
                 cwd.to_path_buf(),
             )
             .await
-            .map_err(|e| {
-                tracing::warn!(task_id = %task.id, error = %e, "per-run MCP listener failed                      to start — the attempt runs without run tools");
-                e
-            })
-            .ok(),
+            {
+                Ok(session) => Some(session),
+                Err(e) => {
+                    // Recorded, not warned: the attempt runs without run
+                    // tools, and the log says so and why.
+                    if let Some((observer, obs_node)) = audit {
+                        observer
+                            .emit_session_event(
+                                obs_node,
+                                EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
+                                    capability: "run_tools".to_string(),
+                                    adapter: adapter.id().clone(),
+                                    policy_applied: format!(
+                                        "the attempt runs without run tools: {e}"
+                                    ),
+                                }),
+                            )
+                            .await
+                            .map_err(|source| TaskCycleError::Audit {
+                                task: task.id.clone(),
+                                source,
+                            })?;
+                    }
+                    None
+                }
+            },
             None => None,
         };
         // Minimal brief — the node's instruction plus which
@@ -816,9 +870,15 @@ pub async fn run_task(
         last_staged = adapter.staged_paths(&request);
         let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
             .await
-            .map_err(|source| TaskCycleError::Spawn {
-                task: task.id.clone(),
-                source,
+            .map_err(|error| match error {
+                DispatchError::Adapter(source) => TaskCycleError::Spawn {
+                    task: task.id.clone(),
+                    source,
+                },
+                DispatchError::Audit(source) => TaskCycleError::Audit {
+                    task: task.id.clone(),
+                    source,
+                },
             })?;
 
         // A cancelled dispatch ends the cycle right here — no

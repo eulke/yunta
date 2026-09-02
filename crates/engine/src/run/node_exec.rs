@@ -319,9 +319,14 @@ async fn execute_parallel(
                     }
                     NodeEnd::Failed => failures.push(child_id),
                     // Root cancellation, not a sibling race —
-                    // drain the rest and unwind without a terminal.
+                    // drain the rest and unwind without a terminal. A
+                    // storage error a drained sibling hits propagates
+                    // (`result?`) rather than vanishing into the drain,
+                    // exactly as the no-winner drain below already does.
                     NodeEnd::Interrupted => {
-                        while running.next().await.is_some() {}
+                        while let Some((_, result)) = running.next().await {
+                            result?;
+                        }
                         return Ok(NodeEnd::Interrupted);
                     }
                     // A paused child run is neither a win nor a
@@ -454,8 +459,10 @@ async fn run_hook(
 ) -> Result<HookRun, RunError> {
     let rendered = match render_template(&step.run, &template_vars(ctx, node)) {
         Ok(rendered) => rendered,
-        Err(e) => {
-            // An unrenderable hook is a failed hook — recorded as such.
+        Err(_) => {
+            // An unrenderable hook is a failed hook — the
+            // `hook_executed { exit_code: -1 }` emitted here is the log's
+            // account of it; no warning duplicates that event.
             ctx.emit(
                 Some(&node.id),
                 EventPayload::HookExecuted(HookExecutedPayload {
@@ -465,7 +472,6 @@ async fn run_hook(
                 }),
             )
             .await?;
-            tracing::warn!(node_id = %node.id, error = %e, "hook template failed to render");
             return Ok(HookRun::Ran(false));
         }
     };
@@ -1040,20 +1046,32 @@ pub(super) enum RunToolsSetupError {
     },
 }
 
+/// What [`open_run_tools`] resolved. `session` is the listener when one
+/// opened; `degraded` carries the reason to record when the session
+/// proceeds without run tools — the caller emits that
+/// `capability_degraded` on the run's log, since this function has no
+/// fallible emit of its own.
+pub(super) struct RunToolsResolution {
+    pub session: Option<crate::run_tools::RunToolsSession>,
+    pub degraded: Option<String>,
+}
+
 /// Opens this session attempt's per-run MCP listener, or decides
-/// it must not exist. `Ok(None)` — no `run_tools` capability outside a
-/// blackboard group — is the resting state. `Err(diagnostic)` is the
-/// degradation case: the node's group declared `coordination:
-/// blackboard` and this session cannot carry it (capability missing,
-/// or the listener failed to bind) — the caller fails the node with
-/// it, never emulates.
+/// it must not exist. A resolution with no session and no degradation —
+/// no `run_tools` capability outside a blackboard group — is the resting
+/// state. A resolution carrying `degraded` is the recorded fallback: the
+/// listener could not bind but the node can proceed without it.
+/// `Err(diagnostic)` is the fatal case: the node's group declared
+/// `coordination: blackboard` and this session cannot carry it
+/// (capability missing, or the listener failed to bind) — the caller
+/// fails the node with it, never emulates.
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_adapters::Adapter,
     adapter_id: &AdapterId,
     task: Option<&yunta_core::TaskId>,
-) -> Result<Option<crate::run_tools::RunToolsSession>, RunToolsSetupError> {
+) -> Result<RunToolsResolution, RunToolsSetupError> {
     let host = &ctx.run_tools_host;
     let needs_blackboard = host.is_blackboard_member(&node.id);
     if !adapter.capabilities().run_tools {
@@ -1063,7 +1081,10 @@ pub(super) async fn open_run_tools(
                 adapter: adapter_id.clone(),
             });
         }
-        return Ok(None);
+        return Ok(RunToolsResolution {
+            session: None,
+            degraded: None,
+        });
     }
     match crate::run_tools::open_session_listener(
         host.clone(),
@@ -1073,7 +1094,10 @@ pub(super) async fn open_run_tools(
     )
     .await
     {
-        Ok(session) => Ok(Some(session)),
+        Ok(session) => Ok(RunToolsResolution {
+            session: Some(session),
+            degraded: None,
+        }),
         Err(e) => {
             if needs_blackboard {
                 return Err(RunToolsSetupError::ListenerFailed {
@@ -1081,8 +1105,10 @@ pub(super) async fn open_run_tools(
                     source: e,
                 });
             }
-            tracing::warn!(node_id = %node.id, error = %e, "per-run MCP listener failed to                  start — the session runs without run tools");
-            Ok(None)
+            Ok(RunToolsResolution {
+                session: None,
+                degraded: Some(format!("the session runs without run tools: {e}")),
+            })
         }
     }
 }
@@ -1146,7 +1172,22 @@ async fn execute_prompt(
     // node sits in a `coordination: blackboard` group, whose declared
     // semantics the engine never emulates: that's a node failure.
     let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
-        Ok(run_tools) => run_tools,
+        Ok(resolution) => {
+            if let Some(policy_applied) = resolution.degraded {
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::CapabilityDegraded(
+                        yunta_core::events::CapabilityDegradedPayload {
+                            capability: "run_tools".to_string(),
+                            adapter: chosen.adapter.clone(),
+                            policy_applied,
+                        },
+                    ),
+                )
+                .await?;
+            }
+            resolution.session
+        }
         Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
     let request = SessionRequest {
@@ -1216,9 +1257,12 @@ async fn execute_prompt(
         resume_session.as_ref(),
     )
     .await
-    .map_err(|source| RunError::Spawn {
-        node: node.id.clone(),
-        source,
+    .map_err(|error| match error {
+        crate::task_cycle::DispatchError::Adapter(source) => RunError::Spawn {
+            node: node.id.clone(),
+            source,
+        },
+        crate::task_cycle::DispatchError::Audit(source) => RunError::Storage(source),
     })?;
 
     match outcome {

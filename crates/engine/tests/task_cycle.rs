@@ -701,3 +701,81 @@ fn criterion_results_without_duration_still_parse() {
     let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
     assert_eq!(result.duration_ms, None);
 }
+
+/// A `SessionObserver` whose every append fails, standing in for storage
+/// that has gone down mid-session.
+struct FailingObserver;
+
+#[async_trait::async_trait]
+impl yunta_engine::SessionObserver for FailingObserver {
+    async fn emit_session_event(
+        &self,
+        _node_id: &yunta_core::NodeId,
+        _payload: yunta_core::events::EventPayload,
+    ) -> Result<(), yunta_storage::StorageError> {
+        Err(yunta_storage::StorageError::Append {
+            run_id: yunta_core::RunId::from("run-test"),
+            source: "audit storage is down".into(),
+        })
+    }
+
+    fn process_registry(&self) -> Option<&yunta_engine::ProcessRegistry> {
+        None
+    }
+}
+
+#[tokio::test]
+async fn a_lost_session_audit_event_fails_the_task() {
+    // A session's audit event that cannot be appended is not dropped
+    // with a warning: the storage cause travels back and fails the task,
+    // so the trail never silently loses an event.
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new("config-hash");
+
+    let t = task(
+        "write-output",
+        &["output.txt"],
+        vec![cmd("test -f output.txt")],
+    );
+    let adapter = MockAdapter::from_yaml(
+        r#"
+effects:
+  - { path: output.txt, content: "hello\n" }
+outcome: { type: completed, summary: "wrote it" }
+"#,
+    )
+    .unwrap();
+
+    let node = yunta_core::NodeId::from("build");
+    let observer = FailingObserver;
+    let err = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+            registry: None,
+        },
+        ScopeGovernance {
+            permissions: None,
+            profile: PermissionProfile::Edit,
+            scope_expansion: None,
+            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
+            already_granted_paths: &[],
+        },
+        Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
+        &tokio_util::sync::CancellationToken::new(),
+        &yunta_engine::SessionSetup::default(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(err, yunta_engine::TaskCycleError::Audit { .. }),
+        "a lost session audit event must fail the task, got: {err:?}"
+    );
+}

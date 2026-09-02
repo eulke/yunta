@@ -363,16 +363,14 @@ pub(super) async fn execute_loop(
                     // concurrency, not evidence the task itself can't
                     // succeed — that verdict only comes from `run_task`'s
                     // own retry exhaustion, the branch above.
+                    // A rejection returns the task to `Pending`; the
+                    // `task_status_changed` emitted just below is the
+                    // log's record of it (with the rebase-conflict
+                    // `criteria_checked` that caused it), so no warning
+                    // duplicates that event.
                     let new_status = match &outcome {
                         IntegrationOutcome::Integrated => TaskStatus::Done,
-                        IntegrationOutcome::Rejected(reason) => {
-                            tracing::warn!(
-                                task_id = %task.id,
-                                %reason,
-                                "task integration rejected, returning to ready"
-                            );
-                            TaskStatus::Pending
-                        }
+                        IntegrationOutcome::Rejected => TaskStatus::Pending,
                     };
                     ctx.emit(
                         Some(&node.id),
@@ -804,7 +802,10 @@ async fn dispatch_task_in_isolation<'a>(
 
 enum IntegrationOutcome {
     Integrated,
-    Rejected(String),
+    /// The task returned to `ready`; the cause is already on the log —
+    /// the rebase-conflict `criteria_checked`, or the post-integration
+    /// `criteria_checked`/`scope_checked` — so the variant carries none.
+    Rejected,
 }
 
 /// A task the cycle verified `Done` in its own worktree, as the
@@ -865,10 +866,7 @@ async fn integrate_task(
                 }),
             )
             .await?;
-        return Ok(IntegrationOutcome::Rejected(format!(
-            "rebase onto the integrated tree conflicted for task `{}`",
-            task.id
-        )));
+        return Ok(IntegrationOutcome::Rejected);
     }
 
     let post_runs = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
@@ -895,10 +893,7 @@ async fn integrate_task(
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     if !criteria_green || !scope.violations.is_empty() {
-        return Ok(IntegrationOutcome::Rejected(format!(
-            "criteria or scope failed after integration for task `{}`",
-            task.id
-        )));
+        return Ok(IntegrationOutcome::Rejected);
     }
 
     let task_head = head_commit(task_worktree).await?;

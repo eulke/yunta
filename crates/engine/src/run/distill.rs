@@ -28,13 +28,9 @@
 //! next `none` run until a human commits or discards is deliberate
 //! friction, not a bug.
 
-use std::path::Path;
-
 use serde::Serialize;
-use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
-};
-use yunta_core::{sha256_hex, FindingId, Isolation, ModeName, OnFinishStep};
+use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
+use yunta_core::{sha256_hex, Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
 
@@ -179,22 +175,15 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                 // node, a reroute never reached it): registered, never
                 // lost — reported as a finding — and the rest distills
                 // anyway.
-                ctx.emit(
+                ctx.engine_finding(
                     None,
-                    EventPayload::FindingPosted(FindingPostedPayload {
-                        finding: Finding {
-                            id: FindingId::try_from(format!("distill-missing-{name}"))?,
-                            severity: FindingSeverity::Minor,
-                            title: format!(
-                                "distill: declared artifact `{name}` was never produced"
-                            ),
-                            location: format!("run.dir/artifacts/{name}"),
-                            detail: "the workflow's `on_finish.distill` names this artifact \
-                                     but no node produced it in this run"
-                                .to_string(),
-                            proposed_criterion: None,
-                        },
-                    }),
+                    &format!("distill-missing-{name}"),
+                    FindingSeverity::Minor,
+                    format!("distill: declared artifact `{name}` was never produced"),
+                    format!("run.dir/artifacts/{name}"),
+                    "the workflow's `on_finish.distill` names this artifact \
+                     but no node produced it in this run"
+                        .to_string(),
                 )
                 .await?;
                 artifacts.push(ProvenanceArtifact {
@@ -225,18 +214,22 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
     })?;
 
     if ctx.manifest.isolation == Isolation::Worktree {
-        commit_and_maybe_push(ctx.worktree, ctx.run_id.as_str()).await;
+        commit_and_maybe_push(ctx).await?;
     }
     Ok(())
 }
 
-/// The knowledge travels on the run's own branch. Failures here warn —
-/// the files are on disk either way, and `cleanup`'s `git branch -d`
-/// (never `-D`) already guarantees an unpushed distill commit can't be
-/// destroyed by the close.
-async fn commit_and_maybe_push(worktree: &Path, run_id: &str) {
+/// The knowledge travels on the run's own branch. A git failure here is
+/// recorded as an engine finding — the files are on disk either way, and
+/// `cleanup`'s `git branch -d` (never `-D`) already guarantees an
+/// unpushed distill commit can't be destroyed by the close — never a
+/// `tracing` warning that leaves the log silent about what didn't happen.
+const DISTILLED_DIR: &str = ".yunta/knowledge/distilled";
+
+async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let worktree = ctx.worktree.to_path_buf();
     let git = |args: Vec<String>| {
-        let worktree = worktree.to_path_buf();
+        let worktree = worktree.clone();
         async move {
             tokio::process::Command::new("git")
                 .args(&args)
@@ -245,24 +238,36 @@ async fn commit_and_maybe_push(worktree: &Path, run_id: &str) {
                 .await
         }
     };
-    let add = git(vec![
-        "add".to_string(),
-        ".yunta/knowledge/distilled".to_string(),
-    ])
-    .await;
+    let add = git(vec!["add".to_string(), DISTILLED_DIR.to_string()]).await;
     if !matches!(&add, Ok(output) if output.status.success()) {
-        tracing::warn!("distill: `git add` failed — the files stay uncommitted on disk");
-        return;
+        return ctx
+            .engine_finding(
+                None,
+                "distill-add",
+                FindingSeverity::Minor,
+                "distill: `git add` failed".to_string(),
+                DISTILLED_DIR.to_string(),
+                "the distilled files stay uncommitted in the run's worktree".to_string(),
+            )
+            .await;
     }
     let commit = git(vec![
         "commit".to_string(),
         "-m".to_string(),
-        format!("docs(knowledge): distill from {run_id}"),
+        format!("docs(knowledge): distill from {}", ctx.run_id.as_str()),
     ])
     .await;
     if !matches!(&commit, Ok(output) if output.status.success()) {
-        tracing::warn!("distill: `git commit` failed — the files stay uncommitted on disk");
-        return;
+        return ctx
+            .engine_finding(
+                None,
+                "distill-commit",
+                FindingSeverity::Minor,
+                "distill: `git commit` failed".to_string(),
+                DISTILLED_DIR.to_string(),
+                "the distilled files stay uncommitted in the run's worktree".to_string(),
+            )
+            .await;
     }
     // Push only where an upstream already exists (a `pr` node's own
     // `push -u`); otherwise the commit rides the local branch, which
@@ -277,7 +282,17 @@ async fn commit_and_maybe_push(worktree: &Path, run_id: &str) {
     if matches!(&upstream, Ok(output) if output.status.success()) {
         let push = git(vec!["push".to_string()]).await;
         if !matches!(&push, Ok(output) if output.status.success()) {
-            tracing::warn!("distill: `git push` failed — the commit stays on the local branch");
+            return ctx
+                .engine_finding(
+                    None,
+                    "distill-push",
+                    FindingSeverity::Minor,
+                    "distill: `git push` failed".to_string(),
+                    DISTILLED_DIR.to_string(),
+                    "the distill commit stays on the run's local branch".to_string(),
+                )
+                .await;
         }
     }
+    Ok(())
 }

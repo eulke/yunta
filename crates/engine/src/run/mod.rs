@@ -42,12 +42,13 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge, ForgeError};
 use yunta_core::events::{
-    EventDraft, EventPayload, NodeReroutedPayload, PromotionSignaledPayload, RunCreatedPayload,
-    RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload, StoredEvent,
-    TerminalState,
+    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeReroutedPayload,
+    PromotionSignaledPayload, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
+    RunResumedPayload, StoredEvent, TerminalState,
 };
 use yunta_core::{
-    AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, Pid, RunId, Seq,
+    AdapterError, AdapterId, Clock, FindingId, IdSource, Manifest, ModeName, NodeId, Pid, RunId,
+    Seq,
 };
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -281,6 +282,38 @@ impl RunCtx<'_> {
             })
     }
 
+    /// Records an engine-authored degradation as a `finding_posted`:
+    /// something the engine itself could not do (a git step, a cleanup,
+    /// its own bookkeeping file), on the run's log in the same
+    /// vocabulary an agent's findings use — never a `tracing` warning
+    /// that leaves the log silent. `node` is the node it concerns, or
+    /// `None` for a run-level degradation.
+    pub(crate) async fn engine_finding(
+        &self,
+        node: Option<&NodeId>,
+        id: &str,
+        severity: FindingSeverity,
+        title: String,
+        location: String,
+        detail: String,
+    ) -> Result<(), RunError> {
+        self.emit(
+            node,
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: Finding {
+                    id: FindingId::try_from(id.to_string())?,
+                    severity,
+                    title,
+                    location,
+                    detail,
+                    proposed_criterion: None,
+                },
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// The [`Budget`] for one agent session: an equal
     /// share of the remaining run cap
     /// ([`budget::session_token_budget`]'s policy). Unlimited — exactly
@@ -361,10 +394,24 @@ impl RunCtx<'_> {
 /// fails the run properly if it's really down.
 #[async_trait::async_trait]
 impl crate::task_cycle::SessionObserver for RunCtx<'_> {
-    async fn emit_session_event(&self, node_id: &NodeId, payload: EventPayload) {
-        if let Err(e) = self.emit(Some(node_id), payload).await {
-            tracing::warn!(error = %e, "failed to append a session audit event");
-        }
+    async fn emit_session_event(
+        &self,
+        node_id: &NodeId,
+        payload: EventPayload,
+    ) -> Result<(), StorageError> {
+        // A session audit event that cannot be appended is not
+        // dropped: it would silently thin the trail `status` and replay
+        // read (a lost `agent_session_opened` even changes what a resume
+        // finds), so the storage cause travels back to the dispatch and
+        // fails the node — the same storage the run's next mandatory
+        // event would hit anyway, surfaced now instead of masked.
+        let draft = EventDraft {
+            run_id: self.run_id.clone(),
+            node_id: Some(node_id.clone()),
+            payload,
+        };
+        let at = self.clock.now();
+        self.storage.append(draft, at).await.map(|_| ())
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
@@ -632,6 +679,17 @@ pub(crate) async fn execute_run_at_depth(
     // ever fires.
     let root_cancel = cancel.cloned().unwrap_or_default();
     let root_cancel_for_ctx = root_cancel.clone();
+    // The registry is written before the ctx exists, so its failure
+    // can't emit yet; it's carried past construction and recorded as a
+    // finding once there's a log to record it on.
+    let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
+        run_dir,
+        Pid::current(),
+        clock.now().to_rfc3339(),
+    ) {
+        Ok(registry) => (Some(registry), None),
+        Err(e) => (None, Some(e)),
+    };
     let ctx = RunCtx {
         run_id,
         manifest,
@@ -646,17 +704,7 @@ pub(crate) async fn execute_run_at_depth(
         human_interaction,
         adapter_override,
         budget_lifted: std::sync::atomic::AtomicBool::new(false),
-        process_registry: match crate::process_registry::ProcessRegistry::create(
-            run_dir,
-            Pid::current(),
-            clock.now().to_rfc3339(),
-        ) {
-            Ok(registry) => Some(registry),
-            Err(e) => {
-                tracing::warn!(error = %e, "cannot write engine.json — `yunta cancel` will                      not see this invocation's processes");
-                None
-            }
-        },
+        process_registry: registry,
         root_cancel: root_cancel_for_ctx,
         forge,
         depth,
@@ -723,6 +771,20 @@ pub(crate) async fn execute_run_at_depth(
     // — nothing reopens it, ever — so a stale approval only
     // matters, and is only ever rechecked, while the run still has
     // unresolved work of its own keeping it open.
+    if let Some(error) = registry_error {
+        ctx.engine_finding(
+            None,
+            "engine-registry",
+            FindingSeverity::Minor,
+            "the process registry could not be written".to_string(),
+            crate::process_registry::registry_path(run_dir)
+                .display()
+                .to_string(),
+            format!("`yunta cancel` cannot see this invocation's process tree: {error}"),
+        )
+        .await?;
+    }
+
     gate_exec::recheck_approved_gates(&ctx, forge).await?;
 
     // The mode is frozen once, in `run_created` (`events[0]`
@@ -769,12 +831,12 @@ pub(crate) async fn execute_run_at_depth(
                 // Best-effort by design: if the export itself fails, the
                 // original diagnostic wins (never masked by an IO error
                 // about its own post-mortem).
-                if let Err(export_error) = ctx.export_events_jsonl().await {
-                    tracing::warn!(
-                        error = %export_error,
-                        "could not export events.jsonl for the broken run"
-                    );
-                }
+                let diagnostic = match ctx.export_events_jsonl().await {
+                    Ok(()) => diagnostic,
+                    Err(export_error) => {
+                        format!("{diagnostic}; events.jsonl could not be exported: {export_error}")
+                    }
+                };
                 return Err(RunError::Broken { diagnostic });
             }
             ScheduleStep::Finish => {
@@ -817,14 +879,28 @@ pub(crate) async fn execute_run_at_depth(
                     {
                         Ok(crate::worktree::WorktreeCleanup::Removed) => {}
                         Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
-                            tracing::warn!(
-                                worktree = %ctx.worktree.display(),
-                                "on_finish.cleanup: worktree skipped — the run's tree is not \
-                                 a linked git worktree"
-                            );
+                            ctx.engine_finding(
+                                None,
+                                "cleanup-not-a-worktree",
+                                FindingSeverity::Minor,
+                                "on_finish.cleanup: worktree skipped".to_string(),
+                                ctx.worktree.display().to_string(),
+                                "the run's tree is not a linked git worktree, so removing \
+                                 it would delete a primary checkout — nothing was touched"
+                                    .to_string(),
+                            )
+                            .await?;
                         }
                         Err(e) => {
-                            tracing::warn!(error = %e, "on_finish.cleanup: worktree failed");
+                            ctx.engine_finding(
+                                None,
+                                "cleanup-failed",
+                                FindingSeverity::Minor,
+                                "on_finish.cleanup: worktree failed".to_string(),
+                                ctx.worktree.display().to_string(),
+                                format!("the run's linked worktree could not be removed: {e}"),
+                            )
+                            .await?;
                         }
                     }
                 }

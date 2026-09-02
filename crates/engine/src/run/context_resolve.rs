@@ -400,7 +400,7 @@ async fn resolve_one(
         ContextSpec::RunEvents { run_events } => {
             resolve_run_events(ctx, node, source_id, run_events).await
         }
-        ContextSpec::Ledger { .. } => resolve_ledger(ctx).await,
+        ContextSpec::Ledger { .. } => resolve_ledger(ctx, node, source_id).await,
         ContextSpec::Knowledge { knowledge } => {
             resolve_knowledge(ctx, node, source_id, knowledge).await
         }
@@ -545,8 +545,24 @@ async fn resolve_run_events(
     Ok(lines.join("\n").into_bytes())
 }
 
-async fn resolve_ledger(ctx: &RunCtx<'_>) -> Result<Vec<u8>, ContextResolveError> {
-    let events = ctx.load_events().await.unwrap_or_default();
+async fn resolve_ledger(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    source_id: &str,
+) -> Result<Vec<u8>, ContextResolveError> {
+    // A storage failure is not an empty ledger: handing the agent "no
+    // tasks" as context would hide the failure behind plausible content,
+    // so the read propagates exactly as its sibling `resolve_run_events`
+    // already does.
+    let events = ctx
+        .load_events()
+        .await
+        .map_err(|e| ContextResolveError::Io {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            action: "read the event log".to_string(),
+            source: std::io::Error::other(e.to_string()),
+        })?;
     let state = crate::replay::derive(&events);
     let mut lines: Vec<String> = state
         .tasks

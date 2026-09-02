@@ -300,7 +300,11 @@ async fn lock_worktree_mutations(
     match lock::acquire(&lock_path, contention, &SystemProbe, &SystemClock).await {
         Ok(Acquired::Fresh) => Ok(WorktreeMutationGuard { lock_path }),
         Ok(Acquired::Stolen { dead }) => {
-            tracing::warn!(
+            // Taking over a dead holder's lock is the protocol working as
+            // designed, not a degradation of this run — a crash
+            // mid-mutation is exactly what leaves one behind. Worth a log
+            // line, not a warning.
+            tracing::info!(
                 pid = %dead.pid,
                 since = %dead.started_at,
                 "took over the worktree-mutation lock of a process that is gone"

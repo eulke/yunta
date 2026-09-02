@@ -316,12 +316,18 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `until_result` | `bool` | sí | resultado de evaluar la condición del loop — la evalúa el engine, no el agente |
 
 ### 5.21 `finding_posted` — engine
-**Fuente:** autor (nodo), hallazgo: id, severidad, título, location, detalle
+**Fuente:** autor (nodo o engine), hallazgo: id, severidad, título, location, detalle
+
+El engine también es autor: cada degradación que sufre —un `git` de
+distill que falla, una limpieza que no corre, su propio `engine.json` no
+escribible— se registra como un `finding_posted` con `node_id` ausente
+(hallazgo de run) e `id` compuesto por el engine, nunca un `warn` que
+deje el log en silencio.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `finding.id` | string | sí | autor = `node_id` del envelope |
-| `finding.severity` | enum | sí | usada por `findings_gate` |
+| `finding.id` | string | sí | autor = `node_id` del envelope; ausente cuando lo emite el engine (hallazgo de run) |
+| `finding.severity` | enum | sí | usada por `findings_gate`; las degradaciones del engine son `minor` |
 | `finding.title` | string | sí | — |
 | `finding.location` | string | sí | usada para deduplicación |
 | `finding.detail` | string | sí | — |
@@ -353,7 +359,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `capability` | string (nombre de campo de `Capabilities`) | sí | — |
 | `adapter` | string (`id()` del adapter) | sí | — |
-| `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter |
+| `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir— el texto que dice que la sesión corre sin run tools y por qué |
 
 ### 5.25 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas
