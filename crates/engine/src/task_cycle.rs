@@ -704,6 +704,10 @@ pub struct ScopeGovernance<'a> {
     pub permissions: Option<&'a yunta_core::PermissionsConfig>,
     pub profile: PermissionProfile,
     pub scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
+    /// The run's `limits.max_expansion_files` ceiling, resolved once by
+    /// the caller — a `rules`-mode request touching more files than this
+    /// is denied.
+    pub max_expansion_files: usize,
     pub grants: &'a crate::scope_expansion::GrantLedger,
     pub already_granted_paths: &'a [String],
 }
@@ -757,6 +761,7 @@ pub async fn run_task(
         permissions,
         profile,
         scope_expansion,
+        max_expansion_files,
         grants,
         already_granted_paths,
     } = governance;
@@ -915,6 +920,7 @@ pub async fn run_task(
                         mode,
                         within,
                         max_per_run,
+                        max_expansion_files,
                         grants,
                         &expansion_request,
                         cwd,

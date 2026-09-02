@@ -789,6 +789,7 @@ async fn dispatch_task_in_isolation<'a>(
             permissions: ctx.manifest.config.permissions.as_ref(),
             profile: super::node_exec::session_profile(node),
             scope_expansion,
+            max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
             already_granted_paths: &granted_paths_for(events, &task.id),
         },

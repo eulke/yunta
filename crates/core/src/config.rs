@@ -292,6 +292,11 @@ pub struct LimitsConfig {
     /// Ceiling on workflow-invoking-workflow nesting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_workflow_depth: Option<u32>,
+    /// How many files a `rules`-mode scope expansion may touch before it
+    /// is denied as no longer "a small, adjacent set" — absent means the
+    /// reference default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_expansion_files: Option<usize>,
     /// Guard against runaway artifacts at close: an artifact over
     /// this size fails the node with a diagnostic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -645,6 +650,17 @@ impl ConfigLayer {
             .unwrap_or(12)
     }
 
+    /// `limits.max_expansion_files`, with the reference default (`5`)
+    /// applied — the ceiling above which a `rules`-mode scope expansion
+    /// is no longer "a small, adjacent set" and is denied. Same "the
+    /// default lives here" convention as [`ConfigLayer::resolved_isolation`].
+    pub fn resolved_max_expansion_files(&self) -> usize {
+        self.limits
+            .as_ref()
+            .and_then(|limits| limits.max_expansion_files)
+            .unwrap_or(5)
+    }
+
     /// `limits.inline_context_bytes`, with the reference default
     /// (`32000`) applied — same "the default lives here" convention as
     /// [`ConfigLayer::resolved_isolation`].
@@ -930,6 +946,9 @@ fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> Limit
             .max_concurrent_runs
             .or(base.max_concurrent_runs),
         max_workflow_depth: more_specific.max_workflow_depth.or(base.max_workflow_depth),
+        max_expansion_files: more_specific
+            .max_expansion_files
+            .or(base.max_expansion_files),
         max_artifact_bytes: more_specific.max_artifact_bytes.or(base.max_artifact_bytes),
         inline_context_bytes: more_specific
             .inline_context_bytes

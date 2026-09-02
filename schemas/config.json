@@ -441,6 +441,15 @@
           "format": "uint32",
           "minimum": 0
         },
+        "max_expansion_files": {
+          "description": "How many files a `rules`-mode scope expansion may touch before it\nis denied as no longer \"a small, adjacent set\" — absent means the\nreference default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
         "max_loop_iterations": {
           "description": "Ceiling on loop-node iterations — the only net under a ledger\nwhose state oscillates forever.",
           "type": [

@@ -73,8 +73,7 @@ use super::{RunCtx, RunError};
 /// Bound on how long any single external call (`command:`'s subprocess,
 /// `mcp:`'s round trip) may run before this recorte gives up and fails
 /// the node — the spec requires a timeout on `command:` stdout but names
-/// no number; the same "no number specified" treatment applies to
-/// `MAX_EXPANSION_FILES` elsewhere in the engine.
+/// no number, so this recorte fixes one.
 const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]

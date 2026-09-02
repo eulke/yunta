@@ -19,7 +19,8 @@
 //! - **"Tamaño acotado"** (no number given in the wording it comes from):
 //!   bounded by file count rather than changed lines — simpler and
 //!   robust across a mix of tracked and untracked files, still faithful
-//!   to "un arreglo chico, adyacente". See [`MAX_EXPANSION_FILES`].
+//!   to "un arreglo chico, adyacente". The ceiling is
+//!   `limits.max_expansion_files`.
 //!
 //! A third boundary, a consequence of how pausing is wired
 //! (`loop_exec.rs`): a task whose own criteria succeed on its *declared*
@@ -51,11 +52,6 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervis
 /// instead of one node since a request is task-specific (the request
 /// payload is keyed by `task_id`).
 pub const SCOPE_EXPANSION_REQUEST_FILE: &str = ".yunta-scope-expansion-request.yaml";
-
-/// Documented engine convention (no number given elsewhere): at most this many
-/// files may fall under one expansion request's `paths` for `rules` mode
-/// to consider it "acotado".
-pub const MAX_EXPANSION_FILES: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum ScopeExpansionError {
@@ -206,10 +202,15 @@ impl GrantLedger {
 /// en rojo" logic already applies to task criteria. Then the mode
 /// evaluates (still outside any lock), and the cap's atomic window
 /// (`GrantLedger::commit`) has the last word.
+// The mode, the `within` ceiling, the per-run cap and the file bound are
+// one scope-expansion policy, passed positionally here until the shared
+// escalation surface bundles them.
+#[allow(clippy::too_many_arguments)]
 pub async fn evaluate(
     mode: ScopeExpansionMode,
     within: &[String],
     max_per_run: Option<u32>,
+    max_expansion_files: usize,
     grants: &GrantLedger,
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
@@ -233,7 +234,9 @@ pub async fn evaluate(
             Decision::Denied("scope_expansion mode is deny (the default)".to_string())
         }
         ScopeExpansionMode::Ask => Decision::Escalate,
-        ScopeExpansionMode::Rules => evaluate_rules(within, request, task_worktree).await?,
+        ScopeExpansionMode::Rules => {
+            evaluate_rules(within, request, task_worktree, max_expansion_files).await?
+        }
     };
     Ok((precheck_exit, grants.commit(max_per_run, provisional).await))
 }
@@ -242,6 +245,7 @@ async fn evaluate_rules(
     within: &[String],
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
+    max_expansion_files: usize,
 ) -> Result<Decision, ScopeExpansionError> {
     let ceiling = build_globset(within)?;
     let requested = build_globset(&request.paths)?;
@@ -268,9 +272,9 @@ async fn evaluate_rules(
         .iter()
         .filter(|path| requested.is_match(path))
         .collect();
-    if matched.len() > MAX_EXPANSION_FILES {
+    if matched.len() > max_expansion_files {
         return Ok(Decision::Denied(format!(
-            "diff at the requested paths touches {} file(s), over the {MAX_EXPANSION_FILES}-file bound",
+            "diff at the requested paths touches {} file(s), over the {max_expansion_files}-file bound",
             matched.len()
         )));
     }
