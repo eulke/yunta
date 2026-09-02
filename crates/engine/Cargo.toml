@@ -87,3 +87,5 @@ yunta-core = { workspace = true, features = ["testkit"] }
 serde_yaml.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+# A capturing subscriber asserts a run's spans carry their run_id/node_id.
+tracing-subscriber.workspace = true

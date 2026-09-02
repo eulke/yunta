@@ -681,6 +681,7 @@ pub async fn record_pause_after_crash(
 /// `workflow_exec` re-enters here for each child run, one level deeper —
 /// the recursion the Contrato's "a parent's resume recursively resumes
 /// orphaned children" is made of.
+#[tracing::instrument(skip_all, fields(run_id = %env.run_id, depth))]
 pub(crate) async fn execute_run_at_depth(
     env: RunEnv<'_>,
     depth: u32,

@@ -2606,6 +2606,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "yunta-adapters",
  "yunta-core",

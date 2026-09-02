@@ -733,6 +733,13 @@ pub struct AttemptEnv<'a> {
 /// Never trusts the session's own outcome: `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
 /// diff, regardless of whether the session reported `Completed`.
+#[tracing::instrument(
+    skip_all,
+    fields(
+        task = %task.id,
+        node_id = audit.map(|(_, node)| node.as_str()).unwrap_or_default(),
+    )
+)]
 pub async fn run_task(
     task: &Task,
     instruction: &str,

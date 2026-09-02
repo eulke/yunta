@@ -66,6 +66,10 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
 /// `cancel` only ever fires for a child of a `join: any` parallel group
 /// once a sibling has won — every other call site passes a token
 /// nothing ever cancels, so this is a no-op parameter for them.
+#[tracing::instrument(
+    skip_all,
+    fields(run_id = %ctx.run_id, node_id = %node.id, attempt)
+)]
 pub(super) async fn execute_node(
     ctx: &RunCtx<'_>,
     node: &Node,
