@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
-use yunta_core::events::{EventBody, EventDraft, EventPayload, StoredEvent};
+use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent};
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
 use crate::error::{Cause, Result, StorageError};
@@ -359,9 +359,14 @@ impl Storage {
             };
             let anchor = match &prev_hash {
                 Some(prev) => prev.clone(),
-                None => match genesis_from_first_row(&row) {
+                None => match genesis_from_first_row(run_id, &row) {
                     Ok(anchor) => anchor,
-                    Err(detail) => return Ok(ChainVerification::Broken { seq, detail }),
+                    Err(error) => {
+                        return Ok(ChainVerification::Broken {
+                            seq,
+                            detail: error.to_string(),
+                        })
+                    }
                 },
             };
             let recomputed = chain_hash(ChainHashFields {
@@ -430,15 +435,15 @@ impl Storage {
                 run_id: run_id.clone(),
                 source,
             })?;
-            let corrupt = |detail: String| StorageError::CorruptPayload {
+            let corrupt = |source: EventShapeError| StorageError::CorruptPayload {
                 run_id: run_id.clone(),
                 seq,
-                detail,
+                source,
             };
             let object = match serde_json::from_str::<serde_json::Value>(&payload_json) {
                 Ok(serde_json::Value::Object(object)) => object,
-                Ok(_) => return Err(corrupt("the payload is not a JSON object".to_string())),
-                Err(error) => return Err(corrupt(error.to_string())),
+                Ok(_) => return Err(corrupt(EventShapeError::NotAnObject)),
+                Err(source) => return Err(corrupt(EventShapeError::Json { source })),
             };
             let body = EventBody::from_object(object, schema_version).map_err(corrupt)?;
 
@@ -538,12 +543,11 @@ struct StoredRow {
 
 /// The chain's anchor for a run's first row: `run_created`'s own
 /// manifest hash, hashed.
-fn genesis_from_first_row(row: &StoredRow) -> std::result::Result<String, String> {
+fn genesis_from_first_row(run_id: &RunId, row: &StoredRow) -> Result<String> {
     if row.kind != "run_created" {
-        return Err(format!(
-            "first event is `{}`, not `run_created` — no genesis",
-            row.kind
-        ));
+        return Err(StorageError::GenesisMissing {
+            run_id: run_id.clone(),
+        });
     }
     let manifest_hash = serde_json::from_str::<serde_json::Value>(&row.payload_json)
         .ok()
@@ -554,5 +558,7 @@ fn genesis_from_first_row(row: &StoredRow) -> std::result::Result<String, String
         });
     manifest_hash
         .map(|hash| genesis_hash(&hash))
-        .ok_or_else(|| "run_created payload has no readable manifest_hash — no genesis".to_string())
+        .ok_or_else(|| StorageError::CorruptGenesis {
+            run_id: run_id.clone(),
+        })
 }

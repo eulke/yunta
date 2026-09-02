@@ -22,7 +22,7 @@ use crate::replay::{derive, NodeState};
 use crate::runner::resolve_runner;
 use crate::scope::scope_check;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
-use crate::template::render_template;
+use crate::template::{render_template, TemplateError};
 
 use super::{RunCtx, RunError};
 
@@ -596,7 +596,7 @@ fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
 /// template vars (`{{runner.role}}` above all), so each fan-out sibling
 /// declares — and verifies — its own file. Nodes without templates in
 /// their names come back unchanged.
-fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, String> {
+fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
     }
@@ -608,7 +608,7 @@ fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, String> 
                 yunta_core::ArtifactSpec::Plain(name) => name,
                 yunta_core::ArtifactSpec::Typed { name, .. } => name,
             };
-            *name = render_template(name, &vars).map_err(|e| e.to_string())?;
+            *name = render_template(name, &vars)?;
         }
     }
     Ok(rendered)
@@ -680,7 +680,7 @@ pub(super) async fn close_node(
     // sibling verifies its own file.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
-        Err(detail) => return fail_with_tokens(ctx, node, detail, false, tokens).await,
+        Err(error) => return fail_with_tokens(ctx, node, error.to_string(), false, tokens).await,
     };
     let node = &node_rendered;
     match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
@@ -1102,6 +1102,30 @@ pub(super) async fn resolve_node_runner(
     }
 }
 
+/// A blackboard group's session that cannot reach the per-run MCP
+/// endpoint — the node fails with it, never emulates.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RunToolsSetupError {
+    #[error(
+        "node `{node}` is in a `coordination: blackboard` group but adapter `{adapter}` declares \
+         no `run_tools` capability — the blackboard cannot be mounted; pick a runner on an \
+         adapter that can be a client of the per-run MCP endpoint"
+    )]
+    NoRunToolsCapability {
+        node: yunta_core::NodeId,
+        adapter: AdapterId,
+    },
+    #[error(
+        "node `{node}` is in a `coordination: blackboard` group but its per-run MCP listener \
+         failed to start: {source}"
+    )]
+    ListenerFailed {
+        node: yunta_core::NodeId,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Opens this session attempt's per-run MCP listener, or decides
 /// it must not exist. `Ok(None)` — no `run_tools` capability outside a
 /// blackboard group — is the resting state. `Err(diagnostic)` is the
@@ -1115,15 +1139,15 @@ pub(super) async fn open_run_tools(
     adapter: &dyn yunta_adapters::Adapter,
     adapter_id: &AdapterId,
     task: Option<&yunta_core::TaskId>,
-) -> Result<Option<crate::run_tools::RunToolsSession>, String> {
+) -> Result<Option<crate::run_tools::RunToolsSession>, RunToolsSetupError> {
     let host = &ctx.run_tools_host;
     let needs_blackboard = host.is_blackboard_member(&node.id);
     if !adapter.capabilities().run_tools {
         if needs_blackboard {
-            return Err(format!(
-                "node `{}` is in a `coordination: blackboard` group but adapter                  `{adapter_id}` declares no `run_tools` capability — the blackboard                  cannot be mounted; pick a runner on an adapter that can be a client                  of the per-run MCP endpoint",
-                node.id
-            ));
+            return Err(RunToolsSetupError::NoRunToolsCapability {
+                node: node.id.clone(),
+                adapter: adapter_id.clone(),
+            });
         }
         return Ok(None);
     }
@@ -1138,10 +1162,10 @@ pub(super) async fn open_run_tools(
         Ok(session) => Ok(Some(session)),
         Err(e) => {
             if needs_blackboard {
-                return Err(format!(
-                    "node `{}` is in a `coordination: blackboard` group but its per-run                      MCP listener failed to start: {e}",
-                    node.id
-                ));
+                return Err(RunToolsSetupError::ListenerFailed {
+                    node: node.id.clone(),
+                    source: e,
+                });
             }
             tracing::warn!(node_id = %node.id, error = %e, "per-run MCP listener failed to                  start — the session runs without run tools");
             Ok(None)
@@ -1183,7 +1207,7 @@ async fn execute_prompt(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
+        Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
     let skills = if !skills.is_empty() && !adapter.capabilities().skills {
         ctx.emit(
@@ -1208,7 +1232,7 @@ async fn execute_prompt(
     // semantics the engine never emulates: that's a node failure.
     let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
         Ok(run_tools) => run_tools,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
+        Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
     let request = SessionRequest {
         prompt: rendered,

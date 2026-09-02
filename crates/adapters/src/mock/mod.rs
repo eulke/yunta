@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
-use yunta_core::{AdapterId, AgentName, Capabilities, Result, SessionId, YuntaError};
+use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, Result, SessionId};
 
 use crate::session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, ProbeReport, SessionRequest,
@@ -126,7 +126,7 @@ impl MockAdapter {
                 continue;
             }
             let full_path = cwd.join(&effect.path);
-            let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
+            let io_err = |action: String, source: std::io::Error| AdapterError::AdapterIo {
                 adapter: ID.clone(),
                 action,
                 source,
@@ -225,7 +225,7 @@ impl MockAdapter {
                     .map(|(i, _)| i)
             });
             let Some(index) = claim else {
-                return Err(YuntaError::Adapter {
+                return Err(AdapterError::Adapter {
                     adapter: ID.clone(),
                     message: format!(
                         "fixture exhausted: {} scripted session(s), none left unconsumed and \
@@ -248,7 +248,7 @@ impl MockAdapter {
                 "mock-session-{}",
                 SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
             ))
-            .map_err(|error| YuntaError::Adapter {
+            .map_err(|error| AdapterError::Adapter {
                 adapter: ID.clone(),
                 message: error.to_string(),
             })?,
@@ -329,9 +329,11 @@ impl MockAdapter {
                                 name: tool,
                                 target_digest: digest,
                             },
-                            Err(message) => {
+                            Err(error) => {
                                 let _ = tx.send(AgentEvent::Failed {
-                                    error: AgentError { message },
+                                    error: AgentError {
+                                        message: yunta_core::describe(&error),
+                                    },
                                     retryable: false,
                                 });
                                 return;
@@ -402,24 +404,47 @@ impl AgentSession for MockSession {
     }
 }
 
+/// Why the mock's own MCP call failed — the session fails with it.
+#[derive(Debug, thiserror::Error)]
+enum RunToolCallError {
+    #[error(
+        "fixture step run_tool `{tool}` but this session has no run_tools_endpoint — the \
+         engine never offered one (missing `run_tools` capability, or the listener wasn't \
+         opened)"
+    )]
+    NoEndpoint { tool: String },
+    #[error("run_tool `{tool}`: cannot reach the per-run endpoint")]
+    Connect {
+        tool: String,
+        #[source]
+        source: Box<rmcp::service::ClientInitializeError>,
+    },
+    #[error("run_tool `{tool}` failed")]
+    Call {
+        tool: String,
+        #[source]
+        source: Box<rmcp::service::ServiceError>,
+    },
+    #[error("run_tool `{tool}` returned an error: {text}")]
+    Refused { tool: String, text: String },
+}
+
 /// The mock's own MCP client leg: one `tools/call` against the
 /// session's per-run endpoint, exactly as a real CLI would place it.
 /// Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content), or the error text
-/// that fails the session.
+/// (`ToolUse.target_digest` — never full content), or the error that
+/// fails the session.
 async fn call_run_tool(
     endpoint: Option<&crate::RunToolsEndpoint>,
     tool: &str,
     arguments: serde_json::Map<String, serde_json::Value>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<String, RunToolCallError> {
     use rmcp::ServiceExt;
 
     let Some(endpoint) = endpoint else {
-        return Err(format!(
-            "fixture step run_tool `{tool}` but this session has no run_tools_endpoint — \
-             the engine never offered one (missing `run_tools` capability, or the \
-             listener wasn't opened)"
-        ));
+        return Err(RunToolCallError::NoEndpoint {
+            tool: tool.to_string(),
+        });
     };
     let config =
         rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
@@ -430,17 +455,23 @@ async fn call_run_tool(
         reqwest::Client::default(),
         config,
     );
-    let client = ()
-        .serve(transport)
-        .await
-        .map_err(|e| format!("run_tool `{tool}`: cannot reach the per-run endpoint: {e}"))?;
+    let client =
+        ().serve(transport)
+            .await
+            .map_err(|source| RunToolCallError::Connect {
+                tool: tool.to_string(),
+                source: Box::new(source),
+            })?;
     let mut params = rmcp::model::CallToolRequestParams::new(tool.to_string());
     if !arguments.is_empty() {
         params = params.with_arguments(arguments);
     }
     let result = client.call_tool(params).await;
     let _ = client.cancel().await;
-    let result = result.map_err(|e| format!("run_tool `{tool}` failed: {e}"))?;
+    let result = result.map_err(|source| RunToolCallError::Call {
+        tool: tool.to_string(),
+        source: Box::new(source),
+    })?;
     let text: String = result
         .content
         .iter()
@@ -449,7 +480,10 @@ async fn call_run_tool(
         .collect::<Vec<_>>()
         .join(" ");
     if result.is_error.unwrap_or(false) {
-        return Err(format!("run_tool `{tool}` returned an error: {text}"));
+        return Err(RunToolCallError::Refused {
+            tool: tool.to_string(),
+            text,
+        });
     }
     let hash = yunta_core::sha256_hex(text.as_bytes());
     Ok(format!("{tool}:{}", &hash[..12]))

@@ -21,7 +21,7 @@ use yunta_adapters::{
 };
 use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
 use yunta_core::Criterion;
-use yunta_core::{Task, TaskId, YuntaError};
+use yunta_core::{AdapterError, Task, TaskId};
 
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 
@@ -38,7 +38,7 @@ pub enum TaskCycleError {
     Spawn {
         task: TaskId,
         #[source]
-        source: YuntaError,
+        source: AdapterError,
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
@@ -456,7 +456,7 @@ pub(crate) async fn dispatch_session(
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     resume: Option<&yunta_core::SessionId>,
-) -> Result<(DispatchOutcome, TokenUsage), YuntaError> {
+) -> Result<(DispatchOutcome, TokenUsage), AdapterError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
     // `Some` continues an interrupted conversation instead of

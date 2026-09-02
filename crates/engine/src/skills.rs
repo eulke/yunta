@@ -37,6 +37,20 @@ fn skill_names(config: &ConfigLayer, workflow: &Workflow, node: &Node) -> Vec<St
     names
 }
 
+/// A skill name that resolves to no directory.
+#[derive(Debug, thiserror::Error)]
+pub enum SkillsError {
+    #[error(
+        "skill `{name}` not found under {} — add the directory, fix `skills.paths` in the config, \
+         or install the pack that declares it",
+        searched.iter().map(|root| format!("`{}`", root.display())).collect::<Vec<_>>().join(", ")
+    )]
+    NotFound {
+        name: String,
+        searched: Vec<PathBuf>,
+    },
+}
+
 /// Resolves every skill name to an existing directory, or says exactly
 /// which name failed and where it looked. Relative search paths resolve
 /// against `worktree` (the run's checkout carries the repo's own
@@ -46,7 +60,7 @@ pub fn resolve_skills(
     workflow: &Workflow,
     node: &Node,
     worktree: &Path,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, SkillsError> {
     let names = skill_names(config, workflow, node);
     if names.is_empty() {
         return Ok(Vec::new());
@@ -78,15 +92,10 @@ pub fn resolve_skills(
         match found {
             Some(dir) => resolved.push(dir),
             None => {
-                return Err(format!(
-                    "skill `{name}` not found under {} — add the directory, fix \
-                     `skills.paths` in the config, or install the pack that declares it",
-                    search_roots
-                        .iter()
-                        .map(|root| format!("`{}`", root.display()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
+                return Err(SkillsError::NotFound {
+                    name: name.clone(),
+                    searched: search_roots.clone(),
+                });
             }
         }
     }

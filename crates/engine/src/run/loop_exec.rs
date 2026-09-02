@@ -56,7 +56,7 @@ pub(super) async fn execute_loop(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
+        Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
     let skills = if !skills.is_empty() && !adapter.capabilities().skills {
         ctx.emit(

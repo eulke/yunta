@@ -47,7 +47,7 @@ use yunta_core::events::{
     TerminalState,
 };
 use yunta_core::{
-    AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, Pid, RunId, Seq, YuntaError,
+    AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, Pid, RunId, Seq,
 };
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -60,6 +60,35 @@ pub use budget::session_token_budget;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor, RunRoots};
 use schedule::ScheduleStep;
+
+/// A frozen `manifest.yaml` that cannot be read back.
+#[derive(Debug, Error)]
+pub enum ManifestReadError {
+    #[error("cannot read `{path}`")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("`{path}` is not a manifest")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: yunta_core::yaml::YamlError,
+    },
+}
+
+/// Reads a run's frozen manifest back from its `manifest.yaml`.
+pub fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
+    let text = std::fs::read_to_string(path).map_err(|source| ManifestReadError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    yunta_core::yaml::parse(&text).map_err(|source| ManifestReadError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
 
 #[derive(Debug, Error)]
 pub enum RunError {
@@ -121,7 +150,7 @@ pub enum RunError {
     Spawn {
         node: NodeId,
         #[source]
-        source: YuntaError,
+        source: AdapterError,
     },
 
     #[error(transparent)]

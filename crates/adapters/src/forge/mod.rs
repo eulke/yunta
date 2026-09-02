@@ -23,10 +23,31 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ForgeError {
-    #[error("forge request failed: {0}")]
-    Request(String),
-    #[error("forge returned an unexpected response: {0}")]
-    UnexpectedResponse(String),
+    /// The request never got an answer.
+    #[error("forge: failed to {action}")]
+    Request {
+        action: &'static str,
+        #[source]
+        source: reqwest::Error,
+    },
+    /// The forge answered, and the answer is a refusal.
+    #[error("forge: failed to {action}: {status} {body}")]
+    Status {
+        action: &'static str,
+        status: u16,
+        body: String,
+    },
+    /// The forge answered success with a body that is not the shape the
+    /// call expects.
+    #[error("forge: the answer to {action} is not the shape expected")]
+    Response {
+        action: &'static str,
+        #[source]
+        source: reqwest::Error,
+    },
+    /// A gate handle the forge does not know.
+    #[error("forge: no gate #{number}")]
+    UnknownGate { number: u64 },
 }
 
 /// What `publish` needs to commit and open a PR. The trait itself does

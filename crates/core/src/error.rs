@@ -2,11 +2,11 @@ use thiserror::Error;
 
 use crate::ids::AdapterId;
 
-/// Typed errors shared across the workspace's public APIs (CLAUDE.md:
-/// "errores tipados en la lib, contexto en el borde" — never `unwrap()`
-/// or `expect()` outside tests).
+/// What an adapter can fail with — the one error type every adapter
+/// speaks, so the engine handles a failure by its kind and the edge
+/// renders it once.
 #[derive(Debug, Error)]
-pub enum YuntaError {
+pub enum AdapterError {
     /// An adapter was asked for a capability it never declared: the
     /// engine fails typed instead of emulating or degrading in silence.
     #[error("adapter `{adapter}` does not support `{what}`")]
@@ -45,5 +45,19 @@ pub enum YuntaError {
     },
 }
 
-/// Convenience alias for the workspace's typed `Result`.
-pub type Result<T> = std::result::Result<T, YuntaError>;
+/// Convenience alias for an adapter's typed `Result`.
+pub type Result<T> = std::result::Result<T, AdapterError>;
+
+/// The error and every cause behind it, joined for a person to read —
+/// what an edge prints, so no cause is lost when a typed error is
+/// rendered once.
+pub fn describe(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut cause = error.source();
+    while let Some(next) = cause {
+        text.push_str(": ");
+        text.push_str(&next.to_string());
+        cause = next.source();
+    }
+    text
+}

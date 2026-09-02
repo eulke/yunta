@@ -232,26 +232,88 @@ struct SessionTools {
     cwd: PathBuf,
 }
 
+/// Why a tool call could not be honored — rendered once, at the MCP
+/// boundary, as the text the session gets back.
+#[derive(Debug, thiserror::Error)]
+enum RunToolError {
+    #[error(
+        "invalid finding — requires id, severity (blocking|major|minor|note), title, location \
+         and detail: {source}"
+    )]
+    InvalidFinding {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "invalid request — requires paths (list) and reason, with an optional \
+         proposed_criterion {{cmd}}: {source}"
+    )]
+    InvalidRequest {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "this session's node is not in a `coordination: blackboard` group — the blackboard is \
+         never mounted outside one"
+    )]
+    NotInBlackboardGroup,
+    #[error(
+        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a \
+         prompt node's scope is fixed by its own declaration"
+    )]
+    NoTask,
+    #[error(
+        "a scope expansion request is already pending for this attempt — one request per attempt"
+    )]
+    RequestPending,
+    #[error("the run's log cannot be reached")]
+    Storage {
+        #[source]
+        source: yunta_storage::StorageError,
+    },
+    #[error("the answer cannot be rendered as JSON")]
+    Render {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("the request cannot be written as YAML")]
+    Yaml {
+        #[source]
+        source: yunta_core::yaml::YamlError,
+    },
+    #[error("cannot write `{path}`")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("unknown tool `{name}`")]
+    UnknownTool { name: String },
+}
+
 impl SessionTools {
     fn in_blackboard_group(&self) -> bool {
         self.host.blackboard_members.contains_key(&self.node)
     }
 
-    async fn events(&self) -> Result<Vec<StoredEvent>, String> {
+    async fn events(&self) -> Result<Vec<StoredEvent>, RunToolError> {
         self.host
             .storage
             .events_for_run(self.host.run_id.clone())
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|source| RunToolError::Storage { source })
     }
 
-    async fn post_finding(&self, args: serde_json::Map<String, Value>) -> Result<String, String> {
+    async fn post_finding(
+        &self,
+        args: serde_json::Map<String, Value>,
+    ) -> Result<String, RunToolError> {
         // One schema, both intake paths: the same `Finding`
         // type the artifact path parses — an incomplete report is a
         // visible error naming the field, never free text nobody can
         // process later.
         let finding: Finding = serde_json::from_value(Value::Object(args))
-            .map_err(|e| format!("invalid finding — requires id, severity (blocking|major|minor|note), title, location and detail: {e}"))?;
+            .map_err(|source| RunToolError::InvalidFinding { source })?;
         let id = finding.id.clone();
         self.host
             .storage
@@ -264,17 +326,13 @@ impl SessionTools {
                 yunta_core::SystemClock.now(),
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|source| RunToolError::Storage { source })?;
         Ok(format!("finding `{id}` recorded"))
     }
 
-    async fn get_blackboard(&self) -> Result<String, String> {
+    async fn get_blackboard(&self) -> Result<String, RunToolError> {
         if !self.in_blackboard_group() {
-            return Err(
-                "this session's node is not in a `coordination: blackboard` group — the \
-                 blackboard is never mounted outside one"
-                    .to_string(),
-            );
+            return Err(RunToolError::NotInBlackboardGroup);
         }
         // While the group runs, only this node's OWN posts —
         // reading a sibling hot would make the outcome depend on
@@ -295,10 +353,10 @@ impl SessionTools {
                      group's join, through its consolidated output",
             "findings": own,
         }))
-        .map_err(|e| e.to_string())
+        .map_err(|source| RunToolError::Render { source })
     }
 
-    async fn task_status(&self) -> Result<String, String> {
+    async fn task_status(&self) -> Result<String, RunToolError> {
         let state = crate::replay::derive(&self.events().await?);
         let mut tasks: Vec<(String, String)> = state
             .tasks
@@ -318,19 +376,16 @@ impl SessionTools {
             .into_iter()
             .map(|(id, status)| (id, Value::String(status)))
             .collect();
-        serde_json::to_string_pretty(&Value::Object(map)).map_err(|e| e.to_string())
+        serde_json::to_string_pretty(&Value::Object(map))
+            .map_err(|source| RunToolError::Render { source })
     }
 
     fn request_scope_expansion(
         &self,
         args: serde_json::Map<String, Value>,
-    ) -> Result<String, String> {
+    ) -> Result<String, RunToolError> {
         if self.task.is_none() {
-            return Err(
-                "scope expansion is ledger-task machinery, keyed by task — this \
-                 session has no task; a prompt node's scope is fixed by its own declaration"
-                    .to_string(),
-            );
+            return Err(RunToolError::NoTask);
         }
         // The identical request object the file-based path uses,
         // validated by the same
@@ -339,24 +394,20 @@ impl SessionTools {
         // (rules/ask/deny, cap, findings on denial) consumes it
         // unchanged: one mechanism, two intake surfaces.
         let request: crate::scope_expansion::ScopeExpansionRequest =
-            serde_json::from_value(Value::Object(args)).map_err(|e| {
-                format!(
-                    "invalid request — requires paths (list) and reason, with an \
-                     optional proposed_criterion {{cmd}}: {e}"
-                )
-            })?;
+            serde_json::from_value(Value::Object(args))
+                .map_err(|source| RunToolError::InvalidRequest { source })?;
         let path = self
             .cwd
             .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
         if path.exists() {
-            return Err(
-                "a scope expansion request is already pending for this attempt — one \
-                 request per attempt"
-                    .to_string(),
-            );
+            return Err(RunToolError::RequestPending);
         }
-        let yaml = yunta_core::yaml::to_string(&request).map_err(|e| e.to_string())?;
-        std::fs::write(&path, yaml).map_err(|e| e.to_string())?;
+        let yaml = yunta_core::yaml::to_string(&request)
+            .map_err(|source| RunToolError::Yaml { source })?;
+        std::fs::write(&path, yaml).map_err(|source| RunToolError::Write {
+            path: path.clone(),
+            source,
+        })?;
         Ok(
             "request recorded — it is evaluated when this attempt ends (the engine \
              or a person decides; a denial becomes a finding); re-attempt the work after"
@@ -444,11 +495,15 @@ impl ServerHandler for SessionTools {
             "yunta_get_blackboard" => self.get_blackboard().await,
             "yunta_task_status" => self.task_status().await,
             "yunta_request_scope_expansion" => self.request_scope_expansion(args),
-            other => Err(format!("unknown tool `{other}`")),
+            other => Err(RunToolError::UnknownTool {
+                name: other.to_string(),
+            }),
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
-            Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]).into(),
+            Err(error) => {
+                CallToolResult::error(vec![ContentBlock::text(yunta_core::describe(&error))]).into()
+            }
         })
     }
 }

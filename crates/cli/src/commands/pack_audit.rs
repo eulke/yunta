@@ -136,7 +136,7 @@ fn print_node(node: &NodeAudit) {
                 println!("      {line}");
             }
         }
-        Some(Err(error)) => println!("    prompt: UNREADABLE — {error}"),
+        Some(Err(error)) => println!("    prompt: UNREADABLE — {}", yunta_core::describe(error)),
     }
 }
 

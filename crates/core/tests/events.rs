@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
 use yunta_core::ScopeExpansionMode;
 use yunta_core::{RunId, RunnerCandidate};
@@ -377,4 +378,25 @@ fn a_draft_names_what_happened_and_nothing_storage_assigns() {
         }),
     };
     assert_eq!(draft.payload.kind_name(), "run_paused");
+}
+
+#[test]
+fn a_body_without_a_kind_is_refused_naming_the_gap() {
+    let error = EventBody::from_object(serde_json::Map::new(), 1).unwrap_err();
+    assert!(matches!(error, EventShapeError::KindMissing), "{error:?}");
+}
+
+#[test]
+fn a_known_kind_whose_fields_do_not_fit_names_the_kind_and_keeps_the_cause() {
+    let mut object = serde_json::Map::new();
+    object.insert("kind".to_string(), serde_json::json!("run_paused"));
+    let error = EventBody::from_object(object, 1).unwrap_err();
+    assert!(
+        matches!(&error, EventShapeError::Payload { kind, .. } if kind == "run_paused"),
+        "{error:?}"
+    );
+    assert!(
+        std::error::Error::source(&error).is_some(),
+        "the serde cause travels with the error"
+    );
 }

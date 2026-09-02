@@ -67,12 +67,15 @@ impl GitHubForge {
             )
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let parsed: RefObject = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "resolve the base branch",
+                source,
+            })?;
+        let resp = ensure_ok("resolve the base branch", resp).await?;
+        let parsed: RefObject = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "resolve the base branch",
+            source,
+        })?;
         Ok(parsed.object.sha)
     }
 
@@ -91,11 +94,14 @@ impl GitHubForge {
             }))
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "create the branch",
+                source,
+            })?;
         if resp.status().as_u16() == 422 {
             return Ok(()); // already exists
         }
-        ensure_ok(resp).await?;
+        ensure_ok("create the branch", resp).await?;
         Ok(())
     }
 
@@ -145,8 +151,11 @@ impl GitHubForge {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        ensure_ok(resp).await?;
+            .map_err(|source| ForgeError::Request {
+                action: "commit an artifact",
+                source,
+            })?;
+        ensure_ok("commit an artifact", resp).await?;
         Ok(())
     }
 
@@ -164,12 +173,15 @@ impl GitHubForge {
             )
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let prs: Vec<PrSummary> = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "find the open pull request",
+                source,
+            })?;
+        let resp = ensure_ok("find the open pull request", resp).await?;
+        let prs: Vec<PrSummary> = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "find the open pull request",
+            source,
+        })?;
         Ok(prs.into_iter().next().map(|pr| PublishedGate {
             url: pr.html_url,
             number: pr.number,
@@ -177,13 +189,20 @@ impl GitHubForge {
     }
 }
 
-async fn ensure_ok(resp: reqwest::Response) -> Result<reqwest::Response, ForgeError> {
+async fn ensure_ok(
+    action: &'static str,
+    resp: reqwest::Response,
+) -> Result<reqwest::Response, ForgeError> {
     if resp.status().is_success() {
         Ok(resp)
     } else {
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        Err(ForgeError::Request(format!("{status}: {body}")))
+        Err(ForgeError::Status {
+            action,
+            status,
+            body,
+        })
     }
 }
 
@@ -228,12 +247,15 @@ impl Forge for GitHubForge {
             }))
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let created: CreatedPr = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "open the pull request",
+                source,
+            })?;
+        let resp = ensure_ok("open the pull request", resp).await?;
+        let created: CreatedPr = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "open the pull request",
+            source,
+        })?;
         Ok(PublishedGate {
             url: created.html_url,
             number: created.number,
@@ -257,12 +279,15 @@ impl Forge for GitHubForge {
             )
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let detail: PrDetail = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "read the pull request",
+                source,
+            })?;
+        let resp = ensure_ok("read the pull request", resp).await?;
+        let detail: PrDetail = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "read the pull request",
+            source,
+        })?;
 
         if detail.state != "open" {
             return Ok(PolledGate {
@@ -288,12 +313,15 @@ impl Forge for GitHubForge {
             )
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let reviews: Vec<Review> = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "read the pull request",
+                source,
+            })?;
+        let resp = ensure_ok("read the pull request", resp).await?;
+        let reviews: Vec<Review> = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "read the pull request",
+            source,
+        })?;
 
         // Last decisive review wins (APPROVED/CHANGES_REQUESTED) —
         // COMMENTED/DISMISSED aren't decisions this maps to anything.
@@ -344,12 +372,15 @@ impl GitHubForge {
             )
             .send()
             .await
-            .map_err(|e| ForgeError::Request(e.to_string()))?;
-        let resp = ensure_ok(resp).await?;
-        let comments: Vec<Comment> = resp
-            .json()
-            .await
-            .map_err(|e| ForgeError::UnexpectedResponse(e.to_string()))?;
+            .map_err(|source| ForgeError::Request {
+                action: "read the review comments",
+                source,
+            })?;
+        let resp = ensure_ok("read the review comments", resp).await?;
+        let comments: Vec<Comment> = resp.json().await.map_err(|source| ForgeError::Response {
+            action: "read the review comments",
+            source,
+        })?;
         Ok(comments
             .into_iter()
             .map(|c| ReviewComment {

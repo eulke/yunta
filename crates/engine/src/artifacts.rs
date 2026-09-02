@@ -54,11 +54,12 @@ pub enum ArtifactError {
         source: std::io::Error,
     },
 
-    #[error("node `{node}`: task ledger `{name}` is not valid YAML: {detail}")]
+    #[error("node `{node}`: task ledger `{name}` is not valid YAML: {source}")]
     MalformedLedger {
         node: NodeId,
         name: String,
-        detail: String,
+        #[source]
+        source: yunta_core::yaml::YamlError,
     },
 
     #[error("node `{node}`: task ledger `{name}` failed validation with {} error(s)", errors.len())]
@@ -68,11 +69,12 @@ pub enum ArtifactError {
         errors: Vec<LedgerError>,
     },
 
-    #[error("node `{node}`: findings `{name}` is not valid YAML: {detail}")]
+    #[error("node `{node}`: findings `{name}` is not valid YAML: {source}")]
     MalformedFindings {
         node: NodeId,
         name: String,
-        detail: String,
+        #[source]
+        source: yunta_core::yaml::YamlError,
     },
 
     #[error("node `{node}`: findings `{name}` failed validation with {} error(s)", errors.len())]
@@ -82,11 +84,12 @@ pub enum ArtifactError {
         errors: Vec<FindingsError>,
     },
 
-    #[error("node `{node}`: questions `{name}` is not valid YAML: {detail}")]
+    #[error("node `{node}`: questions `{name}` is not valid YAML: {source}")]
     MalformedQuestions {
         node: NodeId,
         name: String,
-        detail: String,
+        #[source]
+        source: yunta_core::yaml::YamlError,
     },
 
     #[error("node `{node}`: questions `{name}` failed validation with {} error(s)", errors.len())]
@@ -230,7 +233,7 @@ fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding
         yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedFindings {
             node: node.clone(),
             name: name.to_string(),
-            detail: e.to_string(),
+            source: e,
         })?;
 
     let violations = crate::findings::register(&file);
@@ -254,7 +257,7 @@ fn parse_questions(
         yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedQuestions {
             node: node.clone(),
             name: name.to_string(),
-            detail: e.to_string(),
+            source: e,
         })?;
 
     let violations = crate::questions::register(&file);
@@ -274,7 +277,7 @@ fn parse_ledger(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Ledger, Artif
         yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedLedger {
             node: node.clone(),
             name: name.to_string(),
-            detail: e.to_string(),
+            source: e,
         })?;
 
     let violations = crate::ledger::register(&ledger);

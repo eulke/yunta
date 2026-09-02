@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_adapters::{
-    Adapter, AgentEvent, Budget, MockAdapter, PermissionProfile, ProbeReport, SessionRequest,
+    Adapter, AgentEvent, Budget, Forge, ForgeError, MockAdapter, MockForge, MockForgeState,
+    PermissionProfile, ProbeReport, PublishedGate, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
 
@@ -452,4 +453,18 @@ sessions:
     )
     .await;
     assert!(dir.path().join("second.txt").exists());
+}
+
+#[tokio::test]
+async fn polling_a_gate_the_forge_never_published_is_a_typed_error() {
+    let forge = MockForge::new(MockForgeState::new());
+    let gate = PublishedGate {
+        url: "https://forge.example/pr/99".to_string(),
+        number: 99,
+    };
+    let error = forge.poll(&gate).await.unwrap_err();
+    assert!(
+        matches!(error, ForgeError::UnknownGate { number: 99 }),
+        "{error:?}"
+    );
 }

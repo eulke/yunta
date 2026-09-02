@@ -33,6 +33,19 @@ static DEFAULTS: NodeId = NodeId::from_static("defaults");
 use crate::ledger::globs_might_overlap;
 use crate::template::template_variables;
 
+/// A `yunta_schema:` range the parser cannot read.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SchemaRangeError {
+    #[error("the range is empty")]
+    Empty,
+    #[error("comparator `{comparator}` has no version number")]
+    NoVersion { comparator: String },
+    #[error("`{text}` is not a whole schema version")]
+    NotAVersion { text: String },
+    #[error("unknown comparator `{op}`")]
+    UnknownOperator { op: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
     #[error("duplicate node id `{id}`")]
@@ -112,13 +125,20 @@ pub enum CheckError {
     )]
     ArtifactNameEscapes { node: NodeId, name: String },
 
-    /// The workflow demands a schema this binary doesn't
-    /// speak, or a range the parser can't read.
-    #[error("`yunta_schema: \"{range}\"` — {detail} (this binary speaks schema {binary})")]
-    YuntaSchemaMismatch {
+    /// The workflow demands a schema this binary doesn't speak.
+    #[error(
+        "`yunta_schema: \"{range}\"` — this binary's schema is outside the required range (this \
+         binary speaks schema {binary})"
+    )]
+    YuntaSchemaOutside { range: String, binary: u32 },
+
+    /// The workflow's `yunta_schema:` range cannot be read.
+    #[error("`yunta_schema: \"{range}\"` — {source} (this binary speaks schema {binary})")]
+    YuntaSchemaUnreadable {
         range: String,
-        detail: String,
         binary: u32,
+        #[source]
+        source: SchemaRangeError,
     },
 
     /// The same worktree-collision rule extended to the DAG's
@@ -1391,15 +1411,14 @@ fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     };
     match yunta_schema_satisfied(range, yunta_core::YUNTA_SCHEMA) {
         Ok(true) => {}
-        Ok(false) => errors.push(CheckError::YuntaSchemaMismatch {
+        Ok(false) => errors.push(CheckError::YuntaSchemaOutside {
             range: range.clone(),
-            detail: "this binary's schema is outside the required range".to_string(),
             binary: yunta_core::YUNTA_SCHEMA,
         }),
-        Err(detail) => errors.push(CheckError::YuntaSchemaMismatch {
+        Err(source) => errors.push(CheckError::YuntaSchemaUnreadable {
             range: range.clone(),
-            detail,
             binary: yunta_core::YUNTA_SCHEMA,
+            source,
         }),
     }
 }
@@ -1407,23 +1426,29 @@ fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {
 /// `Ok(bool)` = every comparator evaluated against `binary`; `Err` = the
 /// range doesn't parse. Empty ranges don't parse either — a declared
 /// requirement that constrains nothing is a typo, not a wildcard.
-fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
+fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, SchemaRangeError> {
     let mut any = false;
     for comparator in range.split_whitespace() {
         let (op, number) = comparator
             .find(|c: char| c.is_ascii_digit())
             .map(|i| comparator.split_at(i))
-            .ok_or_else(|| format!("comparator `{comparator}` has no version number"))?;
-        let number: u32 = number
-            .parse()
-            .map_err(|_| format!("`{number}` is not a whole schema version"))?;
+            .ok_or_else(|| SchemaRangeError::NoVersion {
+                comparator: comparator.to_string(),
+            })?;
+        let number: u32 = number.parse().map_err(|_| SchemaRangeError::NotAVersion {
+            text: number.to_string(),
+        })?;
         let holds = match op {
             ">=" => binary >= number,
             "<=" => binary <= number,
             ">" => binary > number,
             "<" => binary < number,
             "=" | "==" | "" => binary == number,
-            other => return Err(format!("unknown comparator `{other}`")),
+            other => {
+                return Err(SchemaRangeError::UnknownOperator {
+                    op: other.to_string(),
+                })
+            }
         };
         any = true;
         if !holds {
@@ -1431,7 +1456,7 @@ fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, String> {
         }
     }
     if !any {
-        return Err("the range is empty".to_string());
+        return Err(SchemaRangeError::Empty);
     }
     Ok(true)
 }

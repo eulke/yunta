@@ -36,7 +36,7 @@ pub use config::{
     PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig, TelemetryConfig,
     TelemetryProtocol,
 };
-pub use error::{Result, YuntaError};
+pub use error::{describe, AdapterError, Result};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
 #[cfg(any(test, feature = "testkit"))]

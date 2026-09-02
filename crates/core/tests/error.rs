@@ -1,8 +1,8 @@
-use yunta_core::YuntaError;
+use yunta_core::AdapterError;
 
 #[test]
 fn unsupported_displays_adapter_and_capability() {
-    let err = YuntaError::Unsupported {
+    let err = AdapterError::Unsupported {
         adapter: "mock".into(),
         what: "resume_session",
     };
@@ -14,7 +14,7 @@ fn unsupported_displays_adapter_and_capability() {
 
 #[test]
 fn unsupported_is_a_std_error() {
-    let err = YuntaError::Unsupported {
+    let err = AdapterError::Unsupported {
         adapter: "mock".into(),
         what: "resume_session",
     };

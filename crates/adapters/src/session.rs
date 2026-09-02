@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use thiserror::Error;
 use yunta_core::{
-    AdapterId, AgentName, Capabilities, ModelName, Pid, Result, Secret, SessionId, YuntaError,
+    AdapterError, AdapterId, AgentName, Capabilities, ModelName, Pid, Result, Secret, SessionId,
 };
 
 /// A node's declared write scope, passed through to an adapter with
@@ -103,13 +103,13 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
 ) -> Result<T> {
     let raw = raw.cloned().unwrap_or_default();
     if let Some(key) = raw.keys().find(|key| !known.contains(&key.as_str())) {
-        return Err(YuntaError::UnknownSetting {
+        return Err(AdapterError::UnknownSetting {
             adapter: adapter.clone(),
             key: key.clone(),
             known: known.to_vec(),
         });
     }
-    serde_json::from_value(serde_json::Value::Object(raw)).map_err(|e| YuntaError::Adapter {
+    serde_json::from_value(serde_json::Value::Object(raw)).map_err(|e| AdapterError::Adapter {
         adapter: adapter.clone(),
         message: format!("`adapter_settings`: {e}"),
     })
@@ -129,7 +129,7 @@ pub async fn write_prompt(
 ) -> Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    let io_error = |action: &str, source: std::io::Error| YuntaError::AdapterIo {
+    let io_error = |action: &str, source: std::io::Error| AdapterError::AdapterIo {
         adapter: adapter.clone(),
         action: action.to_string(),
         source,
@@ -222,7 +222,7 @@ pub trait Adapter: Send + Sync {
         _session: &SessionId,
         _req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
-        Err(YuntaError::Unsupported {
+        Err(AdapterError::Unsupported {
             adapter: self.id().clone(),
             what: "resume_session",
         })

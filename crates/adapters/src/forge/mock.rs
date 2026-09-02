@@ -168,7 +168,9 @@ impl Forge for MockForge {
             .prs
             .values()
             .find(|pr| pr.number == gate.number)
-            .ok_or_else(|| ForgeError::UnexpectedResponse(format!("no PR #{}", gate.number)))?;
+            .ok_or(ForgeError::UnknownGate {
+                number: gate.number,
+            })?;
         let review = match &pr.review {
             Review::Pending => ReviewOutcome::Pending,
             Review::Approved { by, reviewed_sha } => ReviewOutcome::Approved {

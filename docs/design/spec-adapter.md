@@ -122,7 +122,7 @@ pub trait Adapter: Send + Sync {
         session: &SessionId,
         req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
-        Err(YuntaError::Unsupported { adapter: self.id().into(), what: "resume_session" })
+        Err(AdapterError::Unsupported { adapter: self.id().into(), what: "resume_session" })
     }
 }
 

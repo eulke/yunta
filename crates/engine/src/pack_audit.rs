@@ -11,7 +11,7 @@
 //! IO-heavy step the CLI layer owns (it needs an adapter and a sandbox,
 //! neither of which this module touches).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use yunta_core::{
     AgentName, ContextSpec, ExecutorName, Hooks, Node, NodeKind, PackManifest, PromptSource,
@@ -20,7 +20,7 @@ use yunta_core::{
 
 /// The full inventory of one installed (or freshly cloned, pre-vendor)
 /// pack directory.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct PackAudit {
     pub manifest: PackManifest,
     pub workflows: Vec<WorkflowAudit>,
@@ -30,7 +30,7 @@ pub struct PackAudit {
 /// fails to read or parse, since a pack whose manifest promises a
 /// workflow that isn't actually there (or doesn't parse) is itself
 /// something the inventory must surface, not silently drop.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct WorkflowAudit {
     /// The `contents.workflows` entry this came from, relative to the
     /// pack root.
@@ -39,13 +39,22 @@ pub struct WorkflowAudit {
     pub nodes: Vec<NodeAudit>,
 }
 
+/// A `{file: ...}` prompt naming something the pack does not ship.
+#[derive(Debug, thiserror::Error)]
+#[error("cannot read `{path}`")]
+pub struct PromptReadError {
+    pub path: PathBuf,
+    #[source]
+    pub source: std::io::Error,
+}
+
 /// A prompt's full text, resolved exactly as the engine would resolve
 /// it at manifest-freeze time — `Ok` for both inline text and a
 /// successfully read `{file: ...}`; `Err` when a `{file: ...}` prompt
 /// names something the pack doesn't actually ship.
-pub type PromptText = Result<String, String>;
+pub type PromptText = Result<String, PromptReadError>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct NodeAudit {
     pub id: String,
     pub kind: &'static str,
@@ -199,8 +208,10 @@ fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
         PromptSource::Inline(text) => Ok(text.clone()),
         PromptSource::File(path) => {
             let full_path = workflow_dir.join(path);
-            std::fs::read_to_string(&full_path)
-                .map_err(|e| format!("cannot read `{}`: {e}", full_path.display()))
+            std::fs::read_to_string(&full_path).map_err(|source| PromptReadError {
+                path: full_path.clone(),
+                source,
+            })
         }
     }
 }

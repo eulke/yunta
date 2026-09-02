@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use yunta_core::{AdapterId, AdapterSettings, Capabilities, Pid, Result, SessionId, YuntaError};
+use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Pid, Result, SessionId};
 
 use crate::session::{
     write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
@@ -104,7 +104,7 @@ impl ClaudeCodeAdapter {
 
         let mut child = tokio::process::Command::from(std_cmd)
             .spawn()
-            .map_err(|source| YuntaError::AdapterIo {
+            .map_err(|source| AdapterError::AdapterIo {
                 adapter: ID.clone(),
                 action: "spawn the claude subprocess".to_string(),
                 source,
@@ -113,21 +113,21 @@ impl ClaudeCodeAdapter {
         let pid = child
             .id()
             .and_then(|id| Pid::try_from(id).ok())
-            .ok_or_else(|| YuntaError::Adapter {
+            .ok_or_else(|| AdapterError::Adapter {
                 adapter: ID.clone(),
                 message: "the claude subprocess exited before it could be tracked".to_string(),
             })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| YuntaError::Adapter {
+        let stdin = child.stdin.take().ok_or_else(|| AdapterError::Adapter {
             adapter: ID.clone(),
             message: "the claude subprocess has no stdin pipe".to_string(),
         })?;
 
-        let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
+        let stdout = child.stdout.take().ok_or_else(|| AdapterError::Adapter {
             adapter: ID.clone(),
             message: "the claude subprocess has no stdout pipe".to_string(),
         })?;
-        let stderr = child.stderr.take().ok_or_else(|| YuntaError::Adapter {
+        let stderr = child.stderr.take().ok_or_else(|| AdapterError::Adapter {
             adapter: ID.clone(),
             message: "the claude subprocess has no stderr pipe".to_string(),
         })?;
@@ -199,7 +199,7 @@ impl Adapter for ClaudeCodeAdapter {
 
     async fn probe(&self) -> Result<ProbeReport> {
         if let Err(e) = &self.settings {
-            return Err(YuntaError::Adapter {
+            return Err(AdapterError::Adapter {
                 adapter: ID.clone(),
                 message: e.to_string(),
             });
@@ -276,7 +276,7 @@ fn stage_skills(req: &SessionRequest) -> Result<()> {
     if req.skills.is_empty() {
         return Ok(());
     }
-    let io_err = |action: String, source: std::io::Error| YuntaError::AdapterIo {
+    let io_err = |action: String, source: std::io::Error| AdapterError::AdapterIo {
         adapter: ID.clone(),
         action,
         source,
@@ -316,7 +316,7 @@ async fn signal_group(pid: Pid, signal: &str) -> Result<()> {
         .arg(format!("-{pid}"))
         .status()
         .await
-        .map_err(|source| YuntaError::AdapterIo {
+        .map_err(|source| AdapterError::AdapterIo {
             adapter: ID.clone(),
             action: format!("send {signal} to the session's process group"),
             source,

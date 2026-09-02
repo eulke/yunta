@@ -170,3 +170,34 @@ fn a_workflow_the_manifest_declares_but_doesnt_ship_is_still_in_the_report() {
     assert_eq!(audit.workflows[0].declared_path, "nowhere.yaml");
     assert!(audit.workflows[0].error.is_some());
 }
+
+#[test]
+fn a_missing_prompt_file_is_reported_with_its_path_and_cause() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("pack.yaml"),
+        "name: gappy\npublisher: acme\nversion: 1.0.0\n\
+         declares:\n  permissions: edit\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [draft.yaml]\n",
+    );
+    write(
+        &root.path().join("draft.yaml"),
+        "name: draft\nnodes:\n  - id: draft\n    kind: prompt\n    prompt: { file: prompts/missing.md }\n",
+    );
+
+    let audit = audit_pack(root.path(), manifest(root.path()));
+    let prompt = audit.workflows[0].nodes[0]
+        .prompt
+        .as_ref()
+        .expect("draft is a prompt node");
+    let error = prompt
+        .as_ref()
+        .expect_err("prompts/missing.md does not exist");
+    assert!(
+        error.path.ends_with("prompts/missing.md"),
+        "{}",
+        error.path.display()
+    );
+    assert!(std::error::Error::source(error).is_some());
+    assert!(error.to_string().contains("prompts/missing.md"));
+}

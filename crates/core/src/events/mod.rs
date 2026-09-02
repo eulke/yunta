@@ -97,6 +97,32 @@ pub struct UnknownEvent {
     pub payload: serde_json::Map<String, serde_json::Value>,
 }
 
+/// An event object that does not have the shape of an event.
+#[derive(Debug, thiserror::Error)]
+pub enum EventShapeError {
+    #[error("the payload is not a JSON object")]
+    NotAnObject,
+    #[error("the payload is not JSON")]
+    Json {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("an event names its `kind` as a string")]
+    KindMissing,
+    #[error("the fields of a `{kind}` event do not fit its shape")]
+    Payload {
+        kind: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("a `{kind}` event does not serialize as an object")]
+    Serialize {
+        kind: String,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
 impl UnknownEvent {
     /// Reads an event object whose `kind` this binary does not know.
     /// `object` holds the whole body — the kind tag and the fields beside
@@ -104,10 +130,10 @@ impl UnknownEvent {
     pub fn from_object(
         mut object: serde_json::Map<String, serde_json::Value>,
         schema_version: u32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, EventShapeError> {
         let kind = match object.remove("kind") {
             Some(serde_json::Value::String(kind)) => kind,
-            _ => return Err("an event names its `kind` as a string".to_string()),
+            _ => return Err(EventShapeError::KindMissing),
         };
         Ok(UnknownEvent {
             kind,
@@ -135,27 +161,31 @@ impl EventBody {
     pub fn from_object(
         object: serde_json::Map<String, serde_json::Value>,
         schema_version: u32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, EventShapeError> {
         let kind = object
             .get("kind")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "an event names its `kind` as a string".to_string())?;
-        if EventPayload::KINDS.contains(&kind) {
+            .ok_or(EventShapeError::KindMissing)?
+            .to_string();
+        if EventPayload::KINDS.contains(&kind.as_str()) {
             serde_json::from_value(serde_json::Value::Object(object))
                 .map(EventBody::Known)
-                .map_err(|error| error.to_string())
+                .map_err(|source| EventShapeError::Payload { kind, source })
         } else {
             UnknownEvent::from_object(object, schema_version).map(EventBody::Unknown)
         }
     }
 
     /// The body as one JSON object, the kind tag included.
-    pub fn to_object(&self) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    pub fn to_object(&self) -> Result<serde_json::Map<String, serde_json::Value>, EventShapeError> {
         match self {
             EventBody::Known(payload) => match serde_json::to_value(payload) {
                 Ok(serde_json::Value::Object(object)) => Ok(object),
-                Ok(_) => Err("a payload serializes as an object".to_string()),
-                Err(error) => Err(error.to_string()),
+                Ok(_) => Err(EventShapeError::NotAnObject),
+                Err(source) => Err(EventShapeError::Serialize {
+                    kind: self.kind_name().to_string(),
+                    source,
+                }),
             },
             EventBody::Unknown(unknown) => Ok(unknown.to_object()),
         }

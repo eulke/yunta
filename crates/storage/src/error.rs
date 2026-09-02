@@ -1,4 +1,5 @@
 use thiserror::Error;
+use yunta_core::events::EventShapeError;
 use yunta_core::{InvalidId, RunId, Seq};
 
 /// The backend's own failure, kept as the cause of a [`StorageError`]
@@ -38,11 +39,12 @@ pub enum StorageError {
     /// A row whose `kind` this binary knows but whose payload is not that
     /// kind's shape — or is not JSON at all. An unknown kind is not this:
     /// the reader keeps it as [`yunta_core::events::EventBody::Unknown`].
-    #[error("stored payload for run `{run_id}` seq {seq} is not valid: {detail}")]
+    #[error("stored payload for run `{run_id}` seq {seq} is not an event")]
     CorruptPayload {
         run_id: RunId,
         seq: Seq,
-        detail: String,
+        #[source]
+        source: EventShapeError,
     },
 
     #[error("stored timestamp for run `{run_id}` seq {seq} is not valid RFC3339")]
@@ -92,6 +94,11 @@ pub enum StorageError {
 
     #[error("run `{run_id}` has no events to verify")]
     VerifyUnknownRun { run_id: RunId },
+
+    /// The first row is `run_created` but carries no readable
+    /// `manifest_hash`, so the chain has no genesis to anchor to.
+    #[error("run `{run_id}`: its `run_created` has no readable manifest_hash — no chain genesis")]
+    CorruptGenesis { run_id: RunId },
 
     /// A blocking storage call could not be joined from the async
     /// runtime — the task that ran it was cancelled or panicked.

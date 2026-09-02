@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use yunta_core::events::{EventBody, EventDraft, EventPayload, RunPausedPayload};
+use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, RunPausedPayload};
 use yunta_core::{RunId, Seq};
 use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
 
@@ -537,7 +537,11 @@ fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
     .unwrap();
     let result = storage.events_for_run(&RunId::from("run-1"));
     assert!(
-        matches!(result, Err(StorageError::CorruptPayload { ref seq, .. }) if seq.get() == 2),
+        matches!(
+            result,
+            Err(StorageError::CorruptPayload { ref seq, ref source, .. })
+                if seq.get() == 2 && matches!(source, EventShapeError::Payload { kind, .. } if kind == "run_paused")
+        ),
         "{result:?}"
     );
 }

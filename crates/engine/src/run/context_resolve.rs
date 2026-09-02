@@ -63,7 +63,7 @@ use thiserror::Error;
 use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload};
 use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
 
-use crate::template::render_template;
+use crate::template::{render_template, TemplateError};
 
 use super::node_exec::{fail, template_vars, NodeEnd};
 use super::{RunCtx, RunError};
@@ -85,11 +85,12 @@ pub(super) enum ContextResolveError {
         #[source]
         source: std::io::Error,
     },
-    #[error("context `{source_id}` on node `{node}`: {detail}")]
+    #[error("context `{source_id}` on node `{node}`: {source}")]
     Template {
         node: NodeId,
         source_id: String,
-        detail: String,
+        #[source]
+        source: TemplateError,
     },
     #[error("context `{source_id}` on node `{node}`: command `{cmd}` exited {status}: {stderr}")]
     CommandFailed {
@@ -171,12 +172,13 @@ pub(super) enum ContextResolveError {
         server: String,
         var: String,
     },
-    #[error("context `{source_id}` on node `{node}`: mcp server `{server}`: {detail}")]
+    #[error("context `{source_id}` on node `{node}`: mcp server `{server}`: {source}")]
     McpFailed {
         node: NodeId,
         source_id: String,
         server: String,
-        detail: String,
+        #[source]
+        source: McpQueryError,
     },
     #[error(
         "context `{source_id}` on node `{node}`: mcp server `{server}` did not respond within \
@@ -392,7 +394,7 @@ async fn resolve_files(
             render_template(pattern, &vars).map_err(|e| ContextResolveError::Template {
                 node: node.id.clone(),
                 source_id: source_id.to_string(),
-                detail: e.to_string(),
+                source: e,
             })?;
         let path = if Path::new(&rendered).is_absolute() {
             PathBuf::from(&rendered)
@@ -422,7 +424,7 @@ async fn resolve_command(
     let rendered = render_template(command, &vars).map_err(|e| ContextResolveError::Template {
         node: node.id.clone(),
         source_id: source_id.to_string(),
-        detail: e.to_string(),
+        source: e,
     })?;
     let child = tokio::process::Command::new("sh")
         .arg("-c")
@@ -735,7 +737,7 @@ async fn resolve_mcp(
         render_template(&params.query, &vars).map_err(|e| ContextResolveError::Template {
             node: node.id.clone(),
             source_id: source_id.to_string(),
-            detail: e.to_string(),
+            source: e,
         })?;
 
     let auth_header = match &server.auth_env {
@@ -758,29 +760,53 @@ async fn resolve_mcp(
             source_id: source_id.to_string(),
             server: params.server.clone(),
         })?
-        .map_err(|detail| ContextResolveError::McpFailed {
+        .map_err(|source| ContextResolveError::McpFailed {
             node: node.id.clone(),
             source_id: source_id.to_string(),
             server: params.server.clone(),
-            detail,
+            source,
         })?;
     Ok(text.into_bytes())
 }
 
+/// Why one `query` call to an MCP server yielded no text.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum McpQueryError {
+    #[error("cannot connect")]
+    Connect {
+        #[source]
+        source: Box<rmcp::service::ClientInitializeError>,
+    },
+    #[error("the `query` call failed")]
+    Call {
+        #[source]
+        source: Box<rmcp::service::ServiceError>,
+    },
+    #[error("tool `query` returned an error: {text}")]
+    Refused { text: String },
+    #[error("unexpected tools/call response: {response}")]
+    Unexpected { response: String },
+}
+
 /// Connects, calls the `query` tool once, and disconnects — isolated from
-/// `resolve_mcp` only so the `?`-heavy rmcp error plumbing collapses to a
-/// single `String` before it meets `ContextResolveError`.
+/// `resolve_mcp` so the rmcp plumbing meets `ContextResolveError` as one
+/// typed cause.
 async fn call_mcp_query(
     url: String,
     auth_header: Option<String>,
     query: String,
-) -> Result<String, String> {
+) -> Result<String, McpQueryError> {
     let mut config = StreamableHttpClientTransportConfig::with_uri(url);
     if let Some(token) = auth_header {
         config = config.auth_header(token);
     }
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
-    let client = ().serve(transport).await.map_err(|e| e.to_string())?;
+    let client =
+        ().serve(transport)
+            .await
+            .map_err(|source| McpQueryError::Connect {
+                source: Box::new(source),
+            })?;
 
     let mut arguments = rmcp::model::JsonObject::new();
     arguments.insert("query".to_string(), serde_json::Value::String(query));
@@ -789,7 +815,9 @@ async fn call_mcp_query(
         .await;
     let _ = client.cancel().await;
 
-    match result.map_err(|e| e.to_string())? {
+    match result.map_err(|source| McpQueryError::Call {
+        source: Box::new(source),
+    })? {
         rmcp::model::CallToolResponse::Complete(result) => {
             let text: String = result
                 .content
@@ -801,12 +829,14 @@ async fn call_mcp_query(
                 .collect::<Vec<_>>()
                 .join("\n");
             if result.is_error == Some(true) {
-                Err(format!("tool `query` returned an error: {text}"))
+                Err(McpQueryError::Refused { text })
             } else {
                 Ok(text)
             }
         }
-        other => Err(format!("unexpected tools/call response: {other:?}")),
+        other => Err(McpQueryError::Unexpected {
+            response: format!("{other:?}"),
+        }),
     }
 }
 

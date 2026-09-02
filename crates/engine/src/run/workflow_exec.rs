@@ -71,6 +71,30 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
         .unwrap_or_else(|| runs.join("worktrees"))
 }
 
+/// A mount the child cannot be born with.
+#[derive(Debug, thiserror::Error)]
+enum MountError {
+    #[error(
+        "mount `{name}` from node `{node}`: no linked child run of `{node}` reached a terminal \
+         state in this run — did this run's mode exclude it?"
+    )]
+    NoTerminalChild {
+        name: String,
+        node: yunta_core::NodeId,
+    },
+    #[error(
+        "mount `{name}` from node `{node}`: `{path}` cannot be read: {source} — the source node \
+         never produced it"
+    )]
+    Unreadable {
+        name: String,
+        node: yunta_core::NodeId,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Resolves every declared mount to bytes, in memory, *before*
 /// the child is linked or born — a missing source fails the parent's
 /// node with nothing dangling. A `kind: workflow` source resolves
@@ -82,7 +106,7 @@ fn resolve_mounts(
     ctx: &RunCtx<'_>,
     events: &[yunta_core::events::StoredEvent],
     mounts: &[MountSpec],
-) -> Result<Vec<BirthArtifact>, String> {
+) -> Result<Vec<BirthArtifact>, MountError> {
     let mut resolved = Vec::new();
     for mount in mounts {
         let m = &mount.artifact;
@@ -105,11 +129,10 @@ fn resolve_mounts(
                 match child {
                     Some(child_id) => runs_root(ctx).join(child_id.as_str()).join("artifacts"),
                     None => {
-                        return Err(format!(
-                            "mount `{}` from node `{}`: no linked child run of `{}` reached a \
-                             terminal state in this run — did this run's mode exclude it?",
-                            m.name, m.node, m.node
-                        ));
+                        return Err(MountError::NoTerminalChild {
+                            name: m.name.clone(),
+                            node: m.node.clone(),
+                        });
                     }
                 }
             }
@@ -123,14 +146,13 @@ fn resolve_mounts(
                     bytes,
                 });
             }
-            Err(e) => {
-                return Err(format!(
-                    "mount `{}` from node `{}`: `{}` cannot be read: {e} — the source node \
-                     never produced it",
-                    m.name,
-                    m.node,
-                    path.display()
-                ));
+            Err(source) => {
+                return Err(MountError::Unreadable {
+                    name: m.name.clone(),
+                    node: m.node.clone(),
+                    path,
+                    source,
+                });
             }
         }
     }
@@ -288,7 +310,7 @@ pub(super) async fn execute_workflow(
     // child left behind.
     let mounted = match resolve_mounts(ctx, &events, mounts) {
         Ok(mounted) => mounted,
-        Err(diagnostic) => return fail(ctx, node, diagnostic, false).await,
+        Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
 
     // Budgets cascade: the child's frozen cap is what the parent
@@ -440,19 +462,15 @@ async fn resume_child(
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
     let manifest_path = child_run_dir.join("manifest.yaml");
-    let child_manifest: Manifest = match std::fs::read_to_string(&manifest_path)
-        .map_err(|e| e.to_string())
-        .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))
-    {
+    let child_manifest: Manifest = match super::read_manifest(&manifest_path) {
         Ok(manifest) => manifest,
-        Err(detail) => {
+        Err(error) => {
             return fail(
                 ctx,
                 node,
                 format!(
-                    "child run `{child_id}` cannot resume: its manifest `{}` cannot be \
-                     read: {detail}",
-                    manifest_path.display()
+                    "child run `{child_id}` cannot resume: {}",
+                    yunta_core::describe(&error)
                 ),
                 false,
             )

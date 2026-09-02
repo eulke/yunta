@@ -122,8 +122,8 @@ pub fn derive(events: &[StoredEvent]) -> RunState {
     let mut aux = Aux::default();
 
     for event in events {
-        if let Err(diagnostic) = apply(&mut state, &mut aux, event) {
-            state.broken = Some(diagnostic);
+        if let Err(error) = apply(&mut state, &mut aux, event) {
+            state.broken = Some(error.to_string());
             break;
         }
     }
@@ -131,7 +131,7 @@ pub fn derive(events: &[StoredEvent]) -> RunState {
     state
 }
 
-fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(), String> {
+fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(), ReplayError> {
     let Some(payload) = event.payload() else {
         // A kind this binary does not know: counted, named, never a
         // reason to stop deriving what it does know.
@@ -168,10 +168,10 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                     );
                     Ok(())
                 }
-                _ => Err(format!(
-                    "seq {}: node `{node_id}` got node_finished without a matching node_started",
-                    event.seq
-                )),
+                _ => Err(ReplayError::FinishedWithoutStart {
+                    seq: event.seq,
+                    node: node_id,
+                }),
             }
         }
         EventPayload::NodeFailed(p) => {
@@ -196,10 +196,10 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                     state.nodes.insert(node_id, next);
                     Ok(())
                 }
-                _ => Err(format!(
-                    "seq {}: node `{node_id}` got node_failed without a matching node_started",
-                    event.seq
-                )),
+                _ => Err(ReplayError::FailedWithoutStart {
+                    seq: event.seq,
+                    node: node_id,
+                }),
             }
         }
         EventPayload::GateWaiting(p) => {
@@ -265,10 +265,10 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
         }
         EventPayload::TaskStatusChanged(p) => {
             if !state.tasks.contains_key(&p.task_id) {
-                return Err(format!(
-                    "seq {}: task `{}` got task_status_changed without a prior task_registered",
-                    event.seq, p.task_id
-                ));
+                return Err(ReplayError::StatusWithoutTask {
+                    seq: event.seq,
+                    task: p.task_id.clone(),
+                });
             }
             state.tasks.insert(p.task_id.clone(), p.new_status);
             Ok(())
@@ -335,12 +335,26 @@ pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
     deduped
 }
 
-fn require_node_id(event: &StoredEvent) -> Result<NodeId, String> {
-    event.node_id.clone().ok_or_else(|| {
-        format!(
-            "seq {}: `{}` is missing node_id",
-            event.seq,
-            event.body.kind_name()
-        )
-    })
+fn require_node_id(event: &StoredEvent) -> Result<NodeId, ReplayError> {
+    event
+        .node_id
+        .clone()
+        .ok_or_else(|| ReplayError::MissingNodeId {
+            seq: event.seq,
+            kind: event.body.kind_name().to_string(),
+        })
+}
+
+/// The point at which the log stops making sense — what
+/// [`RunState::broken`] reports.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum ReplayError {
+    #[error("seq {seq}: `{kind}` is missing node_id")]
+    MissingNodeId { seq: Seq, kind: String },
+    #[error("seq {seq}: node `{node}` got node_finished without a matching node_started")]
+    FinishedWithoutStart { seq: Seq, node: NodeId },
+    #[error("seq {seq}: node `{node}` got node_failed without a matching node_started")]
+    FailedWithoutStart { seq: Seq, node: NodeId },
+    #[error("seq {seq}: task `{task}` got task_status_changed without a prior task_registered")]
+    StatusWithoutTask { seq: Seq, task: TaskId },
 }

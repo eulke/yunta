@@ -54,7 +54,9 @@ pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     ResolvedWorkflow, WorkflowOrigin,
 };
-pub use check::{check, check_warnings, check_workflow_refs, CheckError, CheckWarning};
+pub use check::{
+    check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
+};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{inherited_findings, register as register_findings, FindingsError};
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
@@ -62,7 +64,9 @@ pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
 pub use modes::{dependencies_in_mode, mode_included_nodes};
-pub use pack_audit::{audit_pack, NodeAudit, PackAudit, PromptText, WorkflowAudit};
+pub use pack_audit::{
+    audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
+};
 pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
@@ -79,9 +83,10 @@ pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
 };
 pub use run::{
-    create_promotion_successor, create_run, current_escalation, execute_run, resolve_gate,
-    session_token_budget, BirthArtifact, CreateRunParams, Predecessor, PromotionSuccessor,
-    ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
+    create_promotion_successor, create_run, current_escalation, execute_run, read_manifest,
+    resolve_gate, session_token_budget, BirthArtifact, CreateRunParams, ManifestReadError,
+    Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError, RunReport, RunRoots,
+    RunTerminal,
 };
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};

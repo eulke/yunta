@@ -5,7 +5,7 @@ use yunta_core::{
     ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind, OnFailure,
     PromptSource, RunnerCandidate, Workflow,
 };
-use yunta_engine::{check, check_warnings, CheckError, CheckWarning};
+use yunta_engine::{check, check_warnings, CheckError, CheckWarning, SchemaRangeError};
 
 fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<ModeName, ModeSpec> {
     entries
@@ -1043,19 +1043,24 @@ fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
     wf.yunta_schema = Some(">=2".to_string());
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("yunta_schema")),
+        errors.iter().any(
+            |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range == ">=2")
+                && e.to_string().contains("yunta_schema")
+        ),
         "an out-of-range requirement must fail check: {errors:?}"
     );
 
     wf.yunta_schema = Some("not-a-range".to_string());
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("yunta_schema")),
-        "an unparseable range must fail loudly, never be ignored: {errors:?}"
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::YuntaSchemaUnreadable {
+                source: SchemaRangeError::NoVersion { comparator },
+                ..
+            } if comparator == "not-a-range"
+        )),
+        "an unparseable range must fail loudly, naming the comparator: {errors:?}"
     );
 }
 
