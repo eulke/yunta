@@ -22,6 +22,9 @@ cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
 ```
 
+The toolchain is pinned in `rust-toolchain.toml`; rustup installs it on the
+first build.
+
 CI runs the same checks plus `cargo deny check`, an isolated `cargo check` per
 crate and the self-tests of every pack under `packs/`.
 

@@ -19,10 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          rustflags: ""
 
       - name: fmt
         run: cargo fmt --all -- --check
@@ -81,12 +80,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+          target: ${{ matrix.target }}
+          cache-key: ${{ matrix.target }}
+          rustflags: ""
 
       - name: install cross
         if: matrix.cross
@@ -197,7 +195,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
       # crates.io rejects a crate whose path dependencies aren't yet
       # indexed — dependency order and waiting for each to actually
       # appear aren't optional.
