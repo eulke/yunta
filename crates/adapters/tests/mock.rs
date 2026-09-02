@@ -134,23 +134,22 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
 }
 
 #[tokio::test]
-async fn an_out_of_scope_edit_is_blocked_when_the_adapter_has_edit_hooks() {
+async fn blocked_is_derived_from_edit_constraints() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
 capabilities: { edit_hooks: true }
 effects:
   - { path: src/lib.rs, content: "pub fn hello() {}\n" }
-  - { path: outside/scope.rs, content: "should never land", blocked: true }
+  - { path: outside/scope.rs, content: "should never land" }
 outcome: { type: completed, summary: "done" }
 "#,
     )
     .unwrap();
 
-    let session = fixture
-        .spawn(request(dir.path().to_path_buf()))
-        .await
-        .unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
 
     assert!(dir.path().join("src/lib.rs").exists());
@@ -173,16 +172,15 @@ async fn without_edit_hooks_the_engine_never_asked_for_the_constraint_is_not_enf
         r#"
 capabilities: { edit_hooks: false }
 effects:
-  - { path: outside/scope.rs, content: "lands anyway", blocked: true }
+  - { path: outside/scope.rs, content: "lands anyway" }
 outcome: { type: completed, summary: "done" }
 "#,
     )
     .unwrap();
 
-    let session = fixture
-        .spawn(request(dir.path().to_path_buf()))
-        .await
-        .unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;
 
     // Without the capability, the adapter ignores the constraint

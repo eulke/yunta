@@ -8,6 +8,7 @@
 
 mod parse;
 mod permissions;
+mod settings;
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -24,6 +25,10 @@ use crate::session::{
 
 pub struct ClaudeCodeAdapter {
     binary: PathBuf,
+    /// The typed reading of `adapter_settings`, or the error it
+    /// produced — reported by `probe()`, where a misconfiguration is
+    /// diagnosed before any session is opened.
+    settings: Result<settings::ClaudeSettings>,
 }
 
 impl ClaudeCodeAdapter {
@@ -33,6 +38,7 @@ impl ClaudeCodeAdapter {
                 .binary
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("claude")),
+            settings: settings::ClaudeSettings::read(settings),
         }
     }
 
@@ -57,6 +63,10 @@ impl ClaudeCodeAdapter {
             args.push(agent.clone());
         }
         args.extend(permissions::permission_args(req.permissions));
+        if let Some(max_turns) = req.budget.max_turns {
+            args.push("--max-turns".to_string());
+            args.push(max_turns.to_string());
+        }
         // The prompt arrives on stdin: `-p` with no positional prompt
         // reads it there, and nothing of it shows in the process list.
         args
@@ -182,6 +192,12 @@ impl Adapter for ClaudeCodeAdapter {
     }
 
     async fn probe(&self) -> Result<ProbeReport> {
+        if let Err(e) = &self.settings {
+            return Err(YuntaError::Adapter {
+                adapter: "claude-code".to_string(),
+                message: e.to_string(),
+            });
+        }
         let output = tokio::process::Command::new(&self.binary)
             .arg("--version")
             .output()

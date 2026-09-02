@@ -18,22 +18,33 @@
 //!   calls unattended, runs as root, and actually produces the file a
 //!   prompt asked for. This is what every profile uses.
 //!
-//! `ReadOnly` additionally restricts the tool set to non-mutating tools,
-//! so "accept edits" has nothing mutating to accept. `Edit` and `Full`
-//! are, today, indistinguishable at the CLI level: the real boundary is
-//! the engine's own post-hoc scope check, not a live CLI restriction —
-//! `capabilities().edit_hooks` says so honestly (`false`, see mod.rs).
+//! Each profile is a distinct tool set, which is what makes the
+//! `permission_profiles` capability true: `ReadOnly` gets the
+//! non-mutating tools, so "accept edits" has nothing mutating to
+//! accept; `Edit` gets the file-editing tools and nothing that reaches a
+//! shell or the network; `Full` gets the CLI's whole tool set. Where a
+//! file lands is still the engine's own post-hoc scope check, not a
+//! live CLI restriction — `capabilities().edit_hooks` says so (`false`,
+//! see mod.rs).
 
 use crate::session::PermissionProfile;
 
+/// The tools a profile allows, as the CLI names them; `None` leaves the
+/// CLI's whole tool set available.
+pub(super) fn tools(profile: PermissionProfile) -> Option<&'static str> {
+    match profile {
+        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch"),
+        PermissionProfile::Edit => Some("Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"),
+        PermissionProfile::Full => None,
+    }
+}
+
 pub(super) fn permission_args(profile: PermissionProfile) -> Vec<String> {
-    let mut args = match profile {
-        PermissionProfile::ReadOnly => vec![
-            "--tools".to_string(),
-            "Read,Grep,Glob,WebFetch,WebSearch".to_string(),
-        ],
-        PermissionProfile::Edit | PermissionProfile::Full => Vec::new(),
-    };
+    let mut args = Vec::new();
+    if let Some(tools) = tools(profile) {
+        args.push("--tools".to_string());
+        args.push(tools.to_string());
+    }
     args.push("--permission-mode".to_string());
     args.push("acceptEdits".to_string());
     args

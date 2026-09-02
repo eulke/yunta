@@ -85,7 +85,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
 }
 
 #[tokio::test]
-async fn a_successful_session_opens_streams_usage_and_completes() {
+async fn capability_usage_reporting_surfaces_the_streams_usage() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -330,7 +330,7 @@ async fn a_session_with_no_requested_model_falls_back_to_a_named_default() {
 }
 
 #[tokio::test]
-async fn each_permission_profile_maps_to_its_own_sandbox_mode() {
+async fn capability_permission_profiles_map_to_their_own_sandbox_modes() {
     for (profile, expected) in [
         (PermissionProfile::ReadOnly, "read-only"),
         (PermissionProfile::Edit, "workspace-write"),
@@ -392,7 +392,7 @@ async fn model_is_passed_through_as_its_own_flag() {
 }
 
 #[tokio::test]
-async fn resuming_passes_the_thread_id_to_the_resume_subcommand() {
+async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -514,4 +514,63 @@ fn debug_of_a_session_request_never_prints_secrets() {
         "the token never prints: {debug}"
     );
     assert!(debug.contains("[redacted]"), "{debug}");
+}
+
+/// `adapter_settings.sandbox` is the mode the `Edit` profile runs
+/// under; the other two profiles keep their own modes.
+#[tokio::test]
+async fn the_sandbox_setting_governs_the_edit_profile_only() {
+    let mut extra = serde_json::Map::new();
+    extra.insert(
+        "sandbox".to_string(),
+        serde_json::Value::from("danger-full-access"),
+    );
+    let adapter = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: Some(extra),
+        binary: Some(stub_path()),
+    });
+    for (profile, expected) in [
+        (PermissionProfile::ReadOnly, "read-only"),
+        (PermissionProfile::Edit, "danger-full-access"),
+        (PermissionProfile::Full, "danger-full-access"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let args_file = dir.path().join("args.txt");
+        let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+        let mut req = request(dir.path().to_path_buf());
+        req.permissions = profile;
+        req.env.insert(
+            "CODEX_STUB_ARGS_FILE".to_string(),
+            args_file.display().to_string().into(),
+        );
+        req.env.insert(
+            "CODEX_STUB_LINES_FILE".to_string(),
+            lines.display().to_string().into(),
+        );
+        let session = adapter.spawn(req).await.unwrap();
+        let _ = drain(session).await;
+        let args: Vec<String> = std::fs::read_to_string(&args_file)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let pos = args.iter().position(|a| a == "--sandbox").unwrap();
+        assert_eq!(args[pos + 1], expected, "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_adapter_setting_is_reported_by_probe() {
+    let mut extra = serde_json::Map::new();
+    extra.insert("sandbx".to_string(), serde_json::Value::from("read-only"));
+    let adapter = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: Some(extra),
+        binary: Some(stub_path()),
+    });
+    let err = adapter.probe().await.unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.contains("sandbx") && text.contains("sandbox"),
+        "the unknown key and the known ones are named: {text}"
+    );
 }

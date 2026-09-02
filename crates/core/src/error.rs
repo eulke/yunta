@@ -26,6 +26,18 @@ pub enum YuntaError {
     /// its fixture scripts. The message says what to fix.
     #[error("adapter `{adapter}`: {message}")]
     Adapter { adapter: String, message: String },
+
+    /// `adapters.<id>.adapter_settings` names a key the adapter does not
+    /// read — a typo, or a setting of another adapter.
+    #[error(
+        "adapter `{adapter}`: unknown setting `{key}` in `adapter_settings` — it reads {}",
+        if known.is_empty() { "no settings at all".to_string() } else { format!("only: {}", known.join(", ")) }
+    )]
+    UnknownSetting {
+        adapter: String,
+        key: String,
+        known: Vec<&'static str>,
+    },
 }
 
 /// Convenience alias for the workspace's typed `Result`.

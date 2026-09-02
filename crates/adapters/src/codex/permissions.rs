@@ -20,13 +20,16 @@
 //! the way `claude_code`'s `acceptEdits` was needed for — the sandbox
 //! flag alone is what each profile maps to.
 
+use super::settings::Sandbox;
 use crate::session::PermissionProfile;
 
-pub(super) fn sandbox_args(profile: PermissionProfile) -> Vec<String> {
+/// `edit_sandbox` is the mode the `Edit` profile runs under — the
+/// adapter's `sandbox` setting, `workspace-write` by default.
+pub(super) fn sandbox_args(profile: PermissionProfile, edit_sandbox: Sandbox) -> Vec<String> {
     let mode = match profile {
-        PermissionProfile::ReadOnly => "read-only",
-        PermissionProfile::Edit => "workspace-write",
-        PermissionProfile::Full => "danger-full-access",
+        PermissionProfile::ReadOnly => Sandbox::ReadOnly,
+        PermissionProfile::Edit => edit_sandbox,
+        PermissionProfile::Full => Sandbox::DangerFullAccess,
     };
-    vec!["--sandbox".to_string(), mode.to_string()]
+    vec!["--sandbox".to_string(), mode.as_flag().to_string()]
 }

@@ -33,6 +33,7 @@
 
 mod parse;
 mod permissions;
+mod settings;
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -49,6 +50,11 @@ use crate::session::{
 
 pub struct CodexAdapter {
     binary: PathBuf,
+    /// The typed reading of `adapter_settings`, or the error it
+    /// produced — reported by `probe()`, where a misconfiguration is
+    /// diagnosed before any session is opened. A session opened without
+    /// a probe reads the defaults.
+    settings: Result<settings::CodexSettings>,
 }
 
 impl CodexAdapter {
@@ -58,6 +64,7 @@ impl CodexAdapter {
                 .binary
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("codex")),
+            settings: settings::CodexSettings::read(settings),
         }
     }
 
@@ -71,7 +78,15 @@ impl CodexAdapter {
             args.push("--model".to_string());
             args.push(model.clone());
         }
-        args.extend(permissions::sandbox_args(req.permissions));
+        let edit_sandbox = self
+            .settings
+            .as_ref()
+            .ok()
+            .and_then(|settings| settings.sandbox)
+            .unwrap_or_default();
+        args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
+        // `codex exec` exposes no cap on turns: `budget.max_turns` is
+        // bounded here by the engine's own timeout and token budget.
         // `-` makes the CLI read the prompt from stdin, so nothing of
         // it shows in the process list.
         args.push("-".to_string());
@@ -209,6 +224,12 @@ impl Adapter for CodexAdapter {
     }
 
     async fn probe(&self) -> Result<ProbeReport> {
+        if let Err(e) = &self.settings {
+            return Err(YuntaError::Adapter {
+                adapter: "codex".to_string(),
+                message: e.to_string(),
+            });
+        }
         let output = tokio::process::Command::new(&self.binary)
             .arg("--version")
             .output()

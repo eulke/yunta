@@ -48,6 +48,22 @@ adapters:
     binary: /opt/claude/bin/claude
 ```
 
+`adapter_settings:` under an adapter carries what has no portable expression —
+model, agent, permissions and budget are typed fields a node or runner sets,
+never settings. Each adapter reads its own, and `yunta doctor` (and every
+`run`, before opening a session) refuses a key it does not read, naming the
+keys it does. `codex` reads `sandbox`: the `codex exec --sandbox` mode the
+`edit` profile runs under (`workspace-write` by default; `read-only` narrows
+it, `danger-full-access` widens it). `claude-code` reads none.
+
+The three permission profiles map onto each CLI's own mechanism. On
+`claude-code`, `read-only` allows the non-mutating tools, `edit` allows file
+editing and nothing that reaches a shell or the network, and `full` leaves the
+whole tool set available; on `codex`, they are the `read-only`,
+`workspace-write` and `danger-full-access` sandbox modes. `budget.max_turns`
+reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
+the engine's own timeout and token budget bound the session.
+
 ## `mock`: not a test helper, a first-class adapter
 
 `mock` reproduces an agent session from a YAML fixture — a scripted sequence

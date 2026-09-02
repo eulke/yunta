@@ -38,7 +38,6 @@
 
 use std::path::Path;
 
-use globset::{Glob, GlobSetBuilder};
 use serde::Deserialize;
 use thiserror::Error;
 use yunta_core::events::ScopeExpansionMode;
@@ -271,20 +270,8 @@ async fn evaluate_rules(
 }
 
 fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansionError> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = Glob::new(pattern).map_err(|source| ScopeExpansionError::InvalidGlob {
-            glob: pattern.clone(),
-            source,
-        })?;
-        builder.add(glob);
-    }
-    builder
-        .build()
-        .map_err(|source| ScopeExpansionError::InvalidGlob {
-            glob: patterns.join(", "),
-            source,
-        })
+    yunta_core::scope_globset(patterns)
+        .map_err(|(glob, source)| ScopeExpansionError::InvalidGlob { glob, source })
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionError> {

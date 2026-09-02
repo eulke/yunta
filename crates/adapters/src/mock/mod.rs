@@ -101,13 +101,25 @@ impl MockAdapter {
         Ok(Self::new(yunta_core::yaml::parse(yaml)?))
     }
 
-    /// Applies one session's filesystem effects under `cwd`, honoring
-    /// `blocked` + `edit_hooks`: a hook-capable adapter installs the
-    /// block before the edit ever lands; without the capability, the
-    /// engine's own post-check scope diff is what catches it instead.
-    fn apply_effects(&self, script: &SessionScript, cwd: &std::path::Path) -> Result<()> {
+    /// Whether an effect at `path` is blocked by the request's edit
+    /// constraints: only a hook-capable adapter blocks, and only a path
+    /// no declared glob matches. No constraints means nothing to block.
+    fn is_blocked(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
+        self.fixture.capabilities.edit_hooks
+            && req.edit_constraints.as_ref().is_some_and(|globs| {
+                yunta_core::scope_globset(globs).is_ok_and(|set| !set.is_match(path))
+            })
+    }
+
+    /// Applies one session's filesystem effects under the request's
+    /// `cwd`, leaving out the ones its edit constraints block: a
+    /// hook-capable adapter installs the block before the edit ever
+    /// lands; without the capability, the engine's own post-check scope
+    /// diff is what catches it instead.
+    fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
+        let cwd = &req.cwd;
         for effect in &script.effects {
-            if effect.blocked && self.fixture.capabilities.edit_hooks {
+            if self.is_blocked(req, &effect.path) {
                 continue;
             }
             let full_path = cwd.join(&effect.path);
@@ -227,7 +239,7 @@ impl MockAdapter {
         };
         let script = &self.fixture.sessions[index];
 
-        self.apply_effects(script, &req.cwd)?;
+        self.apply_effects(script, &req)?;
 
         let session_id = resume_as.unwrap_or_else(|| {
             SessionId::from(format!(
@@ -239,7 +251,7 @@ impl MockAdapter {
         let blocked_markers: Vec<PathBuf> = script
             .effects
             .iter()
-            .filter(|e| e.blocked && self.fixture.capabilities.edit_hooks)
+            .filter(|e| self.is_blocked(&req, &e.path))
             .map(|e| e.path.clone())
             .collect();
 

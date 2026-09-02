@@ -11,6 +11,7 @@ mod config;
 mod error;
 pub mod events;
 mod findings;
+mod glob;
 mod ids;
 mod inputs;
 mod ledger;
@@ -34,6 +35,7 @@ pub use config::{
 };
 pub use error::{Result, YuntaError};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
+pub use glob::{scope_glob, scope_globset};
 pub use ids::{AdapterId, NodeId, RunId, SessionId, TaskId};
 pub use inputs::InputSpec;
 pub use ledger::{Criterion, Ledger, Task};

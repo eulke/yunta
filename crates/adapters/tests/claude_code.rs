@@ -91,7 +91,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
 }
 
 #[tokio::test]
-async fn a_successful_session_opens_streams_usage_and_completes() {
+async fn capability_usage_reporting_surfaces_the_streams_usage() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -207,7 +207,7 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
 }
 
 #[tokio::test]
-async fn read_only_restricts_the_tool_set_and_never_asks() {
+async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -231,7 +231,7 @@ async fn read_only_restricts_the_tool_set_and_never_asks() {
 }
 
 #[tokio::test]
-async fn edit_and_full_run_unattended_without_the_root_blocked_flags() {
+async fn capability_permission_profiles_leave_full_the_whole_tool_set_unattended() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -261,7 +261,7 @@ async fn edit_and_full_run_unattended_without_the_root_blocked_flags() {
 }
 
 #[tokio::test]
-async fn model_and_agent_are_passed_through_as_their_own_flags() {
+async fn capability_custom_agents_passes_the_agent_as_its_own_flag() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -292,7 +292,7 @@ async fn model_and_agent_are_passed_through_as_their_own_flags() {
 }
 
 #[tokio::test]
-async fn resuming_passes_the_session_id_to_the_resume_flag() {
+async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
@@ -421,4 +421,115 @@ fn debug_of_a_session_request_never_prints_secrets() {
         "the token never prints: {debug}"
     );
     assert!(debug.contains("[redacted]"), "{debug}");
+}
+
+/// `Edit` is its own tool set — file editing, no shell, no network —
+/// which is what makes `permission_profiles` more than a name.
+#[tokio::test]
+async fn capability_permission_profiles_give_edit_a_bounded_tool_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = PermissionProfile::Edit;
+    req.env.insert(
+        "CLAUDE_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let pos = args
+        .iter()
+        .position(|a| a == "--tools")
+        .expect("Edit restricts the tools");
+    let tools = &args[pos + 1];
+    assert!(tools.contains("Edit") && tools.contains("Write"), "{tools}");
+    assert!(!tools.contains("Bash"), "no shell for Edit: {tools}");
+    assert!(
+        !tools.contains("WebFetch") && !tools.contains("WebSearch"),
+        "no network for Edit: {tools}"
+    );
+}
+
+/// `skills` is backed by staging every resolved skill directory into
+/// the CLI's own discovery location under the session's cwd.
+#[tokio::test]
+async fn capability_skills_are_staged_into_the_clis_discovery_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("skills-src/grill");
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(skill.join("SKILL.md"), "# grill\n").unwrap();
+    let cwd = dir.path().join("worktree");
+    std::fs::create_dir_all(&cwd).unwrap();
+    write_lines(&cwd, ".claude-stub-lines.jsonl", &[]);
+
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill.clone()];
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+
+    let staged = cwd.join(".claude/skills/grill");
+    assert!(
+        std::fs::symlink_metadata(&staged).is_ok_and(|m| m.file_type().is_symlink()),
+        "the skill is staged as a link under .claude/skills"
+    );
+    assert_eq!(std::fs::read_link(&staged).unwrap(), skill);
+}
+
+#[tokio::test]
+async fn budget_max_turns_reaches_the_cli_as_a_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+
+    let mut req = request(dir.path().to_path_buf());
+    req.budget.max_turns = Some(7);
+    req.env.insert(
+        "CLAUDE_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let pos = args
+        .iter()
+        .position(|a| a == "--max-turns")
+        .expect("--max-turns is passed");
+    assert_eq!(args[pos + 1], "7");
+}
+
+#[tokio::test]
+async fn an_unknown_adapter_setting_is_reported_by_probe() {
+    let mut extra = serde_json::Map::new();
+    extra.insert("max_thinking".to_string(), serde_json::Value::from(3));
+    let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
+        adapter_settings: Some(extra),
+        binary: Some(stub_path()),
+    });
+    let err = adapter.probe().await.unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.contains("max_thinking") && text.contains("adapter_settings"),
+        "{text}"
+    );
 }

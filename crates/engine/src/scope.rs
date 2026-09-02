@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSetBuilder};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -46,20 +45,8 @@ pub async fn scope_check(
     cwd: &Path,
     scope: &[String],
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in scope {
-        let glob = Glob::new(pattern).map_err(|source| ScopeCheckError::InvalidGlob {
-            glob: pattern.clone(),
-            source,
-        })?;
-        builder.add(glob);
-    }
-    let set = builder
-        .build()
-        .map_err(|source| ScopeCheckError::InvalidGlob {
-            glob: scope.join(", "),
-            source,
-        })?;
+    let set = yunta_core::scope_globset(scope)
+        .map_err(|(glob, source)| ScopeCheckError::InvalidGlob { glob, source })?;
 
     let mut diff = git_diff_names(cwd).await?;
     diff.extend(git_untracked(cwd).await?);

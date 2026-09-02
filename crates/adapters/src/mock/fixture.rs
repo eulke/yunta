@@ -187,16 +187,16 @@ impl MockStep {
 }
 
 /// A file the session writes under the request's `cwd`, simulating the
-/// agent's own edits. `blocked: true` simulates a write that falls
-/// outside the node's declared scope — see `MockFixture`'s doc on how
-/// `edit_hooks` changes what happens to it.
+/// agent's own edits. Whether it lands is the request's business: with
+/// `edit_hooks` declared, a path outside the request's
+/// `edit_constraints` is blocked before it is written, exactly as a
+/// hook-capable CLI would; without the capability every effect lands
+/// and the engine's post-check scope diff is what catches it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MockEffect {
     pub path: PathBuf,
     pub content: String,
-    #[serde(default)]
-    pub blocked: bool,
 }
 
 /// How the session's stream ends. `Crash` and `Hang` exist to exercise

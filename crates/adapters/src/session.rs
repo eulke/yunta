@@ -90,6 +90,29 @@ pub struct RunToolsEndpoint {
     pub token: Secret<String>,
 }
 
+/// Reads an adapter's `adapter_settings` map into its typed settings:
+/// every key must be one of `known`, and the typed struct reads the
+/// values. The one place a setting name is checked, so an unknown key
+/// is always the same error whichever adapter it reaches.
+pub fn typed_settings<T: serde::de::DeserializeOwned>(
+    adapter: &'static str,
+    raw: Option<&serde_json::Map<String, serde_json::Value>>,
+    known: &'static [&'static str],
+) -> Result<T> {
+    let raw = raw.cloned().unwrap_or_default();
+    if let Some(key) = raw.keys().find(|key| !known.contains(&key.as_str())) {
+        return Err(YuntaError::UnknownSetting {
+            adapter: adapter.to_string(),
+            key: key.clone(),
+            known: known.to_vec(),
+        });
+    }
+    serde_json::from_value(serde_json::Value::Object(raw)).map_err(|e| YuntaError::Adapter {
+        adapter: adapter.to_string(),
+        message: format!("`adapter_settings`: {e}"),
+    })
+}
+
 /// Hands `prompt` to a just-spawned CLI on its stdin and closes the
 /// pipe, so the CLI sees end-of-input and the prompt never appears in
 /// an argument list. Called once the CLI's output is being read, so a

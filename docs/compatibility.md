@@ -66,6 +66,13 @@ Per the release pipeline's `test` gate (`.github/workflows/release.yml`):
 None of this is negotiable on a per-release basis — a release that doesn't
 pass all of it doesn't ship.
 
+## Scope globs
+
+A scope pattern — a node's or task's `scope`, an expansion's `within` — reads
+with a literal separator: `*` never crosses a `/`, so `src/*.rs` names the
+files directly under `src/` and `src/**` names everything beneath it. A
+workflow that expects `*` to descend into subdirectories writes `**`.
+
 ## Platforms
 
 Yunta builds and is published for Linux and macOS. The engine's process
