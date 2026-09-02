@@ -81,30 +81,22 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
 }
 
 fn detect_base_branch(repo: &Path) -> String {
-    let symbolic = std::process::Command::new("git")
-        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
-        .current_dir(repo)
-        .output();
-    if let Ok(output) = symbolic {
-        if output.status.success() {
-            let raw = String::from_utf8_lossy(&output.stdout);
-            if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
-                if !branch.is_empty() {
-                    return branch.to_string();
-                }
+    // Both probes are best-effort: a git that can't answer (no remote
+    // HEAD, detached head, no repo) falls through to the next, then to
+    // the conventional default.
+    if let Ok(raw) =
+        yunta_engine::git::output_blocking(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+    {
+        if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
+            if !branch.is_empty() {
+                return branch.to_string();
             }
         }
     }
-    let current = std::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(repo)
-        .output();
-    if let Ok(output) = current {
-        if output.status.success() {
-            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !name.is_empty() {
-                return name;
-            }
+    if let Ok(name) = yunta_engine::git::output_blocking(repo, &["branch", "--show-current"]) {
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
         }
     }
     "main".to_string()

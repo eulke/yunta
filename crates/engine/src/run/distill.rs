@@ -227,19 +227,14 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
 const DISTILLED_DIR: &str = ".yunta/knowledge/distilled";
 
 async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
-    let worktree = ctx.worktree.to_path_buf();
-    let git = |args: Vec<String>| {
-        let worktree = worktree.clone();
-        async move {
-            tokio::process::Command::new("git")
-                .args(&args)
-                .current_dir(&worktree)
-                .output()
-                .await
-        }
-    };
-    let add = git(vec!["add".to_string(), DISTILLED_DIR.to_string()]).await;
-    if !matches!(&add, Ok(output) if output.status.success()) {
+    // Best-effort: a git that can't spawn or exits non-zero is a `false`,
+    // recorded as a finding — never a hard error that would un-close the
+    // run the log is about to close.
+    async fn ran(worktree: &std::path::Path, args: &[&str]) -> bool {
+        crate::git::success(worktree, args).await.unwrap_or(false)
+    }
+
+    if !ran(ctx.worktree, &["add", DISTILLED_DIR]).await {
         return ctx
             .engine_finding(
                 None,
@@ -251,13 +246,8 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             )
             .await;
     }
-    let commit = git(vec![
-        "commit".to_string(),
-        "-m".to_string(),
-        format!("docs(knowledge): distill from {}", ctx.run_id.as_str()),
-    ])
-    .await;
-    if !matches!(&commit, Ok(output) if output.status.success()) {
+    let message = format!("docs(knowledge): distill from {}", ctx.run_id.as_str());
+    if !ran(ctx.worktree, &["commit", "-m", &message]).await {
         return ctx
             .engine_finding(
                 None,
@@ -272,27 +262,22 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     // Push only where an upstream already exists (a `pr` node's own
     // `push -u`); otherwise the commit rides the local branch, which
     // cleanup's `-d` refuses to delete unmerged.
-    let upstream = git(vec![
-        "rev-parse".to_string(),
-        "--abbrev-ref".to_string(),
-        "--symbolic-full-name".to_string(),
-        "@{u}".to_string(),
-    ])
+    let has_upstream = ran(
+        ctx.worktree,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
     .await;
-    if matches!(&upstream, Ok(output) if output.status.success()) {
-        let push = git(vec!["push".to_string()]).await;
-        if !matches!(&push, Ok(output) if output.status.success()) {
-            return ctx
-                .engine_finding(
-                    None,
-                    "distill-push",
-                    FindingSeverity::Minor,
-                    "distill: `git push` failed".to_string(),
-                    DISTILLED_DIR.to_string(),
-                    "the distill commit stays on the run's local branch".to_string(),
-                )
-                .await;
-        }
+    if has_upstream && !ran(ctx.worktree, &["push"]).await {
+        return ctx
+            .engine_finding(
+                None,
+                "distill-push",
+                FindingSeverity::Minor,
+                "distill: `git push` failed".to_string(),
+                DISTILLED_DIR.to_string(),
+                "the distill commit stays on the run's local branch".to_string(),
+            )
+            .await;
     }
     Ok(())
 }

@@ -117,12 +117,10 @@ mod tests {
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
+        assert!(
+            yunta_engine::git::success_blocking(dir, args).unwrap(),
+            "git {args:?} failed"
+        );
     }
 
     fn init_repo(dir: &Path) {

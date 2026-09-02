@@ -264,23 +264,14 @@ fn freeze_prompt(
 }
 
 fn git_line(repo: &Path, args: &[&str]) -> Result<String, ManifestError> {
-    let git_error = |detail: String| ManifestError::Git {
-        args: args.join(" "),
-        cwd: repo.to_path_buf(),
-        detail,
-    };
-
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .map_err(|e| git_error(e.to_string()))?;
-
-    if !output.status.success() {
-        return Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    crate::git::output_blocking(repo, args)
+        .map(|stdout| stdout.trim().to_string())
+        .map_err(|e| {
+            let detail = e.detail();
+            ManifestError::Git {
+                args: e.args,
+                cwd: e.cwd,
+                detail,
+            }
+        })
 }

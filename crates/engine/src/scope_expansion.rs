@@ -284,23 +284,19 @@ fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansion
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionError> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
+    crate::git::output(cwd, args)
         .await
-        .map_err(|source| ScopeExpansionError::Io {
-            action: format!("run `git {}`", args.join(" ")),
-            source,
-        })?;
-    if !output.status.success() {
-        return Err(ScopeExpansionError::GitFailed {
-            command: args.join(" "),
-            status: output.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        .map_err(|e| match e.source {
+            Some(source) => ScopeExpansionError::Io {
+                action: format!("run `git {}`", e.args),
+                source,
+            },
+            None => ScopeExpansionError::GitFailed {
+                command: e.args,
+                status: e.code.unwrap_or(-1),
+                stderr: e.stderr,
+            },
+        })
 }
 
 async fn diff_paths(cwd: &Path) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {

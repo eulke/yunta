@@ -360,12 +360,9 @@ fn init_git(dir: &Path) -> Result<(), String> {
         vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {
-        let status = std::process::Command::new("git")
-            .args(&args)
-            .current_dir(dir)
-            .status()
-            .map_err(|e| format!("git {args:?}: {e}"))?;
-        if !status.success() {
+        let ran = yunta_engine::git::success_blocking(dir, &args)
+            .map_err(|e| format!("git {args:?}: {}", e.detail()))?;
+        if !ran {
             return Err(format!("git {args:?} failed in `{}`", dir.display()));
         }
     }

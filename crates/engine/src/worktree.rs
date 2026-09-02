@@ -398,25 +398,14 @@ fn main_repo_of(common_dir: &Path) -> Result<PathBuf, WorktreeError> {
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    let git_error = |detail: String| WorktreeError::Git {
-        args: args.join(" "),
-        cwd: cwd.to_path_buf(),
-        detail,
-    };
-
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| git_error(e.to_string()))?;
-
-    if !output.status.success() {
-        return Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    crate::git::output(cwd, args).await.map_err(|e| {
+        let detail = e.detail();
+        WorktreeError::Git {
+            args: e.args,
+            cwd: e.cwd,
+            detail,
+        }
+    })
 }
 
 #[cfg(test)]

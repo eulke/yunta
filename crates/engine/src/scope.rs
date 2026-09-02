@@ -68,25 +68,19 @@ pub async fn scope_check(
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeCheckError> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
+    crate::git::output(cwd, args)
         .await
-        .map_err(|source| ScopeCheckError::Io {
-            action: format!("run `git {}`", args.join(" ")),
-            source,
-        })?;
-
-    if !output.status.success() {
-        return Err(ScopeCheckError::GitFailed {
-            command: args.join(" "),
-            status: output.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        .map_err(|e| match e.source {
+            Some(source) => ScopeCheckError::Io {
+                action: format!("run `git {}`", e.args),
+                source,
+            },
+            None => ScopeCheckError::GitFailed {
+                command: e.args,
+                status: e.code.unwrap_or(-1),
+                stderr: e.stderr,
+            },
+        })
 }
 
 async fn git_diff_names(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {

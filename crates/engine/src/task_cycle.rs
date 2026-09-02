@@ -153,25 +153,15 @@ impl Memo {
 /// result; a bare filename list (from `git status`) isn't enough since a
 /// file can change content without its name changing.
 async fn tree_hash(cwd: &Path) -> Result<String, TaskCycleError> {
-    let git_error = |args: &str, detail: String| TaskCycleError::TreeHash {
-        args: args.to_string(),
-        cwd: cwd.to_path_buf(),
-        detail,
-    };
     let run_git = |args: &'static [&'static str]| async move {
-        let output = tokio::process::Command::new("git")
-            .args(args)
-            .current_dir(cwd)
-            .output()
-            .await
-            .map_err(|e| git_error(&args.join(" "), e.to_string()))?;
-        if !output.status.success() {
-            return Err(git_error(
-                &args.join(" "),
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            ));
-        }
-        Ok::<_, TaskCycleError>(String::from_utf8_lossy(&output.stdout).into_owned())
+        crate::git::output(cwd, args).await.map_err(|e| {
+            let detail = e.detail();
+            TaskCycleError::TreeHash {
+                args: e.args,
+                cwd: e.cwd,
+                detail,
+            }
+        })
     };
 
     let head = run_git(&["rev-parse", "HEAD"]).await?;

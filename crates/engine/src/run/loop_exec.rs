@@ -845,7 +845,7 @@ async fn integrate_task(
 
     let integration_head = head_commit(ctx.worktree).await?;
     if !run_git_ok(task_worktree, &["rebase", &integration_head]).await? {
-        let _ = run_git(task_worktree, &["rebase", "--abort"]).await;
+        let _ = crate::git::success(task_worktree, &["rebase", "--abort"]).await;
         // No `post_check` ran — nothing to attach the reason to but the
         // rebase itself, so it's recorded the same way any other command
         // outcome is: a synthetic `CriterionRun` naming the git command
@@ -919,30 +919,24 @@ async fn integrate_task(
 /// were satisfied by side effects that left no diff) simply produces no
 /// commit — never an error.
 async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
-    let add = run_git(cwd, &["add", "-A"])
+    let git_error = |e: crate::git::GitError, action: &str| RunError::Git {
+        context: format!("{action} task `{}` work", task.id),
+        detail: e.detail(),
+    };
+    crate::git::output(cwd, &["add", "-A"])
         .await
-        .map_err(|source| RunError::Io {
-            context: format!("stage task `{}` work", task.id),
-            source,
-        })?;
-    if !add.status.success() {
-        return Err(RunError::Git {
-            context: format!("stage task `{}` work", task.id),
-            detail: String::from_utf8_lossy(&add.stderr).trim().to_string(),
-        });
-    }
+        .map_err(|e| git_error(e, "stage"))?;
 
-    let staged = run_git(cwd, &["diff", "--cached", "--quiet"])
+    // `diff --cached --quiet` exits 0 with nothing staged, 1 with staged
+    // changes — both are answers, not failures.
+    if crate::git::success(cwd, &["diff", "--cached", "--quiet"])
         .await
-        .map_err(|source| RunError::Io {
-            context: format!("inspect staged work for task `{}`", task.id),
-            source,
-        })?;
-    if staged.status.success() {
+        .map_err(|e| git_error(e, "inspect staged work for"))?
+    {
         return Ok(()); // nothing staged — nothing to commit
     }
 
-    let commit = run_git(
+    crate::git::output(
         cwd,
         &[
             "commit",
@@ -952,49 +946,27 @@ async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
         ],
     )
     .await
-    .map_err(|source| RunError::Io {
-        context: format!("commit task `{}` work", task.id),
-        source,
-    })?;
-    if !commit.status.success() {
-        return Err(RunError::Git {
-            context: format!("commit task `{}` work", task.id),
-            detail: String::from_utf8_lossy(&commit.stderr).trim().to_string(),
-        });
-    }
+    .map_err(|e| git_error(e, "commit"))?;
     Ok(())
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .await
-}
-
 async fn run_git_ok(cwd: &Path, args: &[&str]) -> Result<bool, RunError> {
-    let output = run_git(cwd, args).await.map_err(|source| RunError::Io {
-        context: format!("run git {}", args.join(" ")),
-        source,
-    })?;
-    Ok(output.status.success())
+    crate::git::success(cwd, args)
+        .await
+        .map_err(|e| RunError::Git {
+            context: format!("run git {}", e.args),
+            detail: e.detail(),
+        })
 }
 
 async fn head_commit(repo: &Path) -> Result<String, RunError> {
-    let output = run_git(repo, &["rev-parse", "HEAD"])
+    crate::git::output(repo, &["rev-parse", "HEAD"])
         .await
-        .map_err(|source| RunError::Io {
+        .map(|stdout| stdout.trim().to_string())
+        .map_err(|e| RunError::Git {
             context: "read the integration HEAD commit".to_string(),
-            source,
-        })?;
-    if !output.status.success() {
-        return Err(RunError::Git {
-            context: "read the integration HEAD commit".to_string(),
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            detail: e.detail(),
+        })
 }
 
 /// Emits the events one attempt's scope-expansion outcome requires:

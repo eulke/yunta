@@ -72,22 +72,16 @@ pub fn clone_url(source: &str) -> String {
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
+    yunta_engine::git::output(cwd, args)
         .await
-        .map_err(|e| PackError::Git {
-            args: args.join(" "),
-            detail: e.to_string(),
-        })?;
-    if !output.status.success() {
-        return Err(PackError::Git {
-            args: args.join(" "),
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .map(|stdout| stdout.trim().to_string())
+        .map_err(|e| {
+            let detail = e.detail();
+            PackError::Git {
+                args: e.args,
+                detail,
+            }
+        })
 }
 
 /// Clones `url` into `dest` (a fresh, empty directory), checking out

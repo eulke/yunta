@@ -145,19 +145,10 @@ fn read_inherited_artifacts(from_run_dir: &Path) -> std::io::Result<Vec<BirthArt
 }
 
 fn head_commit(worktree: &Path) -> Result<String, RunError> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(worktree)
-        .output()
+    crate::git::output_blocking(worktree, &["rev-parse", "HEAD"])
+        .map(|stdout| stdout.trim().to_string())
         .map_err(|e| RunError::Git {
             context: format!("resolve HEAD in `{}`", worktree.display()),
-            detail: e.to_string(),
-        })?;
-    if !output.status.success() {
-        return Err(RunError::Git {
-            context: format!("resolve HEAD in `{}`", worktree.display()),
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            detail: e.detail(),
+        })
 }

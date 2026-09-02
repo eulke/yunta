@@ -24,6 +24,7 @@ mod catalog;
 mod check;
 mod events_export;
 mod findings;
+pub mod git;
 mod human_interaction;
 mod inputs;
 mod ledger;
@@ -62,6 +63,7 @@ pub use check::{
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::{inherited_findings, register as register_findings, FindingsError};
+pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
 pub use ledger::{register, LedgerError};
