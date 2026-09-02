@@ -710,3 +710,66 @@ fn a_layer_softening_the_scope_expansion_ceiling_is_a_conflict() {
         serde_yaml::from_str("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
     assert!(yunta_core::permission_layer_conflicts(&[("org", &org), ("repo", &hard)]).is_empty());
 }
+
+// --- `~` in paths ------------------------------------------------------------
+
+#[test]
+fn a_leading_tilde_expands_against_the_given_home_in_every_path_field() {
+    let mut layer: yunta_core::ConfigLayer = yunta_core::yaml::parse(
+        "adapters:\n  claude-code: { binary: ~/bin/claude }\nstorage: { path: ~/state/yunta.db }\n\
+         paths: { runs: ~/runs, worktrees: \"~\" }\nskills: { paths: [~/skills, ./local] }\n",
+    )
+    .unwrap();
+    layer
+        .expand_home(Some(std::path::Path::new("/home/ana")))
+        .unwrap();
+    assert_eq!(
+        layer.adapters.unwrap()["claude-code"].binary.as_deref(),
+        Some(std::path::Path::new("/home/ana/bin/claude"))
+    );
+    assert_eq!(
+        layer.storage.unwrap().path.as_deref(),
+        Some(std::path::Path::new("/home/ana/state/yunta.db"))
+    );
+    let paths = layer.paths.unwrap();
+    assert_eq!(
+        paths.runs.as_deref(),
+        Some(std::path::Path::new("/home/ana/runs"))
+    );
+    assert_eq!(
+        paths.worktrees.as_deref(),
+        Some(std::path::Path::new("/home/ana"))
+    );
+    let skills = layer.skills.unwrap();
+    assert_eq!(skills.paths[0], std::path::Path::new("/home/ana/skills"));
+    assert_eq!(skills.paths[1], std::path::Path::new("./local"));
+}
+
+#[test]
+fn a_tilde_with_no_home_is_an_error_that_names_the_field() {
+    let mut layer: yunta_core::ConfigLayer =
+        yunta_core::yaml::parse("storage: { path: ~/state/yunta.db }\n").unwrap();
+    let err = layer.expand_home(None).unwrap_err();
+    assert!(matches!(
+        &err,
+        yunta_core::HomeExpansionError::NoHome { field, .. } if field == "storage.path"
+    ));
+    let text = err.to_string();
+    assert!(
+        text.contains("storage.path") && text.contains("HOME"),
+        "{text}"
+    );
+}
+
+#[test]
+fn another_users_home_is_refused_naming_the_field() {
+    let mut layer: yunta_core::ConfigLayer =
+        yunta_core::yaml::parse("paths: { runs: ~ana/runs }\n").unwrap();
+    let err = layer
+        .expand_home(Some(std::path::Path::new("/home/me")))
+        .unwrap_err();
+    assert!(matches!(
+        &err,
+        yunta_core::HomeExpansionError::OtherUser { field, .. } if field == "paths.runs"
+    ));
+}

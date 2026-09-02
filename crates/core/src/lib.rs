@@ -26,10 +26,11 @@ pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
     CommandPermissions, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig,
-    McpServerConfig, NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig,
-    PermissionsConfig, PricingEntry, ProjectConfig, PublisherPermissions, RunnerCandidate,
-    SkillsConfig, StorageConfig, TelemetryConfig, TelemetryProtocol,
+    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
+    Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
+    PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProjectConfig,
+    PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig, TelemetryConfig,
+    TelemetryProtocol,
 };
 pub use error::{Result, YuntaError};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};

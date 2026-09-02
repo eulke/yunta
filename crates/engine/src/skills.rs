@@ -118,12 +118,9 @@ fn resolve_pack_skill(worktree: &Path, name: &str) -> Option<PathBuf> {
     found
 }
 
+/// A configured skills path is absolute, or relative to the worktree;
+/// a `~` was expanded when the config layer was loaded.
 fn expand(path: &Path, worktree: &Path) -> PathBuf {
-    if let Ok(stripped) = path.strip_prefix("~") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
     if path.is_absolute() {
         path.to_path_buf()
     } else {

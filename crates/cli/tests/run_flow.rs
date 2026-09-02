@@ -2246,3 +2246,45 @@ fn adapter_mock_with_fixture_runs() {
     );
     assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
 }
+
+/// A `~` in `storage.path` lands under the home the process was given —
+/// never a directory literally named `~` beside the repository.
+#[test]
+fn tilde_in_storage_path_resolves_under_home() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage: { path: ~/state/yunta.db }\npaths: { runs: ~/state/runs, worktrees: ~/state/worktrees }\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: tilde\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n",
+    );
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("HOME", &home)
+        .env_remove("YUNTA_HOME")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        home.join("state/yunta.db").exists(),
+        "the event log lives under the home"
+    );
+    assert!(
+        !repo.join("~").exists(),
+        "no literal `~` directory beside the repository"
+    );
+}

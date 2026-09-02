@@ -121,6 +121,36 @@ pub struct PathsConfig {
     pub worktrees: Option<PathBuf>,
 }
 
+/// Rewrites `path` in place when it starts with `~`: `~` alone becomes
+/// `home`, `~/rest` becomes `home/rest`; `~user/...` is refused.
+fn expand_path(
+    path: &mut PathBuf,
+    home: Option<&std::path::Path>,
+    field: &str,
+) -> Result<(), HomeExpansionError> {
+    let Some(text) = path.to_str() else {
+        return Ok(());
+    };
+    if !text.starts_with('~') {
+        return Ok(());
+    }
+    let rest = &text[1..];
+    if !(rest.is_empty() || rest.starts_with('/')) {
+        return Err(HomeExpansionError::OtherUser {
+            field: field.to_string(),
+            path: text.to_string(),
+        });
+    }
+    let Some(home) = home else {
+        return Err(HomeExpansionError::NoHome {
+            field: field.to_string(),
+            path: text.to_string(),
+        });
+    };
+    *path = home.join(rest.trim_start_matches('/'));
+    Ok(())
+}
+
 /// The user state root: `$YUNTA_HOME`, or `~/.yunta` when unset. Shared by
 /// the CLI (which layers `config.yaml` from it) and the engine
 /// (which reads `knowledge/` from it live at context-resolution time)
@@ -488,7 +518,59 @@ pub struct ConfigLayer {
     pub telemetry: Option<TelemetryConfig>,
 }
 
+/// A path in a config layer that starts with `~` and cannot be
+/// expanded: there is no home directory to expand it against, or the
+/// form is one this schema does not read (`~user/...`).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum HomeExpansionError {
+    #[error("`{field}` is `{path}` but no home directory is known — set HOME (or YUNTA_HOME for the state root) or write the path in full")]
+    NoHome { field: String, path: String },
+    #[error(
+        "`{field}` is `{path}` — only `~` and `~/...` expand; write another user's home in full"
+    )]
+    OtherUser { field: String, path: String },
+}
+
 impl ConfigLayer {
+    /// Expands a leading `~` in every path this layer declares —
+    /// `adapters.<id>.binary`, `storage.path`, `paths.runs`,
+    /// `paths.worktrees`, `skills.paths[]` — against `home`, so no
+    /// consumer ever sees a literal `~`. `home: None` makes any such path
+    /// an error naming the field.
+    pub fn expand_home(
+        &mut self,
+        home: Option<&std::path::Path>,
+    ) -> Result<(), HomeExpansionError> {
+        if let Some(adapters) = &mut self.adapters {
+            for (id, settings) in adapters.iter_mut() {
+                if let Some(binary) = &mut settings.binary {
+                    expand_path(binary, home, &format!("adapters.{id}.binary"))?;
+                }
+            }
+        }
+        if let Some(path) = self
+            .storage
+            .as_mut()
+            .and_then(|storage| storage.path.as_mut())
+        {
+            expand_path(path, home, "storage.path")?;
+        }
+        if let Some(paths) = &mut self.paths {
+            if let Some(runs) = &mut paths.runs {
+                expand_path(runs, home, "paths.runs")?;
+            }
+            if let Some(worktrees) = &mut paths.worktrees {
+                expand_path(worktrees, home, "paths.worktrees")?;
+            }
+        }
+        if let Some(skills) = &mut self.skills {
+            for (index, path) in skills.paths.iter_mut().enumerate() {
+                expand_path(path, home, &format!("skills.paths[{index}]"))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Merges layers in increasing order of precedence — pass
     /// `[org, user, repo]` so the last one's keys win (the default
     /// precedence; `permissions` inverts this).

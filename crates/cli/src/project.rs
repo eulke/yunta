@@ -71,8 +71,15 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
             })
         }
     };
-    let layer: ConfigLayer =
+    let mut layer: ConfigLayer =
         yunta_core::yaml::parse(&contents).map_err(|e| ProjectError::Parse {
+            path: path.to_path_buf(),
+            detail: e.to_string(),
+        })?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    layer
+        .expand_home(home.as_deref())
+        .map_err(|e| ProjectError::Parse {
             path: path.to_path_buf(),
             detail: e.to_string(),
         })?;
