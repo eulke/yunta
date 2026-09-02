@@ -51,11 +51,17 @@ pub enum CheckError {
     #[error("duplicate node id `{id}`")]
     DuplicateNodeId { id: NodeId },
 
-    #[error("node `{node}` depends_on unknown node `{unknown}`")]
-    UnknownDependency { node: NodeId, unknown: NodeId },
-
-    #[error("node `{node}` on_failure.goto targets unknown node `{target}`")]
-    UnknownGotoTarget { node: NodeId, target: NodeId },
+    /// A node's field names a target node the workflow doesn't define — the
+    /// one broken-reference error, whatever field carries the reference
+    /// (`depends_on`, `on_failure.goto`, a gate option's `on.<option>`, a
+    /// `mounts` entry). Catching it here means the run never starts having
+    /// silently dropped work its author named.
+    #[error("node `{node}`: `{field}` references unknown node `{target}`")]
+    BrokenReference {
+        node: NodeId,
+        field: String,
+        target: NodeId,
+    },
 
     #[error("cycle in depends_on: {path}")]
     DependsOnCycle { path: String },
@@ -247,16 +253,7 @@ pub enum CheckError {
     #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
     GateOnUndeclaredOption { node: NodeId, option: String },
 
-    /// Same broken-reference class as `UnknownGotoTarget`, for a
-    /// gate option's re-route target.
-    #[error("gate `{node}`: `on.{option}` targets unknown node `{target}`")]
-    UnknownGateOptionTarget {
-        node: NodeId,
-        option: String,
-        target: NodeId,
-    },
-
-    /// Same broken-reference class as `UnknownGotoTarget` —
+    /// The same broken-reference class as `BrokenReference` —
     /// catching it here means the run never starts with a mode that
     /// silently omits work its own author meant to include.
     #[error("mode `{mode}` includes unknown node `{node}`")]
@@ -268,8 +265,8 @@ pub enum CheckError {
     InvariantNodeExcludedFromMode { node: NodeId, mode: ModeName },
 
     /// A mode's own coherence rule, made an error rather than a warning
-    /// for the same reason: it's the same broken-goto class
-    /// `UnknownGotoTarget` catches, just scoped to one mode's variant of
+    /// for the same reason: it's the same broken-reference class
+    /// `BrokenReference` catches, just scoped to one mode's variant of
     /// the graph instead of the whole file. The message names both ways
     /// out.
     #[error(
@@ -303,16 +300,6 @@ pub enum CheckError {
          declare a disjoint scope"
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
-
-    /// A mount reads a node of the parent's own graph — an
-    /// unknown name is the same broken-reference class as
-    /// `UnknownDependency`, named for the field the author actually
-    /// wrote.
-    #[error(
-        "node `{node}`: `mounts` references node `{target}` which this workflow does not \
-         define — name a node of this same workflow"
-    )]
-    MountUnknownNode { node: NodeId, target: NodeId },
 
     /// Mounting one's own artifact is a read of an outcome that
     /// cannot exist yet — the implied `depends_on` would be a self-cycle.
@@ -375,7 +362,7 @@ pub enum CheckError {
     MaxParallelNodesZero,
 
     /// A composition reference that can't resolve today — the
-    /// same broken-reference class as `UnknownGotoTarget`, across
+    /// same broken-reference class as `BrokenReference`, across
     /// files. Advisory about the *current* catalog by design: the child
     /// freezes its own file at birth, so a run only ever meets the file
     /// as it is then.
@@ -555,17 +542,19 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     for node in &workflow.nodes {
         for dep in &node.depends_on {
             if !known_ids.contains(dep) {
-                errors.push(CheckError::UnknownDependency {
+                errors.push(CheckError::BrokenReference {
                     node: node.id.clone(),
-                    unknown: dep.clone(),
+                    field: "depends_on".to_string(),
+                    target: dep.clone(),
                 });
             }
         }
 
         if let Some(on_failure) = &node.on_failure {
             if !known_ids.contains(&on_failure.goto) {
-                errors.push(CheckError::UnknownGotoTarget {
+                errors.push(CheckError::BrokenReference {
                     node: node.id.clone(),
+                    field: "on_failure.goto".to_string(),
                     target: on_failure.goto.clone(),
                 });
             }
@@ -1206,7 +1195,7 @@ fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
 /// `forge.github` configured (`external.kind` is a closed enum with one
 /// variant today, so this is a total match); an internal gate's own
 /// `on:` mapping must reference declared options and existing targets —
-/// the same broken-reference class `UnknownGotoTarget` already catches.
+/// the same broken-reference class `BrokenReference` already catches.
 fn check_gate(
     node: &Node,
     known_ids: &HashSet<NodeId>,
@@ -1245,9 +1234,9 @@ fn check_gate(
             });
         }
         if !known_ids.contains(target) {
-            errors.push(CheckError::UnknownGateOptionTarget {
+            errors.push(CheckError::BrokenReference {
                 node: node.id.clone(),
-                option: option.clone(),
+                field: format!("on.{option}"),
                 target: target.clone(),
             });
         }
@@ -1526,8 +1515,9 @@ fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
                         node: node.id.clone(),
                     });
                 } else if !known.contains(target) {
-                    errors.push(CheckError::MountUnknownNode {
+                    errors.push(CheckError::BrokenReference {
                         node: node.id.clone(),
+                        field: "mounts".to_string(),
                         target: target.clone(),
                     });
                 }

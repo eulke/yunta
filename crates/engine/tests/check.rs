@@ -221,9 +221,10 @@ fn duplicate_node_id_is_reported() {
 fn unknown_dependency_is_reported() {
     let wf = workflow(vec![bash("a", "true", &["ghost"])]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::UnknownDependency {
+    assert!(errors.contains(&CheckError::BrokenReference {
         node: "a".into(),
-        unknown: "ghost".into(),
+        field: "depends_on".to_string(),
+        target: "ghost".into(),
     }));
 }
 
@@ -235,8 +236,9 @@ fn unknown_goto_target_is_reported() {
         max_reroutes: 1,
     });
     let errors = check(&workflow(vec![node]), &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::UnknownGotoTarget {
+    assert!(errors.contains(&CheckError::BrokenReference {
         node: "a".into(),
+        field: "on_failure.goto".to_string(),
         target: "ghost".into(),
     }));
 }
@@ -522,9 +524,9 @@ fn a_gate_on_targeting_an_unknown_node_is_reported() {
         &[("ajustar", "ghost")],
     )]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::UnknownGateOptionTarget {
+    assert!(errors.contains(&CheckError::BrokenReference {
         node: "approve".into(),
-        option: "ajustar".to_string(),
+        field: "on.ajustar".to_string(),
         target: "ghost".into(),
     }));
 }
@@ -648,20 +650,22 @@ fn every_error_message_names_its_rule() {
         "duplicate node id `a`"
     );
     assert_eq!(
-        CheckError::UnknownDependency {
+        CheckError::BrokenReference {
             node: "a".into(),
-            unknown: "b".into()
-        }
-        .to_string(),
-        "node `a` depends_on unknown node `b`"
-    );
-    assert_eq!(
-        CheckError::UnknownGotoTarget {
-            node: "a".into(),
+            field: "depends_on".to_string(),
             target: "b".into()
         }
         .to_string(),
-        "node `a` on_failure.goto targets unknown node `b`"
+        "node `a`: `depends_on` references unknown node `b`"
+    );
+    assert_eq!(
+        CheckError::BrokenReference {
+            node: "a".into(),
+            field: "on_failure.goto".to_string(),
+            target: "b".into()
+        }
+        .to_string(),
+        "node `a`: `on_failure.goto` references unknown node `b`"
     );
     assert_eq!(
         CheckError::DependsOnCycle {
@@ -1584,8 +1588,8 @@ nodes:
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::MountUnknownNode { node, target }
-                if node.as_str() == "cons" && target.as_str() == "ghost"
+            CheckError::BrokenReference { node, field, target }
+                if node.as_str() == "cons" && field == "mounts" && target.as_str() == "ghost"
         )),
         "got: {errors:?}"
     );
