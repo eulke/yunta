@@ -7,6 +7,7 @@ use std::path::Path;
 
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
+use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -52,6 +53,7 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -73,6 +75,7 @@ async fn deny_mode_denies_without_running_any_rule() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -93,6 +96,7 @@ async fn ask_mode_escalates_instead_of_deciding() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -111,6 +115,7 @@ async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -130,6 +135,7 @@ async fn rules_mode_denies_a_path_outside_within() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -151,6 +157,7 @@ async fn rules_mode_requires_a_proposed_criterion() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -174,6 +181,7 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -195,6 +203,7 @@ async fn an_exhausted_cap_escalates_even_under_rules_mode() {
         &GrantLedger::new(2), // already at the cap
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();
@@ -217,6 +226,7 @@ async fn a_cap_not_yet_reached_does_not_escalate() {
         &GrantLedger::new(2),
         &req,
         dir.path(),
+        Supervision::none(),
     )
     .await
     .unwrap();

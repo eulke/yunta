@@ -8,13 +8,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
 use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
 
-use super::node_exec::{close_node, fail, kill_process_group, NodeEnd};
+use super::node_exec::{close_node, fail, NodeEnd};
 use super::{RunCtx, RunError};
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 
 /// The stdin JSON shape (`with:`, the run's own paths, declared env).
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
@@ -55,12 +55,6 @@ fn resolve_path(worktree: &Path, registration: &ExecutorRegistration) -> std::pa
     } else {
         worktree.join(&registration.path)
     }
-}
-
-enum WaitOutcome {
-    Done(std::process::ExitStatus),
-    TimedOut,
-    Cancelled,
 }
 
 pub(super) async fn execute_executor(
@@ -115,120 +109,34 @@ pub(super) async fn execute_executor(
         }
     };
 
-    let mut std_cmd = std::process::Command::new(&path);
-    std_cmd
-        .current_dir(ctx.worktree)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    // An executor's whole process tree must die together on timeout
-    // or cancellation, the same process-group pattern every other
-    // engine-spawned command in this codebase uses.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        std_cmd.process_group(0);
+    let mut command = GovernedCommand::new(&path, ctx.worktree)
+        .stdin(stdin_bytes)
+        .stdout(Capture::Collect)
+        .stderr(Capture::Collect);
+    if let Some(seconds) = timeout_seconds {
+        command = command.timeout(Duration::from_secs(seconds));
     }
-    let mut child = tokio::process::Command::from(std_cmd)
-        .spawn()
-        .map_err(|source| RunError::Io {
-            context: format!("spawn executor `{executor}` for node `{}`", node.id),
-            source,
-        })?;
-    let _pgid_registration = crate::process_registry::register(
-        ctx.process_registry.as_ref(),
-        crate::process_registry::child_pid(&child),
-    );
-
-    let Some(mut stdin) = child.stdin.take() else {
-        // Unreachable given `Stdio::piped()` above, but a typed error
-        // beats a panic (CLAUDE.md: no unwrap/expect outside tests) —
-        // this crate never trusts "can't happen" enough to crash on it.
-        return Err(RunError::Io {
-            context: format!("executor `{executor}` for node `{}`", node.id),
-            source: std::io::Error::other("spawned child has no stdin pipe"),
-        });
-    };
-    let write_task = tokio::spawn(async move {
-        let _ = stdin.write_all(&stdin_bytes).await;
-        // Dropping `stdin` here closes the pipe, signaling EOF.
-    });
-    let stdout_task = child.stdout.take().map(|mut pipe| {
-        tokio::spawn(async move {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf).await;
-            buf
-        })
-    });
-    let stderr_task = child.stderr.take().map(|mut pipe| {
-        tokio::spawn(async move {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf).await;
-            buf
-        })
-    });
-
-    let deadline = timeout_seconds.map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
-    let outcome = if let Some(deadline_at) = deadline {
-        tokio::select! {
-            _ = cancel.cancelled() => WaitOutcome::Cancelled,
-            result = tokio::time::timeout_at(deadline_at, child.wait()) => {
-                match result {
-                    Ok(status) => WaitOutcome::Done(status.map_err(|source| RunError::Io {
-                        context: format!("wait for executor `{executor}`"),
-                        source,
-                    })?),
-                    Err(_elapsed) => WaitOutcome::TimedOut,
-                }
+    let (status, stdout_bytes, stderr_bytes) =
+        match spawn_governed(command, ctx.supervision(cancel)).await? {
+            Outcome::Exited {
+                status,
+                stdout,
+                stderr,
+            } => (status, stdout, stderr),
+            Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
+            Outcome::TimedOut { .. } => {
+                return fail(
+                    ctx,
+                    node,
+                    format!(
+                        "executor `{executor}` exceeded its {}s timeout",
+                        timeout_seconds.unwrap_or_default()
+                    ),
+                    false,
+                )
+                .await;
             }
-        }
-    } else {
-        tokio::select! {
-            _ = cancel.cancelled() => WaitOutcome::Cancelled,
-            status = child.wait() => WaitOutcome::Done(status.map_err(|source| RunError::Io {
-                context: format!("wait for executor `{executor}`"),
-                source,
-            })?),
-        }
-    };
-
-    let _ = write_task.await;
-
-    let status = match outcome {
-        WaitOutcome::Cancelled => {
-            if let Some(pid) = crate::process_registry::child_pid(&child) {
-                kill_process_group(pid).await;
-            }
-            let _ = child.wait().await;
-            return super::node_exec::cancelled_end(ctx, node).await;
-        }
-        WaitOutcome::TimedOut => {
-            if let Some(pid) = crate::process_registry::child_pid(&child) {
-                kill_process_group(pid).await;
-            }
-            let _ = child.wait().await;
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "executor `{executor}` exceeded its {}s timeout",
-                    timeout_seconds.unwrap_or_default()
-                ),
-                false,
-            )
-            .await;
-        }
-        WaitOutcome::Done(status) => status,
-    };
-
-    let stdout_bytes = match stdout_task {
-        Some(task) => task.await.unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let stderr_bytes = match stderr_task {
-        Some(task) => task.await.unwrap_or_default(),
-        None => Vec::new(),
-    };
+        };
 
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {

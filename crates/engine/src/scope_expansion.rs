@@ -43,6 +43,8 @@ use thiserror::Error;
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
 
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+
 /// The well-known path, relative to a task's own isolated worktree, an
 /// agent writes to request an expansion — mirrors `findings.yaml`'s role
 /// as a structured, engine-read artifact, scoped to one task
@@ -66,6 +68,12 @@ pub enum ScopeExpansionError {
         glob: String,
         #[source]
         source: globset::Error,
+    },
+    #[error("failed to run proposed criterion `{cmd}`")]
+    Process {
+        cmd: String,
+        #[source]
+        source: crate::process::SpawnError,
     },
     #[error("failed to {action}")]
     Io {
@@ -205,9 +213,10 @@ pub async fn evaluate(
     grants: &GrantLedger,
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
+    supervision: Supervision<'_>,
 ) -> Result<(Option<i32>, Decision), ScopeExpansionError> {
     let precheck_exit = match &request.proposed_criterion {
-        Some(criterion) => Some(run_criterion(task_worktree, &criterion.cmd).await?),
+        Some(criterion) => Some(run_criterion(task_worktree, &criterion.cmd, supervision).await?),
         None => None,
     };
     if precheck_exit == Some(0) {
@@ -311,16 +320,23 @@ async fn diff_paths(cwd: &Path) -> Result<Vec<std::path::PathBuf>, ScopeExpansio
     Ok(paths)
 }
 
-async fn run_criterion(cwd: &Path, cmd: &str) -> Result<i32, ScopeExpansionError> {
-    let status = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(cwd)
-        .status()
-        .await
-        .map_err(|source| ScopeExpansionError::Io {
-            action: format!("run proposed criterion `{cmd}`"),
-            source,
-        })?;
-    Ok(status.code().unwrap_or(-1))
+async fn run_criterion(
+    cwd: &Path,
+    cmd: &str,
+    supervision: Supervision<'_>,
+) -> Result<i32, ScopeExpansionError> {
+    let command = GovernedCommand::shell(cwd, cmd)
+        .stdout(Capture::Inherit)
+        .stderr(Capture::Inherit);
+    Ok(
+        match spawn_governed(command, supervision)
+            .await
+            .map_err(|source| ScopeExpansionError::Process {
+                cmd: cmd.to_string(),
+                source,
+            })? {
+            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+        },
+    )
 }

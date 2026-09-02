@@ -60,12 +60,14 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload};
 use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
 
+use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::{render_template, TemplateError};
 
-use super::node_exec::{fail, template_vars, NodeEnd};
+use super::node_exec::{cancelled_end, fail, template_vars, NodeEnd};
 use super::{RunCtx, RunError};
 
 /// Bound on how long any single external call (`command:`'s subprocess,
@@ -84,6 +86,13 @@ pub(super) enum ContextResolveError {
         action: String,
         #[source]
         source: std::io::Error,
+    },
+    #[error("context `{source_id}` on node `{node}`: {source}")]
+    Process {
+        node: NodeId,
+        source_id: String,
+        #[source]
+        source: crate::process::SpawnError,
     },
     #[error("context `{source_id}` on node `{node}`: {source}")]
     Template {
@@ -105,6 +114,14 @@ pub(super) enum ContextResolveError {
         EXTERNAL_CALL_TIMEOUT.as_secs()
     )]
     CommandTimedOut {
+        node: NodeId,
+        source_id: String,
+        cmd: String,
+    },
+    #[error(
+        "context `{source_id}` on node `{node}`: command `{cmd}` was stopped by a cancellation"
+    )]
+    Cancelled {
         node: NodeId,
         source_id: String,
         cmd: String,
@@ -198,22 +215,16 @@ pub(super) enum ContextResolveError {
 /// no context at all, so callers never prepend an empty header. A
 /// resolution failure is the node's own failure ("a source that fails
 /// is a failure of the node"), routed through the same `fail` every
-/// other node-level error already uses — never a `RunError`.
+/// other node-level error already uses — never a `RunError`. A
+/// `command:` source runs under `cancel`: when the token fires the
+/// command dies with its tree and the node ends as every cancelled
+/// node ends.
 pub(super) async fn resolve_and_assemble(
     ctx: &RunCtx<'_>,
     node: &Node,
+    cancel: &CancellationToken,
 ) -> Result<Result<Option<String>, NodeEnd>, RunError> {
-    if node.context.is_empty() {
-        return Ok(Ok(None));
-    }
-
-    match resolve_all(ctx, node, None, None).await {
-        Ok(block) => Ok(Ok(Some(block))),
-        Err(error) => {
-            let end = fail(ctx, node, error.to_string(), false).await?;
-            Ok(Err(end))
-        }
-    }
+    assemble(ctx, node, None, None, cancel).await
 }
 
 /// Resolved content cached across one loop node's task briefs,
@@ -237,13 +248,28 @@ pub(super) async fn resolve_for_task(
     node: &Node,
     task_id: &yunta_core::TaskId,
     memo: &StableContextMemo,
+    cancel: &CancellationToken,
+) -> Result<Result<Option<String>, NodeEnd>, RunError> {
+    assemble(ctx, node, Some(task_id), Some(memo), cancel).await
+}
+
+/// The one mapping from a resolution's result to the node's end: a
+/// block to prepend, the node's own failure, or — when `cancel` fired
+/// while a `command:` source ran — the cancelled end.
+async fn assemble(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: Option<&yunta_core::TaskId>,
+    memo: Option<&StableContextMemo>,
+    cancel: &CancellationToken,
 ) -> Result<Result<Option<String>, NodeEnd>, RunError> {
     if node.context.is_empty() {
         return Ok(Ok(None));
     }
 
-    match resolve_all(ctx, node, Some(task_id), Some(memo)).await {
+    match resolve_all(ctx, node, task_id, memo, cancel).await {
         Ok(block) => Ok(Ok(Some(block))),
+        Err(ContextResolveError::Cancelled { .. }) => Ok(Err(cancelled_end(ctx, node).await?)),
         Err(error) => {
             let end = fail(ctx, node, error.to_string(), false).await?;
             Ok(Err(end))
@@ -256,6 +282,7 @@ async fn resolve_all(
     node: &Node,
     task_id: Option<&yunta_core::TaskId>,
     memo: Option<&StableContextMemo>,
+    cancel: &CancellationToken,
 ) -> Result<String, ContextResolveError> {
     let mut sources = Vec::with_capacity(node.context.len());
     let mut stable_blocks = Vec::new();
@@ -279,7 +306,7 @@ async fn resolve_all(
         let content = match cached {
             Some(content) => content,
             None => {
-                let content = resolve_one(ctx, node, &source_id, spec).await?;
+                let content = resolve_one(ctx, node, &source_id, spec, cancel).await?;
                 if let Some(memo) = memoizable {
                     memo.cache
                         .lock()
@@ -360,10 +387,13 @@ async fn resolve_one(
     node: &Node,
     source_id: &str,
     spec: &ContextSpec,
+    cancel: &CancellationToken,
 ) -> Result<Vec<u8>, ContextResolveError> {
     match spec {
         ContextSpec::Files { files } => resolve_files(ctx, node, source_id, files).await,
-        ContextSpec::Command { command } => resolve_command(ctx, node, source_id, command).await,
+        ContextSpec::Command { command } => {
+            resolve_command(ctx, node, source_id, command, cancel).await
+        }
         ContextSpec::Artifact { artifact } => {
             resolve_artifact(ctx, node, source_id, artifact).await
         }
@@ -419,6 +449,7 @@ async fn resolve_command(
     node: &Node,
     source_id: &str,
     command: &str,
+    cancel: &CancellationToken,
 ) -> Result<Vec<u8>, ContextResolveError> {
     let vars = template_vars(ctx, node);
     let rendered = render_template(command, &vars).map_err(|e| ContextResolveError::Template {
@@ -426,34 +457,44 @@ async fn resolve_command(
         source_id: source_id.to_string(),
         source: e,
     })?;
-    let child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&rendered)
-        .current_dir(ctx.worktree)
-        .output();
-    let output = tokio::time::timeout(EXTERNAL_CALL_TIMEOUT, child)
+    let command = GovernedCommand::shell(ctx.worktree, &rendered).timeout(EXTERNAL_CALL_TIMEOUT);
+    let (status, stdout, stderr) = match spawn_governed(command, ctx.supervision(cancel))
         .await
-        .map_err(|_elapsed| ContextResolveError::CommandTimedOut {
+        .map_err(|source| ContextResolveError::Process {
             node: node.id.clone(),
             source_id: source_id.to_string(),
-            cmd: rendered.clone(),
-        })?
-        .map_err(|source| ContextResolveError::Io {
-            node: node.id.clone(),
-            source_id: source_id.to_string(),
-            action: format!("run `{rendered}`"),
             source,
-        })?;
-    if !output.status.success() {
+        })? {
+        Outcome::Exited {
+            status,
+            stdout,
+            stderr,
+        } => (status, stdout, stderr),
+        Outcome::TimedOut { .. } => {
+            return Err(ContextResolveError::CommandTimedOut {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                cmd: rendered,
+            });
+        }
+        Outcome::Cancelled { .. } => {
+            return Err(ContextResolveError::Cancelled {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                cmd: rendered,
+            });
+        }
+    };
+    if !status.success() {
         return Err(ContextResolveError::CommandFailed {
             node: node.id.clone(),
             source_id: source_id.to_string(),
             cmd: rendered,
-            status: output.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            status: status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
         });
     }
-    Ok(output.stdout)
+    Ok(stdout)
 }
 
 async fn resolve_artifact(

@@ -32,6 +32,7 @@ mod modes;
 mod pack_audit;
 mod pack_requires;
 mod permissions;
+pub mod process;
 mod process_registry;
 mod progress;
 mod questions;

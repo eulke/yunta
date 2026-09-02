@@ -13,11 +13,12 @@ use yunta_core::events::{
     RunnerResolvedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{
-    AdapterId, AgentName, HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind, Pid,
+    AdapterId, AgentName, HookFailurePolicy, HookStep, Hooks, JoinPolicy, Node, NodeKind,
     PromptSource,
 };
 
 use crate::artifacts::close_artifacts;
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 use crate::replay::{derive, NodeState};
 use crate::runner::resolve_runner;
 use crate::scope::scope_check;
@@ -477,56 +478,21 @@ async fn run_hook(
         return Ok(HookRun::Violation(rule));
     }
 
-    let mut std_cmd = std::process::Command::new("sh");
-    std_cmd.arg("-c").arg(&rendered).current_dir(ctx.worktree);
-    // A timed-out hook's whole process tree must die together, not
-    // just the `sh` that ran it — same reasoning as the adapter session's
-    // own process group (yunta-adapters::claude_code).
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        std_cmd.process_group(0);
+    // A hook shares the engine's streams and is bounded by its own
+    // timeout and by the run's cancellation; either kills its whole
+    // process tree.
+    let mut command = GovernedCommand::shell(ctx.worktree, &rendered)
+        .stdout(Capture::Inherit)
+        .stderr(Capture::Inherit);
+    if let Some(seconds) = step.timeout_seconds {
+        command = command.timeout(std::time::Duration::from_secs(seconds));
     }
-    let mut child = tokio::process::Command::from(std_cmd)
-        .spawn()
-        .map_err(|source| RunError::Io {
-            context: format!("spawn hook `{rendered}`"),
-            source,
-        })?;
-    let _pgid_registration = crate::process_registry::register(
-        ctx.process_registry.as_ref(),
-        crate::process_registry::child_pid(&child),
-    );
-
-    let exit_code = match step.timeout_seconds.map(std::time::Duration::from_secs) {
-        None => child
-            .wait()
-            .await
-            .map_err(|source| RunError::Io {
-                context: format!("run hook `{rendered}`"),
-                source,
-            })?
-            .code()
-            .unwrap_or(-1),
-        Some(timeout) => match tokio::time::timeout(timeout, child.wait()).await {
-            Ok(status) => status
-                .map_err(|source| RunError::Io {
-                    context: format!("run hook `{rendered}`"),
-                    source,
-                })?
-                .code()
-                .unwrap_or(-1),
-            Err(_elapsed) => {
-                if let Some(pid) = crate::process_registry::child_pid(&child) {
-                    kill_process_group(pid).await;
-                }
-                let _ = child.wait().await;
-                // Never a real process exit code (those are 0..=255) —
-                // distinct from -1's "couldn't even render/run" so a
-                // timeout is diagnosable from the event alone.
-                -2
-            }
-        },
+    let exit_code = match spawn_governed(command, ctx.supervision(&ctx.root_cancel)).await? {
+        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+        // Never a real process exit code (those are 0..=255) — distinct
+        // from -1's "couldn't even render/run", so a hook the engine
+        // stopped is diagnosable from the event alone.
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
     };
 
     ctx.emit(
@@ -550,18 +516,6 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
         Some(yunta_core::NodePermissions::Full) => PermissionProfile::Full,
         Some(yunta_core::NodePermissions::Edit) | None => PermissionProfile::Edit,
     }
-}
-
-/// Sends `SIGKILL` to `pid`'s whole process group — the `--` before
-/// the negative pid is load-bearing, see `claude_code::signal_group`'s
-/// doc comment for the procps-ng behavior this avoids.
-pub(super) async fn kill_process_group(pid: Pid) {
-    let _ = tokio::process::Command::new("kill")
-        .arg("-KILL")
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .status()
-        .await;
 }
 
 /// A node's hooks with `node_defaults.hooks` filled in per phase:
@@ -895,103 +849,49 @@ async fn execute_bash(
         return fail(ctx, node, rule, false).await;
     }
 
-    let mut std_cmd = std::process::Command::new("sh");
-    std_cmd
-        .arg("-c")
-        .arg(&rendered)
-        .current_dir(ctx.worktree)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        std_cmd.process_group(0);
-    }
-    let mut child = tokio::process::Command::from(std_cmd)
-        .spawn()
-        .map_err(|source| RunError::Io {
-            context: format!("spawn bash node `{}`", node.id),
-            source,
-        })?;
-    let _pgid_registration = crate::process_registry::register(
-        ctx.process_registry.as_ref(),
-        crate::process_registry::child_pid(&child),
-    );
+    let command = GovernedCommand::shell(ctx.worktree, &rendered);
+    let (status, stdout_bytes, stderr_bytes) =
+        match spawn_governed(command, ctx.supervision(cancel)).await? {
+            Outcome::Exited {
+                status,
+                stdout,
+                stderr,
+            } => (status, stdout, stderr),
+            // A bash node has no timeout of its own: the only way it
+            // stops early is the run's cancellation.
+            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => {
+                return cancelled_end(ctx, node).await;
+            }
+        };
+    // Captured regardless of exit status — a
+    // failing `lint` is exactly the case a corrective node's own
+    // `node-output` context wants to read.
+    crate::run::context_resolve::write_node_output(
+        ctx.run_dir,
+        &node.id,
+        &stdout_bytes,
+        &stderr_bytes,
+    )?;
 
-    let stderr_task = child.stderr.take().map(|mut pipe| {
-        tokio::spawn(async move {
-            use tokio::io::AsyncReadExt;
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf).await;
-            buf
-        })
-    });
-    let stdout_task = child.stdout.take().map(|mut pipe| {
-        tokio::spawn(async move {
-            use tokio::io::AsyncReadExt;
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf).await;
-            buf
-        })
-    });
-
-    tokio::select! {
-        _ = cancel.cancelled() => {
-            if let Some(pid) = crate::process_registry::child_pid(&child) {
-                kill_process_group(pid).await;
-            }
-            let _ = child.wait().await;
-            if let Some(task) = stderr_task {
-                let _ = task.await;
-            }
-            if let Some(task) = stdout_task {
-                let _ = task.await;
-            }
-            cancelled_end(ctx, node).await
-        }
-        status = child.wait() => {
-            let status = status.map_err(|source| RunError::Io {
-                context: format!("run bash node `{}`", node.id),
-                source,
-            })?;
-            let stderr_bytes = match stderr_task {
-                Some(task) => task.await.unwrap_or_default(),
-                None => Vec::new(),
-            };
-            let stdout_bytes = match stdout_task {
-                Some(task) => task.await.unwrap_or_default(),
-                None => Vec::new(),
-            };
-            // Captured regardless of exit status — a
-            // failing `lint` is exactly the case a corrective node's own
-            // `node-output` context wants to read.
-            crate::run::context_resolve::write_node_output(
-                ctx.run_dir,
-                &node.id,
-                &stdout_bytes,
-                &stderr_bytes,
-            )?;
-
-            if status.success() {
-                close_node(ctx, node, "exit 0".to_string(), TokenUsage::default()).await
-            } else {
-                let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-                    .lines()
-                    .rev()
-                    .take(20)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                fail(
-                    ctx,
-                    node,
-                    format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
-                    false,
-                ).await
-            }
-        }
+    if status.success() {
+        close_node(ctx, node, "exit 0".to_string(), TokenUsage::default()).await
+    } else {
+        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
+            .lines()
+            .rev()
+            .take(20)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        fail(
+            ctx,
+            node,
+            format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
+            false,
+        )
+        .await
     }
 }
 
@@ -1183,10 +1083,11 @@ async fn execute_prompt(
         Ok(rendered) => rendered,
         Err(end) => return Ok(end),
     };
-    let context_block = match super::context_resolve::resolve_and_assemble(ctx, node).await? {
-        Ok(block) => block,
-        Err(end) => return Ok(end),
-    };
+    let context_block =
+        match super::context_resolve::resolve_and_assemble(ctx, node, cancel).await? {
+            Ok(block) => block,
+            Err(end) => return Ok(end),
+        };
     let rendered = match context_block {
         Some(block) => format!("{block}\n{rendered}"),
         None => rendered,

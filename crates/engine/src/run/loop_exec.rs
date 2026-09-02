@@ -217,8 +217,14 @@ pub(super) async fn execute_loop(
         // session is spent.
         let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
         for task in &batch {
-            match super::context_resolve::resolve_for_task(ctx, node, &task.id, &context_memo)
-                .await?
+            match super::context_resolve::resolve_for_task(
+                ctx,
+                node,
+                &task.id,
+                &context_memo,
+                cancel,
+            )
+            .await?
             {
                 Ok(Some(block)) => briefs.push(format!("{block}\n\n{instruction}")),
                 Ok(None) => briefs.push(instruction.clone()),
@@ -343,6 +349,7 @@ pub(super) async fn execute_loop(
                         &task_worktree,
                         &ctx.memo,
                         &mut last_check_seq,
+                        cancel,
                     )
                     .await?;
                     // A rejected integration goes back to ready on the
@@ -774,6 +781,7 @@ async fn dispatch_task_in_isolation<'a>(
             max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
+            registry: ctx.process_registry.as_ref(),
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),
@@ -813,6 +821,7 @@ async fn integrate_task(
     task_worktree: &Path,
     memo: &Memo,
     last_check_seq: &mut Seq,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<IntegrationOutcome, RunError> {
     commit_task_work(task_worktree, task).await?;
 
@@ -846,7 +855,7 @@ async fn integrate_task(
         )));
     }
 
-    let post_runs = post_check(task, task_worktree, memo).await?;
+    let post_runs = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
     *last_check_seq = ctx
         .emit(
             Some(&node.id),

@@ -23,6 +23,7 @@ use yunta_core::events::{CriterionType, EventPayload, TokenUsage};
 use yunta_core::Criterion;
 use yunta_core::{AdapterError, Task, TaskId};
 
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 use crate::scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 
 #[derive(Debug, Error)]
@@ -32,7 +33,7 @@ pub enum TaskCycleError {
         task: TaskId,
         cmd: String,
         #[source]
-        source: std::io::Error,
+        source: crate::process::SpawnError,
     },
     #[error("adapter failed to spawn a session for task `{task}`")]
     Spawn {
@@ -278,21 +279,28 @@ async fn run_criterion(
     task_id: &TaskId,
     cwd: &Path,
     cmd: &str,
+    supervision: Supervision<'_>,
 ) -> Result<(i32, u64), TaskCycleError> {
     let started = std::time::Instant::now();
-    let status = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(cwd)
-        .status()
+    // A criterion shares the engine's streams: its output is the
+    // person's to read, its exit code the engine's to record.
+    let command = GovernedCommand::shell(cwd, cmd)
+        .stdout(Capture::Inherit)
+        .stderr(Capture::Inherit);
+    let exit_code = match spawn_governed(command, supervision)
         .await
         .map_err(|source| TaskCycleError::Criterion {
             task: task_id.clone(),
             cmd: cmd.to_string(),
             source,
-        })?;
+        })? {
+        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+        // Stopped by the engine before it could answer — never a real
+        // exit code, so the record says so.
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+    };
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    Ok((status.code().unwrap_or(-1), duration_ms))
+    Ok((exit_code, duration_ms))
 }
 
 /// Tree hash computed once per call and shared across every criterion in
@@ -305,6 +313,7 @@ async fn run_all_criteria(
     criteria: &[Criterion],
     cwd: &Path,
     memo: &Memo,
+    supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let tree_hash = tree_hash(cwd).await?;
     let mut runs = Vec::with_capacity(criteria.len());
@@ -312,7 +321,8 @@ async fn run_all_criteria(
         let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {
             Some(exit_code) => (exit_code, true, None),
             None => {
-                let (exit_code, duration_ms) = run_criterion(task_id, cwd, &criterion.cmd).await?;
+                let (exit_code, duration_ms) =
+                    run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
                 memo.put(&criterion.cmd, &tree_hash, exit_code);
                 memo.record_duration(&criterion.cmd, duration_ms);
                 (exit_code, false, Some(duration_ms))
@@ -341,13 +351,14 @@ pub async fn pre_check(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
+    supervision: Supervision<'_>,
 ) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
     let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
     // Stable sort: no-history criteria (u64::MAX key) keep declared
     // order among themselves.
     ordered.sort_by_key(|criterion| memo.median_duration(&criterion.cmd).unwrap_or(u64::MAX));
     let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
-    let runs = run_all_criteria(&task.id, &ordered, cwd, memo).await?;
+    let runs = run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await?;
 
     let mut outcome = PreCheckOutcome::Red;
     for run in &runs {
@@ -373,8 +384,9 @@ pub async fn post_check(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
+    supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    run_all_criteria(&task.id, &task.criteria, cwd, memo).await
+    run_all_criteria(&task.id, &task.criteria, cwd, memo, supervision).await
 }
 
 /// Everything about *how* one node's sessions open, resolved
@@ -678,6 +690,8 @@ pub struct AttemptEnv<'a> {
     pub max_retries: u32,
     pub budget: Budget,
     pub memo: &'a Memo,
+    /// Where every criterion's process registers for the run.
+    pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
 }
 
 /// Runs a task through the full cycle: pre-check once, then
@@ -702,7 +716,12 @@ pub async fn run_task(
         max_retries,
         budget,
         memo,
+        registry,
     } = env;
+    let supervision = Supervision {
+        registry,
+        cancel: Some(cancel),
+    };
     let ScopeGovernance {
         permissions,
         profile,
@@ -722,7 +741,7 @@ pub async fn run_task(
         }
     }
 
-    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo).await?;
+    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
 
     if !matches!(pre_outcome, PreCheckOutcome::Red) {
         let reason = match pre_outcome {
@@ -837,6 +856,7 @@ pub async fn run_task(
                         grants,
                         &expansion_request,
                         cwd,
+                        supervision,
                     )
                     .await
                     .map_err(|source| TaskCycleError::ScopeExpansion {
@@ -864,7 +884,7 @@ pub async fn run_task(
             .chain(granted_paths.iter().cloned())
             .collect();
 
-        let post_runs = post_check(task, cwd, memo).await?;
+        let post_runs = post_check(task, cwd, memo, supervision).await?;
         // "el diff final se evalúa contra scope declarado más
         // ampliaciones autorizadas" — never against a denied or escalated
         // request's paths.

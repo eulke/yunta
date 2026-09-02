@@ -3,6 +3,7 @@ use std::path::Path;
 use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
 use yunta_core::Criterion;
 use yunta_core::Task;
+use yunta_engine::process::Supervision;
 use yunta_engine::{
     run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
 };
@@ -81,6 +82,7 @@ outcome: { type: completed, summary: "wrote it" }
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -134,6 +136,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -173,6 +176,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -221,6 +225,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -276,6 +281,7 @@ outcome: { type: completed, summary: "done" }
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -331,6 +337,7 @@ sessions:
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -368,6 +375,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -398,7 +406,7 @@ async fn pre_check_and_post_check_run_every_criterion() {
         vec![cmd("test -f a.txt"), cmd("test -f b.txt")],
     );
     let memo = Memo::new("config-hash");
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
     assert_eq!(runs.len(), 2);
@@ -425,10 +433,14 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     );
     let memo = Memo::new("config-hash");
 
-    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo).await.unwrap();
+    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+        .await
+        .unwrap();
     assert!(!first[0].reused, "the first check must actually execute");
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo).await.unwrap();
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+        .await
+        .unwrap();
     assert!(
         second[0].reused,
         "an unchanged tree and config must reuse the cached result"
@@ -457,12 +469,16 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
     );
     let memo = Memo::new("config-hash");
 
-    yunta_engine::pre_check(&t, &repo, &memo).await.unwrap();
+    yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+        .await
+        .unwrap();
     // Dirty the repo's own tree — the next check must see a different
     // tree_hash (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo).await.unwrap();
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+        .await
+        .unwrap();
     assert!(
         !second[0].reused,
         "a changed tree must invalidate the memoized result"
@@ -499,6 +515,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 max_retries: 0,
                 budget,
                 memo: &memo,
+                registry: None,
             },
             ScopeGovernance {
                 permissions: None,
@@ -558,6 +575,7 @@ outcome: { type: completed, summary: "should never be reached" }
             max_retries: 0,
             budget,
             memo: &memo,
+            registry: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -591,7 +609,7 @@ async fn pre_check_orders_criteria_by_learned_median_duration() {
     let t = task("T1", &["**"], vec![cmd(slow), cmd(fast)]);
 
     // First pass: no history — declared order, real durations recorded.
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
     assert_eq!(outcome, PreCheckOutcome::Red);
@@ -605,7 +623,7 @@ async fn pre_check_orders_criteria_by_learned_median_duration() {
     // The tree changes (no memo reuse), and the learned medians reorder:
     // the historically-fast criterion now runs first to fail fast.
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
     assert_eq!(
@@ -627,7 +645,7 @@ async fn reused_criteria_carry_no_duration() {
     let memo = Memo::new("config-hash");
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo)
+    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
     assert!(!runs[0].reused);
@@ -635,7 +653,7 @@ async fn reused_criteria_carry_no_duration() {
 
     // Same tree: the memo answers, and a reused result has no duration
     // of its own (nothing ran).
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo)
+    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
     assert!(runs[0].reused);
@@ -662,7 +680,7 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     for (i, permutation) in permutations.drain(..).enumerate() {
         let memo = Memo::new(format!("config-{i}"));
         let t = task("T1", &["**"], permutation);
-        let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo)
+        let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
             .await
             .unwrap();
         verdicts.push(outcome);

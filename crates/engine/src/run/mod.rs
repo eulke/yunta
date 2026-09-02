@@ -154,6 +154,9 @@ pub enum RunError {
     },
 
     #[error(transparent)]
+    Process(#[from] crate::process::SpawnError),
+
+    #[error(transparent)]
     TaskCycle(#[from] TaskCycleError),
 
     #[error(transparent)]
@@ -221,6 +224,18 @@ pub(crate) struct RunCtx<'a> {
 }
 
 impl RunCtx<'_> {
+    /// The supervision every subprocess of this run gets: its registry,
+    /// and `cancel` — a node's own token, or the run's root token.
+    pub(crate) fn supervision<'a>(
+        &'a self,
+        cancel: &'a CancellationToken,
+    ) -> crate::process::Supervision<'a> {
+        crate::process::Supervision {
+            registry: self.process_registry.as_ref(),
+            cancel: Some(cancel),
+        }
+    }
+
     /// Appends one event and returns the seq storage assigned to it. The
     /// timestamp is read from the run's clock here, before the hop to
     /// the blocking thread that writes it.

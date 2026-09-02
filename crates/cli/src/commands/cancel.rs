@@ -18,7 +18,8 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use yunta_core::{events::EventPayload, Clock, Pid, RunId, SystemClock};
+use yunta_core::{events::EventPayload, Clock, RunId, SystemClock};
+use yunta_engine::process::kill_process_group;
 use yunta_engine::NodeState;
 use yunta_storage::AsyncStorage;
 
@@ -136,7 +137,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
                      — escalating to SIGKILL on its process groups"
                 );
                 for pgid in &registry.process_groups {
-                    kill_group(*pgid);
+                    kill_process_group(*pgid).await;
                 }
                 let _ = std::process::Command::new("kill")
                     .args(["-KILL", &registry.engine_pid.to_string()])
@@ -148,7 +149,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
 
     // Case 2 — the engine crashed; its leftovers are ours to clean.
     for pgid in &registry.process_groups {
-        kill_group(*pgid);
+        kill_process_group(*pgid).await;
     }
     let paused = storage
         .append(
@@ -178,13 +179,4 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         registry.process_groups.len()
     );
     ExitCode::SUCCESS
-}
-
-/// SIGKILL to a whole process group — the `--` before the negative pid
-/// is load-bearing (procps-ng parses `-KILL -123` as two flags without
-/// it). A group already gone is the desired end state, not an error.
-fn kill_group(pgid: Pid) {
-    let _ = std::process::Command::new("kill")
-        .args(["-KILL", "--", &format!("-{pgid}")])
-        .status();
 }

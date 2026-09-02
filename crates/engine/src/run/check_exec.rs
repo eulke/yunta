@@ -15,6 +15,7 @@ use crate::replay::derive;
 
 use super::node_exec::{close_node, fail, NodeEnd};
 use super::{RunCtx, RunError};
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 
 /// `kind: check`: the engine evaluates its own data,
 /// never a person — no session, no tokens spent. Each builtin's config
@@ -62,63 +63,15 @@ async fn run_command(
     cmd: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<CommandRun, RunError> {
-    let mut std_cmd = std::process::Command::new("sh");
-    std_cmd
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(cwd)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        std_cmd.process_group(0);
-    }
-    let mut child = tokio::process::Command::from(std_cmd)
-        .spawn()
-        .map_err(|source| RunError::Io {
-            context: format!("run check command `{cmd}`"),
-            source,
-        })?;
-    let _pgid_registration = crate::process_registry::register(
-        ctx.process_registry.as_ref(),
-        crate::process_registry::child_pid(&child),
-    );
-
-    let stdout_task = child.stdout.take().map(|mut pipe| {
-        tokio::spawn(async move {
-            use tokio::io::AsyncReadExt;
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf).await;
-            buf
-        })
-    });
-
-    tokio::select! {
-        _ = cancel.cancelled() => {
-            if let Some(pid) = crate::process_registry::child_pid(&child) {
-                super::node_exec::kill_process_group(pid).await;
-            }
-            let _ = child.wait().await;
-            if let Some(task) = stdout_task {
-                let _ = task.await;
-            }
-            Ok(CommandRun::Cancelled)
-        }
-        status = child.wait() => {
-            let status = status.map_err(|source| RunError::Io {
-                context: format!("run check command `{cmd}`"),
-                source,
-            })?;
-            let stdout_bytes = match stdout_task {
-                Some(task) => task.await.unwrap_or_default(),
-                None => Vec::new(),
-            };
-            Ok(CommandRun::Done(CommandOutput {
-                exit_code: status.code().unwrap_or(-1),
-                stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-            }))
-        }
+    let command = GovernedCommand::shell(cwd, cmd).stderr(Capture::Discard);
+    match spawn_governed(command, ctx.supervision(cancel)).await? {
+        Outcome::Exited { status, stdout, .. } => Ok(CommandRun::Done(CommandOutput {
+            exit_code: status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        })),
+        // A check command has no timeout of its own: stopping early
+        // means the run was cancelled.
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => Ok(CommandRun::Cancelled),
     }
 }
 
