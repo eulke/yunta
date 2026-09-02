@@ -17,6 +17,7 @@ mod ledger;
 mod manifest;
 mod pack;
 mod questions;
+mod secret;
 mod workflow;
 pub mod yaml;
 
@@ -41,6 +42,7 @@ pub use pack::{
     PackManifest, PackManifestError, PackRequires, RequiredRole,
 };
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use secret::Secret;
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
     ContextSpec, Coordination, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks,

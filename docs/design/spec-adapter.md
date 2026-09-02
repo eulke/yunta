@@ -74,8 +74,10 @@ pub struct SessionRequest {
     /// Perfil de permisos del nodo.
     pub permissions: PermissionProfile,   // ReadOnly | Edit | Full
     /// Env vars para la sesión. Los secretos llegan SOLO por acá,
-    /// ya resueltos por el engine desde el manifest (I12).
-    pub env: HashMap<String, String>,
+    /// ya resueltos por el engine desde el manifest (I12), envueltos en
+    /// `Secret`: `Debug` imprime `[redacted]` y el valor se expone una
+    /// sola vez, al construir el entorno del hijo.
+    pub env: HashMap<String, Secret<String>>,
     /// Globs de scope si el nodo/tarea los declara y el adapter
     /// tiene `edit_hooks`. El adapter DEBE ignorarlo (no fallar)
     /// si no declaró la capacidad: el engine ya degradó y avisó.
@@ -181,6 +183,11 @@ telemetría, no evidencia.
   contenido de archivos, prompts completos ni valores de env. El engine además
   redacta todo valor de secreto conocido antes de persistir (I12): defensa en
   profundidad, no permiso para descuidarse.
+- **O5. El prompt viaja por stdin**: el adapter escribe el prompt en la entrada
+  estándar del CLI y cierra el pipe; nunca lo pasa como argumento, donde cualquier
+  proceso de la máquina lo leería en la lista de procesos. El CLI que termina antes
+  de leerlo cierra el pipe de su lado y su stream lo reporta (O2); la escritura no
+  es un fallo del adapter.
 - **O4. Presupuesto colaborativo, enforcement del engine**: el adapter pasa los
   límites al CLI si el CLI los soporta; el engine corta por `interrupt → kill`
   cuando el conteo de `Usage` o el timeout lo exigen, tenga o no ayuda del CLI.

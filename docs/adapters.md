@@ -32,6 +32,12 @@ itself, which wins) names a custom agent definition, for adapters that
 support one (`custom_agents` capability) — an adapter that doesn't declares
 this openly rather than silently ignoring the field.
 
+Whatever the adapter, the session's prompt reaches the CLI on its standard
+input, never as a command-line argument, so it is not readable from the
+process list; and the values of the secrets a config declares live only in
+the CLI's own environment — the engine hands them over wrapped, prints them
+as `[redacted]` in every diagnostic, and never writes them to the event log.
+
 `adapters:` (a sibling of `runners:`) overrides settings per adapter name —
 most commonly `binary:` when the CLI isn't called `claude` or `codex`, or
 isn't on `PATH` under that name:

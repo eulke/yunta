@@ -18,7 +18,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use yunta_core::{AdapterSettings, Capabilities, Result, SessionId, YuntaError};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::session::{
+    write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
+};
 
 pub struct ClaudeCodeAdapter {
     binary: PathBuf,
@@ -55,7 +57,8 @@ impl ClaudeCodeAdapter {
             args.push(agent.clone());
         }
         args.extend(permissions::permission_args(req.permissions));
-        args.push(req.prompt.clone());
+        // The prompt arrives on stdin: `-p` with no positional prompt
+        // reads it there, and nothing of it shows in the process list.
         args
     }
 
@@ -71,8 +74,8 @@ impl ClaudeCodeAdapter {
         std_cmd
             .args(&args)
             .current_dir(&req.cwd)
-            .envs(&req.env)
-            .stdin(Stdio::null())
+            .envs(req.env.iter().map(|(name, value)| (name, value.expose())))
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // The whole session's process tree must die together on
@@ -97,6 +100,11 @@ impl ClaudeCodeAdapter {
         let pid = child.id().ok_or_else(|| YuntaError::Adapter {
             adapter: "claude-code".to_string(),
             message: "the claude subprocess exited before it could be tracked".to_string(),
+        })?;
+
+        let stdin = child.stdin.take().ok_or_else(|| YuntaError::Adapter {
+            adapter: "claude-code".to_string(),
+            message: "the claude subprocess has no stdin pipe".to_string(),
         })?;
 
         let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
@@ -132,6 +140,7 @@ impl ClaudeCodeAdapter {
             let _ = child.wait().await;
         });
         tokio::spawn(drain_stderr(stderr));
+        write_prompt(stdin, &req.prompt, "claude-code").await?;
 
         Ok(Box::new(ClaudeCodeSession {
             pid,

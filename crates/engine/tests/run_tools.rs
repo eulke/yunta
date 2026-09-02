@@ -137,7 +137,7 @@ async fn client_for(
     rmcp::service::RunningService<rmcp::RoleClient, ()>,
     Box<rmcp::service::ClientInitializeError>,
 > {
-    let token = token_override.unwrap_or(&session.endpoint.token);
+    let token = token_override.unwrap_or(session.endpoint.token.expose());
     // rmcp prepends `Bearer ` itself — pass the bare token.
     let config = StreamableHttpClientTransportConfig::with_uri(session.endpoint.url.clone())
         .auth_header(token.to_string());
@@ -428,7 +428,7 @@ async fn dropping_the_session_closes_the_endpoint() {
     let bench = Bench::new();
     let session = bench.listener("solo", None).await;
     let url = session.endpoint.url.clone();
-    let token = session.endpoint.token.clone();
+    let token = session.endpoint.token.expose().clone();
     drop(session);
     // Give the graceful shutdown a beat to release the socket.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

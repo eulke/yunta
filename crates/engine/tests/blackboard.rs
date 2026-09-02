@@ -338,7 +338,10 @@ sessions:
         "got: {}",
         endpoint.url
     );
-    assert!(endpoint.token.len() >= 32, "token must be high-entropy");
+    assert!(
+        endpoint.token.expose().len() >= 32,
+        "token must be high-entropy"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

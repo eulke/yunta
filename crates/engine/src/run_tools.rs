@@ -209,7 +209,10 @@ pub async fn open_session_listener(
     });
 
     Ok(RunToolsSession {
-        endpoint: RunToolsEndpoint { url, token },
+        endpoint: RunToolsEndpoint {
+            url,
+            token: token.into(),
+        },
         shutdown,
         server,
     })

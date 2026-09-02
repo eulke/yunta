@@ -16,7 +16,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use thiserror::Error;
-use yunta_core::{Capabilities, Result, SessionId, YuntaError};
+use yunta_core::{Capabilities, Result, Secret, SessionId, YuntaError};
 
 /// A node's declared write scope, passed through to an adapter with
 /// `edit_hooks` so it can block edits outside it as they happen.
@@ -49,8 +49,9 @@ pub struct SessionRequest {
     pub agent: Option<String>,
     pub permissions: PermissionProfile,
     /// Secrets arrive here, already resolved from the manifest — never
-    /// any other way.
-    pub env: HashMap<String, String>,
+    /// any other way — and stay wrapped until the child process is
+    /// spawned.
+    pub env: HashMap<String, Secret<String>>,
     /// Globs the node/task declares, if the adapter has `edit_hooks`. An
     /// adapter without that capability ignores this field rather than
     /// failing — the engine already degraded and warned.
@@ -86,7 +87,38 @@ pub struct SessionRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunToolsEndpoint {
     pub url: String,
-    pub token: String,
+    pub token: Secret<String>,
+}
+
+/// Hands `prompt` to a just-spawned CLI on its stdin and closes the
+/// pipe, so the CLI sees end-of-input and the prompt never appears in
+/// an argument list. Called once the CLI's output is being read, so a
+/// CLI that talks before it listens cannot deadlock the exchange. A CLI
+/// that exits before reading closes the pipe on its side; that is the
+/// session's own ending, reported by its stream, never a failure of the
+/// write.
+pub async fn write_prompt(
+    mut stdin: tokio::process::ChildStdin,
+    prompt: &str,
+    adapter: &'static str,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let io_error = |action: &str, source: std::io::Error| YuntaError::AdapterIo {
+        adapter: adapter.to_string(),
+        action: action.to_string(),
+        source,
+    };
+    match stdin.write_all(prompt.as_bytes()).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+        Err(e) => return Err(io_error("write the prompt to the subprocess's stdin", e)),
+    }
+    match stdin.shutdown().await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(io_error("close the subprocess's stdin", e)),
+    }
 }
 
 /// Health check result (`probe()` — binary present, version compatible,

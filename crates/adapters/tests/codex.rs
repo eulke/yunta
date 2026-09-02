@@ -102,7 +102,7 @@ async fn a_successful_session_opens_streams_usage_and_completes() {
     req.model = Some("gpt-5-codex".to_string());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -143,7 +143,7 @@ async fn a_failed_turn_ends_the_stream_with_failed_and_retryable() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -173,7 +173,7 @@ async fn a_command_execution_item_maps_to_tool_use_with_the_command_as_digest() 
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -200,7 +200,7 @@ async fn a_file_change_item_maps_to_tool_use_with_the_first_path_as_digest() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -227,7 +227,7 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_with_server_and_tool_as_digest()
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -254,7 +254,7 @@ async fn a_web_search_item_maps_to_tool_use_with_the_query_as_digest() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -281,7 +281,7 @@ async fn a_reasoning_item_is_never_surfaced() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -301,7 +301,7 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -318,7 +318,7 @@ async fn a_session_with_no_requested_model_falls_back_to_a_named_default() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -344,11 +344,11 @@ async fn each_permission_profile_maps_to_its_own_sandbox_mode() {
         req.permissions = profile;
         req.env.insert(
             "CODEX_STUB_ARGS_FILE".to_string(),
-            args_file.display().to_string(),
+            args_file.display().to_string().into(),
         );
         req.env.insert(
             "CODEX_STUB_LINES_FILE".to_string(),
-            lines.display().to_string(),
+            lines.display().to_string().into(),
         );
         let session = adapter().spawn(req).await.unwrap();
         let _ = drain(session).await;
@@ -373,11 +373,11 @@ async fn model_is_passed_through_as_its_own_flag() {
     req.model = Some("gpt-5-codex".to_string());
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string(),
+        args_file.display().to_string().into(),
     );
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -400,11 +400,11 @@ async fn resuming_passes_the_thread_id_to_the_resume_subcommand() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string(),
+        args_file.display().to_string().into(),
     );
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
+        lines.display().to_string().into(),
     );
     let session_id = SessionId::from("thread-to-resume");
     let session = adapter().resume(&session_id, req).await.unwrap();
@@ -427,10 +427,10 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string(),
+        child_pid_file.display().to_string().into(),
     );
     req.env
-        .insert("CODEX_STUB_HANG".to_string(), "1".to_string());
+        .insert("CODEX_STUB_HANG".to_string(), "1".to_string().into());
     let mut session = adapter().spawn(req).await.unwrap();
 
     for _ in 0..50 {
@@ -461,4 +461,57 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(!grandchild_running, "grandchild process survived kill()");
+}
+
+#[tokio::test]
+async fn prompt_travels_by_stdin_never_argv() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let stdin_file = dir.path().join("stdin.txt");
+    write_lines(dir.path(), ".codex-stub-lines.jsonl", &[]);
+    let mut req = request(dir.path().to_path_buf());
+    req.prompt = "the whole brief, with a --flag-looking line".to_string();
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.to_str().unwrap().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_STDIN_FILE".to_string(),
+        stdin_file.to_str().unwrap().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    drain(session).await;
+
+    let args = std::fs::read_to_string(&args_file).unwrap();
+    assert!(
+        !args.contains("the whole brief"),
+        "the prompt must never be an argument (visible in `ps`): {args}"
+    );
+    let stdin = std::fs::read_to_string(&stdin_file).unwrap();
+    assert_eq!(stdin, "the whole brief, with a --flag-looking line");
+}
+
+#[test]
+fn debug_of_a_session_request_never_prints_secrets() {
+    let mut req = request(std::path::PathBuf::from("/tmp"));
+    req.env
+        .insert("API_TOKEN".to_string(), "hunter2".to_string().into());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:1/mcp".to_string(),
+        token: "bearer-secret".to_string().into(),
+    });
+    let debug = format!("{req:?}");
+    assert!(
+        debug.contains("API_TOKEN"),
+        "the name stays visible: {debug}"
+    );
+    assert!(
+        !debug.contains("hunter2"),
+        "the value never prints: {debug}"
+    );
+    assert!(
+        !debug.contains("bearer-secret"),
+        "the token never prints: {debug}"
+    );
+    assert!(debug.contains("[redacted]"), "{debug}");
 }

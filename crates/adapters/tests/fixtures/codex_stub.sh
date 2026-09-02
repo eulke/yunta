@@ -4,6 +4,7 @@
 # file's own comment for the rationale each knob shares.
 #
 # - `--version`: replies like the real CLI and exits.
+# - $CODEX_STUB_STDIN_FILE, if set: everything read from stdin — the prompt.
 # - $CODEX_STUB_ARGS_FILE, if set: every argv entry, one per line.
 # - $CODEX_STUB_CHILD_PID_FILE, if set: spawns a background `sleep` of
 #   its own and records its pid — a grandchild kill() must also reach.
@@ -13,6 +14,10 @@
 
 if [ -n "$CODEX_STUB_ARGS_FILE" ]; then
   printf '%s\n' "$@" > "$CODEX_STUB_ARGS_FILE"
+fi
+
+if [ -n "$CODEX_STUB_STDIN_FILE" ]; then
+  cat > "$CODEX_STUB_STDIN_FILE"
 fi
 
 if [ "$1" = "--version" ]; then

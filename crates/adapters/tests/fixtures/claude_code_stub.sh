@@ -4,6 +4,7 @@
 # no-real-LLM rule.
 #
 # - `--version`: replies like the real CLI and exits.
+# - $CLAUDE_STUB_STDIN_FILE, if set: everything read from stdin — the prompt.
 # - $CLAUDE_STUB_ARGS_FILE, if set: every argv entry, one per line — lets
 #   tests assert the exact CLI invocation the adapter built (permission
 #   flags, --model, --resume, ...) without exposing that logic publicly.
@@ -21,6 +22,10 @@
 
 if [ -n "$CLAUDE_STUB_ARGS_FILE" ]; then
   printf '%s\n' "$@" > "$CLAUDE_STUB_ARGS_FILE"
+fi
+
+if [ -n "$CLAUDE_STUB_STDIN_FILE" ]; then
+  cat > "$CLAUDE_STUB_STDIN_FILE"
 fi
 
 if [ "$1" = "--version" ]; then

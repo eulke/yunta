@@ -43,7 +43,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use yunta_core::{AdapterSettings, Capabilities, Result, SessionId, YuntaError};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::session::{
+    write_prompt, Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest,
+};
 
 pub struct CodexAdapter {
     binary: PathBuf,
@@ -70,7 +72,9 @@ impl CodexAdapter {
             args.push(model.clone());
         }
         args.extend(permissions::sandbox_args(req.permissions));
-        args.push(req.prompt.clone());
+        // `-` makes the CLI read the prompt from stdin, so nothing of
+        // it shows in the process list.
+        args.push("-".to_string());
         args
     }
 
@@ -90,8 +94,8 @@ impl CodexAdapter {
         std_cmd
             .args(&args)
             .current_dir(&req.cwd)
-            .envs(&req.env)
-            .stdin(Stdio::null())
+            .envs(req.env.iter().map(|(name, value)| (name, value.expose())))
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // The whole session's process tree must die together on
@@ -113,6 +117,11 @@ impl CodexAdapter {
         let pid = child.id().ok_or_else(|| YuntaError::Adapter {
             adapter: "codex".to_string(),
             message: "the codex subprocess exited before it could be tracked".to_string(),
+        })?;
+
+        let stdin = child.stdin.take().ok_or_else(|| YuntaError::Adapter {
+            adapter: "codex".to_string(),
+            message: "the codex subprocess has no stdin pipe".to_string(),
         })?;
 
         let stdout = child.stdout.take().ok_or_else(|| YuntaError::Adapter {
@@ -154,6 +163,7 @@ impl CodexAdapter {
             let _ = child.wait().await;
         });
         tokio::spawn(drain_stderr(stderr));
+        write_prompt(stdin, &req.prompt, "codex").await?;
 
         Ok(Box::new(CodexSession {
             pid,

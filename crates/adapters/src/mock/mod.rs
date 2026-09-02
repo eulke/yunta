@@ -407,7 +407,7 @@ async fn call_run_tool(
         rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
             endpoint.url.clone(),
         )
-        .auth_header(endpoint.token.clone());
+        .auth_header(endpoint.token.expose().clone());
     let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
         reqwest::Client::default(),
         config,

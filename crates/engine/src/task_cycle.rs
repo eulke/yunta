@@ -386,7 +386,7 @@ pub async fn post_check(
 pub struct SessionSetup {
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
-    pub env: std::collections::HashMap<String, String>,
+    pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
     /// The per-run MCP host plus the loop node's own id, present
     /// ONLY when the resolved adapter declared `run_tools` (the caller
     /// gates on the capability — this module never re-checks it). Each
@@ -402,11 +402,15 @@ impl SessionSetup {
     /// The env a session may see: declared names, present values.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
-    ) -> std::collections::HashMap<String, String> {
+    ) -> std::collections::HashMap<String, yunta_core::Secret<String>> {
         config
             .secrets
             .iter()
-            .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
+            .filter_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .map(|value| (name.clone(), yunta_core::Secret::from(value)))
+            })
             .collect()
     }
 }
