@@ -61,7 +61,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload};
+use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload, StoredEvent};
 use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
@@ -148,11 +148,11 @@ pub(super) enum ContextResolveError {
         source_id: String,
         referenced: NodeId,
     },
-    #[error("context `{source_id}` on node `{node}`: unsupported run-events filter `{filter}`")]
-    UnsupportedFilter {
+    #[error("context `{source_id}` on node `{node}`: failed to render the run's events: {detail}")]
+    RunEventsRender {
         node: NodeId,
         source_id: String,
-        filter: String,
+        detail: String,
     },
     /// Between org knowledge packs there is no order —
     /// same filename from two installed packs never resolves by
@@ -527,22 +527,28 @@ async fn resolve_run_events(
             action: "read the event log".to_string(),
             source: std::io::Error::other(e.to_string()),
         })?;
-    let lines: Vec<String> = match params.filter.as_deref() {
-        None => events.iter().map(|e| format!("{e:?}")).collect(),
-        Some("failed") => events
-            .iter()
+    // The same canonical JSONL the run's own `events.jsonl` export
+    // writes — a session reads exactly what a forensic reader does,
+    // stable across any `Debug` derive change on the event structs.
+    let filtered: Vec<StoredEvent> = match params.filter {
+        None => events,
+        Some(yunta_core::RunEventsFilter::Failed) => events
+            .into_iter()
             .filter(|e| matches!(e.payload(), Some(EventPayload::NodeFailed(_))))
-            .map(|e| format!("{e:?}"))
             .collect(),
-        Some(other) => {
-            return Err(ContextResolveError::UnsupportedFilter {
-                node: node.id.clone(),
-                source_id: source_id.to_string(),
-                filter: other.to_string(),
-            })
-        }
+        Some(yunta_core::RunEventsFilter::Findings) => events
+            .into_iter()
+            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .collect(),
     };
-    Ok(lines.join("\n").into_bytes())
+    let jsonl = crate::events_export::render_events_jsonl(&filtered).map_err(|source| {
+        ContextResolveError::RunEventsRender {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            detail: source.to_string(),
+        }
+    })?;
+    Ok(jsonl.into_bytes())
 }
 
 async fn resolve_ledger(
@@ -1000,7 +1006,7 @@ fn source_id_for(spec: &ContextSpec) -> String {
         },
         ContextSpec::RunEvents { run_events } => format!(
             "run-events:{}",
-            run_events.filter.as_deref().unwrap_or("all")
+            run_events.filter.map(|f| f.as_str()).unwrap_or("all")
         ),
         ContextSpec::Ledger { .. } => "ledger".to_string(),
         ContextSpec::Knowledge { knowledge } => {

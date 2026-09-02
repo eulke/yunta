@@ -1223,14 +1223,26 @@
     "Requiredness": {
       "type": "boolean"
     },
+    "RunEventsFilter": {
+      "description": "The `run-events` filters the resolver knows. Absent (`None`) means\nthe whole log; `Failed` narrows it to `node_failed` events, `Findings`\nto `finding_posted` events (what a corrective node reads to act on\nwhat an earlier node found).",
+      "type": "string",
+      "enum": [
+        "failed",
+        "findings"
+      ]
+    },
     "RunEventsParams": {
-      "description": "`run-events: { filter: ... }` — a read-only query into the run's\nown event log. `filter` stays a free-form string (the only reference\nexample is `filter: failed`, no closed vocabulary given) — the\nresolver's own job to interpret, not the schema's.",
+      "description": "`run-events: { filter: ... }` — a read-only query into the run's\nown event log. `filter` is a closed vocabulary parsed to\n[`RunEventsFilter`], so an unknown value is rejected when the\nworkflow is read (and `yunta check` surfaces it), never carried to\nthe resolver as a string it must reject at runtime.",
       "type": "object",
       "properties": {
         "filter": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEventsFilter"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

@@ -226,7 +226,7 @@ fn describe_context(spec: &ContextSpec) -> String {
         },
         ContextSpec::Mcp { mcp } => format!("mcp: server={} query={}", mcp.server, mcp.query),
         ContextSpec::RunEvents { run_events } => match &run_events.filter {
-            Some(filter) => format!("run-events: filter={filter}"),
+            Some(filter) => format!("run-events: filter={}", filter.as_str()),
             None => "run-events: (no filter)".to_string(),
         },
         ContextSpec::Ledger { .. } => "ledger".to_string(),

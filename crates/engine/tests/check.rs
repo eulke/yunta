@@ -1738,3 +1738,27 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
         "a relative name, subdirectory and template included, is fine"
     );
 }
+
+#[test]
+fn unknown_filter_is_a_check_error() {
+    // `run-events: { filter: ... }` is a closed vocabulary. An unknown
+    // value is rejected when `yunta check` reads the workflow — naming
+    // the bad value — rather than reaching the resolver as a string it
+    // must reject at runtime.
+    let yaml = r#"
+name: bad-filter
+nodes:
+  - id: read
+    kind: prompt
+    runner: executor
+    prompt: "x"
+    context:
+      - run-events: { filter: bogus }
+"#;
+    let err = yunta_core::yaml::parse::<Workflow>(yaml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("bogus") || msg.contains("failed"),
+        "the rejection names the bad filter or the valid vocabulary: {msg}"
+    );
+}

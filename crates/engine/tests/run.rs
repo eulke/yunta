@@ -726,6 +726,73 @@ sessions:
     assert_eq!(state.findings[0].id, "f1");
 }
 
+#[tokio::test]
+async fn run_events_context_is_canonical_jsonl() {
+    // A `run-events` context is the same canonical JSONL the run's own
+    // `events.jsonl` export writes — one JSON object per line — never the
+    // Rust `Debug` rendering, which would drift with any struct change.
+    let bench = Bench::new();
+    let workflow = r#"
+name: run-events-ctx
+nodes:
+  - id: seed
+    kind: bash
+    run: "true"
+  - id: read
+    kind: prompt
+    runner: executor
+    depends_on: [seed]
+    prompt: "Review the log."
+    context:
+      - run-events: {}
+"#;
+    let (terminal, _) = bench
+        .run(
+            workflow,
+            "sessions:\n  - outcome: { type: completed, summary: ok }\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let source = events
+        .iter()
+        .find_map(|e| match (&e.node_id, e.payload()) {
+            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
+                if n.as_str() == "read" =>
+            {
+                p.sources.iter().find(|s| s.kind == "run-events").cloned()
+            }
+            _ => None,
+        })
+        .expect("a run-events context source assembled for `read`");
+
+    let content = std::fs::read_to_string(
+        bench
+            .run_dir()
+            .join("context")
+            .join(&source.content_hash)
+            .join("content"),
+    )
+    .unwrap();
+    assert!(
+        !content.contains("StoredEvent {"),
+        "the context must not be Rust Debug output: {content}"
+    );
+    for line in content.lines().filter(|l| !l.is_empty()) {
+        let value: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("each line is canonical JSON ({line:?}): {e}"));
+        assert!(
+            value.get("kind").is_some(),
+            "each event line names its kind: {line}"
+        );
+    }
+    assert!(
+        content.lines().any(|l| l.contains("run_created")),
+        "the run's own events are present in the context"
+    );
+}
+
 // --- kind: questions ------------------------------------
 
 const QUESTIONS_WORKFLOW: &str = r#"
@@ -3740,8 +3807,10 @@ nodes:
     context:
       - run-events: { filter: failed }
 "#;
+    // The failures reach the prompt as canonical JSONL, so the event's
+    // kind reads `node_failed` (not the Rust Debug `NodeFailed`).
     let fixture =
-        "sessions:\n  - match_prompt_contains: \"NodeFailed\"\n    outcome: { type: completed, summary: tried }\n";
+        "sessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
 
     let _ = bench.run(workflow, fixture).await;
 

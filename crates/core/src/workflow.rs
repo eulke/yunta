@@ -593,14 +593,36 @@ pub struct ArtifactContextRef {
 }
 
 /// `run-events: { filter: ... }` — a read-only query into the run's
-/// own event log. `filter` stays a free-form string (the only reference
-/// example is `filter: failed`, no closed vocabulary given) — the
-/// resolver's own job to interpret, not the schema's.
+/// own event log. `filter` is a closed vocabulary parsed to
+/// [`RunEventsFilter`], so an unknown value is rejected when the
+/// workflow is read (and `yunta check` surfaces it), never carried to
+/// the resolver as a string it must reject at runtime.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunEventsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filter: Option<String>,
+    pub filter: Option<RunEventsFilter>,
+}
+
+/// The `run-events` filters the resolver knows. Absent (`None`) means
+/// the whole log; `Failed` narrows it to `node_failed` events, `Findings`
+/// to `finding_posted` events (what a corrective node reads to act on
+/// what an earlier node found).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunEventsFilter {
+    Failed,
+    Findings,
+}
+
+impl RunEventsFilter {
+    /// The YAML spelling, for diagnostics and source labels.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunEventsFilter::Failed => "failed",
+            RunEventsFilter::Findings => "findings",
+        }
+    }
 }
 
 /// `ledger: {}` — no parameters in the current resolution

@@ -694,7 +694,7 @@ context:
     }
     match &node.context[6] {
         ContextSpec::RunEvents { run_events } => {
-            assert_eq!(run_events.filter.as_deref(), Some("failed"))
+            assert_eq!(run_events.filter, Some(yunta_core::RunEventsFilter::Failed))
         }
         other => panic!("expected RunEvents, got {other:?}"),
     }
