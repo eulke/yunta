@@ -273,7 +273,10 @@ impl MockAdapter {
         tokio::spawn(async move {
             // SessionOpened is always the first event, unconditionally.
             if tx
-                .send(AgentEvent::SessionOpened { session_id, model })
+                .send(AgentEvent::SessionOpened {
+                    session_id,
+                    model: Some(model),
+                })
                 .is_err()
             {
                 return;

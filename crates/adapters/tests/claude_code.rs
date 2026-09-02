@@ -115,7 +115,7 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
 
     assert!(matches!(
         &events[0],
-        AgentEvent::SessionOpened { model, .. } if model == "claude-sonnet-5"
+        AgentEvent::SessionOpened { model, .. } if model.as_ref().is_some_and(|model| model == "claude-sonnet-5")
     ));
     assert!(events
         .iter()
@@ -609,4 +609,101 @@ async fn an_unknown_adapter_setting_is_reported_by_probe() {
         text.contains("max_thinking") && text.contains("adapter_settings"),
         "{text}"
     );
+}
+
+// --- a strict reading of the CLI's protocol ---------------------------
+
+/// Runs a session over `lines` scripted for the stub and returns every
+/// event it produced.
+async fn events_of(lines: &[&str]) -> Vec<AgentEvent> {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(dir.path(), "lines.jsonl", lines);
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    drain(session).await
+}
+
+fn non_retryable_failure(event: &AgentEvent) -> &str {
+    match event {
+        AgentEvent::Failed { error, retryable } => {
+            assert!(!retryable, "not a failure to retry: {}", error.message);
+            &error.message
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn init_without_session_id_fails_non_retryable() {
+    let events = events_of(&[
+        r#"{"type":"system","subtype":"init","model":"claude-sonnet-5"}"#,
+        r#"{"type":"result","is_error":false,"result":"all done"}"#,
+    ])
+    .await;
+
+    let message = non_retryable_failure(&events[0]);
+    assert!(
+        message.contains("session_id"),
+        "the failure names the missing field: {message}"
+    );
+    assert_eq!(
+        events.len(),
+        1,
+        "nothing follows a session's terminal event: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn auth_errors_are_not_retryable() {
+    let events = events_of(&[
+        INIT_LINE,
+        r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Invalid API key · Please run /login"}"#,
+    ])
+    .await;
+
+    let message = non_retryable_failure(events.last().unwrap());
+    assert!(message.contains("Invalid API key"));
+}
+
+#[tokio::test]
+async fn an_invalid_model_is_not_retried() {
+    let events = events_of(&[
+        INIT_LINE,
+        r#"{"type":"result","is_error":true,"result":"API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: claude-nope\"}}"}"#,
+    ])
+    .await;
+
+    non_retryable_failure(events.last().unwrap());
+}
+
+#[tokio::test]
+async fn a_result_line_without_is_error_is_a_non_retryable_failure() {
+    let events = events_of(&[INIT_LINE, r#"{"type":"result","result":"all done"}"#]).await;
+
+    let message = non_retryable_failure(events.last().unwrap());
+    assert!(
+        message.contains("is_error"),
+        "the failure names the missing field: {message}"
+    );
+}
+
+#[tokio::test]
+async fn an_event_before_the_session_opens_fails_the_session() {
+    let events = events_of(&[
+        r#"{"type":"assistant","message":{"id":"msg-0","content":[{"type":"text","text":"hi"}]}}"#,
+        INIT_LINE,
+        r#"{"type":"result","is_error":false,"result":"all done"}"#,
+    ])
+    .await;
+
+    let message = non_retryable_failure(&events[0]);
+    assert!(
+        message.contains("before"),
+        "the failure says what came before the session opened: {message}"
+    );
+    assert_eq!(events.len(), 1, "got: {events:?}");
 }

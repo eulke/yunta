@@ -16,6 +16,7 @@
 use serde_json::Value;
 use yunta_core::{sha256_hex, ModelName, SessionId};
 
+use crate::failure;
 use crate::session::{AgentError, AgentEvent, AgentOutcome};
 
 pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
@@ -23,7 +24,7 @@ pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
         return Vec::new();
     };
     match value.get("type").and_then(Value::as_str) {
-        Some("system") if is_init(&value) => session_opened(&value).into_iter().collect(),
+        Some("system") if is_init(&value) => vec![session_opened(&value)],
         Some("assistant") => assistant_message(&value),
         Some("result") => result_events(&value),
         _ => Vec::new(),
@@ -34,23 +35,38 @@ fn is_init(value: &Value) -> bool {
     value.get("subtype").and_then(Value::as_str) == Some("init")
 }
 
-/// The init line names the session and the model; a value that cannot
-/// be one fails the session explicitly instead of opening it under a
-/// name nothing can resume.
-fn session_opened(value: &Value) -> Option<AgentEvent> {
-    let session_id = value.get("session_id")?.as_str()?;
-    let model = value.get("model")?.as_str()?;
-    Some(
-        match (session_id.parse::<SessionId>(), model.parse::<ModelName>()) {
-            (Ok(session_id), Ok(model)) => AgentEvent::SessionOpened { session_id, model },
-            (Err(error), _) | (_, Err(error)) => AgentEvent::Failed {
-                error: AgentError {
-                    message: format!("the CLI's init line is malformed: {error}"),
-                },
-                retryable: false,
-            },
+/// The init line names the session, and the model when the CLI says
+/// which. A session id that is missing or cannot be one fails the
+/// session outright — nothing can resume a session under a name it
+/// never had, and the next attempt would read the same line.
+fn session_opened(value: &Value) -> AgentEvent {
+    let Some(session_id) = value.get("session_id").and_then(Value::as_str) else {
+        return malformed("init line has no `session_id`");
+    };
+    let session_id = match session_id.parse::<SessionId>() {
+        Ok(session_id) => session_id,
+        Err(error) => return malformed(&format!("init line's `session_id`: {error}")),
+    };
+    let model = match value.get("model").and_then(Value::as_str) {
+        None => None,
+        Some(model) => match model.parse::<ModelName>() {
+            Ok(model) => Some(model),
+            Err(error) => return malformed(&format!("init line's `model`: {error}")),
         },
-    )
+    };
+    AgentEvent::SessionOpened { session_id, model }
+}
+
+/// A line the protocol does not allow: the CLI is not speaking
+/// stream-json as this adapter reads it, and a retry would read it
+/// again.
+fn malformed(what: &str) -> AgentEvent {
+    AgentEvent::Failed {
+        error: AgentError {
+            message: format!("the CLI's {what}"),
+        },
+        retryable: false,
+    }
 }
 
 fn assistant_message(value: &Value) -> Vec<AgentEvent> {
@@ -99,24 +115,20 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
         });
     }
 
-    let is_error = value
-        .get("is_error")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let Some(is_error) = value.get("is_error").and_then(Value::as_bool) else {
+        events.push(malformed("result line has no `is_error`"));
+        return events;
+    };
     events.push(if is_error {
+        let message = value
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("session ended with an error and no result text")
+            .to_string();
+        let retryable = failure::classify(&message).retryable();
         AgentEvent::Failed {
-            error: AgentError {
-                message: value
-                    .get("result")
-                    .and_then(Value::as_str)
-                    .unwrap_or("session ended with an error and no result text")
-                    .to_string(),
-            },
-            // [inferido]: the CLI's `result` subtypes beyond "success"
-            // aren't documented field-by-field here; retrying is the
-            // safe default — yunta's own max_retries still caps the
-            // cost of guessing wrong.
-            retryable: true,
+            error: AgentError { message },
+            retryable,
         }
     } else {
         AgentEvent::Completed {

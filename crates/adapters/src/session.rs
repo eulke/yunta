@@ -177,10 +177,12 @@ pub struct AgentError {
 /// Events a session's stream carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
-    /// Mandatory first event of every session.
+    /// Mandatory first event of every session. `model` is the one the
+    /// CLI reported, absent when it reports none — never the one the
+    /// request asked for.
     SessionOpened {
         session_id: SessionId,
-        model: ModelName,
+        model: Option<ModelName>,
     },
     ToolUse {
         name: String,

@@ -7,6 +7,7 @@
 
 mod claude_code;
 mod codex;
+pub mod failure;
 mod forge;
 mod mock;
 pub mod process_start;

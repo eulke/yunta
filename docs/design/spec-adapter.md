@@ -148,8 +148,9 @@ pub trait AgentSession: Send {
 
 ```rust
 pub enum AgentEvent {
-    /// OBLIGATORIO como primer evento de toda sesión.
-    SessionOpened { session_id: SessionId, model: String },
+    /// OBLIGATORIO como primer evento de toda sesión. `model` es el que
+    /// el CLI reportó; ausente cuando no reporta ninguno — nunca el pedido.
+    SessionOpened { session_id: SessionId, model: Option<ModelName> },
     /// Actividad resumida: qué herramienta usó, sobre qué (digest).
     /// Nunca contenido completo ni secretos (§4, O3).
     ToolUse { name: String, target_digest: String },

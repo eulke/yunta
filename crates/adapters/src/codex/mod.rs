@@ -38,19 +38,13 @@ mod settings;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, ModelName, Result, SessionId,
-};
+use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
 use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
 use crate::subprocess::{self, Launch, LineParser};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
-
-/// What `SessionOpened.model` reports for a request that names no
-/// model: the CLI picks its own and never says which.
-static DEFAULT_MODEL: ModelName = ModelName::from_static("default");
 
 pub struct CodexAdapter {
     binary: PathBuf,
@@ -102,7 +96,6 @@ impl CodexAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        let requested_model = req.model.clone().unwrap_or_else(|| DEFAULT_MODEL.clone());
         let args = self.build_args(&req, resume);
         subprocess::open(Launch {
             adapter: &ID,
@@ -112,7 +105,6 @@ impl CodexAdapter {
             env: &req.env,
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
-                requested_model,
                 last_message: String::new(),
             }),
         })
@@ -124,13 +116,12 @@ impl CodexAdapter {
 /// what a turn's completion reports as its summary, so it travels from
 /// line to line.
 struct CodexParser {
-    requested_model: ModelName,
     last_message: String,
 }
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let events = parse::parse_line(line, &self.requested_model, &self.last_message);
+        let events = parse::parse_line(line, &self.last_message);
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,

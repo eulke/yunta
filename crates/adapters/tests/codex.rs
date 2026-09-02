@@ -111,7 +111,7 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
 
     assert!(matches!(
         &events[0],
-        AgentEvent::SessionOpened { model, .. } if model == "gpt-5-codex"
+        AgentEvent::SessionOpened { model: None, .. }
     ));
     assert!(events
         .iter()
@@ -313,11 +313,12 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
 }
 
 #[tokio::test]
-async fn a_session_with_no_requested_model_falls_back_to_a_named_default() {
+async fn a_session_reports_no_model_because_the_cli_names_none() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
 
     let mut req = request(dir.path().to_path_buf());
+    req.model = Some("gpt-5-codex".parse().unwrap());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
@@ -325,9 +326,12 @@ async fn a_session_with_no_requested_model_falls_back_to_a_named_default() {
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
+    // The request named a model; the CLI's `thread.started` never
+    // says which one runs, and the session reports only what the CLI
+    // said.
     assert!(matches!(
         &events[0],
-        AgentEvent::SessionOpened { model, .. } if model == "default"
+        AgentEvent::SessionOpened { model: None, .. }
     ));
 }
 
@@ -575,4 +579,54 @@ async fn an_unknown_adapter_setting_is_reported_by_probe() {
         text.contains("sandbx") && text.contains("sandbox"),
         "the unknown key and the known ones are named: {text}"
     );
+}
+
+// --- a strict reading of the CLI's protocol ---------------------------
+
+/// Runs a session over `lines` scripted for the stub and returns every
+/// event it produced.
+async fn events_of(lines: &[&str]) -> Vec<AgentEvent> {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(dir.path(), "lines.jsonl", lines);
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    drain(session).await
+}
+
+#[tokio::test]
+async fn auth_errors_are_not_retryable() {
+    let events = events_of(&[
+        THREAD_STARTED_LINE,
+        r#"{"type":"turn.failed","error":{"message":"401 Unauthorized: invalid API key"}}"#,
+    ])
+    .await;
+
+    match events.last().unwrap() {
+        AgentEvent::Failed { error, retryable } => {
+            assert!(!retryable, "not a failure to retry: {}", error.message);
+            assert!(error.message.contains("401"));
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_fatal_error_event_ends_the_session_as_failed() {
+    let events = events_of(&[
+        THREAD_STARTED_LINE,
+        r#"{"type":"error","message":"stream disconnected before completion"}"#,
+    ])
+    .await;
+
+    match events.last().unwrap() {
+        AgentEvent::Failed { error, retryable } => {
+            assert!(retryable, "a transport failure is one to retry");
+            assert_eq!(error.message, "stream disconnected before completion");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
 }

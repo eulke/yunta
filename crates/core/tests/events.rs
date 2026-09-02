@@ -37,7 +37,7 @@ fn all_kinds() -> Vec<EventPayload> {
         EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
         }),
         EventPayload::AgentMessage(AgentMessagePayload {

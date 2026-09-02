@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use yunta_core::{AdapterError, AdapterId, Pid, Result, Secret};
 
-use crate::session::{write_prompt, AgentEvent, AgentSession, ProbeReport};
+use crate::session::{write_prompt, AgentError, AgentEvent, AgentSession, ProbeReport};
 use crate::signal::{signal_group, Signal};
 
 /// The longest line the reader accepts from a CLI. A stream-json event
@@ -106,9 +106,34 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     let mut parser = launch.parser;
     let reader = tokio::spawn(async move {
         let mut lines = LineReader::new(stdout);
+        let mut opened = false;
         while let Some(line) = lines.next_line().await {
             for event in parser.parse(&line) {
-                if tx.send(event).is_err() {
+                let event = match event {
+                    AgentEvent::SessionOpened { .. } | AgentEvent::Failed { .. } => event,
+                    other if opened => other,
+                    // The session opens before anything happens in it: a
+                    // CLI that reports work under no session is not
+                    // speaking the protocol, and a retry would read the
+                    // same lines.
+                    other => AgentEvent::Failed {
+                        error: AgentError {
+                            message: format!(
+                                "the CLI reported {} before opening the session",
+                                describe(&other)
+                            ),
+                        },
+                        retryable: false,
+                    },
+                };
+                opened = true;
+                let terminal = matches!(
+                    event,
+                    AgentEvent::Completed { .. } | AgentEvent::Failed { .. }
+                );
+                if tx.send(event).is_err() || terminal {
+                    // Exactly one terminal event: nothing after it is
+                    // part of the session.
                     return;
                 }
             }
@@ -296,6 +321,18 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
                 return Some(decode(&line));
             }
         }
+    }
+}
+
+/// An event's kind, for a message about one that came out of order.
+fn describe(event: &AgentEvent) -> &'static str {
+    match event {
+        AgentEvent::SessionOpened { .. } => "a session opening",
+        AgentEvent::ToolUse { .. } => "a tool use",
+        AgentEvent::Usage { .. } => "token usage",
+        AgentEvent::Note { .. } => "a note",
+        AgentEvent::Completed { .. } => "a completion",
+        AgentEvent::Failed { .. } => "a failure",
     }
 }
 

@@ -5129,7 +5129,10 @@ sessions:
         .expect("the session must leave agent_session_opened in the log");
     assert_eq!(opened.0.as_ref().map(|n| n.as_str()), Some("work"));
     assert!(!opened.1.session_id.as_str().is_empty());
-    assert_eq!(opened.1.model, "mock-model");
+    assert_eq!(
+        opened.1.model.as_ref().map(|model| model.as_str()),
+        Some("mock-model")
+    );
 }
 
 #[tokio::test]
@@ -6155,7 +6158,7 @@ async fn resume_orphan_with_mock(
                 yunta_core::events::AgentSessionOpenedPayload {
                     session_id: session_id.into(),
                     agent: None,
-                    model: "mock-model".into(),
+                    model: Some("mock-model".into()),
                     capabilities: yunta_core::Capabilities::default(),
                 },
             ),

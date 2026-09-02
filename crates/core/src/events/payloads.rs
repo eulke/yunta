@@ -251,7 +251,10 @@ pub struct AgentSessionOpenedPayload {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
-    pub model: ModelName,
+    /// The model the CLI reported for the session; absent when it
+    /// reported none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelName>,
     pub capabilities: Capabilities,
 }
 

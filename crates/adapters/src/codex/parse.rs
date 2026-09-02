@@ -7,8 +7,8 @@
 //! at the time this was written) defines the wire format directly:
 //! `ThreadEvent` is `#[serde(tag = "type")]` over `ThreadStartedEvent`
 //! (`thread_id: String` — no `model` field; a confirmed, open gap in
-//! the CLI, openai/codex#14736, not an oversight here — see this
-//! module's caller for how the request's own model fills in),
+//! the CLI, openai/codex#14736, so the session opens with no model
+//! rather than the one the request asked for),
 //! `TurnStartedEvent` (empty), `TurnCompletedEvent` (`usage: Usage` —
 //! `input_tokens`/`cached_input_tokens`/`output_tokens` plus two fields
 //! this adapter doesn't need), `TurnFailedEvent` (`error:
@@ -37,25 +37,21 @@
 //! could be, not wider than what's confirmed.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, ModelName, SessionId};
+use yunta_core::{sha256_hex, SessionId};
 
+use crate::failure;
 use crate::session::{AgentError, AgentEvent, AgentOutcome};
 
-pub(super) fn parse_line(
-    line: &str,
-    requested_model: &ModelName,
-    last_message: &str,
-) -> Vec<AgentEvent> {
+pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
     match value.get("type").and_then(Value::as_str) {
-        Some("thread.started") => thread_started(&value, requested_model)
-            .into_iter()
-            .collect(),
+        Some("thread.started") => thread_started(&value).into_iter().collect(),
         Some("item.completed") => item_completed(&value).into_iter().collect(),
         Some("turn.completed") => turn_completed(&value, last_message),
-        Some("turn.failed") => vec![turn_failed(&value)],
+        Some("turn.failed") => vec![failed(value.get("error"), "turn failed")],
+        Some("error") => vec![failed(Some(&value), "the CLI reported an error")],
         // "turn.started", "item.started"/"item.updated" (this adapter
         // only acts once an item is done) and anything future: nothing
         // this adapter needs.
@@ -66,12 +62,12 @@ pub(super) fn parse_line(
 /// `thread.started` names the session; a thread id that cannot be one
 /// fails the session explicitly instead of opening it under a name
 /// nothing can resume.
-fn thread_started(value: &Value, requested_model: &ModelName) -> Option<AgentEvent> {
+fn thread_started(value: &Value) -> Option<AgentEvent> {
     let thread_id = value.get("thread_id")?.as_str()?;
     Some(match thread_id.parse::<SessionId>() {
         Ok(session_id) => AgentEvent::SessionOpened {
             session_id,
-            model: requested_model.clone(),
+            model: None,
         },
         Err(error) => AgentEvent::Failed {
             error: AgentError {
@@ -163,22 +159,21 @@ fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {
     events
 }
 
-fn turn_failed(value: &Value) -> AgentEvent {
+/// `turn.failed` and the top-level `error` both carry a `message` and
+/// nothing about retrying; the message itself says whether another
+/// attempt can do better.
+fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
+    let message = carrier
+        .and_then(|carrier| carrier.get("message"))
+        .and_then(Value::as_str)
+        .map_or_else(
+            || format!("{fallback} with no error message"),
+            str::to_string,
+        );
+    let retryable = failure::classify(&message).retryable();
     AgentEvent::Failed {
-        error: AgentError {
-            message: value
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("turn failed with no error message")
-                .to_string(),
-        },
-        // [inferido]: `TurnFailedEvent` carries only a message, no
-        // retryable/fatal distinction — same default claude_code's own
-        // parser uses for its own undocumented case, for the same
-        // reason: yunta's own max_retries still caps the cost of
-        // guessing wrong.
-        retryable: true,
+        error: AgentError { message },
+        retryable,
     }
 }
 
