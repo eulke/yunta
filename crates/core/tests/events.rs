@@ -217,6 +217,48 @@ fn all_kinds() -> Vec<EventPayload> {
     ]
 }
 
+/// A compile-time guard for [`all_kinds`], not a runtime check. The match has
+/// one arm per `EventPayload` variant and no wildcard, so adding a variant to
+/// the enum fails this crate's compile until the variant is also constructed
+/// in `all_kinds` above. Without it, a new kind would be silently absent from
+/// every round-trip, version, and name test in this file.
+#[allow(dead_code)]
+fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
+    match payload {
+        EventPayload::RunCreated(_)
+        | EventPayload::RunnerResolved(_)
+        | EventPayload::BaselineCaptured(_)
+        | EventPayload::NodeStarted(_)
+        | EventPayload::AgentSessionOpened(_)
+        | EventPayload::AgentMessage(_)
+        | EventPayload::ArtifactWritten(_)
+        | EventPayload::ContextAssembled(_)
+        | EventPayload::TaskRegistered(_)
+        | EventPayload::CriteriaChecked(_)
+        | EventPayload::TaskStatusChanged(_)
+        | EventPayload::ScopeChecked(_)
+        | EventPayload::ScopeExpansionRequested(_)
+        | EventPayload::ScopeExpansionGranted(_)
+        | EventPayload::ScopeExpansionDenied(_)
+        | EventPayload::NodeFinished(_)
+        | EventPayload::NodeFailed(_)
+        | EventPayload::HookExecuted(_)
+        | EventPayload::NodeRerouted(_)
+        | EventPayload::GateWaiting(_)
+        | EventPayload::GateResolved(_)
+        | EventPayload::QuestionsAnswered(_)
+        | EventPayload::LoopIteration(_)
+        | EventPayload::FindingPosted(_)
+        | EventPayload::PromotionSignaled(_)
+        | EventPayload::ChildRunCreated(_)
+        | EventPayload::ChildRunFinished(_)
+        | EventPayload::CapabilityDegraded(_)
+        | EventPayload::RunPaused(_)
+        | EventPayload::RunResumed(_)
+        | EventPayload::RunFinished(_) => {}
+    }
+}
+
 #[test]
 fn there_are_exactly_31_kinds_with_distinct_names() {
     let kinds = all_kinds();
