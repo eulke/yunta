@@ -6,48 +6,7 @@
 use std::path::Path;
 use std::process::Output;
 
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git")
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let out = git(dir, args);
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-// `-b master` pins the default branch regardless of the host's own
-// `init.defaultBranch` — otherwise `add_vendors_...`'s assertion on the
-// recorded ref would flake between "master" and "main" per environment.
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q", "-b", "master"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
+use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, INITIAL_BRANCH};
 
 /// Builds a minimal, valid pack repo at `dir`: `pack.yaml` (declarative,
 /// no executors) plus one workflow file it lists in `contents`.
@@ -84,8 +43,8 @@ fn write_pack_v2(dir: &Path) {
 }
 
 fn commit_all(dir: &Path, message: &str) {
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", message]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", message]);
 }
 
 fn setup() -> (
@@ -100,13 +59,11 @@ fn setup() -> (
     init_repo(&upstream);
     write_pack_v1(&upstream);
     commit_all(&upstream, "v1");
-    git_ok(&upstream, &["tag", "v1.0.0"]);
+    git(&upstream, &["tag", "v1.0.0"]);
 
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    commit_all(&repo, "initial");
 
     let home = root.path().join("state");
     (root, upstream, repo, home)
@@ -116,7 +73,7 @@ fn setup() -> (
 fn add_vendors_the_pack_and_writes_a_lock_entry() {
     let (_root, upstream, repo, home) = setup();
 
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
         stdout(&out).contains("installed acme/review-pack"),
@@ -138,7 +95,7 @@ fn add_vendors_the_pack_and_writes_a_lock_entry() {
     let entry = &lock["packs"]["acme/review-pack"];
     assert_eq!(entry["publisher"], "acme");
     assert_eq!(entry["name"], "review-pack");
-    assert_eq!(entry["ref"], "master");
+    assert_eq!(entry["ref"], INITIAL_BRANCH);
     assert!(entry["commit"].as_str().unwrap().len() >= 7);
     assert!(!entry["content_hash"].as_str().unwrap().is_empty());
 }
@@ -148,7 +105,7 @@ fn add_with_an_explicit_ref_pins_and_records_it() {
     let (_root, upstream, repo, home) = setup();
 
     let source = format!("{}@v1.0.0", upstream.to_str().unwrap());
-    let out = yunta_in(&repo, &home, &["pack", "add", &source]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", &source]);
     assert!(out.status.success(), "{}", stderr(&out));
 
     let lock: serde_yaml::Value =
@@ -160,10 +117,10 @@ fn add_with_an_explicit_ref_pins_and_records_it() {
 #[test]
 fn add_refuses_a_pack_already_installed() {
     let (_root, upstream, repo, home) = setup();
-    let first = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let first = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(first.status.success(), "{}", stderr(&first));
 
-    let second = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let second = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!second.status.success());
     assert!(
         stderr(&second).contains("already installed"),
@@ -175,13 +132,16 @@ fn add_refuses_a_pack_already_installed() {
 #[test]
 fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     let (_root, upstream, repo, home) = setup();
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
-    let list_out = yunta_in(&repo, &home, &["pack", "list"]);
+    let list_out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(list_out.status.success(), "{}", stderr(&list_out));
     let listed = stdout(&list_out);
-    assert!(listed.contains("acme/review-pack @ master"), "{listed}");
+    assert!(
+        listed.contains(&format!("acme/review-pack @ {INITIAL_BRANCH}")),
+        "{listed}"
+    );
     assert!(listed.contains(") — ok"), "{listed}");
 
     // Tamper with the vendored content directly (never through `add`) —
@@ -192,7 +152,7 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
         "tampered",
     )
     .unwrap();
-    let list_after_tamper = yunta_in(&repo, &home, &["pack", "list"]);
+    let list_after_tamper = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(
         stdout(&list_after_tamper).contains("MODIFIED"),
         "{}",
@@ -203,7 +163,7 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
 #[test]
 fn list_with_nothing_installed_says_so_without_erroring() {
     let (_root, _upstream, repo, home) = setup();
-    let out = yunta_in(&repo, &home, &["pack", "list"]);
+    let out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
         stdout(&out).contains("no packs installed"),
@@ -215,17 +175,17 @@ fn list_with_nothing_installed_says_so_without_erroring() {
 #[test]
 fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     let (_root, upstream, repo, home) = setup();
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
     write_pack_v2(&upstream);
     commit_all(&upstream, "v2");
-    git_ok(&upstream, &["tag", "v2.0.0"]);
+    git(&upstream, &["tag", "v2.0.0"]);
 
-    let update_out = yunta_in(
+    let update_out = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/review-pack", "v2.0.0"],
+        &["pack", "update", "acme/review-pack", "v2.0.0"]
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
     assert!(
@@ -247,10 +207,10 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
 #[test]
 fn update_on_an_uninstalled_pack_is_refused() {
     let (_root, _upstream, repo, home) = setup();
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/review-pack", "v2.0.0"],
+        &["pack", "update", "acme/review-pack", "v2.0.0"]
     );
     assert!(!out.status.success());
     assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
@@ -259,10 +219,10 @@ fn update_on_an_uninstalled_pack_is_refused() {
 #[test]
 fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
     let (_root, upstream, repo, home) = setup();
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
-    let remove_out = yunta_in(&repo, &home, &["pack", "remove", "acme/review-pack"]);
+    let remove_out = yunta_in!(&repo, &home, &["pack", "remove", "acme/review-pack"]);
     assert!(remove_out.status.success(), "{}", stderr(&remove_out));
 
     assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
@@ -281,7 +241,7 @@ fn add_refuses_symlinks() {
     std::os::unix::fs::symlink("/etc/hostname", upstream.join("workflows/link.yaml")).unwrap();
     commit_all(&upstream, "with a symlink");
 
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!out.status.success(), "{}", stdout(&out));
     assert!(
         stderr(&out).contains("symlink") && stderr(&out).contains("workflows/link.yaml"),
@@ -352,8 +312,6 @@ fn add_never_executes_before_confirmation() {
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    commit_all(&repo, "initial");
     let home = root.path().join("state");
     let marker = root.path().join("marker");
     std::fs::create_dir_all(&marker).unwrap();
@@ -362,7 +320,7 @@ fn add_never_executes_before_confirmation() {
         &repo,
         &home,
         &marker,
-        &["pack", "add", "--run-tests", upstream.to_str().unwrap()],
+        &["pack", "add", "--run-tests", upstream.to_str().unwrap()]
     );
     assert!(!refused.status.success(), "{}", stdout(&refused));
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
@@ -382,7 +340,7 @@ fn add_never_executes_before_confirmation() {
             "--yes",
             "--run-tests",
             upstream.to_str().unwrap(),
-        ],
+        ]
     );
     assert!(confirmed.status.success(), "{}", stderr(&confirmed));
     assert!(
@@ -411,8 +369,6 @@ fn add_runs_the_packs_tests_only_when_asked() {
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    commit_all(&repo, "initial");
     let home = root.path().join("state");
     let marker = root.path().join("marker");
     std::fs::create_dir_all(&marker).unwrap();
@@ -421,7 +377,7 @@ fn add_runs_the_packs_tests_only_when_asked() {
         &repo,
         &home,
         &marker,
-        &["pack", "add", "--yes", upstream.to_str().unwrap()],
+        &["pack", "add", "--yes", upstream.to_str().unwrap()]
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
@@ -444,7 +400,7 @@ fn add_is_atomic_when_lock_write_fails() {
     // A directory where the lock file goes makes every write to it fail.
     std::fs::create_dir_all(repo.join(".yunta/yunta.lock")).unwrap();
 
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!out.status.success(), "{}", stdout(&out));
     assert!(stderr(&out).contains("yunta.lock"), "{}", stderr(&out));
     assert!(
@@ -473,7 +429,7 @@ fn add_refuses_a_manifest_whose_names_escape_the_pack() {
     )
     .unwrap();
     commit_all(&upstream, "escaping contents");
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!out.status.success());
     assert!(
         stderr(&out).contains("../outside/review.yaml")
@@ -492,7 +448,7 @@ fn add_refuses_a_manifest_whose_names_escape_the_pack() {
     )
     .unwrap();
     commit_all(&upstream, "escaping publisher");
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("publisher"), "{}", stderr(&out));
     assert!(
@@ -510,18 +466,18 @@ fn add_refuses_a_manifest_whose_names_escape_the_pack() {
 #[test]
 fn update_keeps_the_installed_tree_when_the_new_ref_cannot_be_vendored() {
     let (_root, upstream, repo, home) = setup();
-    let add = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add.status.success(), "{}", stderr(&add));
     let lock_before = std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap();
 
     std::os::unix::fs::symlink("/etc/hostname", upstream.join("workflows/link.yaml")).unwrap();
     commit_all(&upstream, "v2 with a symlink");
-    git_ok(&upstream, &["tag", "v2.0.0"]);
+    git(&upstream, &["tag", "v2.0.0"]);
 
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/review-pack", "v2.0.0"],
+        &["pack", "update", "acme/review-pack", "v2.0.0"]
     );
     assert!(!out.status.success(), "{}", stdout(&out));
     assert!(

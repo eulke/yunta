@@ -428,15 +428,6 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
 
 // --- drafts, stored events and the tolerant reader -------------------------
 
-/// A clock that answers a fixed instant, so a stamped timestamp is checkable.
-struct FixedClock(chrono::DateTime<chrono::Utc>);
-
-impl yunta_core::Clock for FixedClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        self.0
-    }
-}
-
 fn created_draft(run_id: &str) -> EventDraft {
     EventDraft {
         run_id: RunId::from(run_id),
@@ -469,7 +460,7 @@ fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
     let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    let clock = FixedClock(instant);
+    let clock = yunta_testkit::AtClock(instant);
 
     let first = storage.append(&created_draft("run-1"), &clock).unwrap();
     let second = storage
@@ -550,7 +541,7 @@ fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
 fn runs_are_listed_by_their_first_timestamp() {
     let (_dir, storage) = open_temp();
     let at = |text: &str| {
-        FixedClock(
+        yunta_testkit::AtClock(
             chrono::DateTime::parse_from_rfc3339(text)
                 .unwrap()
                 .with_timezone(&chrono::Utc),

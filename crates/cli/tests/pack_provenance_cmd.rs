@@ -4,58 +4,8 @@
 //! — against the real compiled binary.
 
 use std::path::Path;
-use std::process::Output;
 
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git")
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let out = git(dir, args);
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q", "-b", "master"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn run_id_from(output: &Output) -> String {
-    stdout(output)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .expect("run id in output")
-}
+use yunta_testkit::{git, init_repo, run_id_from, stderr, stdout, yunta_in, INITIAL_BRANCH};
 
 /// `lint` fails until `fixed.txt` exists, exhausts its one re-route
 /// (`max_reroutes: 0`) and pauses the run — the same proven pattern
@@ -90,8 +40,8 @@ fn write_pack(dir: &Path, version: &str, fix_lint_run: &str) {
         ),
     )
     .unwrap();
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", version]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", version]);
 }
 
 #[test]
@@ -108,15 +58,12 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    git_ok(&repo, &["add", "."]);
-    git_ok(&repo, &["commit", "-q", "-m", "initial"]);
     let home = root.path().join("state");
 
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
-    let run_out = yunta_in(&repo, &home, &["run", "acme/review"]);
+    let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
     assert!(
         stdout(&run_out).contains("paused"),
         "expected the exhausted re-route to pause the run: {}\nstderr: {}",
@@ -141,10 +88,10 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     // Now the pack updates to v2 — different behavior, same identity —
     // while the run is still sitting paused.
     write_pack(&upstream, "2.0.0", "false");
-    let update_out = yunta_in(
+    let update_out = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/review-pack", "master"],
+        &["pack", "update", "acme/review-pack", INITIAL_BRANCH]
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
     let vendored_after_update =
@@ -156,12 +103,12 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     let manifest_text_after_update = std::fs::read_to_string(&manifest_path).unwrap();
     assert_eq!(manifest_text, manifest_text_after_update);
 
-    let resolve = yunta_in(&repo, &home, &["resolve-gate", &run_id, "retry"]);
+    let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
     assert!(resolve.status.success(), "{}", stderr(&resolve));
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        let status = yunta_in!(&repo, &home, &["status", &run_id]);
         let text = stdout(&status);
         if text.contains("finished") {
             break;

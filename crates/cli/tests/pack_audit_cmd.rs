@@ -3,47 +3,8 @@
 //! automatic audit before vendoring.
 
 use std::path::Path;
-use std::process::Output;
 
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git")
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let out = git(dir, args);
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q", "-b", "master"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
+use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in};
 
 /// A pack with a distinctive, multi-line prompt and a plain bash node —
 /// enough surface to check the audit shows both without trimming.
@@ -72,8 +33,8 @@ fn write_pack(dir: &Path) {
          \x20     Line two, still here, not summarized.\n",
     )
     .unwrap();
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", "v1"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "v1"]);
 }
 
 fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -86,9 +47,6 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    git_ok(&repo, &["add", "."]);
-    git_ok(&repo, &["commit", "-q", "-m", "initial"]);
 
     let home = root.path().join("state");
     (root, upstream, home)
@@ -99,7 +57,7 @@ fn add_shows_the_full_inventory_before_vendoring() {
     let (root, upstream, home) = setup();
     let repo = root.path().join("repo");
 
-    let out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("pack: acme/review-pack"), "{text}");
@@ -122,10 +80,10 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     let (root, upstream, home) = setup();
     let repo = root.path().join("repo");
 
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
-    let out = yunta_in(&repo, &home, &["pack", "audit", "acme/review-pack"]);
+    let out = yunta_in!(&repo, &home, &["pack", "audit", "acme/review-pack"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("pack: acme/review-pack"), "{text}");
@@ -140,7 +98,7 @@ fn audit_on_an_uninstalled_pack_is_refused() {
     let (root, _upstream, home) = setup();
     let repo = root.path().join("repo");
 
-    let out = yunta_in(&repo, &home, &["pack", "audit", "acme/review-pack"]);
+    let out = yunta_in!(&repo, &home, &["pack", "audit", "acme/review-pack"]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
 }

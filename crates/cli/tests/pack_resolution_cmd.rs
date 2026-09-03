@@ -5,47 +5,8 @@
 //! isolation (`crates/engine/tests/catalog.rs` already covers that).
 
 use std::path::Path;
-use std::process::Output;
 
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git")
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let out = git(dir, args);
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q", "-b", "master"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
+use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in};
 
 /// A pack whose one workflow is pure `bash` — runnable with no adapter
 /// configured at all, so the test only exercises resolution, nothing
@@ -67,8 +28,8 @@ fn write_pack(dir: &Path) {
         "name: review\ndescription: pack-provided review\nnodes:\n  - id: noop\n    kind: bash\n    run: \"true\"\n",
     )
     .unwrap();
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", "v1"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "v1"]);
 }
 
 fn setup() -> (
@@ -86,12 +47,9 @@ fn setup() -> (
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    std::fs::write(repo.join(".gitkeep"), "").unwrap();
-    git_ok(&repo, &["add", "."]);
-    git_ok(&repo, &["commit", "-q", "-m", "initial"]);
 
     let home = root.path().join("state");
-    let add_out = yunta_in(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
     (root, upstream, repo, home)
@@ -101,7 +59,7 @@ fn setup() -> (
 fn yunta_run_resolves_a_bare_publisher_slash_name_against_an_installed_pack() {
     let (_root, _upstream, repo, home) = setup();
 
-    let run_out = yunta_in(&repo, &home, &["run", "acme/review", "--follow"]);
+    let run_out = yunta_in!(&repo, &home, &["run", "acme/review", "--follow"]);
     assert!(run_out.status.success(), "{}", stderr(&run_out));
     assert!(
         stdout(&run_out).contains("finished"),
@@ -114,7 +72,7 @@ fn yunta_run_resolves_a_bare_publisher_slash_name_against_an_installed_pack() {
 fn yunta_check_accepts_a_bare_publisher_slash_name_too() {
     let (_root, _upstream, repo, home) = setup();
 
-    let check_out = yunta_in(&repo, &home, &["check", "acme/review"]);
+    let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
     assert!(check_out.status.success(), "{}", stderr(&check_out));
     assert!(stdout(&check_out).contains("OK"), "{}", stdout(&check_out));
 }
@@ -130,7 +88,7 @@ fn yunta_list_shows_both_the_repo_catalog_and_installed_pack_workflows() {
     )
     .unwrap();
 
-    let out = yunta_in(&repo, &home, &["list"]);
+    let out = yunta_in!(&repo, &home, &["list"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let listed = stdout(&out);
     assert!(listed.contains("local: repo-owned"), "{listed}");
@@ -153,9 +111,9 @@ fn a_repo_workflow_with_the_same_namespaced_name_shadows_the_pack() {
     )
     .unwrap();
 
-    let check_out = yunta_in(&repo, &home, &["check", "acme/review"]);
+    let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
     assert!(check_out.status.success(), "{}", stderr(&check_out));
-    let listed = stdout(&yunta_in(&repo, &home, &["list"]));
+    let listed = stdout(&yunta_in!(&repo, &home, &["list"]));
     assert!(listed.contains("acme/review: repo override"), "{listed}");
     assert!(!listed.contains("pack-provided review"), "{listed}");
 }

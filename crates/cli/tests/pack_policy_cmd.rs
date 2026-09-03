@@ -5,43 +5,8 @@
 //! this suite proves the policy is actually applied.
 
 use std::path::Path;
-use std::process::Output;
 
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git");
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q", "-b", "master"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
+use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, INITIAL_BRANCH};
 
 /// A minimal pack from `publisher`, with or without a declared executor.
 fn write_pack(dir: &Path, publisher: &str, version: &str, executors: &str) {
@@ -62,8 +27,8 @@ fn write_pack(dir: &Path, publisher: &str, version: &str, executors: &str) {
         "name: noop\nnodes:\n  - id: noop\n    kind: bash\n    run: \"true\"\n",
     )
     .unwrap();
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", version]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", version]);
 }
 
 fn setup_project(config: &str) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -73,8 +38,8 @@ fn setup_project(config: &str) -> (tempfile::TempDir, std::path::PathBuf, std::p
     init_repo(&repo);
     std::fs::create_dir_all(repo.join(".yunta")).unwrap();
     std::fs::write(repo.join(".yunta/config.yaml"), config).unwrap();
-    git_ok(&repo, &["add", "."]);
-    git_ok(&repo, &["commit", "-q", "-m", "initial"]);
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "initial"]);
     let home = root.path().join("state");
     (root, repo, home)
 }
@@ -92,10 +57,10 @@ fn add_refuses_a_publisher_outside_a_non_empty_allow_list() {
         setup_project("permissions:\n  packs:\n    publishers: { allow: [acme] }\n");
 
     let globex = upstream("globex", "");
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", globex.path().to_str().unwrap()],
+        &["pack", "add", globex.path().to_str().unwrap()]
     );
     assert!(!out.status.success());
     let err = stderr(&out);
@@ -109,10 +74,10 @@ fn add_refuses_a_publisher_outside_a_non_empty_allow_list() {
 
     // The allowed publisher installs fine under the same config.
     let acme = upstream("acme", "");
-    let ok = yunta_in(
+    let ok = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", acme.path().to_str().unwrap()],
+        &["pack", "add", acme.path().to_str().unwrap()]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
     assert!(stdout(&ok).contains("installed acme/tools-pack"));
@@ -123,10 +88,10 @@ fn executors_deny_refuses_even_with_yes() {
     let (_root, repo, home) = setup_project("permissions:\n  packs:\n    executors: deny\n");
 
     let source = upstream("acme", "runner.py");
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap(), "--yes"],
+        &["pack", "add", source.path().to_str().unwrap(), "--yes"]
     );
     assert!(!out.status.success());
     let err = stderr(&out);
@@ -143,10 +108,10 @@ fn executors_allow_installs_without_yes() {
     let (_root, repo, home) = setup_project("permissions:\n  packs:\n    executors: allow\n");
 
     let source = upstream("acme", "runner.py");
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap()],
+        &["pack", "add", source.path().to_str().unwrap()]
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("installed acme/tools-pack"));
@@ -157,18 +122,18 @@ fn executors_prompt_still_requires_yes() {
     let (_root, repo, home) = setup_project("permissions:\n  packs:\n    executors: prompt\n");
 
     let source = upstream("acme", "runner.py");
-    let refused = yunta_in(
+    let refused = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap()],
+        &["pack", "add", source.path().to_str().unwrap()]
     );
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
 
-    let ok = yunta_in(
+    let ok = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap(), "--yes"],
+        &["pack", "add", source.path().to_str().unwrap(), "--yes"]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
 }
@@ -184,18 +149,18 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
     init_repo(source.path());
     write_pack(source.path(), "acme", "1.0.0", "");
 
-    let add_out = yunta_in(
+    let add_out = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap()],
+        &["pack", "add", source.path().to_str().unwrap()]
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
     write_pack(source.path(), "acme", "2.0.0", "runner.py");
-    let refused = yunta_in(
+    let refused = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/tools-pack", "master"],
+        &["pack", "update", "acme/tools-pack", INITIAL_BRANCH]
     );
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
@@ -206,10 +171,10 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
         "a refused update must leave the old version vendored: {vendored}"
     );
 
-    let ok = yunta_in(
+    let ok = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "acme/tools-pack", "master", "--yes"],
+        &["pack", "update", "acme/tools-pack", INITIAL_BRANCH, "--yes"]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
     let vendored =
@@ -227,10 +192,10 @@ fn update_refuses_a_publisher_no_longer_allowed() {
     init_repo(source.path());
     write_pack(source.path(), "globex", "1.0.0", "");
 
-    let add_out = yunta_in(
+    let add_out = yunta_in!(
         &repo,
         &home,
-        &["pack", "add", source.path().to_str().unwrap()],
+        &["pack", "add", source.path().to_str().unwrap()]
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
 
@@ -241,10 +206,10 @@ fn update_refuses_a_publisher_no_longer_allowed() {
     .unwrap();
     write_pack(source.path(), "globex", "2.0.0", "");
 
-    let out = yunta_in(
+    let out = yunta_in!(
         &repo,
         &home,
-        &["pack", "update", "globex/tools-pack", "master"],
+        &["pack", "update", "globex/tools-pack", INITIAL_BRANCH]
     );
     assert!(!out.status.success());
     assert!(
