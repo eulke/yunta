@@ -320,7 +320,7 @@ fn add_never_executes_before_confirmation() {
         &repo,
         &home,
         &marker,
-        &["pack", "add", "--run-tests", upstream.to_str().unwrap()]
+        &["pack", "add", "--run-tests", upstream.to_str().unwrap()],
     );
     assert!(!refused.status.success(), "{}", stdout(&refused));
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
@@ -340,7 +340,7 @@ fn add_never_executes_before_confirmation() {
             "--yes",
             "--run-tests",
             upstream.to_str().unwrap(),
-        ]
+        ],
     );
     assert!(confirmed.status.success(), "{}", stderr(&confirmed));
     assert!(
@@ -377,7 +377,7 @@ fn add_runs_the_packs_tests_only_when_asked() {
         &repo,
         &home,
         &marker,
-        &["pack", "add", "--yes", upstream.to_str().unwrap()]
+        &["pack", "add", "--yes", upstream.to_str().unwrap()],
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(

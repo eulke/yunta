@@ -481,7 +481,12 @@ nodes:
     // resumes (no second child_run_created), its gate resolves, and
     // everything closes.
     let (terminal, state) = bench
-        .execute(&run_id, &manifest, EMPTY_FIXTURE, &ApproveEverything::new("test"))
+        .execute(
+            &run_id,
+            &manifest,
+            EMPTY_FIXTURE,
+            &ApproveEverything::new("test"),
+        )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
