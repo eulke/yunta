@@ -76,6 +76,23 @@ pub struct RunState {
     pub unknown_kinds: Vec<(Seq, String)>,
 }
 
+/// A run's log read once and its [`RunState`] derived once — the pair
+/// almost every read site needs together. The read and the [`derive`]
+/// call live here, in one place, instead of being repeated at each site.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunView {
+    pub(crate) events: Vec<StoredEvent>,
+    pub(crate) state: RunState,
+}
+
+impl RunView {
+    /// Derives the state from the events, keeping both.
+    pub(crate) fn of(events: Vec<StoredEvent>) -> Self {
+        let state = derive(&events);
+        Self { events, state }
+    }
+}
+
 /// Bookkeeping `derive` needs across events without exposing it on
 /// [`RunState`]: what a `Waiting` node was before its gate
 /// opened (so `gate_resolved` can restore it — the internal

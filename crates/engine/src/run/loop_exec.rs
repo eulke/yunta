@@ -17,7 +17,7 @@ use yunta_core::events::{
 };
 use yunta_core::{FindingId, Isolation, Ledger, Node, NodeKind, PromptSource, Seq, Task};
 
-use crate::replay::{derive, RunState};
+use crate::replay::RunState;
 use crate::scope::scope_check;
 use crate::task_cycle::{
     post_check, run_task, AttemptEnv, CriterionRun, Memo, ScopeGovernance, TaskCycleReport,
@@ -51,16 +51,15 @@ pub(super) async fn execute_loop(
     };
     loop {
         state.iteration += 1;
-        let events = ctx.load_events().await?;
-        let derived = derive(&events);
-        let batch = select_batch(&prep.ledger, &derived, prep.concurrency);
+        let view = ctx.run_view().await?;
+        let batch = select_batch(&prep.ledger, &view.state, prep.concurrency);
 
         if batch.is_empty() {
             let all_done = prep
                 .ledger
                 .tasks
                 .iter()
-                .all(|task| derived.tasks.get(&task.id) == Some(&TaskStatus::Done));
+                .all(|task| view.state.tasks.get(&task.id) == Some(&TaskStatus::Done));
             ctx.emit(
                 Some(&node.id),
                 EventPayload::LoopIteration(LoopIterationPayload {
@@ -132,9 +131,9 @@ pub(super) async fn execute_loop(
         // One grant ledger per batch, seeded from the log — the atomic cap
         // window every concurrent member's evaluation commits through, so
         // `max_per_run` holds exactly.
-        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&events));
+        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&view.events));
         let batch_env = BatchDispatchEnv {
-            events: &events,
+            events: &view.events,
             base_commit: &base_commit,
             adapter: prep.adapter.as_ref(),
             scope_expansion: prep.scope_expansion,
@@ -153,7 +152,7 @@ pub(super) async fn execute_loop(
         // carries an accurate `count_this_run` — the cap *decision* already
         // happened atomically in the batch's `GrantLedger`; this count only
         // feeds the event payload.
-        let mut expansions_granted_this_run = granted_count(&events);
+        let mut expansions_granted_this_run = granted_count(&view.events);
         let pending = match integrate_batch(
             ctx,
             node,

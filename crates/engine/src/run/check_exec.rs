@@ -11,8 +11,6 @@ use yunta_core::events::{
 };
 use yunta_core::{CheckBuiltin, Node};
 
-use crate::replay::derive;
-
 use super::node_exec::{close_node, fail, NodeEnd};
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
@@ -269,7 +267,7 @@ async fn execute_findings_gate(
     node: &Node,
     max_severity: FindingSeverity,
 ) -> Result<NodeEnd, RunError> {
-    let state = derive(&ctx.load_events().await?);
+    let state = ctx.run_view().await?.state;
     let offending: Vec<&str> = state
         .findings
         .iter()

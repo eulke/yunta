@@ -561,16 +561,16 @@ async fn resolve_ledger(
     // tasks" as context would hide the failure behind plausible content,
     // so the read propagates exactly as its sibling `resolve_run_events`
     // already does.
-    let events = ctx
-        .load_events()
+    let state = ctx
+        .run_view()
         .await
         .map_err(|e| ContextResolveError::Io {
             node: node.id.clone(),
             source_id: source_id.to_string(),
             action: "read the event log".to_string(),
             source: std::io::Error::other(e.to_string()),
-        })?;
-    let state = crate::replay::derive(&events);
+        })?
+        .state;
     let mut lines: Vec<String> = state
         .tasks
         .iter()

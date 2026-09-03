@@ -19,7 +19,7 @@ use yunta_core::{
 
 use crate::artifacts::close_artifacts;
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
-use crate::replay::{derive, NodeState};
+use crate::replay::NodeState;
 use crate::runner::resolve_runner;
 use crate::scope::scope_check;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
@@ -201,7 +201,7 @@ async fn execute_parallel(
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let group_cancel = cancel.child_token();
-    let state = derive(&ctx.load_events().await?);
+    let state = ctx.run_view().await?.state;
 
     let already_failed: Vec<&Node> = children
         .iter()

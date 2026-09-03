@@ -319,8 +319,7 @@ pub(super) async fn recheck_approved_gates(
         return Ok(()); // nothing to re-check without a live forge
     };
 
-    let events = ctx.load_events().await?;
-    let state = crate::replay::derive(&events);
+    let crate::replay::RunView { events, state } = ctx.run_view().await?;
 
     for node in &ctx.manifest.workflow.nodes {
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {

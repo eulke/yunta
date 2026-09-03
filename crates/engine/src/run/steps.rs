@@ -38,7 +38,7 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
     // Distill before `run_finished` — nothing is emitted after the close
     // event, and its findings are events.
     super::distill::run_distill(ctx, mode_name).await?;
-    let state = derive(&ctx.load_events().await?);
+    let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
         EventPayload::RunFinished(RunFinishedPayload {
@@ -238,7 +238,7 @@ pub(super) async fn gate_exhausted(
             terminal: RunTerminal::Promoted {
                 suggested_mode: next_mode,
             },
-            state: derive(&ctx.load_events().await?),
+            state: ctx.run_view().await?.state,
         }))
     } else {
         let reason = format!(
@@ -419,7 +419,7 @@ async fn gate_still_waiting(
     match step {
         gate_exec::GateStep::StillWaiting { reason } => Ok(Some(RunReport {
             terminal: RunTerminal::Paused { reason },
-            state: derive(&ctx.load_events().await?),
+            state: ctx.run_view().await?.state,
         })),
         gate_exec::GateStep::Resolved => Ok(None),
     }

@@ -16,7 +16,7 @@ use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId,
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
-use crate::replay::derive;
+use crate::replay::RunView;
 use crate::task_cycle::Memo;
 
 use super::{budget, RunError};
@@ -109,6 +109,13 @@ impl RunCtx<'_> {
         Ok(self.storage.events_for_run(self.run_id.clone()).await?)
     }
 
+    /// The run's log read and its state derived, together — the pairing
+    /// every site that needs the current state goes through, so the load
+    /// and the `derive` live in one place rather than at each call.
+    pub(crate) async fn run_view(&self) -> Result<RunView, RunError> {
+        Ok(RunView::of(self.load_events().await?))
+    }
+
     /// Exports the run's whole log to `run.dir/events.jsonl` — called
     /// at every close this recorte recognizes (`Finish` and `Pause`; see
     /// this module's own doc comment on the trigger decision). Re-exports
@@ -193,7 +200,7 @@ impl RunCtx<'_> {
                 ..Default::default()
             });
         };
-        let state = derive(&self.load_events().await?);
+        let state = self.run_view().await?.state;
         let non_terminal = self
             .manifest
             .workflow

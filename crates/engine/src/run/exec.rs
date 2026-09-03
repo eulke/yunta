@@ -18,7 +18,6 @@ use yunta_core::events::{
 use yunta_core::{Clock, ModeName, NodeId, Pid, RunId};
 use yunta_storage::AsyncStorage;
 
-use crate::replay::derive;
 use crate::task_cycle::Memo;
 
 use super::schedule::{self, ScheduleStep};
@@ -64,7 +63,7 @@ pub(super) async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport,
     record_pause(ctx, &reason).await?;
     Ok(RunReport {
         terminal: RunTerminal::Paused { reason },
-        state: derive(&ctx.load_events().await?),
+        state: ctx.run_view().await?.state,
     })
 }
 
@@ -193,13 +192,14 @@ pub(crate) async fn execute_run_at_depth(
 async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     let (ctx, root_cancel, registry_error) = build_ctx(env, depth);
 
-    let events = ctx.load_events().await?;
-    if events.is_empty() {
+    let view = ctx.run_view().await?;
+    if view.events.is_empty() {
         return Err(RunError::UnknownRun {
             run_id: ctx.run_id.clone(),
         });
     }
-    if events
+    if view
+        .events
         .iter()
         .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_))))
     {
@@ -207,17 +207,17 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         // already has its ending.
         return Ok(Startup::Finished(RunReport {
             terminal: RunTerminal::Finished,
-            state: derive(&events),
+            state: view.state,
         }));
     }
-    if events.len() > 1 {
+    if view.events.len() > 1 {
         // Anything beyond run_created means a previous invocation worked
         // on this run — this one is a resume. A node the mode excludes
         // never ran, so the orphans are the same whichever nodes are
         // in the mode.
         let policies = schedule::resume_policies(
             ctx.manifest.workflow.nodes.iter(),
-            &derive(&events),
+            &view.state,
             ctx.manifest.config.resolved_on_interrupt(),
         );
         let shared: BTreeSet<&str> = policies
@@ -267,7 +267,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // same name back off the log rather than re-deriving it, same
     // "resolved once, reused forever" discipline runner resolution
     // already follows.
-    let mode_name = yunta_core::events::run_mode(&events);
+    let mode_name = yunta_core::events::run_mode(&view.events);
     let mode_nodes = crate::modes::mode_included_nodes(&ctx.manifest.workflow, &mode_name);
     Ok(Startup::Ready {
         ctx,
