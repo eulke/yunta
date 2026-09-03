@@ -192,7 +192,15 @@ fn gitignore_block() -> String {
 
 fn write_gitignore(repo: &Path) -> std::io::Result<bool> {
     let path = repo.join(".gitignore");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    // An absent `.gitignore` is the create case; any *other* read error
+    // (unreadable, not UTF-8, a directory) is propagated, never swallowed
+    // as "empty" — appending to an empty string would then overwrite a
+    // file whose real content we failed to read.
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
     if existing.contains(GITIGNORE_MARKER) {
         return Ok(false);
     }
@@ -312,6 +320,13 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed);
+    // Never write a config this binary can't read back: parse the
+    // generated text into a real `ConfigLayer` first, so a broken template
+    // fails here instead of leaving an unreadable file — the more so under
+    // `--force`, which would otherwise overwrite a good config with a bad
+    // one.
+    yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&config_yaml)
+        .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
     std::fs::write(&config_path, config_yaml)
         .map_err(|source| CliError::io("write", config_path.display(), source))?;
     wrote.push(config_path.display().to_string());

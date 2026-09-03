@@ -238,3 +238,55 @@ fn new_works_before_init_ever_ran() {
     let result = yunta_in(&repo, &home, &["new", "standalone", "--shape", "ledger"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 }
+
+#[test]
+fn init_never_replaces_an_unreadable_gitignore() {
+    let (_root, repo, home) = setup();
+
+    // A `.gitignore` that isn't valid UTF-8: reading it fails with a
+    // non-NotFound error, which `init` must propagate rather than treat as
+    // "empty" and overwrite — losing whatever the file actually held.
+    let gitignore = repo.join(".gitignore");
+    std::fs::write(&gitignore, [0xff, 0xfe, 0x00, 0x01, 0x02]).unwrap();
+    let before = std::fs::read(&gitignore).unwrap();
+
+    let result = yunta_in(&repo, &home, &["init"]);
+    assert!(
+        !result.status.success(),
+        "init must fail on an unreadable .gitignore, never clobber it: {}",
+        stdout(&result)
+    );
+    assert!(
+        stderr(&result).contains(".gitignore"),
+        "the error names the file it could not read: {}",
+        stderr(&result)
+    );
+
+    let after = std::fs::read(&gitignore).unwrap();
+    assert_eq!(
+        before, after,
+        "the unreadable .gitignore must be left exactly as it was"
+    );
+}
+
+#[test]
+fn new_writes_only_a_parseable_skeleton() {
+    let (_root, repo, home) = setup();
+
+    // Every shape the CLI writes parses back as a real `Workflow` — `new`
+    // builds the type from its skeleton before the file ever touches disk.
+    for shape in ["one-node", "lint-fix", "ledger"] {
+        let name = format!("parseable-{shape}");
+        let result = yunta_in(&repo, &home, &["new", &name, "--shape", shape]);
+        assert!(
+            result.status.success(),
+            "shape {shape}: {}",
+            stderr(&result)
+        );
+        let yaml =
+            std::fs::read_to_string(repo.join(".yunta/workflows").join(format!("{name}.yaml")))
+                .unwrap();
+        yunta_core::yaml::parse::<yunta_core::Workflow>(&yaml)
+            .unwrap_or_else(|e| panic!("shape {shape} wrote an unparseable workflow: {e}\n{yaml}"));
+    }
+}

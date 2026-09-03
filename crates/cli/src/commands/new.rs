@@ -168,6 +168,17 @@ pub fn new_workflow(
         }
     };
 
+    // Build the real type before writing: a skeleton that doesn't parse as
+    // a `Workflow` never reaches disk, so `--force` can't leave an invalid
+    // file behind.
+    let yaml = shape.skeleton(name);
+    let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
+        CliError::msg(format!(
+            "the {} skeleton does not parse as a workflow: {e}",
+            shape.label()
+        ))
+    })?;
+
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
@@ -180,16 +191,8 @@ pub fn new_workflow(
         std::fs::create_dir_all(parent)
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
-
-    let yaml = shape.skeleton(name);
     std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
     println!("wrote {} ({})", path.display(), shape.label());
-
-    let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
-        CliError::msg(format!(
-            "the skeleton this command just wrote fails to parse: {e}"
-        ))
-    })?;
 
     // Same layered config `yunta check` resolves without an explicit
     // `--config` — an empty/default layer set (no `.yunta/config.yaml`
