@@ -14,17 +14,44 @@ use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
 use yunta_core::{Answer, AnswerType, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
+use crate::error::warn;
+
 pub struct ConsoleInteraction;
 
-/// Reads one line from stdin; `None` on EOF (stdin closed mid-prompt —
-/// the same "can't interact" case as never having a TTY, never a
-/// silent default).
-fn read_line() -> Option<String> {
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-        return None;
+/// Prints `message`, flushes it, and reads one trimmed line from stdin —
+/// the single prompt the console surface uses. The read runs on a blocking
+/// thread (`spawn_blocking`), so a person taking their time answering never
+/// freezes the run's single-threaded runtime and the tasks that share it:
+/// the per-node run-tools listener, a `--follow` follower, the Ctrl-C
+/// handler.
+///
+/// `None` means no answer could be read, and the caller degrades to
+/// pausing. The two ways that happens are kept distinct: a clean EOF
+/// (stdin closed mid-prompt) is silent, the same "can't interact" case as
+/// having no TTY; a real read failure is surfaced with a `warning:` so it
+/// is never mistaken for one.
+async fn prompt(message: &str) -> Option<String> {
+    print!("{message}");
+    let _ = std::io::stdout().flush();
+    let read = tokio::task::spawn_blocking(|| {
+        let mut line = String::new();
+        std::io::stdin()
+            .read_line(&mut line)
+            .map(|read| (read, line))
+    })
+    .await;
+    match read {
+        Ok(Ok((0, _))) => None,
+        Ok(Ok((_, line))) => Some(line.trim().to_string()),
+        Ok(Err(e)) => {
+            warn(format!("could not read your answer from stdin: {e}"));
+            None
+        }
+        Err(e) => {
+            warn(format!("the stdin reader task failed: {e}"));
+            None
+        }
     }
-    Some(line.trim().to_string())
 }
 
 #[async_trait]
@@ -49,18 +76,9 @@ impl HumanInteraction for ConsoleInteraction {
         }
 
         let chosen_option = loop {
-            print!("choose an option id: ");
-            let _ = std::io::stdout().flush();
-            let mut line = String::new();
-            // EOF (0 bytes read) means stdin closed mid-prompt — same
-            // "can't interact" case as never having a TTY at all, not a
-            // silent default.
-            if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-                return None;
-            }
-            let line = line.trim();
+            let line = prompt("choose an option id: ").await?;
             if escalation.options.iter().any(|o| o.id == line) {
-                break line.to_string();
+                break line;
             }
             println!(
                 "`{line}` isn't one of: {}",
@@ -73,18 +91,12 @@ impl HumanInteraction for ConsoleInteraction {
             );
         };
 
-        print!("optional free-text feedback (enter to skip): ");
-        let _ = std::io::stdout().flush();
-        let mut free_text_line = String::new();
-        if std::io::stdin().read_line(&mut free_text_line).unwrap_or(0) == 0 {
-            return None;
-        }
-        let free_text = free_text_line.trim();
+        let free_text = prompt("optional free-text feedback (enter to skip): ").await?;
 
         Some(GateResolvedPayload {
             chosen_option: Some(chosen_option),
             resolved_by: std::env::var("USER").ok(),
-            free_text: (!free_text.is_empty()).then(|| free_text.to_string()),
+            free_text: (!free_text.is_empty()).then_some(free_text),
             approved_sha: None,
         })
     }
@@ -107,18 +119,17 @@ impl HumanInteraction for ConsoleInteraction {
         let mut answers = Vec::new();
         for question in &questions.questions {
             let value = loop {
-                match question.answer_type {
-                    AnswerType::Text => print!("{} ", question.text),
+                let mut message = match question.answer_type {
+                    AnswerType::Text => format!("{} ", question.text),
                     AnswerType::Choice => {
-                        print!("{} [{}] ", question.text, question.values.join("/"))
+                        format!("{} [{}] ", question.text, question.values.join("/"))
                     }
-                    AnswerType::Boolean => print!("{} [y/n] ", question.text),
-                }
+                    AnswerType::Boolean => format!("{} [y/n] ", question.text),
+                };
                 if !question.required {
-                    print!("(enter to skip) ");
+                    message.push_str("(enter to skip) ");
                 }
-                let _ = std::io::stdout().flush();
-                let line = read_line()?;
+                let line = prompt(&message).await?;
                 if line.is_empty() {
                     if question.required {
                         println!("`{}` is required", question.id);

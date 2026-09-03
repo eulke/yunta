@@ -2531,6 +2531,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "nix",
  "rmcp",
  "serde",
  "serde_json",

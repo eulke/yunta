@@ -59,3 +59,7 @@ rmcp = { workspace = true, features = [
     "client",
     "transport-child-process",
 ] }
+# The console-interaction test drives `yunta run` with a real terminal on
+# stdin (openpty) so the console surface engages, then signals it (SIGINT)
+# to prove the runtime stays responsive while a prompt waits.
+nix = { workspace = true, features = ["term", "signal"] }
