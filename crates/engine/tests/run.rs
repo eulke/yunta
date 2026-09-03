@@ -7,182 +7,19 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{git, init_repo, Bench, FixedClock, ScriptedInteraction, MOCK_CONFIG};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
 static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-const CONFIG: &str = r#"
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    runs_root: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-}
-
-impl Bench {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-            run_id: RunId::from("run-test-1"),
-        }
-    }
-
-    /// The absolute run dir this bench's run will use — known before the
-    /// run exists, so fixtures can embed absolute artifact paths the way
-    /// a real agent would after reading `{{run.dir}}` from its prompt.
-    fn run_dir(&self) -> std::path::PathBuf {
-        self.runs_root.join(self.run_id.as_str())
-    }
-
-    async fn run(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        self.run_with_config(workflow_yaml, fixture_yaml, CONFIG)
-            .await
-    }
-
-    /// Same as [`Bench::run`] but with a caller-chosen config layer — for
-    /// tests that need `baseline:`/`coverage:`/`limits:` alongside the
-    /// usual `runners:`.
-    async fn run_with_config(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-        config_yaml: &str,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        self.run_full(workflow_yaml, fixture_yaml, config_yaml, &NoInteraction)
-            .await
-    }
-
-    /// Same as [`Bench::run`] but with a caller-chosen
-    /// [`yunta_engine::HumanInteraction`] — for tests that need to
-    /// script a gate's resolution instead of always degrading to pause.
-    async fn run_with_interaction(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-        human_interaction: &dyn yunta_engine::HumanInteraction,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        self.run_full(workflow_yaml, fixture_yaml, CONFIG, human_interaction)
-            .await
-    }
-
-    /// The fully-parameterized shape every other `run*` helper delegates
-    /// to: caller-chosen config layer *and* interaction surface.
-    async fn run_full(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-        config_yaml: &str,
-        human_interaction: &dyn yunta_engine::HumanInteraction,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &self.run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
-
-        let report = execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-        })
-        .await
-        .unwrap();
-        (report.terminal, report.state)
-    }
-}
 
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
@@ -487,7 +324,7 @@ nodes:
     // Second execution: same log, no new adapter, still Finished — and
     // no duplicate node execution (the log would show a second start).
     let workflow: Workflow = serde_yaml::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -870,7 +707,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -1064,7 +901,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -1352,7 +1189,7 @@ nodes:
     run: "test -f present.txt"
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -1445,7 +1282,7 @@ nodes:
     on_interrupt: fail_if_uncertain
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -1686,7 +1523,7 @@ nodes:
         run: "test -f present.txt"
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -3329,14 +3166,12 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
     );
 
-    let interaction = ScriptedInteraction {
-        resolution: yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("grant".to_string()),
-            resolved_by: Some("eulke".to_string()),
-            free_text: None,
-            approved_sha: None,
-        },
-    };
+    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
+        chosen_option: Some("grant".to_string()),
+        resolved_by: Some("eulke".to_string()),
+        free_text: None,
+        approved_sha: None,
+    });
     let (terminal, state) = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
@@ -3405,14 +3240,12 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
     );
 
-    let interaction = ScriptedInteraction {
-        resolution: yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("deny".to_string()),
-            resolved_by: Some("eulke".to_string()),
-            free_text: Some("out of this sprint".to_string()),
-            approved_sha: None,
-        },
-    };
+    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
+        chosen_option: Some("deny".to_string()),
+        resolved_by: Some("eulke".to_string()),
+        free_text: Some("out of this sprint".to_string()),
+        approved_sha: None,
+    });
     let (terminal, state) = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
@@ -3637,7 +3470,7 @@ nodes:
 // --- context: -----------------------------------------------------
 
 /// A single `prompt` node named `ask` declaring `context_yaml` verbatim
-/// under `context:`. `runner: executor` matches `CONFIG`'s own mock
+/// under `context:`. `runner: executor` matches `MOCK_CONFIG`'s own mock
 /// candidate.
 fn context_workflow(context_yaml: &str) -> String {
     format!(
@@ -3935,7 +3768,7 @@ nodes:
 async fn a_node_can_reference_project_config_by_template() {
     let bench = Bench::new();
     let config = format!(
-        "{CONFIG}\nproject:\n  name: mi-repo\n  base_branch: main\n  branch_prefix: yunta/\n"
+        "{MOCK_CONFIG}\nproject:\n  name: mi-repo\n  base_branch: main\n  branch_prefix: yunta/\n"
     );
     let workflow = r#"
 name: project-template
@@ -4387,20 +4220,6 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
 
 // --- HumanInteraction — gates ----------------------------------
 
-struct ScriptedInteraction {
-    resolution: yunta_core::events::GateResolvedPayload,
-}
-
-#[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for ScriptedInteraction {
-    async fn resolve(
-        &self,
-        _escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        Some(self.resolution.clone())
-    }
-}
-
 /// A never-refuses `on_failure.goto` corrective node whose *second*
 /// attempt actually fixes what its first attempt didn't — so a human
 /// authorizing exactly one extra retry at the exhausted-reroutes gate is
@@ -4429,14 +4248,12 @@ sessions:
 #[tokio::test]
 async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_finish() {
     let bench = Bench::new();
-    let interaction = ScriptedInteraction {
-        resolution: yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("retry".to_string()),
-            resolved_by: Some("eulke".to_string()),
-            free_text: None,
-            approved_sha: None,
-        },
-    };
+    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
+        chosen_option: Some("retry".to_string()),
+        resolved_by: Some("eulke".to_string()),
+        free_text: None,
+        approved_sha: None,
+    });
 
     let (terminal, state) = bench
         .run_with_interaction(
@@ -4486,14 +4303,12 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
 #[tokio::test]
 async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
     let bench = Bench::new();
-    let interaction = ScriptedInteraction {
-        resolution: yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("abort".to_string()),
-            resolved_by: Some("eulke".to_string()),
-            free_text: Some("not worth chasing today".to_string()),
-            approved_sha: None,
-        },
-    };
+    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
+        chosen_option: Some("abort".to_string()),
+        resolved_by: Some("eulke".to_string()),
+        free_text: Some("not worth chasing today".to_string()),
+        approved_sha: None,
+    });
 
     let (terminal, _) = bench
         .run_with_interaction(
@@ -4639,7 +4454,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
     // failures" pause that never touches the gate again.
     let bench = Bench::new();
     let workflow: Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -4799,7 +4614,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     let artifacts_dir = bench.run_dir().join("artifacts");
     let _ = artifacts_dir; // same Bench shape as every other e2e here
     let workflow: yunta_core::Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -5796,7 +5611,7 @@ sessions:
     // Run in `quick` mode: `notes` never runs, its artifact never
     // exists, but distill declares it.
     let workflow_parsed: Workflow = serde_yaml::from_str(&workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow_parsed,
         &config,
@@ -5925,7 +5740,7 @@ sessions:
     outcome: { type: completed, summary: "informed" }
 "#;
     let workflow: Workflow = serde_yaml::from_str(second_workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -6229,7 +6044,7 @@ nodes:
     // Corrupt the log by hand: a node_finished with no node_started —
     // exactly the class of inconsistency `derive` refuses to guess over.
     let wf: Workflow = serde_yaml::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &wf,
         &config,
@@ -6315,7 +6130,7 @@ async fn resume_orphan_with_mock(
 ) {
     let bench = Bench::new();
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -6482,7 +6297,7 @@ sessions:
 "#;
     let bench = Bench::new();
     let (terminal, _state, adapter) =
-        run_with_recording_mock(&bench, RESUME_WORKFLOW, fixture, CONFIG).await;
+        run_with_recording_mock(&bench, RESUME_WORKFLOW, fixture, MOCK_CONFIG).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(adapter.resumes_seen().is_empty());
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -6612,7 +6427,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let provided = HashMap::from([("idea".to_string(), "ship it".to_string())]);
     let manifest = build_manifest(
         &workflow,
@@ -6672,7 +6487,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
