@@ -1458,7 +1458,7 @@ fn max_parallel_nodes_zero_is_a_check_error() {
 }
 
 #[test]
-fn a_push_to_the_base_branch_without_a_prior_gate_warns_d48() {
+fn a_push_to_the_base_branch_without_a_prior_gate_warns() {
     let config: ConfigLayer = serde_yaml::from_str("project: { base_branch: main }").unwrap();
 
     // Direct push to the configured base, no gate anywhere upstream.

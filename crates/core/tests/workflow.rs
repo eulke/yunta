@@ -6,7 +6,7 @@ use yunta_core::{
 const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
 
 #[test]
-fn parses_the_m0_schema_recorte_without_loss() {
+fn parses_the_reference_schema_excerpt_without_loss() {
     let workflow: Workflow = serde_yaml::from_str(FIXTURE).expect("fixture should parse");
 
     assert_eq!(workflow.name, "fix-lint-loop");

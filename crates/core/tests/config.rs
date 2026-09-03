@@ -143,7 +143,7 @@ fn a_group_absent_from_every_layer_stays_none() {
 }
 
 #[test]
-fn parses_the_reference_config_groups_in_scope_for_m0() {
+fn parses_the_reference_config_groups_in_scope() {
     let yaml = r#"
 runners:
   planner:
