@@ -814,3 +814,102 @@ sessions:
         Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
     )));
 }
+
+/// A `prompt` node that declares `network: false` — the policy no adapter
+/// can enforce.
+const NETWORK_DECLARED_WORKFLOW: &str = r#"
+name: network-declared
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    network: false
+    prompt: "Do the thing."
+"#;
+
+#[tokio::test]
+async fn network_false_is_reported_as_declarative_only() {
+    // `network: false` is a declared policy, not a capability the engine has:
+    // no adapter isolates the network (D105/D119). The engine records the gap
+    // before the session with a `capability_degraded`, never consolidating it
+    // into silence.
+    let bench = Bench::new();
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "network: false blocks nothing — policy, not capability"
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let degraded = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+                if p.capability == "network_isolation" =>
+            {
+                Some(p)
+            }
+            _ => None,
+        })
+        .expect("network: false the adapter cannot enforce must be an event, never silence");
+    assert_eq!(degraded.adapter, "mock");
+    assert_eq!(
+        degraded.policy_applied,
+        "declarative-only — the adapter declares no network isolation; `network: false` is recorded for policy and audit, not enforced"
+    );
+}
+
+#[tokio::test]
+async fn a_node_that_declares_no_network_policy_records_no_isolation_degradation() {
+    // Only an explicit `network: false` is a policy the engine reports it
+    // cannot enforce; a node that never mentions network declares none, so
+    // there is nothing to degrade.
+    let bench = Bench::new();
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+                if p.capability == "network_isolation"
+        )),
+        "an unset network policy is not a degradation"
+    );
+}
+
+#[tokio::test]
+async fn an_adapter_that_isolates_the_network_records_no_degradation() {
+    // The degradation is capability-aware: an adapter that declares
+    // `network_isolation` can enforce `network: false`, so the engine records
+    // nothing — the policy is applied, not degraded.
+    let bench = Bench::new();
+    let fixture = r#"
+capabilities: { network_isolation: true }
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _, _adapter) =
+        run_with_recording_mock(&bench, NETWORK_DECLARED_WORKFLOW, fixture, MOCK_CONFIG).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+                if p.capability == "network_isolation"
+        )),
+        "an adapter that declares network isolation leaves nothing to degrade"
+    );
+}

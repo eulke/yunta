@@ -296,14 +296,17 @@ pub struct Node {
     /// governs which *commands* run at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<NodePermissions>,
-    /// Declarative ONLY: `network: false` activates no
-    /// sandboxing — the engine never blocks a network call over it. It
-    /// exists for policy and audit (a pack declaring it and then curling
-    /// is a detectable contradiction), and an executor may choose to
-    /// actually enforce it on its own. Reading it as a sandbox is reading
-    /// a guarantee the system never offered. Absent means `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub network: bool,
+    /// A node's network policy, declarative ONLY: `network: false` asks for
+    /// no network access, `network: true` allows it, and absent (`None`)
+    /// declares no policy at all. The engine never blocks a network call
+    /// over this — it exists for policy and audit (a pack declaring `false`
+    /// and then curling is a detectable contradiction), and an executor may
+    /// choose to enforce it on its own. Where a session's resolved adapter
+    /// cannot enforce a declared `network: false`, the engine records a
+    /// `capability_degraded` before the session; reading it as a sandbox is
+    /// reading a guarantee the system never offered (D105/D119).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<bool>,
     /// `context:` — data resolved and materialized
     /// *before* a session opens, in declaration order. Consumed by
     /// `kind: prompt` (the node's one session) and `kind: loop` (once
@@ -395,7 +398,7 @@ struct NodeFields {
     #[serde(default)]
     permissions: Option<NodePermissions>,
     #[serde(default)]
-    network: bool,
+    network: Option<bool>,
     #[serde(default)]
     context: Vec<ContextSpec>,
     #[serde(default)]

@@ -1115,6 +1115,33 @@ pub(super) async fn open_run_tools(
     }
 }
 
+/// Records that a node's `network: false` is declarative only when the
+/// session's resolved adapter cannot enforce it (D105/D119): before the
+/// session, the engine states it will not sandbox the network — it never
+/// emulates isolation it does not have. A node that declares no network
+/// policy (`None`) or one whose adapter isolates the network records nothing.
+pub(super) async fn report_declarative_network(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    adapter: &dyn yunta_adapters::Adapter,
+    adapter_id: &AdapterId,
+) -> Result<(), RunError> {
+    if node.network == Some(false) && !adapter.capabilities().network_isolation {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
+                capability: "network_isolation".to_string(),
+                adapter: adapter_id.clone(),
+                policy_applied: "declarative-only — the adapter declares no network isolation; \
+                                 `network: false` is recorded for policy and audit, not enforced"
+                    .to_string(),
+            }),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -1140,6 +1167,7 @@ async fn execute_prompt(
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
+    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
     // Names resolved by the engine; mounting is the adapter's —
     // and an adapter without the capability degrades with an event,
     // never a fatal error (a skill is instruction, not correctness).

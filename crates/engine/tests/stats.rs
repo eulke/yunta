@@ -27,7 +27,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         on_interrupt: None,
         description: None,
         permissions: None,
-        network: false,
+        network: None,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),

@@ -736,8 +736,11 @@
           "default": false
         },
         "network": {
-          "description": "Declarative ONLY: `network: false` activates no\nsandboxing — the engine never blocks a network call over it. It\nexists for policy and audit (a pack declaring it and then curling\nis a detectable contradiction), and an executor may choose to\nactually enforce it on its own. Reading it as a sandbox is reading\na guarantee the system never offered. Absent means `false`.",
-          "type": "boolean"
+          "description": "A node's network policy, declarative ONLY: `network: false` asks for\nno network access, `network: true` allows it, and absent (`None`)\ndeclares no policy at all. The engine never blocks a network call\nover this — it exists for policy and audit (a pack declaring `false`\nand then curling is a detectable contradiction), and an executor may\nchoose to enforce it on its own. Where a session's resolved adapter\ncannot enforce a declared `network: false`, the engine records a\n`capability_degraded` before the session; reading it as a sandbox is\nreading a guarantee the system never offered (D105/D119).",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "on_failure": {
           "anyOf": [

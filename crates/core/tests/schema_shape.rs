@@ -48,12 +48,12 @@ fn loop_until_is_an_exhaustive_enum() {
 }
 
 #[test]
-fn node_network_and_interactive_are_false_unless_declared() {
+fn node_network_is_none_and_interactive_false_unless_declared() {
     let wf = workflow(
         "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    network: true\n    interactive: true\n",
     );
-    assert!(!wf.nodes[0].network && !wf.nodes[0].interactive);
-    assert!(wf.nodes[1].network && wf.nodes[1].interactive);
+    assert!(wf.nodes[0].network.is_none() && !wf.nodes[0].interactive);
+    assert!(wf.nodes[1].network == Some(true) && wf.nodes[1].interactive);
 }
 
 #[test]

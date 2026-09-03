@@ -201,6 +201,11 @@
           "type": "boolean",
           "default": false
         },
+        "network_isolation": {
+          "description": "Can confine a session's process to no network access, enforcing a\nnode's `network: false`. Declarative policy is never an OS sandbox\nYunta core promises (D105): where this is absent, a node's\n`network: false` degrades with `capability_degraded` — recorded for\npolicy and audit, never enforced.",
+          "type": "boolean",
+          "default": false
+        },
         "permission_profiles": {
           "description": "Distinguishes permission profiles (`read_only`/`edit`/`full`).",
           "type": "boolean",

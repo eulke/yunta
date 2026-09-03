@@ -128,6 +128,10 @@ impl Adapter for ClaudeCodeAdapter {
             // Mounted by staging into the session cwd's own
             // `.claude/skills/` — the CLI's native discovery location.
             skills: true,
+            // No network sandbox is wired for the real CLI — the engine's
+            // post-hoc audit is the boundary, so `network: false` degrades
+            // to declarative-only rather than claiming isolation.
+            network_isolation: false,
         }
     }
 

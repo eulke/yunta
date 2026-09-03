@@ -26,7 +26,8 @@ use crate::task_cycle::{
 use crate::worktree::prepare_worktree;
 
 use super::node_exec::{
-    close_node, fail, fail_with_tokens, prompt_text, render_or_fail, resolve_node_runner, NodeEnd,
+    close_node, fail, fail_with_tokens, prompt_text, render_or_fail, report_declarative_network,
+    resolve_node_runner, NodeEnd,
 };
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -244,6 +245,10 @@ async fn prepare_loop<'a>(
         Step::Ended(end) => return Ok(LoopReady::Ended(end)),
     };
     let adapter = ctx.adapters[&chosen.adapter].clone();
+    // Once for the whole loop, like skills below: the network policy is the
+    // node's, not the task's, so its declarative-only degradation is recorded
+    // here rather than per task session.
+    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
     // One resolution for the whole loop — every task session mounts the same
     // skills, and a missing name fails the node before any token is spent.

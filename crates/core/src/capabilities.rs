@@ -33,4 +33,11 @@ pub struct Capabilities {
     pub skills: bool,
     /// Can connect to Yunta's per-run MCP server as a client.
     pub run_tools: bool,
+    /// Can confine a session's process to no network access, enforcing a
+    /// node's `network: false`. Declarative policy is never an OS sandbox
+    /// Yunta core promises (D105): where this is absent, a node's
+    /// `network: false` degrades with `capability_degraded` — recorded for
+    /// policy and audit, never enforced.
+    #[serde(default)]
+    pub network_isolation: bool,
 }

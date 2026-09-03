@@ -24,7 +24,7 @@ fn node(id: &str, description: Option<&str>) -> Node {
         on_interrupt: None,
         description: description.map(str::to_string),
         permissions: None,
-        network: false,
+        network: None,
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),

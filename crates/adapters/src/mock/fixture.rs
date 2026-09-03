@@ -92,6 +92,7 @@ pub struct FixtureCapabilities {
     pub usage_reporting: bool,
     pub skills: bool,
     pub run_tools: bool,
+    pub network_isolation: bool,
 }
 
 impl From<FixtureCapabilities> for Capabilities {
@@ -104,6 +105,7 @@ impl From<FixtureCapabilities> for Capabilities {
             usage_reporting: fixture.usage_reporting,
             skills: fixture.skills,
             run_tools: fixture.run_tools,
+            network_isolation: fixture.network_isolation,
         }
     }
 }

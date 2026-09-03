@@ -555,7 +555,7 @@ run: "true"
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(node.permissions, None);
-    assert!(!node.network);
+    assert_eq!(node.network, None);
 }
 
 #[test]
@@ -567,7 +567,7 @@ run: "cargo clippy"
 network: false
 "#;
     let node: yunta_core::Node = serde_yaml::from_str(yaml).unwrap();
-    assert!(!node.network);
+    assert_eq!(node.network, Some(false));
 }
 
 #[test]

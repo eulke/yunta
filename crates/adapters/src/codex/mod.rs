@@ -158,6 +158,10 @@ impl Adapter for CodexAdapter {
             usage_reporting: true,
             // MCP per-run tools aren't wired yet.
             run_tools: false,
+            // `codex exec` isolates no network — declaring the capability
+            // would claim a sandbox that isn't built, so `network: false`
+            // degrades to declarative-only here.
+            network_isolation: false,
         }
     }
 
