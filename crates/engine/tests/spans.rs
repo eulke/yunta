@@ -3,51 +3,23 @@
 //! filters logs by. A capturing subscriber reads them back off a real run.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Utc};
 use tracing::field::{Field, Visit};
 use tracing::span::Attributes;
 use tracing::Subscriber;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
-use yunta_core::{Clock, ConfigLayer, RunId, SeqIdSource, Workflow};
+use yunta_core::{ConfigLayer, RunId, SeqIdSource, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv,
     DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{init_repo, FixedClock};
 
 static IDS: SeqIdSource = SeqIdSource::new("spans");
-
-struct FixedClock;
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
-    }
-}
-
-/// The manifest freezes the worktree's `HEAD`, so the worktree is a repo.
-fn init_repo(dir: &Path) {
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
-    };
-    git(&["init", "-q"]);
-    git(&["config", "user.email", "test@example.com"]);
-    git(&["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(&["add", "."]);
-    git(&["commit", "-q", "-m", "initial"]);
-}
 
 /// One recorded span: its name and its fields as strings.
 type RecordedSpan = (String, BTreeMap<String, String>);

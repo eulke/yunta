@@ -1,29 +1,16 @@
-use std::path::Path;
-
 use yunta_engine::{scope_check, ScopeCheckError};
 
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
+fn setup_repo(dir: &std::path::Path) {
+    yunta_testkit::init_repo(dir);
+    yunta_testkit::write(&dir.join("tracked.txt"), "original\n");
+    yunta_testkit::git(dir, &["add", "."]);
+    yunta_testkit::git(dir, &["commit", "-q", "-m", "tracked"]);
 }
 
 #[tokio::test]
 async fn a_modified_tracked_file_inside_scope_is_not_a_violation() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::write(dir.path().join("tracked.txt"), "changed\n").unwrap();
 
     let result = scope_check(dir.path(), &["tracked.txt".to_string()], &[])
@@ -36,7 +23,7 @@ async fn a_modified_tracked_file_inside_scope_is_not_a_violation() {
 #[tokio::test]
 async fn a_new_untracked_file_outside_scope_is_a_violation() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::write(dir.path().join("new_file.txt"), "surprise\n").unwrap();
 
     let result = scope_check(dir.path(), &["tracked.txt".to_string()], &[])
@@ -51,7 +38,7 @@ async fn a_new_untracked_file_outside_scope_is_a_violation() {
 #[tokio::test]
 async fn a_recursive_glob_covers_nested_paths() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::create_dir_all(dir.path().join("src/sub")).unwrap();
     std::fs::write(dir.path().join("src/sub/mod.rs"), "// new\n").unwrap();
 
@@ -64,7 +51,7 @@ async fn a_recursive_glob_covers_nested_paths() {
 #[tokio::test]
 async fn no_changes_means_no_diff_and_no_violations() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
 
     let result = scope_check(dir.path(), &["tracked.txt".to_string()], &[])
         .await
@@ -76,7 +63,7 @@ async fn no_changes_means_no_diff_and_no_violations() {
 #[tokio::test]
 async fn an_invalid_glob_is_a_typed_error() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
 
     let result = scope_check(dir.path(), &["[".to_string()], &[]).await;
     assert!(matches!(result, Err(ScopeCheckError::InvalidGlob { .. })));
@@ -94,7 +81,7 @@ async fn a_non_git_directory_surfaces_a_typed_git_failure() {
 #[tokio::test]
 async fn a_path_an_adapter_staged_is_never_charged_to_scope() {
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::create_dir_all(dir.path().join(".claude/skills")).unwrap();
     std::fs::write(dir.path().join(".claude/skills/review"), "a mount\n").unwrap();
 
@@ -128,7 +115,7 @@ async fn star_does_not_cross_directories() {
     // but not a file one directory deeper, which is therefore a
     // violation of a scope that only declared the top level.
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::create_dir_all(dir.path().join("src/sub")).unwrap();
     std::fs::write(dir.path().join("src/lib.rs"), "// top\n").unwrap();
     std::fs::write(dir.path().join("src/sub/deep.rs"), "// nested\n").unwrap();
@@ -149,7 +136,7 @@ async fn non_ascii_paths_match_their_globs() {
     // globs byte-for-byte (`src/café.rs`) and matches `src/*.rs` — not as
     // the escaped `"src/caf\303\251.rs"` string no glob would match.
     let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    setup_repo(dir.path());
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     std::fs::write(dir.path().join("src/café.rs"), "// unicode\n").unwrap();
 

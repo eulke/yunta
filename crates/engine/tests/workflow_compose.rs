@@ -7,46 +7,18 @@
 //! workflow name.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{EventPayload, TerminalState};
-use yunta_core::{AdapterId, Clock, ConfigLayer, IdSource, Manifest, RunId, SeqIdSource, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, IdSource, Manifest, RunId, SeqIdSource, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
+use yunta_testkit::{git, init_repo, ApproveEverything, FixedClock};
 
 const CONFIG: &str = r#"
 runners:
@@ -509,7 +481,7 @@ nodes:
     // resumes (no second child_run_created), its gate resolves, and
     // everything closes.
     let (terminal, state) = bench
-        .execute(&run_id, &manifest, EMPTY_FIXTURE, &ApproveEverything)
+        .execute(&run_id, &manifest, EMPTY_FIXTURE, &ApproveEverything::new("test"))
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -611,23 +583,6 @@ nodes:
 
 // --- The composed reference workflow --------------------
 
-struct ApproveEverything;
-
-#[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for ApproveEverything {
-    async fn resolve(
-        &self,
-        escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        Some(yunta_core::events::GateResolvedPayload {
-            chosen_option: escalation.options.first().map(|o| o.id.clone()),
-            resolved_by: Some("test".to_string()),
-            free_text: None,
-            approved_sha: None,
-        })
-    }
-}
-
 #[tokio::test]
 async fn the_release_cycle_reference_runs_with_mock() {
     let release_cycle = std::fs::read_to_string(concat!(
@@ -689,7 +644,7 @@ sessions:
             CONFIG,
             &inputs,
             fixture,
-            &ApproveEverything,
+            &ApproveEverything::new("test"),
         )
         .await;
 

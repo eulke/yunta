@@ -10,51 +10,22 @@
 //! the parent-side half of the chain.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{EventPayload, GateResolvedPayload};
+use yunta_core::events::EventPayload;
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, Clock, ConfigLayer, ModeName, RunId, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
     RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{init_repo, FixedClock, ScriptedInteraction};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
 static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
 
 const CONFIG: &str = r#"
 runners:
@@ -93,39 +64,6 @@ nodes:
     kind: bash
     run: "true"
 "#;
-
-struct ScriptedInteraction {
-    resolution: GateResolvedPayload,
-    seen_options: std::sync::Mutex<Vec<Vec<String>>>,
-}
-
-impl ScriptedInteraction {
-    fn choosing(option: &str) -> Self {
-        Self {
-            resolution: GateResolvedPayload {
-                chosen_option: Some(option.to_string()),
-                resolved_by: Some("eulke".to_string()),
-                free_text: None,
-                approved_sha: None,
-            },
-            seen_options: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl HumanInteraction for ScriptedInteraction {
-    async fn resolve(
-        &self,
-        escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<GateResolvedPayload> {
-        self.seen_options
-            .lock()
-            .unwrap()
-            .push(escalation.options.iter().map(|o| o.id.clone()).collect());
-        Some(self.resolution.clone())
-    }
-}
 
 async fn run_with_mode(
     workflow_yaml: &str,
@@ -223,7 +161,7 @@ async fn run_with_mode_and_findings(
 
 #[tokio::test]
 async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
-    let interaction = ScriptedInteraction::choosing("promote");
+    let interaction = ScriptedInteraction::choose("promote");
     let (terminal, events) = run_with_mode(PROMOTABLE_WORKFLOW, "quick", &interaction).await;
 
     match &terminal {
@@ -256,7 +194,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     // The offered options actually included "promote" — proving the
     // escalation added it, not that this test just got lucky with a
     // fallback.
-    let options = interaction.seen_options.lock().unwrap();
+    let options = interaction.seen_options();
     assert!(
         options[0].contains(&"promote".to_string()),
         "got: {options:?}"
@@ -265,11 +203,11 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
 
 #[tokio::test]
 async fn promote_is_never_offered_with_no_later_mode() {
-    let interaction = ScriptedInteraction::choosing("abort");
+    let interaction = ScriptedInteraction::choose("abort");
     let (terminal, _events) = run_with_mode(NO_LATER_MODE_WORKFLOW, "full", &interaction).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
 
-    let options = interaction.seen_options.lock().unwrap();
+    let options = interaction.seen_options();
     assert!(
         !options[0].contains(&"promote".to_string()),
         "the last declared mode has nowhere to promote to — got: {options:?}"
@@ -303,7 +241,7 @@ fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding
 
 #[tokio::test]
 async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
-    let interaction = ScriptedInteraction::choosing("promote");
+    let interaction = ScriptedInteraction::choose("promote");
     let planted = [
         finding(
             "scope-expansion-T001-1",
@@ -341,7 +279,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 
 #[tokio::test]
 async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
-    let interaction = ScriptedInteraction::choosing("promote");
+    let interaction = ScriptedInteraction::choose("promote");
     let (terminal, _events, run_dir, _root) =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));

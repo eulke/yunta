@@ -8,70 +8,19 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, check, create_run, execute_run, CreateRunParams, HumanInteraction,
-    NoInteraction, NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, check, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
+    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{git, git_output, write, ApproveEverything, FixedClock};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
 static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-/// Always picks the escalation's first declared option — `approve`,
-/// here (the engine appends its own `abort` after whatever the
-/// workflow declares).
-struct ApproveEverything;
-
-#[async_trait::async_trait]
-impl HumanInteraction for ApproveEverything {
-    async fn resolve(
-        &self,
-        escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        Some(yunta_core::events::GateResolvedPayload {
-            chosen_option: escalation.options.first().map(|o| o.id.clone()),
-            resolved_by: Some("curator".to_string()),
-            free_text: None,
-            approved_sha: None,
-        })
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
 
 const CONFIG: &str = r#"
 runners:
@@ -187,7 +136,7 @@ sessions:
         clock: std::sync::Arc::new(FixedClock),
         ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &ApproveEverything,
+        human_interaction: &ApproveEverything::new("curator"),
         forge: None,
         cancel: None,
         adapter_override: None,
@@ -208,9 +157,9 @@ sessions:
 
     let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();
     assert!(pack_yaml.contains("version: 1.1.0"), "{pack_yaml}");
-    let tags = git(&worktree, &["tag", "--list"]);
+    let tags = git_output(&worktree, &["tag", "--list"]);
     assert_eq!(tags, "v1.1.0");
-    let log = git(&worktree, &["log", "--oneline", "-1"]);
+    let log = git_output(&worktree, &["log", "--oneline", "-1"]);
     assert!(log.contains("promote to 1.1.0"), "{log}");
 }
 
@@ -295,6 +244,6 @@ sessions:
         pack_yaml.contains("version: 1.0.0"),
         "version must not have moved: {pack_yaml}"
     );
-    let tags = git(&worktree, &["tag", "--list"]);
+    let tags = git_output(&worktree, &["tag", "--list"]);
     assert!(tags.is_empty(), "no tag should exist yet: {tags:?}");
 }

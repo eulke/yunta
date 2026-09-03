@@ -3,30 +3,15 @@
 //! a real git worktree (the pre-check and the `rules`-mode size bound
 //! both need real `git diff`).
 
-use std::path::Path;
-
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
 use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
+use yunta_testkit::init_repo;
 
 fn repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    std::fs::write(dir.path().join(".gitkeep"), "").unwrap();
-    git(dir.path(), &["add", "."]);
-    git(dir.path(), &["commit", "-q", "-m", "initial"]);
+    init_repo(dir.path());
     dir
 }
 

@@ -6,36 +6,10 @@ use yunta_adapters::signal::Liveness;
 use yunta_core::{Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
 use yunta_engine::{prepare_worktree, release_worktree, WorktreeError};
-
-fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let output = git(dir, args);
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn init_repo(dir: &Path) {
-    git_ok(dir, &["init", "-q"]);
-    git_ok(dir, &["config", "user.email", "test@example.com"]);
-    git_ok(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git_ok(dir, &["add", "."]);
-    git_ok(dir, &["commit", "-q", "-m", "initial"]);
-}
+use yunta_testkit::{git_output, init_repo};
 
 fn head(dir: &Path) -> String {
-    let output = git(dir, &["rev-parse", "HEAD"]);
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    git_output(dir, &["rev-parse", "HEAD"])
 }
 
 #[tokio::test]
@@ -60,11 +34,8 @@ async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
     assert!(worktree_path.join(".gitkeep").exists());
     assert_eq!(head(&worktree_path), base_commit);
     // It's a real worktree of the same repo, not a detached clone.
-    let common_dir = git(&worktree_path, &["rev-parse", "--git-common-dir"]);
-    let common_dir = String::from_utf8_lossy(&common_dir.stdout);
-    assert!(common_dir
-        .trim()
-        .starts_with(repo.join(".git").to_str().unwrap()));
+    let common_dir = git_output(&worktree_path, &["rev-parse", "--git-common-dir"]);
+    assert!(common_dir.starts_with(repo.join(".git").to_str().unwrap()));
 }
 
 #[tokio::test]
