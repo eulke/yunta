@@ -15,7 +15,6 @@
 //!    crash" }`, delete the leftover registry.
 //! 3. **No registry** — nothing to signal; report what the log says.
 
-use std::process::ExitCode;
 use std::time::Duration;
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
@@ -23,6 +22,7 @@ use yunta_core::{describe, events::EventPayload, Pid, RunId, SystemClock};
 use yunta_engine::NodeState;
 use yunta_storage::AsyncStorage;
 
+use crate::error::{note, warn, CliError, Outcome};
 use crate::project;
 
 /// How long the engine gets to react to the SIGINT before the escalation
@@ -30,41 +30,16 @@ use crate::project;
 /// mid-batch engine finishes killing its sessions before it pauses.
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub async fn cancel(run_id: &RunId) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let storage = match AsyncStorage::open(&project.storage_path).await {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let events = match storage.events_for_run(run_id.clone()).await {
-        Ok(events) => events,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
+    let storage = AsyncStorage::open(&project.storage_path).await?;
+    let events = storage.events_for_run(run_id.clone()).await?;
     if events.is_empty() {
-        eprintln!(
-            "error: no run `{run_id}` in {}",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` in {}",
             project.storage_path.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
 
     let state = yunta_engine::derive(&events);
@@ -77,7 +52,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
 
     if state.broken.is_some() || has_terminal_run_event {
         println!("run {run_id}: already stopped — nothing to cancel");
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     }
 
     let run_dir = project::find_run_dir(&project, run_id.as_str())
@@ -91,14 +66,13 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
             .any(|n| matches!(n, NodeState::Running { .. }));
         if !has_live_node {
             println!("run {run_id}: no node in progress — nothing to cancel");
-            return ExitCode::SUCCESS;
+            return Ok(Outcome::Success);
         }
-        eprintln!(
-            "error: run `{run_id}` has a node in progress but no `engine.json` to signal \
+        return Err(CliError::msg(format!(
+            "run `{run_id}` has a node in progress but no `engine.json` to signal \
              through — the engine that ran it predates this build, or its scratch directory \
              is gone. `yunta resume {run_id}` recovers the run once its process has stopped."
-        );
-        return ExitCode::FAILURE;
+        )));
     };
 
     if liveness(registry.engine_pid) == Liveness::Alive {
@@ -107,21 +81,14 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
             "run {run_id}: signalling the live engine (pid {})",
             registry.engine_pid
         );
-        if let Err(e) = signal_process(registry.engine_pid, Signal::SIGINT) {
-            eprintln!("error: {} — retry `yunta cancel {run_id}`", describe(&e));
-            return ExitCode::FAILURE;
-        }
+        signal_process(registry.engine_pid, Signal::SIGINT).map_err(|e| {
+            CliError::msg(format!("{} — retry `yunta cancel {run_id}`", describe(&e)))
+        })?;
 
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            let events = match storage.events_for_run(run_id.clone()).await {
-                Ok(events) => events,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
+            let events = storage.events_for_run(run_id.clone()).await?;
             let terminal = events.iter().any(|e| {
                 matches!(
                     e.payload(),
@@ -130,20 +97,20 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
             });
             if terminal {
                 println!("run {run_id}: cancelled — the log has its terminal");
-                return ExitCode::SUCCESS;
+                return Ok(Outcome::Success);
             }
             if tokio::time::Instant::now() >= deadline {
-                eprintln!(
+                note(format!(
                     "run {run_id}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
                      — escalating to SIGKILL on its process groups"
-                );
+                ));
                 kill_groups(&registry.process_groups);
                 if let Err(e) = signal_process(registry.engine_pid, Signal::SIGKILL) {
                     if !e.is_gone() {
-                        eprintln!("warning: {}", describe(&e));
+                        warn(describe(&e));
                     }
                 }
-                return ExitCode::FAILURE;
+                return Ok(Outcome::Reported);
             }
         }
     }
@@ -152,20 +119,11 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
     // `run_paused` is emitted through the engine, not hand-built here, so
     // the CLI never stamps an event with a clock of its own.
     kill_groups(&registry.process_groups);
-    if let Err(e) = yunta_engine::record_pause_after_crash(
-        &storage,
-        run_id,
-        "cancelled after crash",
-        &SystemClock,
-    )
-    .await
-    {
-        eprintln!("error: {e}");
-        return ExitCode::FAILURE;
-    }
+    yunta_engine::record_pause_after_crash(&storage, run_id, "cancelled after crash", &SystemClock)
+        .await?;
     if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(&run_dir)) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("warning: could not delete engine.json: {e}");
+            warn(format!("could not delete engine.json: {e}"));
         }
     }
     println!(
@@ -174,7 +132,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
         registry.engine_pid,
         registry.process_groups.len()
     );
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 /// SIGKILL to every process group the engine registered. A group that
@@ -183,7 +141,7 @@ pub async fn cancel(run_id: &RunId) -> ExitCode {
 fn kill_groups(groups: &[Pid]) {
     for pgid in groups {
         if let Err(e) = signal_group(*pgid, Signal::SIGKILL) {
-            eprintln!("warning: {}", describe(&e));
+            warn(describe(&e));
         }
     }
 }

@@ -18,6 +18,7 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 mod commands;
+mod error;
 mod graph;
 mod human_interaction;
 mod pack;
@@ -28,6 +29,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use yunta_core::{AdapterId, ConfigLayer, ModeName, PackRef, RunId, Workflow};
+
+use crate::error::{error_block, note, warn, CliError, Outcome};
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -284,7 +287,20 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     tracing::debug!("yunta starting");
 
-    match cli.command {
+    match dispatch(cli.command).await {
+        Ok(Outcome::Success) => ExitCode::SUCCESS,
+        Ok(Outcome::Reported) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Runs one subcommand, handing back its verdict or the one error the
+/// caller turns into a line on stderr and a failing exit code.
+async fn dispatch(command: Command) -> Result<Outcome, CliError> {
+    match command {
         Command::Check { workflow, config } => run_check(&workflow, config.as_deref()),
         Command::Run {
             workflow,
@@ -372,49 +388,29 @@ async fn main() -> ExitCode {
 pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
     path: &Path,
     what: &str,
-) -> Result<T, ExitCode> {
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        eprintln!("error: failed to read {what} at {}: {e}", path.display());
-        ExitCode::FAILURE
-    })?;
-    yunta_core::yaml::parse(&contents).map_err(|e| {
-        eprintln!("error: failed to parse {what} at {}: {e}", path.display());
-        ExitCode::FAILURE
-    })
+) -> Result<T, CliError> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io(&format!("read {what} at"), path.display(), source))?;
+    yunta_core::yaml::parse(&contents)
+        .map_err(|e| CliError::msg(format!("failed to parse {what} at {}: {e}", path.display())))
 }
 
-fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
+fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
     // A bare catalog name (no `.yaml`/`.yml` extension) resolves through
     // the repo catalog, then a publisher's vendored packs — same rule
     // `yunta run` follows; anything with an extension stays a literal
     // path.
     let resolved_path: std::path::PathBuf;
     let workflow_path: &Path = if workflow_path.extension().is_none() {
-        let cwd = match std::env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(e) => {
-                eprintln!("error: cannot determine the current directory: {e}");
-                return ExitCode::FAILURE;
-            }
-        };
-        match yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy()) {
-            Ok(resolved) => {
-                resolved_path = resolved.path;
-                &resolved_path
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
+        let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+        resolved_path =
+            yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy())?.path;
+        &resolved_path
     } else {
         workflow_path
     };
 
-    let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
-        Ok(w) => w,
-        Err(code) => return code,
-    };
+    let workflow: Workflow = load_yaml(workflow_path, "workflow")?;
 
     // Without `--config`, check sees the project's real layers — the
     // same ones a run would — including the `permissions` layer
@@ -422,34 +418,16 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
     // denied is refused here, citing both layers). An explicit `--config`
     // is a single already-merged file: nothing layered to conflict.
     let config: ConfigLayer = match config_path {
-        Some(path) => match load_yaml(path, "config") {
-            Ok(c) => c,
-            Err(code) => return code,
-        },
+        Some(path) => load_yaml(path, "config")?,
         None => {
-            let cwd = match std::env::current_dir() {
-                Ok(cwd) => cwd,
-                Err(e) => {
-                    eprintln!("error: cannot determine the current directory: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let layers = match project::load_named_layers(&cwd) {
-                Ok(layers) => layers,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
+            let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+            let layers = project::load_named_layers(&cwd)?;
             let named: Vec<(&str, &ConfigLayer)> =
                 layers.iter().map(|(name, layer)| (*name, layer)).collect();
             let conflicts = yunta_core::permission_layer_conflicts(&named);
             if !conflicts.is_empty() {
-                eprintln!("{}: {} error(s)", workflow_path.display(), conflicts.len());
-                for conflict in &conflicts {
-                    eprintln!("  {conflict}");
-                }
-                return ExitCode::FAILURE;
+                note(error_block(workflow_path, &conflicts));
+                return Ok(Outcome::Reported);
             }
             ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer))
         }
@@ -464,9 +442,8 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
             &workflow, &config, &cwd, &origin,
         ));
     }
-    let warnings = yunta_engine::check_warnings(&workflow, &config);
-    for warning in &warnings {
-        eprintln!("warning: {warning}");
+    for warning in &yunta_engine::check_warnings(&workflow, &config) {
+        warn(warning);
     }
 
     // Verification-effectiveness findings, surfaced here too — right
@@ -487,7 +464,7 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
                     yunta_engine::analyze_verification_effectiveness(&workflow, &history);
                 let text = commands::stats::render_verification_findings(&findings);
                 if !text.is_empty() {
-                    eprintln!("\n{text}");
+                    note(format!("\n{text}"));
                 }
             }
         }
@@ -495,12 +472,9 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> ExitCode {
 
     if errors.is_empty() {
         println!("{}: OK", workflow_path.display());
-        ExitCode::SUCCESS
+        Ok(Outcome::Success)
     } else {
-        eprintln!("{}: {} error(s)", workflow_path.display(), errors.len());
-        for error in &errors {
-            eprintln!("  {error}");
-        }
-        ExitCode::FAILURE
+        note(error_block(workflow_path, &errors));
+        Ok(Outcome::Reported)
     }
 }

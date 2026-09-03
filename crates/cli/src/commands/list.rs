@@ -9,11 +9,11 @@
 //! since the two are printed and looked up under different keys.
 
 use std::path::PathBuf;
-use std::process::ExitCode;
 
 use yunta_core::{InputSpec, Manifest, Workflow};
 
 use super::status::progress_summary;
+use crate::error::{CliError, Outcome};
 use crate::project;
 
 /// One catalog entry ready to render — `display_name` already carries
@@ -24,14 +24,8 @@ struct CatalogEntry {
     path: PathBuf,
 }
 
-pub fn list_workflows() -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn list_workflows() -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
 
     // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
@@ -64,7 +58,7 @@ pub fn list_workflows() -> ExitCode {
                 cwd.join(".yunta/packs").display()
             );
         }
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     }
 
     for entry in entries {
@@ -115,7 +109,7 @@ pub fn list_workflows() -> ExitCode {
             }
         }
     }
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 fn repo_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
@@ -198,42 +192,17 @@ fn input_type_label(spec: &InputSpec) -> &'static str {
     }
 }
 
-pub fn list_runs() -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let storage = match yunta_storage::Storage::open(&project.storage_path) {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn list_runs() -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
+    let storage = yunta_storage::Storage::open(&project.storage_path)?;
 
-    let run_ids = match storage
+    let run_ids = storage
         .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
     if run_ids.is_empty() {
         println!("no runs in {}", project.storage_path.display());
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     }
 
     for run_id in run_ids {
@@ -263,5 +232,5 @@ pub fn list_runs() -> ExitCode {
         };
         println!("{run_id}: {}", progress_summary(&events, &manifest));
     }
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }

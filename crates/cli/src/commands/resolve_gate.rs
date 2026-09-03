@@ -10,11 +10,10 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
-use std::process::ExitCode;
-
 use yunta_core::{Manifest, RunId, SystemClock};
 use yunta_storage::AsyncStorage;
 
+use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::project;
 
@@ -23,42 +22,20 @@ pub async fn resolve_gate(
     option_id: &str,
     resolved_by: Option<&str>,
     free_text: Option<&str>,
-) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
     let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
-        eprintln!(
-            "error: no run `{run_id}` under {} (or the default state root)",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` under {} (or the default state root)",
             project.runs_root.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     };
-    let manifest: Manifest = match load_yaml(&run_dir.join("manifest.yaml"), "run manifest") {
-        Ok(manifest) => manifest,
-        Err(code) => return code,
-    };
+    let manifest: Manifest = load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
 
-    let storage = match AsyncStorage::open(&project.storage_path).await {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let storage = AsyncStorage::open(&project.storage_path).await?;
 
-    if let Err(e) = yunta_engine::resolve_gate(
+    yunta_engine::resolve_gate(
         &manifest,
         &storage,
         run_id,
@@ -67,18 +44,13 @@ pub async fn resolve_gate(
         resolved_by.map(str::to_string),
         free_text.map(str::to_string),
     )
-    .await
-    {
-        eprintln!("error: {e}");
-        return ExitCode::FAILURE;
-    }
+    .await?;
 
-    if let Err(e) = super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd) {
-        eprintln!(
-            "error: decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
-        );
-        return ExitCode::FAILURE;
-    }
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd).map_err(|e| {
+        CliError::msg(format!(
+            "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
+        ))
+    })?;
     println!("run {run_id}: resolved `{option_id}`, driving forward independently");
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }

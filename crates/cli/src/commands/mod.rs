@@ -21,7 +21,6 @@ pub mod verify;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use yunta_adapters::{
@@ -30,6 +29,8 @@ use yunta_adapters::{
 };
 use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
 use yunta_engine::{RunReport, RunTerminal};
+
+use crate::error::{note, warn, CliError, Outcome};
 
 /// Ctrl-C → the run's root `CancellationToken`. The in-process
 /// interrupt→kill path does the actual exterminating; this only
@@ -42,7 +43,7 @@ pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
     let token = root.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!("interrupt received — stopping the run (sessions get interrupt, then kill)");
+            note("interrupt received — stopping the run (sessions get interrupt, then kill)");
             token.cancel();
         }
     });
@@ -88,17 +89,18 @@ pub(crate) fn spawn_detached_resume(
     Ok(())
 }
 
-/// Prints a run's outcome and maps it to an exit code: success only when
-/// the run finished.
-pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
+/// Prints a run's outcome and reports its verdict: success only when the
+/// run finished; a paused or unresolved-promoted run ran to a stop that
+/// needs a decision, reported as its own output rather than an error.
+pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
     match &report.terminal {
         RunTerminal::Finished => {
             println!("run {run_id}: finished");
-            ExitCode::SUCCESS
+            Outcome::Success
         }
         RunTerminal::Paused { reason } => {
             println!("run {run_id}: paused — {reason}");
-            ExitCode::FAILURE
+            Outcome::Reported
         }
         // `run`/`resume` always route a fresh `RunReport` through
         // `promote::drive_promotions` first — by the time anything
@@ -106,7 +108,7 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> ExitCode {
         // been chased to whatever it became next.
         RunTerminal::Promoted { suggested_mode } => {
             println!("run {run_id}: promoted to `{suggested_mode}` (unresolved)");
-            ExitCode::FAILURE
+            Outcome::Reported
         }
     }
 }
@@ -167,10 +169,10 @@ pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
     match GitHubForge::new(github.repo.clone(), Secret::new(token)) {
         Ok(forge) => Some(Arc::new(forge)),
         Err(e) => {
-            eprintln!(
-                "warning: the forge is unavailable — {}; external gates degrade to the console",
+            warn(format!(
+                "the forge is unavailable — {}; external gates degrade to the console",
                 describe(&e)
-            );
+            ));
             None
         }
     }
@@ -181,7 +183,7 @@ pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
 pub(crate) fn refuse_unrunnable(
     workflow: &Workflow,
     adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
-) -> Result<(), ExitCode> {
+) -> Result<(), CliError> {
     let needs_sessions = workflow.nodes.iter().any(|node| {
         matches!(
             node.kind,
@@ -189,13 +191,12 @@ pub(crate) fn refuse_unrunnable(
         )
     });
     if needs_sessions && adapters.is_empty() {
-        eprintln!(
-            "error: this workflow has prompt/loop nodes but `runners:` in the merged config\n\
+        return Err(CliError::msg(
+            "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
              names no adapter this binary can run (only `claude-code` and `codex`\n\
              are built). To exercise this workflow with the `mock` adapter instead, declare\n\
-             a test case under .yunta/tests/ and run `yunta test`."
-        );
-        return Err(ExitCode::FAILURE);
+             a test case under .yunta/tests/ and run `yunta test`.",
+        ));
     }
     Ok(())
 }
@@ -208,7 +209,7 @@ pub(crate) fn refuse_unrunnable(
 /// stopping at the first failure.
 pub(crate) async fn probe_or_refuse(
     adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
-) -> Result<(), ExitCode> {
+) -> Result<(), CliError> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
         match adapter.probe().await {
@@ -222,11 +223,11 @@ pub(crate) async fn probe_or_refuse(
     if unhealthy.is_empty() {
         return Ok(());
     }
-    eprintln!("error: adapter health check failed — run `yunta doctor` for detail:");
+    let mut message = String::from("adapter health check failed — run `yunta doctor` for detail:");
     for line in &unhealthy {
-        eprintln!("  {line}");
+        message.push_str(&format!("\n  {line}"));
     }
-    Err(ExitCode::FAILURE)
+    Err(CliError::msg(message))
 }
 
 /// `yunta check` before running anything — a workflow that fails static
@@ -238,12 +239,12 @@ pub(crate) fn check_or_refuse(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_path: &std::path::Path,
-) -> Result<(), ExitCode> {
+) -> Result<(), CliError> {
     // Warnings (e.g. a `parallel` group that can't verify its children
     // won't collide) are visible but never block — only `check()`'s
     // errors do.
     for warning in yunta_engine::check_warnings(workflow, config) {
-        eprintln!("warning: {warning}");
+        warn(warning);
     }
     let mut errors = yunta_engine::check(workflow, config);
     // The composition reference graph (`use:` names resolve, acyclic,
@@ -259,12 +260,12 @@ pub(crate) fn check_or_refuse(
     if errors.is_empty() {
         return Ok(());
     }
-    eprintln!(
-        "error: the workflow fails `yunta check` with {} error(s):",
+    let mut message = format!(
+        "the workflow fails `yunta check` with {} error(s):",
         errors.len()
     );
     for error in &errors {
-        eprintln!("  {error}");
+        message.push_str(&format!("\n  {error}"));
     }
-    Err(ExitCode::FAILURE)
+    Err(CliError::msg(message))
 }

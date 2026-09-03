@@ -12,8 +12,7 @@
 //! leaves to this command, since it needs real filesystem access —
 //! `requires.commands` present on `PATH`.
 
-use std::process::ExitCode;
-
+use crate::error::{CliError, Outcome};
 use crate::project;
 use yunta_adapters::ProbeReport;
 use yunta_core::AdapterId;
@@ -25,21 +24,9 @@ fn command_on_path(command: &str) -> bool {
     std::env::split_paths(&path).any(|dir| dir.join(command).is_file())
 }
 
-pub async fn doctor() -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn doctor() -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
 
     let adapters = super::real_adapters(&project.config);
     let mut all_healthy = true;
@@ -82,9 +69,9 @@ pub async fn doctor() -> ExitCode {
     }
 
     if all_healthy {
-        ExitCode::SUCCESS
+        Ok(Outcome::Success)
     } else {
-        ExitCode::FAILURE
+        Ok(Outcome::Reported)
     }
 }
 

@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::ExitCode;
 use std::time::Duration;
 
 use yunta_adapters::MOCK_ID;
@@ -20,6 +19,7 @@ use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::progress_summary;
+use crate::error::{warn, CliError, Outcome};
 use crate::load_yaml;
 use crate::project;
 
@@ -141,29 +141,11 @@ pub async fn run(
     mode: Option<&ModeName>,
     follow: bool,
     detach: bool,
-) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
 
-    let storage = match AsyncStorage::open(&project.storage_path).await {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let storage = AsyncStorage::open(&project.storage_path).await?;
 
     // A bare catalog name (no `.yaml`/`.yml` extension — every real
     // workflow file in this codebase's own convention has one) resolves
@@ -171,41 +153,30 @@ pub async fn run(
     // (e.g. `yunta run acme/review`); anything with an extension stays
     // a literal path, today's behavior unchanged.
     let workflow_path: std::path::PathBuf = if workflow_path.extension().is_none() {
-        match yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy()) {
-            Ok(resolved) => resolved.path,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
+        yunta_engine::resolve_workflow(&cwd, &workflow_path.to_string_lossy())?.path
     } else {
         workflow_path.to_path_buf()
     };
     let workflow_path = workflow_path.as_path();
 
-    let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
-        Ok(w) => w,
-        Err(code) => return code,
-    };
-    if let Err(code) = super::check_or_refuse(&workflow, &project.config, workflow_path) {
-        return code;
-    }
+    let workflow: Workflow = load_yaml(workflow_path, "workflow")?;
+    super::check_or_refuse(&workflow, &project.config, workflow_path)?;
     // `--adapter mock --fixture <path>` runs against a scripted fixture:
     // no real adapter is constructed or probed. Any other `--adapter`
     // is an override every role resolves through.
     let mock_fixture = match (adapter, fixture) {
         (Some(id), Some(path)) if *id == MOCK_ID => Some(path),
         (Some(id), None) if *id == MOCK_ID => {
-            eprintln!(
-                "error: `--adapter mock` runs the workflow against a scripted fixture — pass \
+            return Err(CliError::msg(
+                "`--adapter mock` runs the workflow against a scripted fixture — pass \
                  `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
-                 case and run `yunta test`"
-            );
-            return ExitCode::FAILURE;
+                 case and run `yunta test`",
+            ));
         }
         (_, Some(_)) => {
-            eprintln!("error: `--fixture` only applies together with `--adapter mock`");
-            return ExitCode::FAILURE;
+            return Err(CliError::msg(
+                "`--fixture` only applies together with `--adapter mock`",
+            ));
         }
         _ => None,
     };
@@ -216,42 +187,23 @@ pub async fn run(
         super::real_adapters(&project.config)
     };
     if mock_fixture.is_none() {
-        if let Err(code) = super::refuse_unrunnable(&workflow, &real_adapters) {
-            return code;
-        }
+        super::refuse_unrunnable(&workflow, &real_adapters)?;
         if let Some(name) = adapter {
-            if let Err(e) = validate_adapter_flag(name, &real_adapters) {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
+            validate_adapter_flag(name, &real_adapters).map_err(CliError::msg)?;
         }
-        if let Err(code) = super::probe_or_refuse(&real_adapters).await {
-            return code;
-        }
+        super::probe_or_refuse(&real_adapters).await?;
     }
 
-    let provided_inputs = match parse_inputs(raw_inputs) {
-        Ok(inputs) => inputs,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let provided_inputs = parse_inputs(raw_inputs).map_err(CliError::msg)?;
 
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    let mut manifest = match yunta_engine::build_manifest(
+    let mut manifest = yunta_engine::build_manifest(
         &workflow,
         &project.config,
         workflow_dir,
         &cwd,
         &provided_inputs,
-    ) {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    )?;
     // Freeze the resolved state roots, absolute, so a later `paths.*`
     // change can never lose this run — `resume`/`status` read these
     // from the manifest, not the then-current config.
@@ -304,20 +256,13 @@ pub async fn run(
         .as_ref()
         .and_then(|limits| limits.max_concurrent_runs)
     {
-        match count_non_terminal_runs(&storage).await {
-            Ok(active) if active >= cap as usize => {
-                eprintln!(
-                    "error: {active} run(s) are still active and `limits.max_concurrent_runs` \
-                     is {cap} — resume or cancel one (`yunta list` names them) before starting \
-                     another"
-                );
-                return ExitCode::FAILURE;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
+        let active = count_non_terminal_runs(&storage).await?;
+        if active >= cap as usize {
+            return Err(CliError::msg(format!(
+                "{active} run(s) are still active and `limits.max_concurrent_runs` \
+                 is {cap} — resume or cancel one (`yunta list` names them) before starting \
+                 another"
+            )));
         }
     }
 
@@ -336,18 +281,14 @@ pub async fn run(
         &format!("yunta/{run_id}"),
         manifest.isolation,
     )
-    .await
+    .await?
     {
-        Ok(yunta_engine::WorktreePrepared::Ready) => {}
-        Ok(yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid }) => {
-            eprintln!(
-                "warning: this checkout's isolation lock belonged to a dead process \
+        yunta_engine::WorktreePrepared::Ready => {}
+        yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid } => {
+            warn(format!(
+                "this checkout's isolation lock belonged to a dead process \
                  (pid {dead_pid}) — taking it over"
-            );
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+            ));
         }
     }
 
@@ -367,7 +308,7 @@ pub async fn run(
             .unwrap_or_default()
     });
 
-    let run_dir = match yunta_engine::create_run(
+    let run_dir = yunta_engine::create_run(
         yunta_engine::CreateRunParams {
             run_id: &run_id,
             manifest: &manifest,
@@ -379,24 +320,15 @@ pub async fn run(
         &storage,
         &clock,
     )
-    .await
-    {
-        Ok(run_dir) => run_dir,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    .await?;
     println!("run {run_id}: created at {}", run_dir.display());
 
     let adapters = match mock_fixture {
-        Some(path) => match super::test::load_mock_fixture(path, &run_dir, &worktree) {
-            Ok(mock) => super::test::mock_adapters(&project.config, mock),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
+        Some(path) => {
+            let mock =
+                super::test::load_mock_fixture(path, &run_dir, &worktree).map_err(CliError::msg)?;
+            super::test::mock_adapters(&project.config, mock)
+        }
         None => real_adapters,
     };
 
@@ -404,12 +336,15 @@ pub async fn run(
     // no agent I/O yet), then hand off to a fully independent
     // `yunta resume` and return.
     if detach {
-        if let Err(e) = super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd) {
-            eprintln!("error: cannot spawn a detached `yunta resume {run_id}`: {e}");
-            return ExitCode::FAILURE;
-        }
+        super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd).map_err(|source| {
+            CliError::io(
+                "spawn a detached",
+                format!("`yunta resume {run_id}`"),
+                source,
+            )
+        })?;
         println!("run {run_id}: detached, driving forward independently");
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     }
 
     let follower =
@@ -445,7 +380,7 @@ pub async fn run(
             // anything downstream (release, report) looks at it — see
             // `promote.rs`'s own doc comment for why this can't happen
             // inside `execute_run` itself.
-            let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
+            let (run_id, manifest, _worktree, report) = super::promote::drive_promotions(
                 &super::promote::PromotionEnv {
                     cwd: &cwd,
                     project: &project,
@@ -461,13 +396,7 @@ pub async fn run(
                 report,
             )
             .await
-            {
-                Ok(chained) => chained,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
+            .map_err(CliError::msg)?;
             // Only a *finished* run releases isolation `none`'s lock — a
             // paused run expects a future `resume` on the same checkout,
             // which is the same logical run, not a second concurrent one.
@@ -475,16 +404,10 @@ pub async fn run(
             // engine process is exiting, and a Ctrl-C is designed to
             // leave nothing held.
             if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
-                if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
+                yunta_engine::release_worktree(&cwd, manifest.isolation).await?;
             }
-            super::report_outcome(run_id.as_str(), &report)
+            Ok(super::report_outcome(run_id.as_str(), &report))
         }
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
+        Err(e) => Err(e.into()),
     }
 }

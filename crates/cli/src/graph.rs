@@ -7,13 +7,13 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::ExitCode;
 
 use yunta_core::{NodeId, RunId, Workflow};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
 use crate::commands::check_or_refuse;
+use crate::error::{CliError, Outcome};
 use crate::{load_yaml, project};
 
 type Labels = HashMap<NodeId, String>;
@@ -25,36 +25,20 @@ pub enum GraphFormat {
     Dot,
 }
 
-pub fn graph(workflow_path: &Path, run_id: Option<&RunId>, format: GraphFormat) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn graph(
+    workflow_path: &Path,
+    run_id: Option<&RunId>,
+    format: GraphFormat,
+) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
 
-    let workflow: Workflow = match load_yaml(workflow_path, "workflow") {
-        Ok(w) => w,
-        Err(code) => return code,
-    };
+    let workflow: Workflow = load_yaml(workflow_path, "workflow")?;
 
-    if let Err(code) = check_or_refuse(&workflow, &project.config, workflow_path) {
-        return code;
-    }
+    check_or_refuse(&workflow, &project.config, workflow_path)?;
 
     let labels = match run_id {
-        Some(run_id) => match derive_labels(&project, run_id) {
-            Ok(labels) => Some(labels),
-            Err(code) => return code,
-        },
+        Some(run_id) => Some(derive_labels(&project, run_id)?),
         None => None,
     };
 
@@ -63,27 +47,20 @@ pub fn graph(workflow_path: &Path, run_id: Option<&RunId>, format: GraphFormat) 
         GraphFormat::Dot => render_dot(&workflow, labels.as_ref()),
     };
     print!("{rendered}");
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 /// Derives run state from the event log (`yunta_engine::derive`) and
 /// reduces it to one display label per node — the same source
 /// `status` reads, just formatted for a Mermaid node instead of a list.
-fn derive_labels(project: &project::Project, run_id: &RunId) -> Result<Labels, ExitCode> {
-    let storage = Storage::open(&project.storage_path).map_err(|e| {
-        eprintln!("error: {e}");
-        ExitCode::FAILURE
-    })?;
-    let events = storage.events_for_run(run_id).map_err(|e| {
-        eprintln!("error: {e}");
-        ExitCode::FAILURE
-    })?;
+fn derive_labels(project: &project::Project, run_id: &RunId) -> Result<Labels, CliError> {
+    let storage = Storage::open(&project.storage_path)?;
+    let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
-        eprintln!(
-            "error: no run `{run_id}` in {}",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` in {}",
             project.storage_path.display()
-        );
-        return Err(ExitCode::FAILURE);
+        )));
     }
 
     let state = yunta_engine::derive(&events);

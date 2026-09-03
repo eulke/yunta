@@ -19,8 +19,6 @@
 //! to describe — each names when reaching for a verified workflow
 //! beats implementing directly.
 
-use std::process::ExitCode;
-
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
     ServerCapabilities, ServerInfo, Tool,
@@ -29,24 +27,20 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 
+use crate::error::{CliError, Outcome};
 use crate::project;
 
-pub async fn mcp() -> ExitCode {
+pub async fn mcp() -> Result<Outcome, CliError> {
     let transport = rmcp::transport::io::stdio();
-    let server = match YuntaMcpServer.serve(transport).await {
-        Ok(server) => server,
-        Err(e) => {
-            eprintln!("error: cannot start the MCP server: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match server.waiting().await {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: MCP server exited abnormally: {e}");
-            ExitCode::FAILURE
-        }
-    }
+    let server = YuntaMcpServer
+        .serve(transport)
+        .await
+        .map_err(|e| CliError::msg(format!("cannot start the MCP server: {e}")))?;
+    server
+        .waiting()
+        .await
+        .map_err(|e| CliError::msg(format!("MCP server exited abnormally: {e}")))?;
+    Ok(Outcome::Success)
 }
 
 #[derive(Clone)]

@@ -10,43 +10,30 @@
 //! the inventory.
 
 use std::path::Path;
-use std::process::ExitCode;
 
 use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 
 use super::test::{discover_case_paths, run_case};
+use crate::error::{CliError, Outcome};
 use crate::pack::{packs_root, read_manifest, vendor_dir};
 use yunta_core::PackRef;
 
-pub async fn audit(pack: &PackRef) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let pack_dir = vendor_dir(&cwd, pack);
     if !pack_dir.is_dir() {
-        eprintln!(
-            "error: `{pack}` isn't installed under {}",
+        return Err(CliError::msg(format!(
+            "`{pack}` isn't installed under {}",
             packs_root(&cwd).display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
-    let manifest = match read_manifest(&pack_dir) {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let manifest = read_manifest(&pack_dir)?;
 
     let report = audit_pack(&pack_dir, manifest);
     print_report(&report);
     let tests = run_pack_tests(&pack_dir).await;
     print_test_summary(&tests);
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 /// Prints the full inventory — called both by `audit` (on demand) and by

@@ -8,7 +8,6 @@
 //! color — see this module's own render functions for how.
 
 use std::path::Path;
-use std::process::ExitCode;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -19,60 +18,41 @@ use yunta_engine::{
 };
 use yunta_storage::Storage;
 
+use crate::error::{CliError, Outcome};
 use crate::project::{self, Project};
 
-pub fn stats(run_id: Option<&RunId>, workflow: Option<&str>, json: bool) -> ExitCode {
+pub fn stats(
+    run_id: Option<&RunId>,
+    workflow: Option<&str>,
+    json: bool,
+) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
         (Some(run_id), None) => stats_run(run_id, json),
         (None, Some(workflow)) => stats_workflow(workflow, json),
-        (None, None) => {
-            eprintln!("error: `yunta stats` needs a run id or `--workflow <name>`");
-            ExitCode::FAILURE
-        }
-        (Some(_), Some(_)) => {
-            eprintln!("error: `yunta stats` takes a run id or `--workflow <name>`, not both");
-            ExitCode::FAILURE
-        }
+        (None, None) => Err(CliError::msg(
+            "`yunta stats` needs a run id or `--workflow <name>`",
+        )),
+        (Some(_), Some(_)) => Err(CliError::msg(
+            "`yunta stats` takes a run id or `--workflow <name>`, not both",
+        )),
     }
 }
 
-fn resolve(cwd: &std::path::Path) -> Result<(Project, Storage), ExitCode> {
-    let project = project::resolve(cwd).map_err(|e| {
-        eprintln!("error: {e}");
-        ExitCode::FAILURE
-    })?;
-    let storage = Storage::open(&project.storage_path).map_err(|e| {
-        eprintln!("error: {e}");
-        ExitCode::FAILURE
-    })?;
+fn resolve(cwd: &std::path::Path) -> Result<(Project, Storage), CliError> {
+    let project = project::resolve(cwd)?;
+    let storage = Storage::open(&project.storage_path)?;
     Ok((project, storage))
 }
 
-fn stats_run(run_id: &RunId, json: bool) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let (project, storage) = match resolve(&cwd) {
-        Ok(pair) => pair,
-        Err(code) => return code,
-    };
-    let events = match storage.events_for_run(run_id) {
-        Ok(events) => events,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let (project, storage) = resolve(&cwd)?;
+    let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
-        eprintln!(
-            "error: no run `{run_id}` in {}",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` in {}",
             project.storage_path.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
 
     // Search order (current runs root, then the default) — the run's
@@ -80,10 +60,7 @@ fn stats_run(run_id: &RunId, json: bool) -> ExitCode {
     let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
         .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
-    let manifest: Manifest = match crate::load_yaml(&manifest_path, "run manifest") {
-        Ok(manifest) => manifest,
-        Err(code) => return code,
-    };
+    let manifest: Manifest = crate::load_yaml(&manifest_path, "run manifest")?;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
     let mode = yunta_core::events::run_mode(&events);
@@ -94,41 +71,26 @@ fn stats_run(run_id: &RunId, json: bool) -> ExitCode {
         return print_json(&dto);
     }
     render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
-/// Prints a value as pretty JSON, reporting a serialization failure as a
-/// diagnostic and a failing exit rather than unwrapping it.
-fn print_json<T: serde::Serialize>(value: &T) -> ExitCode {
-    match serde_json::to_string_pretty(value) {
-        Ok(text) => {
-            println!("{text}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("error: could not serialize output as JSON: {e}");
-            ExitCode::FAILURE
-        }
-    }
+/// Prints a value as pretty JSON, reporting a serialization failure as
+/// the one error it can hit rather than unwrapping it.
+fn print_json<T: serde::Serialize>(value: &T) -> Result<Outcome, CliError> {
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|e| CliError::msg(format!("could not serialize output as JSON: {e}")))?;
+    println!("{text}");
+    Ok(Outcome::Success)
 }
 
-fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let (project, storage) = match resolve(&cwd) {
-        Ok(pair) => pair,
-        Err(code) => return code,
-    };
+fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let (project, storage) = resolve(&cwd)?;
 
     let history = collect_history(&project.runs_root, &storage, workflow_name);
     if history.is_empty() {
         println!("no runs of workflow `{workflow_name}` yet");
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     }
 
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
@@ -150,7 +112,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
             println!("\n{text}");
         }
     }
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 /// Every past run of `workflow_name` this project's storage knows about,

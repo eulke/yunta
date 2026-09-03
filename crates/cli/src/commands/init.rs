@@ -10,10 +10,11 @@
 
 use std::io::IsTerminal;
 use std::path::Path;
-use std::process::ExitCode;
 
 use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, ProbeReport};
 use yunta_core::AdapterSettings;
+
+use crate::error::{warn, CliError, Outcome};
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
@@ -265,28 +266,21 @@ fn prompt_line(prompt: &str, default: &str) -> String {
     }
 }
 
-pub async fn init(interactive: bool, force: bool) -> ExitCode {
-    let repo = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
+    let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
 
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
-        eprintln!(
-            "error: {} already exists — pass --force to overwrite",
+        return Err(CliError::msg(format!(
+            "{} already exists — pass --force to overwrite",
             config_path.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
 
     // `-i` degrades to non-interactive with a warning rather than
     // hanging on a stdin that will never produce a line.
     let interactive = if interactive && !std::io::stdin().is_terminal() {
-        eprintln!("warning: --interactive given but stdin isn't a TTY — using detected defaults");
+        warn("--interactive given but stdin isn't a TTY — using detected defaults");
         false
     } else {
         interactive
@@ -314,25 +308,18 @@ pub async fn init(interactive: bool, force: bool) -> ExitCode {
     let mut skipped = Vec::new();
 
     if let Some(parent) = config_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("error: failed to create {}: {e}", parent.display());
-            return ExitCode::FAILURE;
-        }
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed);
-    if let Err(e) = std::fs::write(&config_path, config_yaml) {
-        eprintln!("error: failed to write {}: {e}", config_path.display());
-        return ExitCode::FAILURE;
-    }
+    std::fs::write(&config_path, config_yaml)
+        .map_err(|source| CliError::io("write", config_path.display(), source))?;
     wrote.push(config_path.display().to_string());
 
     match write_gitignore(&repo) {
         Ok(true) => wrote.push(repo.join(".gitignore").display().to_string()),
         Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
-        Err(e) => {
-            eprintln!("error: failed to update .gitignore: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(source) => return Err(CliError::io("update", ".gitignore", source)),
     }
 
     match write_mechanism_skill(&repo, force) {
@@ -340,10 +327,7 @@ pub async fn init(interactive: bool, force: bool) -> ExitCode {
         Ok(false) => skipped.push(format!(
             "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
         )),
-        Err(e) => {
-            eprintln!("error: failed to write the mechanism skill: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
     }
 
     println!("yunta init: done in {}", repo.display());
@@ -382,5 +366,5 @@ pub async fn init(interactive: bool, force: bool) -> ExitCode {
 
     println!("next: run `yunta doctor` to confirm everything above is actually usable.");
 
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }

@@ -15,28 +15,15 @@
 //! only for a run whose run.dir is already gone. The database is never
 //! the first copy of a run to die.
 
-use std::process::ExitCode;
-
 use yunta_core::RunId;
 use yunta_storage::Storage;
 
+use crate::error::{warn, CliError, Outcome};
 use crate::project;
 
-pub fn gc(dry_run: bool) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
 
     let Some(retention_days) = project
         .config
@@ -48,26 +35,13 @@ pub fn gc(dry_run: bool) -> ExitCode {
             "`storage.retention_days` isn't configured — nothing to reclaim until it is, \
              since `gc` has no default retention to guess"
         );
-        return ExitCode::SUCCESS;
+        return Ok(Outcome::Success);
     };
 
-    let storage = match Storage::open(&project.storage_path) {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let run_ids = match storage
+    let storage = Storage::open(&project.storage_path)?;
+    let run_ids = storage
         .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
 
     let now = yunta_core::Clock::now(&yunta_core::SystemClock);
     let mut reclaimed = 0usize;
@@ -75,7 +49,7 @@ pub fn gc(dry_run: bool) -> ExitCode {
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
             Err(e) => {
-                eprintln!("warning: run `{run_id}`: {e}");
+                warn(format!("run `{run_id}`: {e}"));
                 continue;
             }
         };
@@ -116,7 +90,7 @@ pub fn gc(dry_run: bool) -> ExitCode {
                     println!("purged {} event(s) for run {run_id}", purged.rows);
                     reclaimed += 1;
                 }
-                Err(e) => eprintln!("warning: run `{run_id}`: {e}"),
+                Err(e) => warn(format!("run `{run_id}`: {e}")),
             }
         }
     }
@@ -128,7 +102,7 @@ pub fn gc(dry_run: bool) -> ExitCode {
     } else {
         println!("{reclaimed} run(s) reclaimed");
     }
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 fn remove_run(project: &project::Project, run_id: &RunId, dry_run: bool) -> bool {
@@ -144,7 +118,7 @@ fn remove_run(project: &project::Project, run_id: &RunId, dry_run: bool) -> bool
         if dry_run {
             println!("would remove {}", dir.display());
         } else if let Err(e) = std::fs::remove_dir_all(dir) {
-            eprintln!("warning: failed to remove {}: {e}", dir.display());
+            warn(format!("failed to remove {}: {e}", dir.display()));
         } else {
             println!("removed {}", dir.display());
         }

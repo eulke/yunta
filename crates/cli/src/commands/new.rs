@@ -8,10 +8,10 @@
 //! reports the result, same as `yunta check` would.
 
 use std::io::IsTerminal;
-use std::process::ExitCode;
 
 use yunta_core::{ConfigLayer, Workflow};
 
+use crate::error::{error_block, note, warn, CliError, Outcome};
 use crate::project;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,90 +149,65 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn new_workflow(name: &str, shape: Option<&str>, interactive: bool, force: bool) -> ExitCode {
-    if let Err(e) = validate_name(name) {
-        eprintln!("error: {e}");
-        return ExitCode::FAILURE;
-    }
+pub fn new_workflow(
+    name: &str,
+    shape: Option<&str>,
+    interactive: bool,
+    force: bool,
+) -> Result<Outcome, CliError> {
+    validate_name(name).map_err(CliError::msg)?;
 
     let shape = match shape {
-        Some(raw) => match Shape::parse(raw) {
-            Ok(shape) => shape,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
+        Some(raw) => Shape::parse(raw).map_err(CliError::msg)?,
         None if interactive && std::io::stdin().is_terminal() => prompt_shape(),
         None => {
             if interactive {
-                eprintln!(
-                    "warning: --interactive given but stdin isn't a TTY — defaulting to `one-node`"
-                );
+                warn("--interactive given but stdin isn't a TTY — defaulting to `one-node`");
             }
             Shape::OneNode
         }
     };
 
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
-        eprintln!(
-            "error: {} already exists — pass --force to overwrite",
+        return Err(CliError::msg(format!(
+            "{} already exists — pass --force to overwrite",
             path.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
     if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("error: failed to create {}: {e}", parent.display());
-            return ExitCode::FAILURE;
-        }
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
 
     let yaml = shape.skeleton(name);
-    if let Err(e) = std::fs::write(&path, &yaml) {
-        eprintln!("error: failed to write {}: {e}", path.display());
-        return ExitCode::FAILURE;
-    }
+    std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
     println!("wrote {} ({})", path.display(), shape.label());
 
-    let workflow: Workflow = match yunta_core::yaml::parse(&yaml) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("error: the skeleton this command just wrote fails to parse: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
+        CliError::msg(format!(
+            "the skeleton this command just wrote fails to parse: {e}"
+        ))
+    })?;
 
     // Same layered config `yunta check` resolves without an explicit
     // `--config` — an empty/default layer set (no `.yunta/config.yaml`
     // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
     // not an error: these skeletons never reference a `runner:`
     // precisely so `check` never depends on that config existing.
-    let config = match project::load_named_layers(&cwd) {
-        Ok(layers) => ConfigLayer::merge_layers(layers.into_iter().map(|(_, l)| l)),
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let config = ConfigLayer::merge_layers(
+        project::load_named_layers(&cwd)?
+            .into_iter()
+            .map(|(_, l)| l),
+    );
 
     let errors = yunta_engine::check(&workflow, &config);
     if errors.is_empty() {
         println!("{}: OK", path.display());
-        ExitCode::SUCCESS
+        Ok(Outcome::Success)
     } else {
-        eprintln!("{}: {} error(s)", path.display(), errors.len());
-        for error in &errors {
-            eprintln!("  {error}");
-        }
-        ExitCode::FAILURE
+        note(error_block(&path, &errors));
+        Ok(Outcome::Reported)
     }
 }

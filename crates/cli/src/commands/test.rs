@@ -23,7 +23,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -33,6 +32,7 @@ use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::task_status_label;
+use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::project;
 
@@ -83,23 +83,21 @@ enum FinalState {
     Promoted,
 }
 
-pub async fn test(dir: Option<&Path>) -> ExitCode {
-    let root = match project_root(dir) {
-        Ok(root) => root,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
+    let root = project_root(dir).map_err(CliError::msg)?;
 
     let tests_dir = root.join(".yunta/tests");
     let Some(case_paths) = discover_case_paths(&root) else {
-        eprintln!("error: cannot read test cases from {}", tests_dir.display());
-        return ExitCode::FAILURE;
+        return Err(CliError::msg(format!(
+            "cannot read test cases from {}",
+            tests_dir.display()
+        )));
     };
     if case_paths.is_empty() {
-        eprintln!("error: no test cases found under {}", tests_dir.display());
-        return ExitCode::FAILURE;
+        return Err(CliError::msg(format!(
+            "no test cases found under {}",
+            tests_dir.display()
+        )));
     }
 
     let mut failures = 0usize;
@@ -127,9 +125,9 @@ pub async fn test(dir: Option<&Path>) -> ExitCode {
 
     println!("{} case(s), {} failed", case_paths.len(), failures);
     if failures == 0 {
-        ExitCode::SUCCESS
+        Ok(Outcome::Success)
     } else {
-        ExitCode::FAILURE
+        Ok(Outcome::Reported)
     }
 }
 

@@ -5,13 +5,12 @@
 //! never a percentage: a percentage lies the moment a reroute grows
 //! the denominator.
 
-use std::process::ExitCode;
-
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
 use yunta_core::{Manifest, ModeName, NodeId, RunId};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
+use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::project;
 
@@ -129,41 +128,16 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
     summary
 }
 
-pub fn status(run_id: &RunId) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let storage = match Storage::open(&project.storage_path) {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let events = match storage.events_for_run(run_id) {
-        Ok(events) => events,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
+    let storage = Storage::open(&project.storage_path)?;
+    let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
-        eprintln!(
-            "error: no run `{run_id}` in {}",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` in {}",
             project.storage_path.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     }
 
     // Search order (current runs root, then the default) — the run's
@@ -171,10 +145,7 @@ pub fn status(run_id: &RunId) -> ExitCode {
     let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
         .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
-    let manifest: Manifest = match load_yaml(&manifest_path, "run manifest") {
-        Ok(manifest) => manifest,
-        Err(code) => return code,
-    };
+    let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 
     println!("run {run_id}: {}", progress_summary(&events, &manifest));
 
@@ -210,7 +181,7 @@ pub fn status(run_id: &RunId) -> ExitCode {
         "tokens: {} in / {} out",
         state.total_tokens.input, state.total_tokens.output
     );
-    ExitCode::SUCCESS
+    Ok(Outcome::Success)
 }
 
 /// The event schema's snake_case task-status names — user output never

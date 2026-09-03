@@ -7,57 +7,32 @@
 //! comes from its *frozen* paths, so a `paths.*` change between `run`
 //! and `resume` never loses the run.
 
-use std::process::ExitCode;
-
 use yunta_core::{Isolation, Manifest, RunId, SystemClock, SystemIdSource};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
+use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::project;
 
-pub async fn resume(run_id: &RunId) -> ExitCode {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(e) => {
-            eprintln!("error: cannot determine the current directory: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let project = match project::resolve(&cwd) {
-        Ok(project) => project,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let project = project::resolve(&cwd)?;
     let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
-        eprintln!(
-            "error: no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
+        return Err(CliError::msg(format!(
+            "no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
             project.runs_root.display()
-        );
-        return ExitCode::FAILURE;
+        )));
     };
     let manifest_path = run_dir.join("manifest.yaml");
-    let manifest: Manifest = match load_yaml(&manifest_path, "run manifest") {
-        Ok(manifest) => manifest,
-        Err(code) => return code,
-    };
+    let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 
     // The manifest's own frozen config, not the project's current one:
     // a run never re-reads config after it's created.
     let adapters = super::real_adapters(&manifest.config);
-    if let Err(code) = super::refuse_unrunnable(&manifest.workflow, &adapters) {
-        return code;
-    }
+    super::refuse_unrunnable(&manifest.workflow, &adapters)?;
 
-    let storage = match AsyncStorage::open(&project.storage_path).await {
-        Ok(storage) => storage,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let storage = AsyncStorage::open(&project.storage_path).await?;
 
     // The worktree (or the checkout itself, for `none`) was already
     // prepared by the `run` that created this run — resume finds it by
@@ -78,7 +53,7 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
     // never the project's current one.
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();
-    let outcome = yunta_engine::execute_run(RunEnv {
+    let report = yunta_engine::execute_run(RunEnv {
         run_id,
         manifest: &manifest,
         run_dir: &run_dir,
@@ -93,47 +68,31 @@ pub async fn resume(run_id: &RunId) -> ExitCode {
         cancel: Some(&root_cancel),
         adapter_override: None,
     })
-    .await;
+    .await?;
 
-    match outcome {
-        Ok(report) => {
-            let (run_id, manifest, _worktree, report) = match super::promote::drive_promotions(
-                &super::promote::PromotionEnv {
-                    cwd: &cwd,
-                    project: &project,
-                    storage: &storage,
-                    ids: &SystemIdSource,
-                    adapters: &adapters,
-                    forge: forge.as_deref(),
-                    cancel: Some(&root_cancel),
-                },
-                run_id.clone(),
-                manifest,
-                worktree,
-                report,
-            )
+    let (run_id, manifest, _worktree, report) = super::promote::drive_promotions(
+        &super::promote::PromotionEnv {
+            cwd: &cwd,
+            project: &project,
+            storage: &storage,
+            ids: &SystemIdSource,
+            adapters: &adapters,
+            forge: forge.as_deref(),
+            cancel: Some(&root_cancel),
+        },
+        run_id.clone(),
+        manifest,
+        worktree,
+        report,
+    )
+    .await
+    .map_err(CliError::msg)?;
+    // A user cancellation also releases `none`'s lock — the engine
+    // process is exiting, and a Ctrl-C is designed to leave nothing held.
+    if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
+        yunta_engine::release_worktree(&cwd, manifest.isolation)
             .await
-            {
-                Ok(chained) => chained,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            // A user cancellation also releases `none`'s lock — the
-            // engine process is exiting, and a Ctrl-C is designed to
-            // leave nothing held.
-            if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
-                if let Err(e) = yunta_engine::release_worktree(&cwd, manifest.isolation).await {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
-            super::report_outcome(run_id.as_str(), &report)
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
+            .map_err(|e| CliError::msg(e.to_string()))?;
     }
+    Ok(super::report_outcome(run_id.as_str(), &report))
 }
