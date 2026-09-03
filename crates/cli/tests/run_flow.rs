@@ -6,62 +6,13 @@
 //! scripted fake `claude` binary — no network, no cost.
 
 use std::path::{Path, PathBuf};
-use std::process::Output;
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
+use yunta_testkit::{git, init_repo, run_id_from, stdout, write, yunta_in};
 
 fn claude_code_stub() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
-}
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn run_id_from(output: &Output) -> String {
-    stdout(output)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .expect("run id in output")
 }
 
 #[test]
@@ -87,7 +38,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -97,7 +48,7 @@ nodes:
     assert!(stdout(&run).contains("finished"));
 
     let run_id = run_id_from(&run);
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(status.status.success());
     let text = stdout(&status);
     assert!(text.contains("finished"), "got: {text}");
@@ -105,7 +56,7 @@ nodes:
     assert!(text.contains("verify"), "got: {text}");
 
     // Resuming a finished run is a clean no-op.
-    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
         resume.status.success(),
         "stderr: {}",
@@ -148,7 +99,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("yunta test"), "got: {stderr}");
@@ -226,7 +177,7 @@ expect:
 "#,
     );
 
-    let output = yunta_in(&repo, &home, &["test"]);
+    let output = yunta_in!(&repo, &home, &["test"]);
     let text = stdout(&output);
     assert!(
         output.status.success(),
@@ -268,7 +219,7 @@ expect:
 "#,
     );
 
-    let output = yunta_in(&repo, &home, &["test"]);
+    let output = yunta_in!(&repo, &home, &["test"]);
     assert!(!output.status.success());
     let text = stdout(&output);
     assert!(text.contains("FAILED"), "got: {text}");
@@ -323,7 +274,7 @@ nodes:
     git(&repo, &["add", ".claude-stub-lines.jsonl"]);
     git(&repo, &["commit", "-q", "-m", "stub fixture"]);
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -352,7 +303,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -395,9 +346,9 @@ nodes:
 "#,
     );
 
-    let run1 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run1 = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run1.status.success(), "run1: {}", stdout(&run1));
-    let run2 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run2 = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run2.status.success(), "run2: {}", stdout(&run2));
 
     let worktree_dirs: Vec<_> = std::fs::read_dir(home.join("worktrees"))
@@ -436,7 +387,7 @@ nodes:
     // Dirty the tree.
     write(&repo.join("uncommitted.txt"), "dirty");
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
     assert!(
         !home.join("runs").exists(),
@@ -471,7 +422,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let run1 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run1 = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run1.status.success(),
         "stdout: {}\nstderr: {}",
@@ -480,7 +431,7 @@ nodes:
     );
     // Finishing must release the lock so a second run on the same
     // (still clean) checkout can proceed.
-    let run2 = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run2 = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run2.status.success(),
         "stdout: {}\nstderr: {}",
@@ -514,11 +465,11 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(stdout(&run).contains("paused"), "got: {}", stdout(&run));
     let run_id = run_id_from(&run);
 
-    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
         stdout(&resume).contains("paused"),
         "got: {}",
@@ -567,7 +518,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -607,7 +558,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -639,10 +590,10 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(
+    let run = yunta_in!(
         &repo,
         &home,
-        &["run", "wf.yaml", "--input", "greeting=bonjour"],
+        &["run", "wf.yaml", "--input", "greeting=bonjour"]
     );
     assert!(
         run.status.success(),
@@ -675,7 +626,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("idea"), "got: {stderr}");
@@ -698,7 +649,7 @@ fn mode_is_refused_since_modes_have_no_schema_yet() {
         "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--mode", "ship"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "ship"]);
     assert!(!run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("mode"), "got: {stderr}");
@@ -731,7 +682,7 @@ nodes:
 "#,
     );
 
-    let list = yunta_in(&repo, &home, &["list"]);
+    let list = yunta_in!(&repo, &home, &["list"]);
     assert!(list.status.success());
     let text = stdout(&list);
     assert!(text.contains("greet: Says hello"), "got: {text}");
@@ -751,11 +702,11 @@ fn list_runs_shows_local_runs_with_their_progress_summary() {
         &repo.join("wf.yaml"),
         "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
     );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
-    let list = yunta_in(&repo, &home, &["list", "--runs"]);
+    let list = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(list.status.success());
     let text = stdout(&list);
     assert!(text.contains(&run_id), "got: {text}");
@@ -771,7 +722,7 @@ fn doctor_reports_no_adapter_when_runners_names_none_this_build_supports() {
     init_repo(&repo);
     let home = root.path().join("state");
 
-    let doctor = yunta_in(&repo, &home, &["doctor"]);
+    let doctor = yunta_in!(&repo, &home, &["doctor"]);
     assert!(doctor.status.success());
     assert!(stdout(&doctor).contains("no adapter to probe"));
 }
@@ -788,11 +739,11 @@ fn cancel_on_an_already_finished_run_is_a_clean_no_op() {
         &repo.join("wf.yaml"),
         "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
     );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
-    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    let cancel = yunta_in!(&repo, &home, &["cancel", &run_id]);
     assert!(cancel.status.success());
     assert!(stdout(&cancel).contains("nothing to cancel"));
 }
@@ -819,11 +770,11 @@ nodes:
     run: "true"
 "#,
     );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(status.status.success());
     let text = stdout(&status);
     assert!(text.contains("2/2 nodes"), "got: {text}");
@@ -889,7 +840,7 @@ fn run_follow_prints_progress_while_the_run_is_still_in_progress() {
         "name: slow\nnodes:\n  - id: only\n    kind: bash\n    run: \"sleep 1.2\"\n",
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--follow"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--follow"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -924,10 +875,10 @@ fn a_second_run_over_max_concurrent_runs_is_refused_while_one_is_paused() {
 
     // A paused run exits non-zero (it needs attention) but leaves its
     // slot occupied — that's the state the second invocation must see.
-    let first = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let first = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(stdout(&first).contains("paused"), "got: {}", stdout(&first));
 
-    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         !second.status.success(),
         "the second run must be refused while the first is paused"
@@ -960,11 +911,11 @@ fn a_finished_run_never_counts_against_max_concurrent_runs() {
         "name: ok\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
     );
 
-    let first = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let first = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(first.status.success());
     assert!(stdout(&first).contains("finished"));
 
-    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         second.status.success(),
         "a finished run holds no slot: {}",
@@ -985,11 +936,11 @@ fn yunta_verify_reports_an_untouched_run_s_chain_intact() {
         "name: chain\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
-    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    let verify = yunta_in!(&repo, &home, &["verify", &run_id]);
     assert!(
         verify.status.success(),
         "stderr: {}",
@@ -1001,7 +952,7 @@ fn yunta_verify_reports_an_untouched_run_s_chain_intact() {
         stdout(&verify)
     );
 
-    let ghost = yunta_in(&repo, &home, &["verify", "run-ghost"]);
+    let ghost = yunta_in!(&repo, &home, &["verify", "run-ghost"]);
     assert!(!ghost.status.success(), "an unknown run must not verify");
 }
 
@@ -1028,7 +979,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stderr: {}",
@@ -1196,7 +1147,7 @@ nodes:
     let yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
     let run_id = only_run_id(&home);
 
-    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    let cancel = yunta_in!(&repo, &home, &["cancel", &run_id]);
     assert!(
         cancel.status.success(),
         "stdout: {}\nstderr: {}",
@@ -1222,7 +1173,7 @@ nodes:
         "the sleeping child must be dead"
     );
 
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
         stdout(&status).contains("cancelled by user"),
         "got: {}",
@@ -1268,7 +1219,7 @@ nodes:
         "the crash must leave engine.json behind"
     );
 
-    let cancel = yunta_in(&repo, &home, &["cancel", &run_id]);
+    let cancel = yunta_in!(&repo, &home, &["cancel", &run_id]);
     assert!(
         cancel.status.success(),
         "stderr: {}",
@@ -1298,7 +1249,7 @@ nodes:
         "the orphaned child must be dead, ps state: {state}"
     );
     assert!(!engine_json.exists());
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
         stdout(&status).contains("cancelled after crash"),
         "got: {}",
@@ -1364,7 +1315,7 @@ nodes:
         "paths:\n  worktrees: elsewhere-worktrees\n",
     );
 
-    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
         resume.status.success(),
         "stdout: {}\nstderr: {}",
@@ -1392,7 +1343,7 @@ fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
         &repo.join("wf.yaml"),
         "name: legacy\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
     );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
@@ -1419,7 +1370,7 @@ fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
     assert_ne!(manifest, stripped, "the paths block must have been there");
     std::fs::write(&manifest_path, stripped).unwrap();
 
-    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
         resume.status.success(),
         "stderr: {}",
@@ -1450,7 +1401,7 @@ fn frozen_paths_are_absolute_or_run_creation_fails() {
         "name: wf\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         !run.status.success(),
         "a relative state root must fail run creation, not be silently rooted at cwd: {}",
@@ -1515,7 +1466,7 @@ nodes:
 
     // Give the restarted node its exit condition, then resume.
     write(&repo.join("go.txt"), "go");
-    let resume = yunta_in(&repo, &home, &["resume", &run_id]);
+    let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
         resume.status.success(),
         "stdout: {}\nstderr: {}",
@@ -1550,7 +1501,7 @@ on_finish:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stderr: {}",
@@ -1615,7 +1566,7 @@ on_finish:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stderr: {}",
@@ -1634,7 +1585,7 @@ on_finish:
         "uncommitted — the engine never commits the user's branch"
     );
 
-    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         !second.status.success(),
         "the dirty tree must refuse the next `none` run"
@@ -1681,7 +1632,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "catalog"]);
 
-    let output = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let output = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -1735,7 +1686,7 @@ fn yunta_check_refuses_a_composition_cycle() {
         "name: parent\nnodes:\n  - { id: top, kind: workflow, use: a }\n",
     );
 
-    let output = yunta_in(&repo, &home, &["check", "wf.yaml"]);
+    let output = yunta_in!(&repo, &home, &["check", "wf.yaml"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -1772,7 +1723,7 @@ nodes:
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
     let started = std::time::Instant::now();
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml", "--detach"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
     let elapsed = started.elapsed();
 
     assert!(
@@ -1791,7 +1742,7 @@ nodes:
     // detached child until it finishes on its own.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        let status = yunta_in!(&repo, &home, &["status", &run_id]);
         if stdout(&status).contains("finished") {
             break;
         }
@@ -1858,18 +1809,7 @@ nodes:
     let launcher_pgid = pid_of(&launcher); // `process_group(0)`: pgid == its own pid
     let output = launcher.wait_with_output().unwrap();
     assert!(output.status.success());
-    let run_id = stdout(&Output {
-        status: output.status,
-        stdout: output.stdout,
-        stderr: Vec::new(),
-    })
-    .lines()
-    .find_map(|line| {
-        line.strip_prefix("run ")
-            .and_then(|rest| rest.split(':').next())
-            .map(str::to_string)
-    })
-    .expect("run id in output");
+    let run_id = run_id_from(&output);
 
     // The launcher itself has already exited — this signals whatever
     // else is still in its group, if anything is.
@@ -1877,7 +1817,7 @@ nodes:
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        let status = yunta_in!(&repo, &home, &["status", &run_id]);
         if stdout(&status).contains("finished") {
             break;
         }
@@ -1941,7 +1881,7 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         stdout(&run).contains("paused"),
         "expected the exhausted re-route to pause the run, got: {}\nstderr: {}",
@@ -1953,7 +1893,7 @@ nodes:
 
     // A separate process, with no live surface attached to the run,
     // answers it.
-    let resolve = yunta_in(&repo, &home, &["resolve-gate", &run_id, "retry"]);
+    let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
     assert!(
         resolve.status.success(),
         "stdout: {}\nstderr: {}",
@@ -1964,7 +1904,7 @@ nodes:
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let status = yunta_in(&repo, &home, &["status", &run_id]);
+        let status = yunta_in!(&repo, &home, &["status", &run_id]);
         if stdout(&status).contains("finished") {
             break;
         }
@@ -2007,15 +1947,15 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     let run_id = run_id_from(&run);
 
-    let resolve = yunta_in(&repo, &home, &["resolve-gate", &run_id, "nonexistent"]);
+    let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "nonexistent"]);
     assert!(!resolve.status.success());
     let err = String::from_utf8_lossy(&resolve.stderr);
     assert!(err.contains("retry") && err.contains("abort"), "got: {err}");
 
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
         stdout(&status).contains("waiting"),
         "an invalid option must not touch the run's state: {}",
@@ -2126,7 +2066,7 @@ fn adapter_mock_with_fixture_runs() {
         "sessions:\n  - effects:\n      - { path: \"{{run.dir}}/artifacts/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
     );
 
-    let refused = yunta_in(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);
+    let refused = yunta_in!(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);
     assert!(!refused.status.success());
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("--fixture"),
@@ -2134,7 +2074,7 @@ fn adapter_mock_with_fixture_runs() {
         String::from_utf8_lossy(&refused.stderr)
     );
 
-    let run = yunta_in(
+    let run = yunta_in!(
         &repo,
         &home,
         &[
@@ -2144,7 +2084,7 @@ fn adapter_mock_with_fixture_runs() {
             "mock",
             "--fixture",
             "fixture.yaml",
-        ],
+        ]
     );
     assert!(
         run.status.success(),
