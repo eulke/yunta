@@ -399,6 +399,51 @@ impl Storage {
         Ok(ChainVerification::Intact { events: verified })
     }
 
+    /// Test-support fault injection: alters the `seq`-th event's persisted
+    /// payload so a later [`Self::verify_chain`] reports the chain broken at
+    /// exactly this `seq`. Changing one byte is enough — the stored hash no
+    /// longer matches the chain recomputed from the bytes — which is the
+    /// integrity guarantee the chain exists to give. Behind the `testkit`
+    /// feature: a tool for tests, never a capability production code holds.
+    #[cfg(feature = "testkit")]
+    pub fn corrupt_event_payload(&self, run_id: &RunId, seq: Seq) -> Result<()> {
+        let conn = lock(&self.conn);
+        let seq = seq.get() as i64;
+        let json: String = conn
+            .query_row(
+                "SELECT payload_json FROM events WHERE run_id = ?1 AND seq = ?2",
+                params![run_id.as_str(), seq],
+                |row| row.get(0),
+            )
+            .map_err(|source| StorageError::Read {
+                run_id: run_id.clone(),
+                source: cause(source),
+            })?;
+
+        // Replace the payload's first character with a different one: its
+        // bytes, and so its chain hash, change without depending on the
+        // payload's shape. A stored event's payload is never empty.
+        let mut tampered = String::with_capacity(json.len());
+        let mut rest = json.chars();
+        match rest.next() {
+            Some(first) => {
+                tampered.push(if first == '0' { '1' } else { '0' });
+                tampered.extend(rest);
+            }
+            None => tampered.push('0'),
+        }
+
+        conn.execute(
+            "UPDATE events SET payload_json = ?1 WHERE run_id = ?2 AND seq = ?3",
+            params![tampered, run_id.as_str(), seq],
+        )
+        .map_err(|source| StorageError::Append {
+            run_id: run_id.clone(),
+            source: cause(source),
+        })?;
+        Ok(())
+    }
+
     /// All events for a run, ordered by `seq` ascending — the order
     /// replay depends on. A row under a `kind` this binary does not know
     /// comes back as [`EventBody::Unknown`], kept verbatim; a row under a

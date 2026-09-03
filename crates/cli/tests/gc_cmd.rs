@@ -237,3 +237,44 @@ fn failed_removal_is_not_counted() {
     assert!(!home.join("runs").join(&clean_id).exists());
     assert!(stuck_worktree.exists(), "the removal genuinely failed");
 }
+
+#[test]
+fn gc_leaves_a_paused_run_however_old_it_is() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    // A failing node with no `on_failure` pauses the run: it never reaches a
+    // terminal state, so gc must leave its footprint alone however far past
+    // the retention window it is — only terminal runs are reclaimed.
+    write(
+        &repo.join("wf.yaml"),
+        "name: stuck\nnodes:\n  - id: broken\n    kind: bash\n    run: \"false\"\n",
+    );
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+    let run_dir = home.join("runs").join(&run_id);
+    assert!(
+        run_dir.exists(),
+        "the paused run was created: {}",
+        stderr(&run)
+    );
+
+    let gc = yunta_in!(&repo, &home, &["gc"]);
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    assert!(
+        stdout(&gc).contains("nothing to reclaim"),
+        "a non-terminal run offers nothing to reclaim: {}",
+        stdout(&gc)
+    );
+    assert!(
+        run_dir.exists(),
+        "a paused run's footprint must survive gc, however old"
+    );
+}

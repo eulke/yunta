@@ -49,6 +49,9 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# `verify`'s broken-chain test corrupts a stored event behind the store's
+# back through the same fault injector storage's own tests use.
+yunta-storage = { workspace = true, features = ["testkit"] }
 # The shared test harness: git-repo fixture, `yunta_in!`, fixed clock.
 yunta-testkit.workspace = true
 tempfile.workspace = true

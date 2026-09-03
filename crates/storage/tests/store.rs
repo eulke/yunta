@@ -352,51 +352,22 @@ fn a_single_byte_flip_at_any_position_breaks_the_chain() {
         paused_draft("run-1", "three"),
     ];
     for seq in 1..=drafts.len() as i64 {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("yunta.db");
-        let storage = Storage::open(&db).unwrap();
+        let (_dir, storage) = open_temp();
         for draft in &drafts {
             storage.append(draft, &yunta_testkit::FixedClock).unwrap();
         }
-        drop(storage);
 
-        flip_one_byte(&db, seq);
+        storage
+            .corrupt_event_payload(&RunId::from("run-1"), Seq::try_from(seq).unwrap())
+            .unwrap();
 
-        let storage = Storage::open(&db).unwrap();
         match storage.verify_chain(&RunId::from("run-1")).unwrap() {
             ChainVerification::Broken { .. } => {}
             ChainVerification::Intact { .. } => {
-                panic!("a flipped byte at seq {seq} went undetected")
+                panic!("a corrupted event at seq {seq} went undetected")
             }
         }
     }
-}
-
-/// Flips one alphanumeric byte of the `seq`-th event's persisted
-/// `payload_json` to a different character — the smallest tamper the chain
-/// must still catch, reaching past the store's own interface the way only a
-/// corruption test may.
-fn flip_one_byte(db: &std::path::Path, seq: i64) {
-    let conn = rusqlite::Connection::open(db).unwrap();
-    let json: String = conn
-        .query_row(
-            "SELECT payload_json FROM events WHERE run_id = 'run-1' AND seq = ?1",
-            rusqlite::params![seq],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let mut bytes = json.into_bytes();
-    let pos = bytes
-        .iter()
-        .position(|b| b.is_ascii_alphanumeric())
-        .expect("payload has an alphanumeric byte to flip");
-    bytes[pos] = if bytes[pos] == b'a' { b'b' } else { b'a' };
-    let tampered = String::from_utf8(bytes).unwrap();
-    conn.execute(
-        "UPDATE events SET payload_json = ?1 WHERE run_id = 'run-1' AND seq = ?2",
-        rusqlite::params![tampered, seq],
-    )
-    .unwrap();
 }
 
 #[test]

@@ -20,7 +20,16 @@ chrono.workspace = true
 # threads never wait on SQLite. Only the runtime feature the hop needs.
 tokio = { workspace = true, features = ["rt"] }
 
+[features]
+# Fault-injection test support (corrupting a stored event to break the
+# hash chain), compiled only into test builds that ask for it — never a
+# capability a production binary carries.
+testkit = []
+
 [dev-dependencies]
+# Storage's own tests reach that fault injection through the feature, the
+# way `yunta-core` enables its own `testkit` feature for its tests.
+yunta-storage = { path = ".", features = ["testkit"] }
 yunta-core = { workspace = true, features = ["testkit"] }
 # The shared test harness: the fixed clock store tests time events with.
 yunta-testkit.workspace = true
