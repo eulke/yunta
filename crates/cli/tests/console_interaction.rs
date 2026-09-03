@@ -19,7 +19,7 @@ use yunta_testkit::{git, init_repo, write};
 
 /// Polls `seen` until it contains `needle`, failing with `context` (and
 /// everything seen so far) if `timeout` elapses first — the bounded wait
-/// for an external process to reach a state, never a bare sleep.
+/// for an external process to reach a state, never a bare timed wait.
 fn wait_for(seen: &Arc<Mutex<String>>, needle: &str, timeout: Duration, context: &str) {
     let deadline = Instant::now() + timeout;
     loop {
@@ -31,7 +31,7 @@ fn wait_for(seen: &Arc<Mutex<String>>, needle: &str, timeout: Duration, context:
             "{context}\nsaw so far:\n{}",
             seen.lock().unwrap()
         );
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::yield_now();
     }
 }
 

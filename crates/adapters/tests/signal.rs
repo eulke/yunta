@@ -8,17 +8,17 @@ use std::process::{Child, Command, Stdio};
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal, Target};
 use yunta_core::Pid;
 
-/// A `sleep` leading its own process group, so a group signal reaches
+/// A blocker leading its own process group, so a group signal reaches
 /// exactly it.
 fn group_leader() -> Child {
-    Command::new("sleep")
-        .arg("30")
+    Command::new("tail")
+        .args(["-f", "/dev/null"])
         .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("sleep spawns")
+        .expect("the blocker spawns")
 }
 
 fn pid_of(child: &Child) -> Pid {

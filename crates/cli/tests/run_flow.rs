@@ -965,9 +965,10 @@ fn a_live_run_registers_its_processes_in_engine_json_and_deletes_it_at_terminal(
     let home = root.path().join("state");
 
     // The bash node is itself a registered process group — it captures
-    // the registry mid-run from inside the run. The short sleep lets the
-    // engine's registration (which happens right after spawn, while the
-    // command already runs) land first.
+    // the registry mid-run from inside the run. It waits for the engine's
+    // registration (which happens right after spawn, while the command
+    // already runs) to land before copying, rather than pausing a fixed
+    // time.
     write(
         &repo.join("wf.yaml"),
         r#"
@@ -975,7 +976,7 @@ name: registry
 nodes:
   - id: capture
     kind: bash
-    run: "sleep 0.2 && cp {{run.dir}}/scratch/engine.json {{run.dir}}/scratch/captured.json"
+    run: "until [ -f {{run.dir}}/scratch/engine.json ]; do :; done; cp {{run.dir}}/scratch/engine.json {{run.dir}}/scratch/captured.json"
 "#,
     );
 
@@ -1028,7 +1029,7 @@ name: stubborn
 nodes:
   - id: stubborn
     kind: bash
-    run: "echo $$ > child.pid; trap '' INT; sleep 30"
+    run: "echo $$ > child.pid; trap '' INT; tail -f /dev/null"
 "#,
     );
     // Isolation `none` requires a clean tree — commit the fixtures.
@@ -1044,15 +1045,17 @@ nodes:
         .spawn()
         .unwrap();
 
-    // Wait for the bash node to actually start (it writes its pid).
+    // Wait for the bash node to actually start and write its pid — poll for
+    // the pid content, not just the file, so a tight loop never reads it
+    // half-written.
     let pid_path = repo.join("child.pid");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !pid_path.exists() {
+    while !marker_written(&pid_path) {
         assert!(
             std::time::Instant::now() < deadline,
-            "the bash node never started"
+            "the bash node never wrote its pid"
         );
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::yield_now();
     }
     let child_pid = std::fs::read_to_string(&pid_path)
         .unwrap()
@@ -1086,7 +1089,17 @@ nodes:
         .exists());
 }
 
-/// Spawns `yunta run` detached and waits until the given file exists —
+/// True once `marker` exists and holds non-whitespace content — the point
+/// at which the shell has finished writing it, not merely created it. A
+/// poll for existence alone can observe the file in the window between
+/// creation and the write completing.
+fn marker_written(marker: &Path) -> bool {
+    std::fs::read_to_string(marker)
+        .map(|content| !content.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Spawns `yunta run` detached and waits until the given file is written —
 /// the bash node's own signal that it is really running.
 fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Child {
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
@@ -1098,12 +1111,12 @@ fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Chi
         .spawn()
         .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !marker.exists() {
+    while !marker_written(marker) {
         assert!(
             std::time::Instant::now() < deadline,
             "the bash node never started"
         );
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::yield_now();
     }
     child
 }
@@ -1138,7 +1151,7 @@ name: long
 nodes:
   - id: long
     kind: bash
-    run: "echo $$ > child.pid; sleep 30"
+    run: "echo $$ > child.pid; tail -f /dev/null"
 "#,
     );
     git(&repo, &["add", "."]);
@@ -1170,7 +1183,7 @@ nodes:
     assert_eq!(
         liveness(parse_pid(&child_pid)),
         Liveness::Dead,
-        "the sleeping child must be dead"
+        "the blocked child must be dead"
     );
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
@@ -1200,7 +1213,7 @@ name: crashy
 nodes:
   - id: long
     kind: bash
-    run: "echo $$ > child.pid; sleep 30"
+    run: "echo $$ > child.pid; tail -f /dev/null"
 "#,
     );
     git(&repo, &["add", "."]);
@@ -1275,11 +1288,11 @@ name: frozen-paths
 nodes:
   - id: gated
     kind: bash
-    run: "echo x > started.txt; test -f go.txt || sleep 30"
+    run: "echo x > started.txt; test -f go.txt || tail -f /dev/null"
 "#,
     );
 
-    // Crash the engine mid-node (the node sleeps until go.txt exists).
+    // Crash the engine mid-node (the node blocks until go.txt exists).
     let mut yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
         .args(["run", "wf.yaml"])
         .current_dir(&repo)
@@ -1301,7 +1314,7 @@ nodes:
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::yield_now();
     };
     let run_id = only_run_id(&home);
     signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
@@ -1447,7 +1460,7 @@ name: resumable
 nodes:
   - id: gated
     kind: bash
-    run: "echo x > started.txt; test -f go.txt || sleep 30"
+    run: "echo x > started.txt; test -f go.txt || tail -f /dev/null"
 "#,
     );
     git(&repo, &["add", "."]);
@@ -1716,15 +1729,13 @@ name: slow
 nodes:
   - id: work
     kind: bash
-    run: "sleep 2 && echo done > done.txt"
+    run: "until [ -f go.txt ]; do :; done; echo done > done.txt"
 "#,
     );
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let started = std::time::Instant::now();
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
-    let elapsed = started.elapsed();
 
     assert!(
         run.status.success(),
@@ -1732,14 +1743,20 @@ nodes:
         stdout(&run),
         String::from_utf8_lossy(&run.stderr)
     );
-    assert!(
-        elapsed < std::time::Duration::from_secs(1),
-        "--detach must return before the workflow's own 2s node finishes, took {elapsed:?}"
-    );
+    // --detach returned even though the node blocks until `go.txt` appears:
+    // had it waited for the workflow it would still be hanging now. The run
+    // is in progress, not finished, at the moment the invocation returns.
     let run_id = run_id_from(&run);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    assert!(
+        !stdout(&status).contains("finished"),
+        "the workflow is still running in the detached child: {}",
+        stdout(&status)
+    );
 
-    // The parent CLI invocation is gone; the workflow keeps running in a
-    // detached child until it finishes on its own.
+    // Release the node and watch the detached child carry the run to
+    // completion on its own.
+    write(&repo.join("go.txt"), "go");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let status = yunta_in!(&repo, &home, &["status", &run_id]);
@@ -1751,7 +1768,7 @@ nodes:
             "the detached run never reached finished: {}",
             stdout(&status)
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::yield_now();
     }
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
@@ -1791,7 +1808,7 @@ name: slow
 nodes:
   - id: work
     kind: bash
-    run: "sleep 2 && echo done > done.txt"
+    run: "until [ -f go.txt ]; do :; done; echo done > done.txt"
 "#,
     );
     git(&repo, &["add", "."]);
@@ -1815,6 +1832,10 @@ nodes:
     // else is still in its group, if anything is.
     signal_group(launcher_pgid, Signal::SIGTERM).expect("the launcher's group is ours to signal");
 
+    // The node blocks until `go.txt` appears, so it is still running when
+    // the signal lands; release it and confirm the detached run survived
+    // the signal and finished on its own.
+    write(&repo.join("go.txt"), "go");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let status = yunta_in!(&repo, &home, &["status", &run_id]);
@@ -1826,7 +1847,7 @@ nodes:
             "the detached run must survive a signal to its launcher's group, got: {}",
             stdout(&status)
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::yield_now();
     }
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
@@ -1913,7 +1934,7 @@ nodes:
             "the run never reached finished after resolve-gate: {}",
             stdout(&status)
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::yield_now();
     }
     assert!(repo.join("fixed.txt").exists());
 }

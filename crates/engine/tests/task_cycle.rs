@@ -658,6 +658,9 @@ async fn pre_check_orders_criteria_by_learned_median_duration() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new("config-hash");
+    // The duration is the subject under test here: one criterion genuinely
+    // takes longer to run than the other, so the learned median has a real
+    // difference to sort by.
     let slow = "sleep 0.2; test -f never.txt";
     let fast = "test -f never.txt";
     let t = task("T1", &["**"], vec![cmd(slow), cmd(fast)]);

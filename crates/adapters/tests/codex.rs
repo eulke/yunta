@@ -428,7 +428,7 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
 #[tokio::test]
 async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let dir = tempfile::tempdir().unwrap();
-    let child_pid_file = dir.path().join("child.pid");
+    let child_pid_file = child_pid_fifo(dir.path());
 
     let mut req = request(dir.path().to_path_buf());
     req.env.insert(
@@ -439,16 +439,7 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
         .insert("CODEX_STUB_HANG".to_string(), "1".to_string().into());
     let mut session = adapter().spawn(req).await.unwrap();
 
-    for _ in 0..50 {
-        if child_pid_file.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let grandchild_pid = std::fs::read_to_string(&child_pid_file)
-        .unwrap()
-        .trim()
-        .to_string();
+    let grandchild_pid = grandchild_pid(&child_pid_file).await;
 
     session.kill().await.unwrap();
 
@@ -464,9 +455,40 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
             grandchild_running = false;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::task::yield_now().await;
     }
     assert!(!grandchild_running, "grandchild process survived kill()");
+}
+
+/// The fifo the stub records its child pid into. A fifo, not a plain file, so
+/// [`grandchild_pid`] blocks on it and wakes the instant the stub writes, a
+/// rendezvous with the child rather than a poll of the filesystem.
+fn child_pid_fifo(dir: &std::path::Path) -> PathBuf {
+    let path = dir.join("child.pid");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .expect("mkfifo runs");
+    assert!(status.success(), "mkfifo creates the child-pid fifo");
+    path
+}
+
+/// The pid of the blocking child the stub spawned. The path is a fifo, so the
+/// read blocks until the stub opens it and writes the pid: an explicit
+/// rendezvous with the child, not a timed poll. The deadline turns a stub that
+/// never records the pid into a failed test rather than a hung one.
+async fn grandchild_pid(child_pid_fifo: &std::path::Path) -> String {
+    let fifo = child_pid_fifo.to_path_buf();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || std::fs::read_to_string(fifo)),
+    )
+    .await
+    .expect("the stub records the child pid before the deadline")
+    .expect("the pid reader joins")
+    .expect("the child-pid fifo reads")
+    .trim()
+    .to_string()
 }
 
 #[tokio::test]

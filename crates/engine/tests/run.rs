@@ -440,6 +440,9 @@ nodes:
 async fn a_hook_that_exceeds_its_timeout_fails_the_node_without_waiting_it_out() {
     let bench = Bench::new();
 
+    // The hook blocks forever; only its own 1s timeout ends it. Were the
+    // timeout not honored the run would hang here, so reaching the pause at
+    // all is the proof it was cut short — no wall-clock assertion needed.
     let workflow = r#"
 name: hook-timeout
 nodes:
@@ -448,22 +451,16 @@ nodes:
     run: "true"
     hooks:
       before:
-        - run: "sleep 5"
+        - run: "tail -f /dev/null"
           timeout_seconds: 1
 "#;
 
-    let started = std::time::Instant::now();
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
-    let elapsed = started.elapsed();
 
     match terminal {
         RunTerminal::Paused { reason } => assert!(reason.contains("before hook"), "got: {reason}"),
         other => panic!("expected Paused, got {other:?}"),
     }
-    assert!(
-        elapsed < std::time::Duration::from_secs(3),
-        "expected the 1s timeout to cut the 5s sleep short, took {elapsed:?}"
-    );
 }
 
 #[tokio::test]
@@ -1022,27 +1019,23 @@ async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
     }
 }
 
-fn interval(worktree: &std::path::Path, id: &str) -> (i128, i128) {
-    let start = std::fs::read_to_string(worktree.join(format!("{id}-start.txt"))).unwrap();
-    let end = std::fs::read_to_string(worktree.join(format!("{id}-end.txt"))).unwrap();
-    (start.trim().parse().unwrap(), end.trim().parse().unwrap())
-}
-
-/// Sweep-line max overlap: ties break end-before-start, so ambiguous
-/// simultaneity under-counts rather than over-counts — the right side to
-/// err on for a cap-respected assertion.
-fn max_concurrent_intervals(intervals: &[(i128, i128)]) -> usize {
-    let mut events: Vec<(i128, i32)> = Vec::new();
-    for &(start, end) in intervals {
-        events.push((start, 1));
-        events.push((end, -1));
-    }
-    events.sort();
-    let mut current = 0i32;
+/// The most nodes ever started but not yet finished at one point in the
+/// log — the scheduler's realized parallelism, read from event order rather
+/// than a wall clock. A file barrier in the fan-out nodes holds a batch open
+/// together, so this reaches exactly the batch size the scheduler allowed.
+fn max_open_nodes(events: &[yunta_core::events::StoredEvent]) -> usize {
+    use yunta_core::events::EventPayload;
+    let mut open = 0i32;
     let mut max = 0i32;
-    for (_, delta) in events {
-        current += delta;
-        max = max.max(current);
+    for event in events {
+        match event.payload() {
+            Some(EventPayload::NodeStarted(_)) => {
+                open += 1;
+                max = max.max(open);
+            }
+            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)) => open -= 1,
+            _ => {}
+        }
     }
     max as usize
 }
@@ -1051,18 +1044,22 @@ fn max_concurrent_intervals(intervals: &[(i128, i128)]) -> usize {
 async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
     let bench = Bench::new();
 
+    // Each node writes its marker and then waits until two markers exist —
+    // a barrier that cannot clear unless two nodes run at once. It forces
+    // the batch to overlap deterministically, with no wall clock: if the
+    // scheduler ran them one at a time the barrier would never clear.
     let workflow_yaml = r#"
 name: fan-out
 nodes:
   - id: a
     kind: bash
-    run: "date +%s%N > a-start.txt; sleep 0.3; date +%s%N > a-end.txt"
+    run: 'touch a.started; while :; do set -- *.started; [ "$#" -ge 2 ] && break; done'
   - id: b
     kind: bash
-    run: "date +%s%N > b-start.txt; sleep 0.3; date +%s%N > b-end.txt"
+    run: 'touch b.started; while :; do set -- *.started; [ "$#" -ge 2 ] && break; done'
   - id: c
     kind: bash
-    run: "date +%s%N > c-start.txt; sleep 0.3; date +%s%N > c-end.txt"
+    run: 'touch c.started; while :; do set -- *.started; [ "$#" -ge 2 ] && break; done'
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_yaml::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
@@ -1109,11 +1106,10 @@ nodes:
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
 
-    let intervals = ["a", "b", "c"].map(|id| interval(&bench.worktree, id));
     assert_eq!(
-        max_concurrent_intervals(&intervals),
+        max_open_nodes(&bench.events()),
         2,
-        "expected exactly max_parallel_nodes (2) nodes to overlap at once, batch then batch"
+        "exactly max_parallel_nodes (2) nodes overlap at once, batch then batch"
     );
 }
 
@@ -1126,10 +1122,10 @@ name: fan-out
 nodes:
   - id: a
     kind: bash
-    run: "date +%s%N > a-start.txt; sleep 0.1; date +%s%N > a-end.txt"
+    run: "true"
   - id: b
     kind: bash
-    run: "date +%s%N > b-start.txt; sleep 0.1; date +%s%N > b-end.txt"
+    run: "true"
 "#;
     let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
     let config = ConfigLayer::default();
@@ -1176,11 +1172,10 @@ nodes:
     .unwrap();
     assert_eq!(report.terminal, RunTerminal::Finished);
 
-    let intervals = ["a", "b"].map(|id| interval(&bench.worktree, id));
     assert_eq!(
-        max_concurrent_intervals(&intervals),
+        max_open_nodes(&bench.events()),
         1,
-        "unset max_parallel_nodes must stay fully sequential (default 1)"
+        "unset max_parallel_nodes stays fully sequential (default 1)"
     );
 }
 
@@ -1492,24 +1487,20 @@ nodes:
         run: "true"
       - id: slow
         kind: bash
-        run: "sleep 5 && touch slow-finished-fully.txt"
+        run: "tail -f /dev/null; touch slow-finished-fully.txt"
 "#;
 
-    let started = std::time::Instant::now();
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
-    let elapsed = started.elapsed();
 
     assert_eq!(terminal, RunTerminal::Finished);
-    assert!(
-        elapsed < std::time::Duration::from_secs(3),
-        "expected join: any to return as soon as `fast` won, took {elapsed:?}"
-    );
     assert!(matches!(
         state.nodes.get("fast"),
         Some(NodeState::Finished { .. })
     ));
-    // The slow sibling was interrupted before its own `touch` ran — proof
-    // the process was actually cut short, not just outraced by chance.
+    // The slow sibling blocks forever and is interrupted the moment `fast`
+    // wins, before its own `touch` can run: the run finishing at all proves
+    // the loser was cut short, and the absent marker proves the cut landed
+    // before it did any work — never a wall-clock race.
     assert!(!bench.worktree.join("slow-finished-fully.txt").exists());
 }
 
@@ -1990,7 +1981,7 @@ async fn an_executor_node_that_exceeds_its_timeout_fails_with_a_diagnostic() {
     write_executable_script(
         &bench.worktree.join("probe.py"),
         r#"#!/bin/sh
-sleep 5
+exec tail -f /dev/null
 "#,
     );
 
@@ -5219,32 +5210,23 @@ nodes:
         prompt: "Implement your task."
 "#;
 
-    // The task session stalls 4s before doing anything — far longer than
-    // `quick` needs to win. Without cancellation the loop would sit out
-    // the whole delay and finish anyway.
+    // The task session hangs and never returns on its own; only the race
+    // cancelling the loser ends it. Were the loser not cancelled the run
+    // would hang here, so it finishing at all is the proof the loop was cut
+    // short — no wall-clock assertion needed.
     let fixture = format!(
         r#"
 sessions:
   - effects:
       - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"slow\"\n    scope: [\"slow.txt\"]\n    criteria:\n      - cmd: \"test -f slow.txt\"\n" }}
     outcome: {{ type: completed, summary: "planned" }}
-  - steps:
-      - {{ type: note, text: "stalling", after_ms: 4000 }}
-    effects:
-      - {{ path: slow.txt, content: "slow" }}
-    outcome: {{ type: completed, summary: "did T001" }}
+  - outcome: {{ type: hang }}
 "#,
         artifacts = artifacts_dir.display()
     );
 
-    let started = std::time::Instant::now();
     let (terminal, state) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(3),
-        "the loser must die with the race, not sit out its stall: {:?}",
-        started.elapsed()
-    );
 
     assert!(matches!(
         state.nodes.get("race"),
@@ -5261,12 +5243,15 @@ sessions:
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_check_child_when_a_sibling_wins() {
     let bench = Bench::new();
+    // The baseline suite blocks forever; the losing check ends only when
+    // the race cancels it. If it were not cancelled the run would hang here,
+    // so its finishing is the proof — never a wall-clock margin.
     let config = r#"
 runners:
   executor:
     - { adapter: mock, model: mock-model }
 baseline:
-  suite: "sleep 4"
+  suite: "tail -f /dev/null"
 "#;
     let workflow = r#"
 name: race-check
@@ -5283,16 +5268,10 @@ nodes:
         builtin: baseline_compare
 "#;
 
-    let started = std::time::Instant::now();
     let (terminal, state) = bench
         .run_with_config(workflow, "sessions: []\n", config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(3),
-        "the check must die with the race: {:?}",
-        started.elapsed()
-    );
     match state.nodes.get("slow-check") {
         Some(NodeState::Failed { outcome, .. }) => {
             assert!(outcome.contains("interrupted"), "got: {outcome}");

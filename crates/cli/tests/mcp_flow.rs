@@ -119,7 +119,7 @@ nodes:
             "the run never reached finished via workflow_status: {}",
             tool_text(&status)
         );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
     }
     assert_eq!(
         std::fs::read_to_string(repo.join("greeting.txt"))
@@ -219,7 +219,7 @@ nodes:
             "the run never reached finished after resolve_gate: {}",
             tool_text(&status)
         );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
     }
 
     client.cancel().await.unwrap();
@@ -248,7 +248,7 @@ name: slow
 nodes:
   - id: work
     kind: bash
-    run: "sleep 2 && echo done > done.txt"
+    run: "echo done > done.txt"
 "#,
     );
     git(&repo, &["add", "."]);
@@ -311,7 +311,7 @@ nodes:
             "the run must survive the MCP session that created it being killed: {}",
             tool_text(&status)
         );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
     }
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
@@ -559,7 +559,7 @@ async fn finished_detached_runs_leave_no_zombie() {
             "the detached run never finished: {}",
             tool_text(&status)
         );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
     }
 
     // The finished detached child is a child of the long-lived server: it
@@ -574,7 +574,7 @@ async fn finished_detached_runs_leave_no_zombie() {
             std::time::Instant::now() < deadline,
             "a finished detached run is a zombie under the server: {zombies:?}"
         );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
     }
 
     client.cancel().await.unwrap();

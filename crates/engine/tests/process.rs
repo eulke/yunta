@@ -32,8 +32,11 @@ fn group_running(pgid: Pid) -> bool {
 #[tokio::test]
 async fn context_command_timeout_leaves_no_process_alive() {
     let dir = tempfile::tempdir().unwrap();
-    let command = GovernedCommand::shell(dir.path(), "echo started; sleep 30 & sleep 30")
-        .timeout(Duration::from_millis(200));
+    let command = GovernedCommand::shell(
+        dir.path(),
+        "echo started; tail -f /dev/null & tail -f /dev/null",
+    )
+    .timeout(Duration::from_millis(200));
 
     let outcome = spawn_governed(command, Supervision::none()).await.unwrap();
 
@@ -56,11 +59,20 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
     let dir = tempfile::tempdir().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
     let trigger = cancel.clone();
+    let marker = dir.path().join("running.marker");
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Cancel once the command is actually running: it writes the marker
+        // before it blocks, so the cancellation lands on a live process tree
+        // rather than after a fixed delay.
+        while !marker.exists() {
+            tokio::task::yield_now().await;
+        }
         trigger.cancel();
     });
-    let command = GovernedCommand::shell(dir.path(), "echo begun; sleep 30 & sleep 30");
+    let command = GovernedCommand::shell(
+        dir.path(),
+        "echo begun; touch running.marker; tail -f /dev/null & tail -f /dev/null",
+    );
 
     let outcome = spawn_governed(
         command,

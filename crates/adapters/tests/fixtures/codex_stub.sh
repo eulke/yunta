@@ -6,11 +6,11 @@
 # - `--version`: replies like the real CLI and exits.
 # - $CODEX_STUB_STDIN_FILE, if set: everything read from stdin — the prompt.
 # - $CODEX_STUB_ARGS_FILE, if set: every argv entry, one per line.
-# - $CODEX_STUB_CHILD_PID_FILE, if set: spawns a background `sleep` of
+# - $CODEX_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild kill() must also reach.
 # - streams the JSON lines from $CODEX_STUB_LINES_FILE if set, else from
 #   .codex-stub-lines.jsonl relative to the working directory.
-# - (if $CODEX_STUB_HANG is set) ignores SIGINT and sleeps afterwards.
+# - (if $CODEX_STUB_HANG is set) ignores SIGINT and blocks afterwards.
 
 if [ -n "$CODEX_STUB_ARGS_FILE" ]; then
   printf '%s\n' "$@" > "$CODEX_STUB_ARGS_FILE"
@@ -26,7 +26,7 @@ if [ "$1" = "--version" ]; then
 fi
 
 if [ -n "$CODEX_STUB_CHILD_PID_FILE" ]; then
-  sleep 300 &
+  tail -f /dev/null &
   echo $! > "$CODEX_STUB_CHILD_PID_FILE"
 fi
 
@@ -39,7 +39,7 @@ fi
 
 if [ -n "$CODEX_STUB_HANG" ]; then
   trap '' INT
-  sleep 300
+  tail -f /dev/null
 fi
 
 exit "${CODEX_STUB_EXIT:-0}"

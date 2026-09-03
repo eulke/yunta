@@ -91,8 +91,8 @@ async fn start_toy_server() -> (String, CancellationToken) {
             .await
             .unwrap();
     });
-    // Give the listener a moment to actually accept before the client dials.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // The listener is already bound, so a client that dials before `serve`
+    // accepts simply waits in the socket backlog — no pause needed here.
     (url, ct)
 }
 

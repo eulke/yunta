@@ -8,7 +8,7 @@
 # - $CLAUDE_STUB_ARGS_FILE, if set: every argv entry, one per line — lets
 #   tests assert the exact CLI invocation the adapter built (permission
 #   flags, --model, --resume, ...) without exposing that logic publicly.
-# - $CLAUDE_STUB_CHILD_PID_FILE, if set: spawns a background `sleep` of
+# - $CLAUDE_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild the adapter's kill() must
 #   also reach, since the whole process tree must die together.
 # - streams the JSON lines from $CLAUDE_STUB_LINES_FILE if set, else from
@@ -17,7 +17,7 @@
 #   through SessionRequest.env (that field carries secrets only), so a
 #   caller that only controls the worktree still has a way to script a
 #   session.
-# - (if $CLAUDE_STUB_HANG is set) ignores SIGINT and sleeps afterwards —
+# - (if $CLAUDE_STUB_HANG is set) ignores SIGINT and blocks afterwards —
 #   exercising the kill fallback a session that ignores interrupt needs.
 
 if [ -n "$CLAUDE_STUB_ARGS_FILE" ]; then
@@ -34,7 +34,7 @@ if [ "$1" = "--version" ]; then
 fi
 
 if [ -n "$CLAUDE_STUB_CHILD_PID_FILE" ]; then
-  sleep 300 &
+  tail -f /dev/null &
   echo $! > "$CLAUDE_STUB_CHILD_PID_FILE"
 fi
 
@@ -50,7 +50,7 @@ fi
 
 if [ -n "$CLAUDE_STUB_HANG" ]; then
   trap '' INT
-  sleep 300
+  tail -f /dev/null
 fi
 
 exit "${CLAUDE_STUB_EXIT:-0}"

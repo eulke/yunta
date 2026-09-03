@@ -117,6 +117,6 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
             std::time::Instant::now() < deadline,
             "the run never reached finished after resolve-gate: {text}"
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::yield_now();
     }
 }
