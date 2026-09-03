@@ -27,8 +27,8 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project;
 
 pub async fn mcp() -> Result<Outcome, CliError> {
     let transport = rmcp::transport::io::stdio();
@@ -266,9 +266,13 @@ async fn tool_resume_run(
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
     let run_id = required_str(args, "run_id")?;
-    let project = project::resolve(cwd).map_err(|e| e.to_string())?;
-    let run_dir = project::find_run_dir(&project, run_id)
-        .ok_or_else(|| format!("no run `{run_id}` under {}", project.runs_root.display()))?;
+    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
+    let run_dir = ctx.project.run_dir(run_id).ok_or_else(|| {
+        format!(
+            "no run `{run_id}` under {}",
+            ctx.project.runs_root.display()
+        )
+    })?;
     super::spawn_detached_resume(&run_dir, run_id, cwd)
         .map_err(|e| format!("cannot spawn a detached `yunta resume {run_id}`: {e}"))?;
     Ok(format!(
@@ -285,18 +289,20 @@ async fn tool_resolve_gate(
     let by = args.get("by").and_then(Value::as_str).map(str::to_string);
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
-    let project = project::resolve(cwd).map_err(|e| e.to_string())?;
+    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
     let run_id_typed = run_id
         .parse::<yunta_core::RunId>()
         .map_err(|e| e.to_string())?;
-    let run_dir = project::find_run_dir(&project, run_id)
-        .ok_or_else(|| format!("no run `{run_id}` under {}", project.runs_root.display()))?;
+    let run_dir = ctx.project.run_dir(run_id).ok_or_else(|| {
+        format!(
+            "no run `{run_id}` under {}",
+            ctx.project.runs_root.display()
+        )
+    })?;
     let manifest: yunta_core::Manifest = std::fs::read_to_string(run_dir.join("manifest.yaml"))
         .map_err(|e| e.to_string())
         .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
-    let storage = yunta_storage::AsyncStorage::open(&project.storage_path)
-        .await
-        .map_err(|e| e.to_string())?;
+    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
 
     yunta_engine::resolve_gate(
         &manifest,

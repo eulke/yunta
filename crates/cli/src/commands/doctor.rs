@@ -12,8 +12,8 @@
 //! leaves to this command, since it needs real filesystem access —
 //! `requires.commands` present on `PATH`.
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project;
 use yunta_adapters::ProbeReport;
 use yunta_core::AdapterId;
 
@@ -25,10 +25,9 @@ fn command_on_path(command: &str) -> bool {
 }
 
 pub async fn doctor() -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
+    let ctx = Context::load()?;
 
-    let adapters = super::real_adapters(&project.config);
+    let adapters = ctx.adapters();
     let mut all_healthy = true;
     if adapters.is_empty() {
         println!(
@@ -64,7 +63,7 @@ pub async fn doctor() -> Result<Outcome, CliError> {
         }
     }
 
-    if !check_installed_pack_requires(&cwd, &project.config) {
+    if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
         all_healthy = false;
     }
 

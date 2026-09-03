@@ -9,23 +9,32 @@
 //! reclaims that disk, not `release_worktree` (a no-op for
 //! `Isolation::Worktree` by design).
 //!
+//! A run is found and reclaimed by the paths *frozen in its manifest*,
+//! not the current config's: `run.dir` through the same search rule
+//! `status`/`resume` use, and the worktree through the root the manifest
+//! froze — so a `paths.*` change after the run was created never orphans
+//! either. A removal that fails is warned and left uncounted; only a run
+//! whose whole footprint was actually reclaimed is reported as such.
+//!
 //! Database retention: the event-log rows have their own deadline, with
 //! one explicit death order — run.dir (whose exported `events.jsonl` is
 //! the self-contained copy) dies first, rows die on a *later* gc pass,
 //! only for a run whose run.dir is already gone. The database is never
 //! the first copy of a run to die.
 
-use yunta_core::RunId;
-use yunta_storage::Storage;
+use std::path::{Path, PathBuf};
 
+use yunta_core::{Isolation, Manifest, RunId};
+
+use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
-use crate::project;
+use crate::project::Project;
 
 pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
+    let ctx = Context::load()?;
 
-    let Some(retention_days) = project
+    let Some(retention_days) = ctx
+        .project
         .config
         .storage
         .as_ref()
@@ -38,12 +47,12 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         return Ok(Outcome::Success);
     };
 
-    let storage = Storage::open(&project.storage_path)?;
+    let storage = ctx.storage()?;
     let run_ids = storage
         .list_runs()
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
 
-    let now = yunta_core::Clock::now(&yunta_core::SystemClock);
+    let now = yunta_core::Clock::now(&ctx.clock);
     let mut reclaimed = 0usize;
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {
@@ -73,25 +82,26 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         }
 
         // Death order: files first, rows on a later pass. A run whose
-        // run.dir is already gone (a previous gc, or a human) has its
-        // rows purged now; one whose files still exist loses only the
-        // files this pass.
-        let run_dir = project.runs_root.join(run_id.as_str());
-        if run_dir.exists() {
-            if remove_run(&project, &run_id, dry_run) {
+        // run.dir is still on disk (found by its frozen paths) loses only
+        // the files this pass; one whose run.dir is already gone (a
+        // previous gc, or a human) has its rows purged now.
+        match ctx.project.run_dir(run_id.as_str()) {
+            Some(run_dir) => {
+                if remove_run(&ctx.project, &run_dir, &run_id, dry_run) {
+                    reclaimed += 1;
+                }
+            }
+            None if dry_run => {
+                println!("would purge {} event(s) for run {run_id}", events.len());
                 reclaimed += 1;
             }
-        } else if dry_run {
-            println!("would purge {} event(s) for run {run_id}", events.len());
-            reclaimed += 1;
-        } else {
-            match storage.purge_run(&run_id) {
+            None => match storage.purge_run(&run_id) {
                 Ok(purged) => {
                     println!("purged {} event(s) for run {run_id}", purged.rows);
                     reclaimed += 1;
                 }
                 Err(e) => warn(format!("run `{run_id}`: {e}")),
-            }
+            },
         }
     }
 
@@ -105,23 +115,57 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-fn remove_run(project: &project::Project, run_id: &RunId, dry_run: bool) -> bool {
-    let run_dir = project.runs_root.join(run_id.as_str());
-    let worktree_dir = project.worktrees_root.join(run_id.as_str());
-    let mut touched = false;
+/// Removes a terminal run's on-disk footprint — its `run.dir` and, for a
+/// worktree-isolated run, the worktree frozen in its manifest — and
+/// reports whether every directory that was present got removed. A run
+/// with a removal that failed is warned about and returns `false`, so it
+/// is never counted as reclaimed while some of its disk survives. Under
+/// `dry_run` nothing is removed and every present directory counts as if
+/// it had been.
+fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) -> bool {
+    let worktree = worktree_of(project, run_dir, run_id);
+    let mut removed_any = false;
+    let mut all_removed = true;
 
-    for dir in [&run_dir, &worktree_dir] {
+    for dir in [Some(run_dir.to_path_buf()), worktree]
+        .into_iter()
+        .flatten()
+    {
         if !dir.exists() {
             continue;
         }
-        touched = true;
         if dry_run {
             println!("would remove {}", dir.display());
-        } else if let Err(e) = std::fs::remove_dir_all(dir) {
+            removed_any = true;
+        } else if let Err(e) = std::fs::remove_dir_all(&dir) {
             warn(format!("failed to remove {}: {e}", dir.display()));
+            all_removed = false;
         } else {
             println!("removed {}", dir.display());
+            removed_any = true;
         }
     }
-    touched
+    removed_any && all_removed
+}
+
+/// The worktree directory `gc` should reclaim for this run, read from
+/// the root frozen in its manifest — or `None` when there is none to
+/// reclaim: an `isolation: none` run works on the checkout itself, never
+/// a dedicated worktree, so gc removes nothing for it beyond `run.dir`. A
+/// manifest that cannot be read is surfaced and treated as no worktree —
+/// `run.dir` is still reclaimed, its worktree (if any) left for a human,
+/// never guessed at from the current config.
+fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<PathBuf> {
+    let manifest: Manifest = match crate::load_yaml(&run_dir.join("manifest.yaml"), "run manifest")
+    {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            warn(format!("run `{run_id}`: {e}"));
+            return None;
+        }
+    };
+    match manifest.isolation {
+        Isolation::Worktree => Some(project.worktrees_root_for(&manifest).join(run_id.as_str())),
+        Isolation::None => None,
+    }
 }

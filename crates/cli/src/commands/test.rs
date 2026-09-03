@@ -32,9 +32,9 @@ use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::task_status_label;
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
-use crate::project;
 
 /// The run id every case's single run is created under.
 
@@ -177,7 +177,10 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let workflow: Workflow = load_yaml(&workflow_path, "workflow")
         .map_err(|_| format!("could not load workflow `{}`", workflow_path.display()))?;
 
-    let config = project::resolve(cwd).map_err(|e| e.to_string())?.config;
+    let config = Context::resolve_in(cwd.to_path_buf())
+        .map_err(|e| e.to_string())?
+        .project
+        .config;
 
     // Sandbox: worktree + runs root + event log, all temp.
     let sandbox = tempfile::tempdir().map_err(|e| format!("cannot create sandbox: {e}"))?;

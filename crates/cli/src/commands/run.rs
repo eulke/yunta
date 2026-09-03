@@ -11,17 +11,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{
-    AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, RunId, SystemClock, SystemIdSource,
-    Workflow,
-};
+use yunta_core::{AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, RunId, Workflow};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::progress_summary;
+use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::load_yaml;
-use crate::project;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -142,8 +139,12 @@ pub async fn run(
     follow: bool,
     detach: bool,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
+    let Context {
+        cwd,
+        project,
+        clock,
+        ids,
+    } = Context::load()?;
 
     let storage = AsyncStorage::open(&project.storage_path).await?;
 
@@ -266,8 +267,6 @@ pub async fn run(
         }
     }
 
-    let clock = SystemClock;
-    let ids = SystemIdSource;
     let run_id = ids.mint_run_id(clock.now());
 
     let worktree = match manifest.isolation {
@@ -359,7 +358,7 @@ pub async fn run(
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: std::sync::Arc::new(SystemClock),
+        clock: std::sync::Arc::new(clock),
         ids: &ids,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,

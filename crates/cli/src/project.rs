@@ -9,13 +9,49 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::ConfigLayer;
+use yunta_core::{ConfigLayer, Manifest};
 
 pub struct Project {
     pub config: ConfigLayer,
     pub runs_root: PathBuf,
     pub worktrees_root: PathBuf,
     pub storage_path: PathBuf,
+}
+
+impl Project {
+    /// Finds an existing run's directory, in search order: (a) this
+    /// project's current runs root, (b) the built-in default under the
+    /// user state root. The single rule `status`, `stats`, `receipt`,
+    /// `cancel`, `list` and `gc` all locate a run by — once the manifest
+    /// inside is open, everything else reads its *frozen* paths, so this
+    /// search only exists because finding the manifest needs somewhere to
+    /// look first. A run created under roots that no longer appear in any
+    /// layer needs `YUNTA_HOME` pointing there — a documented limit: a
+    /// global index would make derived state the source of truth, which
+    /// this design avoids.
+    pub fn run_dir(&self, run_id: &str) -> Option<PathBuf> {
+        let mut candidates = vec![self.runs_root.clone()];
+        if let Ok(user_root) = user_root() {
+            candidates.push(user_root.join("runs"));
+        }
+        candidates
+            .into_iter()
+            .map(|root| root.join(run_id))
+            .find(|run_dir| run_dir.join("manifest.yaml").exists())
+    }
+
+    /// The worktrees root a run's checkout lives under: the one *frozen*
+    /// in its manifest, so a `paths.*` change after the run was created
+    /// never loses its worktree; a pre-freeze manifest (no `paths:`)
+    /// falls back to this project's current root, the old behavior. The
+    /// one place `resume` and `gc` derive a run's worktree location from.
+    pub fn worktrees_root_for(&self, manifest: &Manifest) -> PathBuf {
+        manifest
+            .paths
+            .as_ref()
+            .map(|paths| paths.worktrees_root.clone())
+            .unwrap_or_else(|| self.worktrees_root.clone())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -117,25 +153,6 @@ pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>,
 
 /// `version:` a layer may declare — the one this binary reads.
 const CONFIG_VERSION: u32 = 1;
-
-/// Finds an existing run's directory, in search order: (a) the current
-/// config's runs root, (b) the built-in default under the user state
-/// root. Once the manifest inside is open, everything else reads its
-/// *frozen* paths — this search only exists because finding the
-/// manifest needs somewhere to look first. A run created under roots
-/// that no longer appear in any layer needs `YUNTA_HOME` pointing there
-/// — a documented limit: a global index would make derived state the
-/// source of truth, which this design avoids.
-pub fn find_run_dir(project: &Project, run_id: &str) -> Option<PathBuf> {
-    let mut candidates = vec![project.runs_root.clone()];
-    if let Ok(user_root) = user_root() {
-        candidates.push(user_root.join("runs"));
-    }
-    candidates
-        .into_iter()
-        .map(|root| root.join(run_id))
-        .find(|run_dir| run_dir.join("manifest.yaml").exists())
-}
 
 /// Resolves the merged config and state paths for a project rooted at
 /// `cwd`. Missing layers are simply absent — an empty config is valid;

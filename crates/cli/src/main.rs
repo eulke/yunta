@@ -18,6 +18,7 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 mod commands;
+mod context;
 mod error;
 mod graph;
 mod human_interaction;
@@ -452,20 +453,17 @@ fn run_check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
     // yet (nothing ever ran) or an unnamed workflow simply shows
     // nothing, same as `list_workflows`'s own stance on missing
     // history.
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(project) = project::resolve(&cwd) {
-            if let Ok(storage) = yunta_storage::Storage::open(&project.storage_path) {
-                let (history, _) = commands::stats::collect_raw_history(
-                    &project.runs_root,
-                    &storage,
-                    &workflow.name,
-                );
-                let findings =
-                    yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-                let text = commands::stats::render_verification_findings(&findings);
-                if !text.is_empty() {
-                    note(format!("\n{text}"));
-                }
+    if let Ok(ctx) = context::Context::load() {
+        if let Ok(storage) = ctx.storage() {
+            let (history, _) = commands::stats::collect_raw_history(
+                &ctx.project.runs_root,
+                &storage,
+                &workflow.name,
+            );
+            let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
+            let text = commands::stats::render_verification_findings(&findings);
+            if !text.is_empty() {
+                note(format!("\n{text}"));
             }
         }
     }

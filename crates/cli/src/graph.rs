@@ -13,6 +13,7 @@ use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
 use crate::commands::check_or_refuse;
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::{load_yaml, project};
 
@@ -30,15 +31,14 @@ pub fn graph(
     run_id: Option<&RunId>,
     format: GraphFormat,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
+    let ctx = Context::load()?;
 
     let workflow: Workflow = load_yaml(workflow_path, "workflow")?;
 
-    check_or_refuse(&workflow, &project.config, workflow_path)?;
+    check_or_refuse(&workflow, &ctx.project.config, workflow_path)?;
 
     let labels = match run_id {
-        Some(run_id) => Some(derive_labels(&project, run_id)?),
+        Some(run_id) => Some(derive_labels(&ctx.project, run_id)?),
         None => None,
     };
 

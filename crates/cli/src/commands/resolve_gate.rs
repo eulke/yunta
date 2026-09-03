@@ -10,12 +10,11 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
-use yunta_core::{Manifest, RunId, SystemClock};
-use yunta_storage::AsyncStorage;
+use yunta_core::{Manifest, RunId};
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
-use crate::project;
 
 pub async fn resolve_gate(
     run_id: &RunId,
@@ -23,30 +22,29 @@ pub async fn resolve_gate(
     resolved_by: Option<&str>,
     free_text: Option<&str>,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
-    let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
+    let ctx = Context::load()?;
+    let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
         return Err(CliError::msg(format!(
             "no run `{run_id}` under {} (or the default state root)",
-            project.runs_root.display()
+            ctx.project.runs_root.display()
         )));
     };
     let manifest: Manifest = load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
 
-    let storage = AsyncStorage::open(&project.storage_path).await?;
+    let storage = ctx.async_storage().await?;
 
     yunta_engine::resolve_gate(
         &manifest,
         &storage,
         run_id,
-        &SystemClock,
+        &ctx.clock,
         option_id,
         resolved_by.map(str::to_string),
         free_text.map(str::to_string),
     )
     .await?;
 
-    super::spawn_detached_resume(&run_dir, run_id.as_str(), &cwd).map_err(|e| {
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd).map_err(|e| {
         CliError::msg(format!(
             "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
         ))

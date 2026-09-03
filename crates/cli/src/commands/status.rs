@@ -8,11 +8,10 @@
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
 use yunta_core::{Manifest, ModeName, NodeId, RunId};
 use yunta_engine::NodeState;
-use yunta_storage::Storage;
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
-use crate::project;
 
 /// Every node id the manifest's frozen DAG declares, `parallel` children
 /// included — the fixed denominator the flow counter measures against.
@@ -129,21 +128,22 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
 }
 
 pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
-    let storage = Storage::open(&project.storage_path)?;
+    let ctx = Context::load()?;
+    let storage = ctx.storage()?;
     let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
         return Err(CliError::msg(format!(
             "no run `{run_id}` in {}",
-            project.storage_path.display()
+            ctx.project.storage_path.display()
         )));
     }
 
     // Search order (current runs root, then the default) — the run's
     // own frozen paths take over once the manifest is open.
-    let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
-        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
+    let manifest_path = ctx
+        .project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
     let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 

@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use yunta_core::{InputSpec, Manifest, Workflow};
 
 use super::status::progress_summary;
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project;
 
 /// One catalog entry ready to render — `display_name` already carries
 /// the `publisher/` prefix for a pack entry, nothing else needs to know
@@ -30,10 +30,9 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
     // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
     // runs" does; neither is an error worth refusing the catalog over.
-    let history_source = project::resolve(&cwd).ok().and_then(|project| {
-        yunta_storage::Storage::open(&project.storage_path)
-            .ok()
-            .map(|storage| (project, storage))
+    let history_source = Context::load().ok().and_then(|ctx| {
+        let storage = ctx.storage().ok()?;
+        Some((ctx.project, storage))
     });
 
     let mut entries = repo_catalog_entries(&cwd);
@@ -193,15 +192,14 @@ fn input_type_label(spec: &InputSpec) -> &'static str {
 }
 
 pub fn list_runs() -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
-    let storage = yunta_storage::Storage::open(&project.storage_path)?;
+    let ctx = Context::load()?;
+    let storage = ctx.storage()?;
 
     let run_ids = storage
         .list_runs()
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
     if run_ids.is_empty() {
-        println!("no runs in {}", project.storage_path.display());
+        println!("no runs in {}", ctx.project.storage_path.display());
         return Ok(Outcome::Success);
     }
 
@@ -213,10 +211,16 @@ pub fn list_runs() -> Result<Outcome, CliError> {
                 continue;
             }
         };
-        let manifest_path = project
-            .runs_root
-            .join(run_id.as_str())
-            .join("manifest.yaml");
+        // The same frozen-path-aware search `status` uses, so a run
+        // created under a since-changed `paths.runs` still lists.
+        let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
+            println!(
+                "{run_id}: manifest missing or unreadable under {}",
+                ctx.project.runs_root.display()
+            );
+            continue;
+        };
+        let manifest_path = run_dir.join("manifest.yaml");
         let manifest = match std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())

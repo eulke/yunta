@@ -9,24 +9,26 @@
 
 use yunta_core::{Manifest, RunId};
 use yunta_engine::{build_receipt, render_receipt_json, render_receipt_markdown, EventChainStatus};
-use yunta_storage::{ChainVerification, Storage};
+use yunta_storage::ChainVerification;
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 
 pub fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = crate::project::resolve(&cwd)?;
-    let storage = Storage::open(&project.storage_path)?;
+    let ctx = Context::load()?;
+    let storage = ctx.storage()?;
     let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
         return Err(CliError::msg(format!(
             "no run `{run_id}` in {}",
-            project.storage_path.display()
+            ctx.project.storage_path.display()
         )));
     }
 
-    let run_dir = crate::project::find_run_dir(&project, run_id.as_str())
-        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()));
+    let run_dir = ctx
+        .project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
     let manifest: Manifest = crate::load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
 
     let chain = match storage.verify_chain(run_id)? {

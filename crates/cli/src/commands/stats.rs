@@ -18,8 +18,8 @@ use yunta_engine::{
 };
 use yunta_storage::Storage;
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project::{self, Project};
 
 pub fn stats(
     run_id: Option<&RunId>,
@@ -38,33 +38,29 @@ pub fn stats(
     }
 }
 
-fn resolve(cwd: &std::path::Path) -> Result<(Project, Storage), CliError> {
-    let project = project::resolve(cwd)?;
-    let storage = Storage::open(&project.storage_path)?;
-    Ok((project, storage))
-}
-
 fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let (project, storage) = resolve(&cwd)?;
+    let ctx = Context::load()?;
+    let storage = ctx.storage()?;
     let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
         return Err(CliError::msg(format!(
             "no run `{run_id}` in {}",
-            project.storage_path.display()
+            ctx.project.storage_path.display()
         )));
     }
 
     // Search order (current runs root, then the default) — the run's
     // own frozen paths take over once the manifest is open.
-    let manifest_path = crate::project::find_run_dir(&project, run_id.as_str())
-        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()))
+    let manifest_path = ctx
+        .project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
         .join("manifest.yaml");
     let manifest: Manifest = crate::load_yaml(&manifest_path, "run manifest")?;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
     let mode = yunta_core::events::run_mode(&events);
-    let pricing = project.config.pricing.clone();
+    let pricing = ctx.project.config.pricing.clone();
 
     if json {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
@@ -84,10 +80,10 @@ fn print_json<T: serde::Serialize>(value: &T) -> Result<Outcome, CliError> {
 }
 
 fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let (project, storage) = resolve(&cwd)?;
+    let ctx = Context::load()?;
+    let storage = ctx.storage()?;
 
-    let history = collect_history(&project.runs_root, &storage, workflow_name);
+    let history = collect_history(&ctx.project.runs_root, &storage, workflow_name);
     if history.is_empty() {
         println!("no runs of workflow `{workflow_name}` yet");
         return Ok(Outcome::Success);
@@ -96,7 +92,8 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
     // criteria/re-routes/gates against.
-    let (raw_history, workflow) = collect_raw_history(&project.runs_root, &storage, workflow_name);
+    let (raw_history, workflow) =
+        collect_raw_history(&ctx.project.runs_root, &storage, workflow_name);
     let findings = workflow
         .as_ref()
         .map(|wf| yunta_engine::analyze_verification_effectiveness(wf, &raw_history));

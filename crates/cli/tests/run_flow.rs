@@ -704,7 +704,7 @@ fn mode_is_refused_since_modes_have_no_schema_yet() {
     assert!(stderr.contains("mode"), "got: {stderr}");
 }
 
-// --- list, doctor, gc, cancel ------------------------------------------
+// --- list, doctor, cancel ----------------------------------------------
 
 #[test]
 fn list_shows_workflows_under_the_repo_s_own_directory_with_their_inputs() {
@@ -774,82 +774,6 @@ fn doctor_reports_no_adapter_when_runners_names_none_this_build_supports() {
     let doctor = yunta_in(&repo, &home, &["doctor"]);
     assert!(doctor.status.success());
     assert!(stdout(&doctor).contains("no adapter to probe"));
-}
-
-#[test]
-fn gc_does_nothing_when_retention_days_is_not_configured() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
-    let gc = yunta_in(&repo, &home, &["gc"]);
-    assert!(gc.status.success());
-    assert!(stdout(&gc).contains("retention_days"));
-}
-
-#[test]
-fn gc_reclaims_a_finished_run_past_its_retention_window() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "storage:\n  retention_days: 0\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
-    );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
-    assert!(run.status.success());
-    let run_id = run_id_from(&run);
-    let run_dir = home.join("runs").join(&run_id);
-    assert!(run_dir.exists());
-
-    let gc = yunta_in(&repo, &home, &["gc"]);
-    assert!(
-        gc.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&gc.stderr)
-    );
-    assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
-    assert!(!run_dir.exists(), "run.dir should have been removed");
-}
-
-#[test]
-fn gc_dry_run_reports_without_removing_anything() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "storage:\n  retention_days: 0\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
-    );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
-    assert!(run.status.success());
-    let run_id = run_id_from(&run);
-    let run_dir = home.join("runs").join(&run_id);
-
-    let gc = yunta_in(&repo, &home, &["gc", "--dry-run"]);
-    assert!(gc.status.success());
-    assert!(
-        stdout(&gc).contains("would be reclaimed"),
-        "got: {}",
-        stdout(&gc)
-    );
-    assert!(run_dir.exists(), "dry-run must never remove anything");
 }
 
 #[test]
@@ -1674,62 +1598,6 @@ on_finish:
         String::from_utf8_lossy(&second.stderr).contains("clean tree"),
         "got: {}",
         String::from_utf8_lossy(&second.stderr)
-    );
-}
-
-#[test]
-fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "storage:\n  retention_days: 0\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: short\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
-    );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
-    assert!(run.status.success());
-    let run_id = run_id_from(&run);
-    let run_dir = home.join("runs").join(&run_id);
-    assert!(run_dir.exists());
-
-    // Pass 1: files die, rows survive — the DB is never first to go.
-    let first = yunta_in(&repo, &home, &["gc"]);
-    assert!(first.status.success());
-    assert!(!run_dir.exists(), "run.dir reclaimed: {}", stdout(&first));
-    // The rows survive pass 1 — `verify` (which needs only the DB)
-    // still walks the chain.
-    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
-    assert!(
-        verify.status.success() && stdout(&verify).contains("intact"),
-        "rows still readable after pass 1: {}",
-        String::from_utf8_lossy(&verify.stderr)
-    );
-
-    // Pass 2: the dir is gone, so the rows go now.
-    let second = yunta_in(&repo, &home, &["gc"]);
-    assert!(second.status.success());
-    assert!(
-        stdout(&second).contains("purged"),
-        "got: {}",
-        stdout(&second)
-    );
-
-    // A purged run reads back as unknown — never corrupt state.
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
-    assert!(!status.status.success());
-    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
-    assert!(!verify.status.success());
-    assert!(
-        String::from_utf8_lossy(&verify.stderr).contains("no events"),
-        "got: {}",
-        String::from_utf8_lossy(&verify.stderr)
     );
 }
 

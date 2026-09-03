@@ -7,21 +7,19 @@
 //! comes from its *frozen* paths, so a `paths.*` change between `run`
 //! and `resume` never loses the run.
 
-use yunta_core::{Isolation, Manifest, RunId, SystemClock, SystemIdSource};
+use yunta_core::{Isolation, Manifest, RunId};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_storage::AsyncStorage;
 
+use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
-use crate::project;
 
 pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
-    let Some(run_dir) = project::find_run_dir(&project, run_id.as_str()) else {
+    let ctx = Context::load()?;
+    let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
         return Err(CliError::msg(format!(
             "no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
-            project.runs_root.display()
+            ctx.project.runs_root.display()
         )));
     };
     let manifest_path = run_dir.join("manifest.yaml");
@@ -32,21 +30,17 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
 
-    let storage = AsyncStorage::open(&project.storage_path).await?;
+    let storage = ctx.async_storage().await?;
 
     // The worktree (or the checkout itself, for `none`) was already
     // prepared by the `run` that created this run — resume finds it by
-    // the same rule, it never prepares a fresh one.
-    // The frozen roots win; a pre-freeze manifest (no `paths:`) falls
-    // back to the current config, exactly the old behavior.
-    let worktrees_root = manifest
-        .paths
-        .as_ref()
-        .map(|paths| paths.worktrees_root.clone())
-        .unwrap_or_else(|| project.worktrees_root.clone());
+    // the same rule (the manifest's frozen root), never a fresh one.
     let worktree = match manifest.isolation {
-        Isolation::Worktree => worktrees_root.join(run_id.as_str()),
-        Isolation::None => cwd.clone(),
+        Isolation::Worktree => ctx
+            .project
+            .worktrees_root_for(&manifest)
+            .join(run_id.as_str()),
+        Isolation::None => ctx.cwd.clone(),
     };
 
     // Same rule as `adapters` above: the manifest's own frozen config,
@@ -60,8 +54,8 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
         worktree: &worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: std::sync::Arc::new(SystemClock),
-        ids: &SystemIdSource,
+        clock: std::sync::Arc::new(ctx.clock),
+        ids: &ctx.ids,
         max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &crate::human_interaction::ConsoleInteraction,
         forge: forge.as_deref(),
@@ -72,10 +66,10 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
 
     let (run_id, manifest, _worktree, report) = super::promote::drive_promotions(
         &super::promote::PromotionEnv {
-            cwd: &cwd,
-            project: &project,
+            cwd: &ctx.cwd,
+            project: &ctx.project,
             storage: &storage,
-            ids: &SystemIdSource,
+            ids: &ctx.ids,
             adapters: &adapters,
             forge: forge.as_deref(),
             cancel: Some(&root_cancel),
@@ -90,9 +84,7 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
     // A user cancellation also releases `none`'s lock — the engine
     // process is exiting, and a Ctrl-C is designed to leave nothing held.
     if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
-        yunta_engine::release_worktree(&cwd, manifest.isolation)
-            .await
-            .map_err(|e| CliError::msg(e.to_string()))?;
+        yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
     }
     Ok(super::report_outcome(run_id.as_str(), &report))
 }

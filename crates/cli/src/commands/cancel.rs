@@ -18,12 +18,11 @@
 use std::time::Duration;
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
-use yunta_core::{describe, events::EventPayload, Pid, RunId, SystemClock};
+use yunta_core::{describe, events::EventPayload, Pid, RunId};
 use yunta_engine::NodeState;
-use yunta_storage::AsyncStorage;
 
+use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
-use crate::project;
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own 200ms interrupt grace, because a
@@ -31,14 +30,13 @@ use crate::project;
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let project = project::resolve(&cwd)?;
-    let storage = AsyncStorage::open(&project.storage_path).await?;
+    let ctx = Context::load()?;
+    let storage = ctx.async_storage().await?;
     let events = storage.events_for_run(run_id.clone()).await?;
     if events.is_empty() {
         return Err(CliError::msg(format!(
             "no run `{run_id}` in {}",
-            project.storage_path.display()
+            ctx.project.storage_path.display()
         )));
     }
 
@@ -55,8 +53,10 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         return Ok(Outcome::Success);
     }
 
-    let run_dir = project::find_run_dir(&project, run_id.as_str())
-        .unwrap_or_else(|| project.runs_root.join(run_id.as_str()));
+    let run_dir = ctx
+        .project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
     let Some(registry) = yunta_engine::read_registry(&run_dir) else {
         // Case 3 — no channel. Legacy fallback behavior, now the
         // exception rather than the rule.
@@ -119,7 +119,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     // `run_paused` is emitted through the engine, not hand-built here, so
     // the CLI never stamps an event with a clock of its own.
     kill_groups(&registry.process_groups);
-    yunta_engine::record_pause_after_crash(&storage, run_id, "cancelled after crash", &SystemClock)
+    yunta_engine::record_pause_after_crash(&storage, run_id, "cancelled after crash", &ctx.clock)
         .await?;
     if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(&run_dir)) {
         if e.kind() != std::io::ErrorKind::NotFound {
