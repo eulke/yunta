@@ -1085,7 +1085,7 @@ async fn head_commit(repo: &Path) -> Result<String, RunError> {
 /// `Denied` also becomes a `FindingPosted`, using the agent's own
 /// `reason`/`proposed_criterion` as the finding's evidence rather than the
 /// engine inventing new wording. `decided_by` is always `Decider::Rule`
-/// here — this recorte has no gate node for a person to decide
+/// here — there is no gate node for a person to decide
 /// through, so `ask` mode only ever reaches `Escalate`, never a rendered
 /// verdict.
 async fn emit_scope_expansion_events(

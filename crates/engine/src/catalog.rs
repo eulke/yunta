@@ -247,8 +247,9 @@ pub fn packs_for_publisher(repo_root: &Path, publisher: &Publisher) -> Publisher
 
 /// Where `workflow_path` actually lives, relative to `repo_root` — the
 /// origin `check_workflow_refs`'s caller must supply for its *top-level*
-/// workflow, since that function only ever sees a parsed [`Workflow`]
-/// value with no memory of the file it came from. `.yunta/packs/
+/// workflow, since that function only ever sees a parsed
+/// [`Workflow`](yunta_core::Workflow) value with no memory of the file it
+/// came from. `.yunta/packs/
 /// <publisher>/<pack>/...` reports `Pack`; anything else (including a
 /// path outside `repo_root` entirely) reports `Repo` — the safe default
 /// that permits ordinary composition instead of one that would refuse

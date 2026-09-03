@@ -78,7 +78,7 @@ pub struct RunnerUsage {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CostSummary {
     pub tokens: TokenUsage,
-    /// Mirrors [`crate::stats`]'s own CPTV: `None` means no task ever
+    /// Mirrors `crate::stats`'s own CPTV: `None` means no task ever
     /// reached `done` in this run, not a manufactured `0.0`.
     pub cptv: Option<f64>,
     pub reroutes: usize,

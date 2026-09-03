@@ -3,7 +3,7 @@
 //! JSON contract over stdio. The spec fixes the high-level shape (JSON
 //! in, JSON out, exit code is the verdict) but stops short of naming
 //! fields — this module's own doc comments carry the concrete contract
-//! this recorte adds on top, pending a real spec revision.
+//! it adds on top, pending a spec revision.
 
 use std::path::Path;
 use std::time::Duration;
@@ -20,7 +20,7 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
 /// every other node already exposes (`node_exec::template_vars`), rather
 /// than inventing different names for the same two paths. `env` is
-/// always present but empty in this recorte — no per-node `env:`
+/// always present but empty for now — no per-node `env:`
 /// declaration exists on `kind: executor` yet (same "not designed yet"
 /// treatment `isolation: container` gets elsewhere), so there is nothing
 /// to declare, but the key stays so an executor never has to branch on
@@ -39,7 +39,7 @@ fn build_stdin(
     })
 }
 
-/// The stdout JSON shape this recorte defines: an optional `summary`
+/// The stdout JSON shape this module defines: an optional `summary`
 /// string, used as the node's outcome text when present. Exit code, not
 /// this payload, is the pass/fail verdict — stdout that
 /// is empty, not JSON, or JSON without `summary` never fails the node by

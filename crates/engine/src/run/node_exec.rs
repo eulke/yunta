@@ -679,10 +679,9 @@ pub(super) async fn close_node_staged(
             // A re-plan — this same node producing a task
             // ledger a second time, whether via a reroute back to it or a
             // resumed run — must not silently keep a task `done` whose
-            // identity actually changed. Identity is exactly the
-            // Contrato's own wording: same `id`, same `criteria`, same
-            // `scope` — `depends_on` is deliberately not part of it, the
-            // spec never mentions it. The most recent prior registration
+            // identity actually changed. Identity is same `id`, same
+            // `criteria`, same `scope` — `depends_on` is deliberately not
+            // part of it. The most recent prior registration
             // per task id is all that's needed; `TaskRegistered`'s own
             // replay handling (`or_insert`, never overwrites an existing
             // status) already makes an identical re-registration a no-op,
@@ -817,10 +816,9 @@ pub(super) async fn fail(
     fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default()).await
 }
 
-/// Regenerates `progress.md` at `run.dir`'s root — the
-/// engine's own call, right after the `node_finished` that triggers it
-/// (the Contrato's literal text names only `node_finished`, not
-/// `node_failed`, as the regeneration point).
+/// Regenerates `progress.md` at `run.dir`'s root — the engine's own
+/// call, right after the `node_finished` that triggers it (`node_failed`
+/// is not itself a regeneration point).
 pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);

@@ -16,10 +16,10 @@
 //!   ends — here, a single well-known path inside the task's own
 //!   isolated worktree (`SCOPE_EXPANSION_REQUEST_FILE`), since a request
 //!   is one object per task attempt, not a list.
-//! - **"Tamaño acotado"** (no number given in the wording it comes from):
+//! - **"Bounded size"** (no number given in the wording it comes from):
 //!   bounded by file count rather than changed lines — simpler and
 //!   robust across a mix of tracked and untracked files, still faithful
-//!   to "un arreglo chico, adyacente". The ceiling is
+//!   to "a small, adjacent fix". The ceiling is
 //!   `limits.max_expansion_files`.
 //!
 //! A third boundary, a consequence of how pausing is wired

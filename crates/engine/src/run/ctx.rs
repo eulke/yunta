@@ -117,8 +117,8 @@ impl RunCtx<'_> {
     }
 
     /// Exports the run's whole log to `run.dir/events.jsonl` — called
-    /// at every close this recorte recognizes (`Finish` and `Pause`; see
-    /// this module's own doc comment on the trigger decision). Re-exports
+    /// at every terminal close (`Finish` and `Pause`; see this module's
+    /// own doc comment on the trigger decision). Re-exports
     /// in full each time, same "regenerate from the log" principle
     /// `progress.md` already follows — a run that pauses, resumes, and
     /// later finishes just gets the file rewritten with the fuller log,

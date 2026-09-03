@@ -1,4 +1,4 @@
-//! Injected time (CLAUDE.md: "Determinismo inyectado") — the engine's
+//! Injected time — the engine's
 //! decision logic never calls `Utc::now()` itself; whoever drives it
 //! passes a [`Clock`]. Tests inject a fixed or stepping clock and get
 //! reproducible event timestamps; the binary passes [`SystemClock`].

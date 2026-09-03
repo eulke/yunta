@@ -1,5 +1,5 @@
 //! The escalation object, built once and shared. Two
-//! constructors — one per gate shape this recorte covers — used by both
+//! constructors — one per gate shape — used by both
 //! the live pause path (`run/mod.rs`'s `GateExhaustedReroutes` arm and
 //! `gate_exec::resolve_internal_gate`, which await a `HumanInteraction`
 //! with the built object synchronously) and [`current_escalation`]
@@ -216,7 +216,7 @@ fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleS
 /// (`gate_waiting`, so the object the human saw is auditable, plus
 /// `gate_resolved`). The *consequence* is never written here: the next
 /// engine to wake this run (the detached `yunta resume` the caller
-/// spawns) finds the pre-seeded decision via [`pre_seeded_resolution`]
+/// spawns) finds the pre-seeded decision via `pre_seeded_resolution`
 /// and applies it through its one existing consequence path — retry,
 /// abort, promote (a live process, exactly what promotion's
 /// distill+successor needs) and internal gates alike, with zero

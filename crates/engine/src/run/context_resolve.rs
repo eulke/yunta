@@ -4,17 +4,17 @@
 //! name exactly what a session saw without re-running anything (the
 //! hash identifies the content, it never substitutes for it).
 //!
-//! Scope of this recorte, deliberate and documented rather than left
+//! Scope of this module, deliberate and documented rather than left
 //! silent:
 //! - Resolved for `kind: prompt` nodes only — validation rejects
 //!   `context:` on any other kind. A loop node's own per-task sessions
 //!   don't go through `execute_prompt` at all (`run_task`'s own
 //!   dispatch); task-scoped context is a separate integration this
-//!   recorte doesn't cover.
+//!   module doesn't cover.
 //! - `files:` resolves each entry as a literal path (after template
-//!   rendering), never a filesystem glob walk — the Contrato's own
-//!   example uses two literal paths, and no test here exercises pattern
-//!   expansion; real glob support is debt, not silently approximated.
+//!   rendering), never a filesystem glob walk — no test here exercises
+//!   pattern expansion; real glob support is debt, not silently
+//!   approximated.
 //! - `knowledge:` resolves all three layers with real precedence: the
 //!   layers merge by filename, `repo` overwriting `user` overwriting
 //!   `org` on a name collision, regardless of the order `layers:` names
@@ -40,15 +40,14 @@
 //!   env var *name*, never the token itself, so no secret ever lands in
 //!   config or the log). No stdio MCP transport exists here;
 //!   `mcp_servers:` never declares a launch command, only a URL, so
-//!   there is nothing to spawn. The Contrato fixes neither which MCP
-//!   verb `query:` maps to nor a tool name — resolved as a `tools/call`
-//!   on a tool literally named `query`, the simplest reading of the
-//!   field's own name; the toy server this recorte's own tests spawn
-//!   implements exactly that tool.
-//! - No literal `trait ContextSource` — the Contrato names one, but with
-//!   a single set of builtins and no second implementer (packs are
-//!   still ahead), a trait object buys nothing CLAUDE.md would call a
-//!   real boundary. Every builtin is a plain resolver function behind
+//!   there is nothing to spawn. `query:` resolves as a `tools/call` on a
+//!   tool literally named `query`, the simplest reading of the field's
+//!   own name; the toy server this module's own tests spawn implements
+//!   exactly that tool.
+//! - No literal `trait ContextSource` — with a single set of builtins
+//!   and no second implementer (packs are still ahead), a trait object
+//!   buys nothing a real boundary would. Every builtin is a plain
+//!   resolver function behind
 //!   one `match`; nothing here stops a future dynamic-dispatch version
 //!   once a pack actually needs to plug in its own source.
 
@@ -72,9 +71,9 @@ use super::step::Step;
 use super::{RunCtx, RunError};
 
 /// Bound on how long any single external call (`command:`'s subprocess,
-/// `mcp:`'s round trip) may run before this recorte gives up and fails
-/// the node — the spec requires a timeout on `command:` stdout but names
-/// no number, so this recorte fixes one.
+/// `mcp:`'s round trip) may run before the node gives up and fails —
+/// the spec requires a timeout on `command:` stdout but names no number,
+/// so this constant fixes one.
 const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
@@ -141,7 +140,7 @@ pub(super) enum ContextResolveError {
     },
     #[error(
         "context `{source_id}` on node `{node}`: node `{referenced}` has no captured output \
-         (only `kind: bash` nodes capture output in this recorte)"
+         (only `kind: bash` nodes capture output)"
     )]
     MissingNodeOutput {
         node: NodeId,
@@ -983,7 +982,7 @@ enum StabilityClass {
 /// guarantee already earns); `command`/`run-events`/`node-output`/the
 /// aggregate `ledger` view are `volatile`. `mcp` has no obvious home in
 /// that scheme — classified `volatile` here since a live external
-/// server's response is never something this recorte can promise is
+/// server's response is never something this module can promise is
 /// byte-stable between sessions.
 fn stability_class(spec: &ContextSpec) -> StabilityClass {
     match spec {

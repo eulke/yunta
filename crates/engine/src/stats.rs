@@ -23,7 +23,7 @@
 //! first try from a retry or a re-route's correction attempt, so no new
 //! bookkeeping is needed to tell them apart.
 //!
-//! **Blocked wall-clock** (the "fracción bloqueada" a workflow author
+//! **Blocked wall-clock** (the "blocked fraction" a workflow author
 //! watches for) is a *best-effort* derived
 //! signal, not a scheduler replay: a node's `ready_at` is the latest
 //! terminal timestamp among its own `depends_on` (or the run's first
@@ -44,7 +44,7 @@ use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
-/// children flattened in place, same convention [`crate::progress`] uses).
+/// children flattened in place, same convention `crate::progress` uses).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeStat {
     pub node_id: NodeId,
@@ -115,8 +115,8 @@ pub struct RunStats {
 
 impl RunStats {
     /// Tokens grouped by resolved role, node order broken and re-grouped
-    /// — the "por rol" half of "costo por nodo, por rol y por
-    /// modo" (mode is a whole-run property today, since `modes:` isn't
+    /// — the "per role" half of "cost per node, per role, and per
+    /// mode" (mode is a whole-run property today, since `modes:` isn't
     /// implemented yet — nothing to break out per role *and* per mode
     /// within one run until it is; `--workflow`'s history view is where
     /// mode comparison lives).
@@ -369,7 +369,7 @@ fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
 
 /// The middle value of an already-sorted-ascending slice, averaging the two
 /// central samples on an even count — the true median, not the nearest-rank
-/// one [`percentile`] gives. `None` for an empty slice: a median of nothing
+/// one `percentile` gives. `None` for an empty slice: a median of nothing
 /// is not zero. This is the one median the whole workspace shares.
 pub fn median(sorted: &[f64]) -> Option<f64> {
     let n = sorted.len();

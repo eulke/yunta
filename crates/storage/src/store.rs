@@ -130,8 +130,8 @@ fn lock(conn: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
     // A poisoned lock here means some other thread panicked while
     // holding it — the connection itself is still whatever it was, so
     // recovering the guard is safer than making every caller of this
-    // crate handle a panic that isn't theirs (and CLAUDE.md rules out
-    // `.lock().unwrap()` outside tests).
+    // crate handle a panic that isn't theirs; production code never
+    // unwraps a lock.
     conn.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -707,10 +707,10 @@ pub struct NodeOutputParams {
 /// straight from the reference schema's own spelling.
 /// `scope_expansion:` — governs how a loop's tasks may
 /// grow past their own declared scope. `within` is a hard ceiling
-/// ("jamás fuera de esto") checked in `rules` mode; `max_per_run` caps
+/// ("never outside this") checked in `rules` mode; `max_per_run` caps
 /// how many expansions this run may grant before exhaustion escalates
-/// ("diez concesiones seguidas no son readecuación, son un plan mal
-/// cortado") — absent means uncapped.
+/// ("ten grants in a row are not re-scoping, they are a badly-cut
+/// plan") — absent means uncapped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
@@ -1018,8 +1018,7 @@ fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
 
 /// A `kind: workflow` node's `isolation:` — deliberately its own
 /// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
-/// nodes ("`inherit` solo en nodos workflow", the reference config's own
-/// comment), and a run-level `none` is not a per-node choice.
+/// nodes, and a run-level `none` is not a per-node choice.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]

@@ -8,8 +8,8 @@
 //! there is nowhere for a second interpretation of a gate to live.
 //!
 //! The console implementation lives in `yunta-cli` (the engine has no
-//! concrete UI, CLAUDE.md's own "nunca `println!` fuera del CLI"); the
-//! MCP one is a `resolve_gate` tool, not built here.
+//! concrete UI and never writes to the console itself); the MCP one is a
+//! `resolve_gate` tool, not built here.
 
 use async_trait::async_trait;
 use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};

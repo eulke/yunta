@@ -158,16 +158,15 @@ pub enum ProbeReport {
 }
 
 /// What the agent itself reported it did — telemetry, never a verdict;
-/// the engine's own criteria run regardless.
-/// `[inferido]`: the spec names this type without detailing its fields.
+/// the engine's own criteria run regardless. One field for now, widened
+/// when a real adapter has more worth reporting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentOutcome {
     pub summary: String,
 }
 
-/// `[inferido]`: the spec names `AgentError` without detailing its
-/// fields; kept intentionally minimal until a real adapter shows what
-/// richer information is actually available to report.
+/// A session's failure, kept intentionally minimal until a real adapter
+/// shows what richer information is actually available to report.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{message}")]
 pub struct AgentError {

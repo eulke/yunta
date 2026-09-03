@@ -1,5 +1,5 @@
 //! `kind: check` execution — split out of
-//! `node_exec.rs` once that file passed CLAUDE.md's ~500-line soft
+//! `node_exec.rs` once that file passed the ~500-line soft
 //! ceiling; kept as its own module since a check builtin's shape (run a
 //! command, parse or compare, never touch an agent) is distinct enough
 //! from bash/prompt/parallel dispatch to stand alone.
@@ -74,10 +74,9 @@ async fn run_command(
 }
 
 /// `baseline_compare`: capture is lazy, on this builtin's own first
-/// invocation in the run, instead of unconditionally at worktree creation
-/// as the Contrato's prose describes — capturing eagerly would make
-/// `create_run` async across its four call sites for a builtin most
-/// workflows never use. Documented deviation, not a silent gap: the first
+/// invocation in the run, rather than eagerly at worktree creation —
+/// capturing eagerly would make `create_run` async across its four call
+/// sites for a builtin most workflows never use. The first
 /// `baseline_compare` node always passes (it has nothing yet to compare
 /// against) and every later one compares against that first run's result.
 async fn execute_baseline_compare(
@@ -164,8 +163,8 @@ async fn execute_baseline_compare(
 
 /// `coverage_gate`: `coverage.cmd`'s stdout must contain a bare
 /// `NN[.NN]%` — the last one found is taken as the measured coverage, per
-/// `CoverageConfig`'s own documented convention (the Contrato's prose
-/// doesn't specify a parsing contract).
+/// `CoverageConfig`'s own documented convention, since no parsing
+/// contract is fixed elsewhere.
 async fn execute_coverage_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -226,7 +225,7 @@ async fn execute_coverage_gate(
 
 /// Finds the last `NN[.NN]%` substring in `text` and parses its number —
 /// hand-rolled rather than pulling in a regex dependency for one bounded
-/// scan (CLAUDE.md: "¿alcanza std o algo ya presente?").
+/// scan.
 fn parse_last_percentage(text: &str) -> Option<f64> {
     let bytes = text.as_bytes();
     let mut best = None;

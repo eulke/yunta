@@ -7,18 +7,15 @@
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (`restart_node`).
 //!
-//! **`events.jsonl` export**: the Contrato says only "at close" without
-//! enumerating which terminal states count — a real gap, documented
-//! rather than guessed silently. This recorte exports on every terminal
-//! `RunReport` the schedule loop already recognizes — `Finish` and
+//! **`events.jsonl` export**: the run exports its whole log on every
+//! terminal `RunReport` the schedule loop recognizes — `Finish` and
 //! `Pause` alike, via [`RunCtx::export_events_jsonl`] — unconditionally,
-//! independent of whether the workflow declares `on_finish:` at all (the
-//! Contrato's phrasing reads as two actions conjoined at close, not one
-//! gated on the other). The `ScheduleStep::Broken` path exports too,
-//! best-effort before its `Err` — a corrupt log is exactly the one a
-//! forensic reader most wants on disk. `on_finish.distill` is a
-//! deterministic transform — see `distill.rs`; the close sequence is
-//! distill → `run_finished` → export → cleanup.
+//! independent of whether the workflow declares `on_finish:` at all. The
+//! `ScheduleStep::Broken` path exports too, best-effort before its
+//! `Err` — a corrupt log is exactly the one a forensic reader most wants
+//! on disk. `on_finish.distill` is a deterministic transform — see
+//! `distill.rs`; the close sequence is distill → `run_finished` →
+//! export → cleanup.
 
 mod budget;
 mod check_exec;
@@ -207,7 +204,7 @@ pub struct RunReport {
 /// own identity/manifest/paths, the environment it executes against
 /// (adapters, storage, clock, ids), and the cross-cutting surfaces
 /// (human_interaction, forge, cancel) every deep execution path can
-/// reach through [`RunCtx`] once this is unpacked into one.
+/// reach through `RunCtx` once this is unpacked into one.
 pub struct RunEnv<'a> {
     pub run_id: &'a RunId,
     pub manifest: &'a Manifest,

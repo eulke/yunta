@@ -1,7 +1,7 @@
 //! State derivation by replay — covers what the event schema can
 //! currently produce.
 //!
-//! `derive` is the "functional core" CLAUDE.md asks for: a pure function
+//! `derive` is the functional core: a pure function
 //! over an event slice, no IO, safe to call from a property test or from
 //! `yunta resume` alike. It tracks what the schema can actually produce
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use yunta_core::events::{EventPayload, Finding, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, Seq, TaskId};
 
-/// One node's derived lifecycle state. An enum, not booleans (CLAUDE.md):
+/// One node's derived lifecycle state. An enum, not booleans:
 /// there is no combination of flags to get wrong.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeState {
@@ -57,14 +57,14 @@ pub struct RunState {
     pub tasks: HashMap<TaskId, TaskStatus>,
     pub total_tokens: TokenUsage,
     /// Every `finding_posted` entry, in log order, never deduplicated
-    /// here — the raw log keeps every contributing posting ("sin
-    /// perder autorías"); [`dedup_findings`] is the query-side view for
+    /// here — the raw log keeps every contributing posting ("without
+    /// losing authorship"); [`dedup_findings`] is the query-side view for
     /// counting/display, not something replay bakes in.
     pub findings: Vec<Finding>,
     /// Every `artifact_written` path, grouped by the node that wrote it,
-    /// in log order (`progress.md`'s own "qué produjo cada
-    /// nodo"). A node with no artifact has no entry here at all, not an
-    /// empty `Vec`.
+    /// in log order (`progress.md`'s own "what each node produced"). A
+    /// node with no artifact has no entry here at all, not an empty
+    /// `Vec`.
     pub artifacts: HashMap<NodeId, Vec<PathBuf>>,
     /// `Some(diagnostic)` once the log has proven insufficient to derive
     /// further state — the point where a `yunta resume`/`status` would
@@ -98,8 +98,8 @@ impl RunView {
 /// opened (so `gate_resolved` can restore it — the internal
 /// waiting+resolved pair leaves a `Failed` node `Failed`), and which
 /// nodes have a `questions` artifact still unanswered (so their
-/// `node_failed` derives `Waiting`, "nodos cuyas preguntas pendientes
-/// esperan respuesta").
+/// `node_failed` derives `Waiting` — nodes whose pending questions await
+/// an answer).
 #[derive(Default)]
 struct Aux {
     pre_gate: HashMap<NodeId, Option<NodeState>>,
@@ -331,12 +331,12 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
     }
 }
 
-/// Query-side view of `RunState.findings`: "findings entre
-/// reviewers se deduplican por `location` + título normalizado". The raw
-/// log (and `RunState.findings`) keeps every posting; this collapses
-/// duplicates for counting/display, keeping the first occurrence — the
-/// schema has no authors list to merge into, so "sin perder autorías"
-/// is satisfied by the untouched event log, not by this derived view.
+/// Query-side view of `RunState.findings`: findings across reviewers are
+/// deduplicated by `location` plus normalized title. The raw log (and
+/// `RunState.findings`) keeps every posting; this collapses duplicates
+/// for counting/display, keeping the first occurrence — the schema has
+/// no authors list to merge into, so authorship is preserved by the
+/// untouched event log, not by this derived view.
 pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();

@@ -264,8 +264,8 @@ pub enum TelemetryProtocol {
 /// `limits:` — declared budgets and guards. Every field is
 /// optional: an absent limit means "no cap", never a hidden default —
 /// except where the reference schema itself names one
-/// ([`LimitsConfig::resolved_max_loop_iterations`],
-/// [`LimitsConfig::resolved_inline_context_bytes`]), and that default
+/// ([`ConfigLayer::resolved_max_loop_iterations`],
+/// [`ConfigLayer::resolved_inline_context_bytes`]), and that default
 /// lives here and nowhere else. Budgets are advisory ceilings the engine
 /// enforces by escalation/diagnostic, never OS enforcement.
 ///

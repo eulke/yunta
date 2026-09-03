@@ -11,8 +11,8 @@
 //! published gate, or unanswered questions — sections 0/0b below) and
 //! `skipped` is the render-side reading of a mode-excluded node (the
 //! filter here + `status`'s own display), and what an included node
-//! waits on under that mode comes from `crate::modes`. `on_interrupt` covers the
-//! Contrato's full triple — `resume_session` orphans re-Execute exactly
+//! waits on under that mode comes from `crate::modes`. `on_interrupt` covers every
+//! policy — `resume_session` orphans re-Execute exactly
 //! like `restart_node` ones from this function's point of view; the
 //! *dispatch* path (`node_exec`) is what continues the recorded session
 //! instead of opening a new one. Concurrency is DAG-shaped fan-out only
@@ -63,8 +63,8 @@ pub enum ScheduleStep {
     Pause {
         reason: String,
     },
-    /// A node's re-routes are exhausted — the one pause this
-    /// recorte gives real options for, since "retry the same
+    /// A node's re-routes are exhausted — the one pause that
+    /// carries real options, since "retry the same
     /// destination once more" and "abort" are both well-defined here
     /// (unlike a plain failure with no `on_failure` at all, which stays
     /// `Pause`). The imperative shell builds the actual

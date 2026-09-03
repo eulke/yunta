@@ -1,9 +1,9 @@
 //! Verification-performance findings — the same
-//! judgment the engine applies to a task's own work ("si algo no puede
-//! fallar, no está probando nada") applied to the workflow's own
-//! ceremony. Pure: takes a workflow and every past run's raw log,
+//! judgment the engine applies to a task's own work ("if something
+//! cannot fail, it is not testing anything") applied to the workflow's
+//! own ceremony. Pure: takes a workflow and every past run's raw log,
 //! returns findings — no I/O, no mutation, nothing that ever touches a
-//! workflow file ("sugiere, jamás actúa").
+//! workflow file ("it suggests, never acts").
 //!
 //! **Core metric is the pre-check red rate, not the total failure
 //! rate** — confusing the two would suggest deleting exactly the

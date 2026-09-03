@@ -1,5 +1,5 @@
 //! `progress.md` — one of exactly four things a node's context is built
-//! from at start ("nunca asume historia"): its rendered prompt, its
+//! from at start (a node never assumes prior history): its rendered prompt, its
 //! resolved context sources, this file, and its skills. The engine
 //! writes it, never an agent — regenerated in full from the log after
 //! each `node_finished`, the same "state is a pure function of the log"
