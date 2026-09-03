@@ -104,7 +104,9 @@ enum Command {
         run_id: RunId,
         /// The chosen option id, as printed by `yunta status`.
         option: String,
-        /// Who's answering, for the audit trail (`gate_resolved.resolved_by`).
+        /// Who's answering, for the audit trail
+        /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
+        /// as `unverified:$USER` — an ambient identity, not a claimed one.
         #[arg(long)]
         by: Option<String>,
         /// Free-form context alongside the choice.

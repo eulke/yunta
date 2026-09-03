@@ -39,7 +39,7 @@ pub async fn resolve_gate(
         run_id,
         &ctx.clock,
         option_id,
-        resolved_by.map(str::to_string),
+        Some(crate::identity::responder(resolved_by)),
         free_text.map(str::to_string),
     )
     .await?;

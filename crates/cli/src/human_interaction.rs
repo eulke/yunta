@@ -95,7 +95,9 @@ impl HumanInteraction for ConsoleInteraction {
 
         Some(GateResolvedPayload {
             chosen_option: Some(chosen_option),
-            resolved_by: std::env::var("USER").ok(),
+            // No `--by` on the interactive surface: the decision carries
+            // the shell's ambient identity, marked unverified.
+            resolved_by: Some(crate::identity::responder(None)),
             free_text: (!free_text.is_empty()).then_some(free_text),
             approved_sha: None,
         })
@@ -162,7 +164,8 @@ impl HumanInteraction for ConsoleInteraction {
         Some(QuestionsReply {
             answers,
             channel: Channel::Tty,
-            responder: std::env::var("USER").ok(),
+            // Same ambient, unverified identity as a console gate decision.
+            responder: Some(crate::identity::responder(None)),
         })
     }
 }

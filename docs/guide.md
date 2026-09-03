@@ -81,6 +81,36 @@ it) works the other way from every other config key: layers only ever *narrow*, 
 re-widen, what's above them. A repo can't un-deny a command pattern its org layer
 denied.
 
+## Config layers and state
+
+Yunta merges its configuration from three layers, key by key, most specific
+winning:
+
+- **repo** — `.yunta/config.yaml` in the project. Committed with the code; the
+  place a team's own runners and defaults live.
+- **user** — `config.yaml` under the user state root (`$YUNTA_HOME` when set,
+  otherwise `~/.yunta`). Per-person overrides that never belong in the repo.
+- **org** — `/etc/yunta/config.yaml`, or the path `YUNTA_ORG_CONFIG` names. A
+  shared baseline an administrator sets once for every project on a machine.
+
+Repo beats user beats org for every key — with the single deliberate exception
+of `permissions:` above, which layers only ever narrow. The org layer is also
+where shared *knowledge* comes from, distributed as packs rather than as this
+one file — see [Knowledge layers](#knowledge-layers).
+
+Two environment variables move all of this:
+
+- **`YUNTA_HOME`** relocates the user state root as a whole — the user config
+  layer *and* every byte of execution state (runs, worktrees, the event-log
+  database) live under it together. Unset, it is `~/.yunta`. Point it at a
+  scratch directory to give a CI or otherwise ephemeral environment its own
+  isolated state. The roots a run freezes at creation are absolute, so
+  `status`, `resume` and `gc` find that run from any directory — as long as
+  `YUNTA_HOME` points at the state root it was created under.
+- **`YUNTA_ORG_CONFIG`** overrides where the org layer is read from, for a
+  machine that keeps its shared baseline somewhere other than
+  `/etc/yunta/config.yaml`.
+
 ## Context
 
 `context:` on a `prompt` or `loop` node assembles what that session sees, beyond the

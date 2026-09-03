@@ -23,6 +23,7 @@ mod context;
 mod error;
 mod graph;
 mod human_interaction;
+mod identity;
 mod json;
 mod pack;
 mod project;
