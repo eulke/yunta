@@ -12,29 +12,7 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, contents).unwrap();
-}
+use yunta_testkit::{git, init_repo, write, yunta_in};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -344,17 +322,6 @@ nodes:
     fresh_client.cancel().await.unwrap();
 }
 
-/// Runs the binary once, synchronously — for the one-shot `pack add` a
-/// test needs before it starts the MCP server.
-fn yunta_once(dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
 /// An upstream repo holding one pure-`bash` pack (`acme/review-pack`),
 /// committed so `pack add` can clone and vendor it.
 fn write_pack(dir: &Path) {
@@ -456,7 +423,7 @@ async fn run_workflow_accepts_pack_names() {
     init_repo(&repo);
     let home = root.path().join("state");
 
-    let add = yunta_once(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(
         add.status.success(),
         "pack add: {}",

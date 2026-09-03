@@ -5,61 +5,7 @@
 //! after the run was created never loses it; a removal that fails is
 //! warned and left uncounted, never reported as reclaimed.
 
-use std::path::Path;
-use std::process::Output;
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn run_id_from(output: &Output) -> String {
-    stdout(output)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .expect("run id in output")
-}
+use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 const ONE_NODE: &str = "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n";
 
@@ -71,7 +17,7 @@ fn gc_does_nothing_when_retention_days_is_not_configured() {
     init_repo(&repo);
     let home = root.path().join("state");
 
-    let gc = yunta_in(&repo, &home, &["gc"]);
+    let gc = yunta_in!(&repo, &home, &["gc"]);
     assert!(gc.status.success());
     assert!(stdout(&gc).contains("retention_days"));
 }
@@ -89,13 +35,13 @@ fn gc_reclaims_a_finished_run_past_its_retention_window() {
         "storage:\n  retention_days: 0\n",
     );
     write(&repo.join("wf.yaml"), ONE_NODE);
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
     let run_dir = home.join("runs").join(&run_id);
     assert!(run_dir.exists());
 
-    let gc = yunta_in(&repo, &home, &["gc"]);
+    let gc = yunta_in!(&repo, &home, &["gc"]);
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
     assert!(!run_dir.exists(), "run.dir should have been removed");
@@ -114,12 +60,12 @@ fn gc_dry_run_reports_without_removing_anything() {
         "storage:\n  retention_days: 0\n",
     );
     write(&repo.join("wf.yaml"), ONE_NODE);
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
     let run_dir = home.join("runs").join(&run_id);
 
-    let gc = yunta_in(&repo, &home, &["gc", "--dry-run"]);
+    let gc = yunta_in!(&repo, &home, &["gc", "--dry-run"]);
     assert!(gc.status.success());
     assert!(
         stdout(&gc).contains("would be reclaimed"),
@@ -145,19 +91,19 @@ fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
         &repo.join("wf.yaml"),
         "name: short\nnodes:\n  - id: fine\n    kind: bash\n    run: \"true\"\n",
     );
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success());
     let run_id = run_id_from(&run);
     let run_dir = home.join("runs").join(&run_id);
     assert!(run_dir.exists());
 
     // Pass 1: files die, rows survive — the DB is never first to go.
-    let first = yunta_in(&repo, &home, &["gc"]);
+    let first = yunta_in!(&repo, &home, &["gc"]);
     assert!(first.status.success());
     assert!(!run_dir.exists(), "run.dir reclaimed: {}", stdout(&first));
     // The rows survive pass 1 — `verify` (which needs only the DB)
     // still walks the chain.
-    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    let verify = yunta_in!(&repo, &home, &["verify", &run_id]);
     assert!(
         verify.status.success() && stdout(&verify).contains("intact"),
         "rows still readable after pass 1: {}",
@@ -165,7 +111,7 @@ fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
     );
 
     // Pass 2: the dir is gone, so the rows go now.
-    let second = yunta_in(&repo, &home, &["gc"]);
+    let second = yunta_in!(&repo, &home, &["gc"]);
     assert!(second.status.success());
     assert!(
         stdout(&second).contains("purged"),
@@ -174,9 +120,9 @@ fn gc_reclaims_files_first_and_purges_rows_only_on_a_later_pass() {
     );
 
     // A purged run reads back as unknown — never corrupt state.
-    let status = yunta_in(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(!status.status.success());
-    let verify = yunta_in(&repo, &home, &["verify", &run_id]);
+    let verify = yunta_in!(&repo, &home, &["verify", &run_id]);
     assert!(!verify.status.success());
     assert!(
         stderr(&verify).contains("no events"),
@@ -199,7 +145,7 @@ fn gc_finds_runs_by_frozen_paths_after_a_config_change() {
         "storage:\n  retention_days: 0\n",
     );
     write(&repo.join("wf.yaml"), ONE_NODE);
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success(), "stderr: {}", stderr(&run));
     let run_id = run_id_from(&run);
     let run_dir = home.join("runs").join(&run_id);
@@ -219,7 +165,7 @@ fn gc_finds_runs_by_frozen_paths_after_a_config_change() {
         ),
     );
 
-    let gc = yunta_in(&repo, &home, &["gc"]);
+    let gc = yunta_in!(&repo, &home, &["gc"]);
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
 
@@ -254,10 +200,10 @@ fn failed_removal_is_not_counted() {
     write(&repo.join("wf.yaml"), ONE_NODE);
 
     // Two finished runs, both past the zero-day retention window.
-    let clean = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let clean = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(clean.status.success());
     let clean_id = run_id_from(&clean);
-    let stuck = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let stuck = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(stuck.status.success());
     let stuck_id = run_id_from(&stuck);
 
@@ -268,7 +214,7 @@ fn failed_removal_is_not_counted() {
     std::fs::remove_dir_all(&stuck_worktree).unwrap();
     std::fs::write(&stuck_worktree, b"not a directory").unwrap();
 
-    let gc = yunta_in(&repo, &home, &["gc"]);
+    let gc = yunta_in!(&repo, &home, &["gc"]);
     assert!(
         gc.status.success(),
         "a failed removal warns, never aborts: {}",

@@ -4,44 +4,7 @@
 //! workflow must pass `check`; `new` must never reference a pack or
 //! touch `yunta.lock`.
 
-use std::path::Path;
-use std::process::{Output, Stdio};
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .stdin(Stdio::null())
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
+use yunta_testkit::{init_repo, stderr, stdout, yunta_in};
 
 fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -56,7 +19,7 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
 fn init_writes_config_gitignore_and_the_mechanism_skill() {
     let (_root, repo, home) = setup();
 
-    let result = yunta_in(&repo, &home, &["init"]);
+    let result = yunta_in!(&repo, &home, &["init"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 
     assert!(repo.join(".yunta/config.yaml").is_file());
@@ -81,7 +44,7 @@ fn init_never_writes_to_claude_md_even_when_one_exists() {
     let (_root, repo, home) = setup();
     std::fs::write(repo.join("CLAUDE.md"), "# original\n").unwrap();
 
-    let result = yunta_in(&repo, &home, &["init"]);
+    let result = yunta_in!(&repo, &home, &["init"]);
     assert!(result.status.success());
 
     let claude_md = std::fs::read_to_string(repo.join("CLAUDE.md")).unwrap();
@@ -92,10 +55,10 @@ fn init_never_writes_to_claude_md_even_when_one_exists() {
 fn init_refuses_to_overwrite_without_force_and_succeeds_with_it() {
     let (_root, repo, home) = setup();
 
-    let first = yunta_in(&repo, &home, &["init"]);
+    let first = yunta_in!(&repo, &home, &["init"]);
     assert!(first.status.success());
 
-    let second = yunta_in(&repo, &home, &["init"]);
+    let second = yunta_in!(&repo, &home, &["init"]);
     assert!(!second.status.success());
     assert!(
         stderr(&second).contains("--force"),
@@ -103,7 +66,7 @@ fn init_refuses_to_overwrite_without_force_and_succeeds_with_it() {
         stderr(&second)
     );
 
-    let forced = yunta_in(&repo, &home, &["init", "--force"]);
+    let forced = yunta_in!(&repo, &home, &["init", "--force"]);
     assert!(forced.status.success(), "stderr: {}", stderr(&forced));
 }
 
@@ -111,7 +74,7 @@ fn init_refuses_to_overwrite_without_force_and_succeeds_with_it() {
 fn init_interactive_without_a_tty_degrades_instead_of_hanging() {
     let (_root, repo, home) = setup();
 
-    let result = yunta_in(&repo, &home, &["init", "--interactive"]);
+    let result = yunta_in!(&repo, &home, &["init", "--interactive"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
     assert!(
         stderr(&result).contains("non-interactive") || stderr(&result).contains("TTY"),
@@ -125,7 +88,7 @@ fn init_detects_a_rust_ecosystem_from_cargo_toml() {
     let (_root, repo, home) = setup();
     std::fs::write(repo.join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
 
-    let result = yunta_in(&repo, &home, &["init"]);
+    let result = yunta_in!(&repo, &home, &["init"]);
     assert!(result.status.success());
     assert!(stdout(&result).contains("rust"), "got: {}", stdout(&result));
 }
@@ -136,7 +99,7 @@ fn every_new_shape_writes_a_workflow_that_passes_check() {
 
     for shape in ["one-node", "lint-fix", "ledger"] {
         let name = format!("wf-{shape}");
-        let result = yunta_in(&repo, &home, &["new", &name, "--shape", shape]);
+        let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(
             result.status.success(),
             "shape {shape} failed — stdout: {}\nstderr: {}",
@@ -155,7 +118,7 @@ fn new_never_references_a_pack_or_touches_the_lock_file() {
 
     for shape in ["one-node", "lint-fix", "ledger"] {
         let name = format!("structural-{shape}");
-        let result = yunta_in(&repo, &home, &["new", &name, "--shape", shape]);
+        let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(result.status.success());
         let yaml =
             std::fs::read_to_string(repo.join(".yunta/workflows").join(format!("{name}.yaml")))
@@ -174,7 +137,7 @@ fn new_never_references_a_pack_or_touches_the_lock_file() {
 #[test]
 fn new_rejects_an_unknown_shape() {
     let (_root, repo, home) = setup();
-    let result = yunta_in(&repo, &home, &["new", "bad", "--shape", "nonexistent"]);
+    let result = yunta_in!(&repo, &home, &["new", "bad", "--shape", "nonexistent"]);
     assert!(!result.status.success());
     assert!(
         !repo.join(".yunta/workflows/bad.yaml").exists(),
@@ -186,10 +149,10 @@ fn new_rejects_an_unknown_shape() {
 fn new_refuses_to_overwrite_without_force_and_succeeds_with_it() {
     let (_root, repo, home) = setup();
 
-    let first = yunta_in(&repo, &home, &["new", "dup", "--shape", "one-node"]);
+    let first = yunta_in!(&repo, &home, &["new", "dup", "--shape", "one-node"]);
     assert!(first.status.success());
 
-    let second = yunta_in(&repo, &home, &["new", "dup", "--shape", "lint-fix"]);
+    let second = yunta_in!(&repo, &home, &["new", "dup", "--shape", "lint-fix"]);
     assert!(!second.status.success());
     assert!(
         stderr(&second).contains("--force"),
@@ -197,10 +160,10 @@ fn new_refuses_to_overwrite_without_force_and_succeeds_with_it() {
         stderr(&second)
     );
 
-    let forced = yunta_in(
+    let forced = yunta_in!(
         &repo,
         &home,
-        &["new", "dup", "--shape", "lint-fix", "--force"],
+        &["new", "dup", "--shape", "lint-fix", "--force"]
     );
     assert!(forced.status.success(), "stderr: {}", stderr(&forced));
     let yaml = std::fs::read_to_string(repo.join(".yunta/workflows/dup.yaml")).unwrap();
@@ -213,7 +176,7 @@ fn new_refuses_to_overwrite_without_force_and_succeeds_with_it() {
 #[test]
 fn new_interactive_without_a_tty_defaults_to_one_node_instead_of_hanging() {
     let (_root, repo, home) = setup();
-    let result = yunta_in(&repo, &home, &["new", "picked", "--interactive"]);
+    let result = yunta_in!(&repo, &home, &["new", "picked", "--interactive"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
     let yaml = std::fs::read_to_string(repo.join(".yunta/workflows/picked.yaml")).unwrap();
     assert!(
@@ -225,7 +188,7 @@ fn new_interactive_without_a_tty_defaults_to_one_node_instead_of_hanging() {
 #[test]
 fn new_rejects_an_unsafe_workflow_name() {
     let (_root, repo, home) = setup();
-    let result = yunta_in(&repo, &home, &["new", "../escape", "--shape", "one-node"]);
+    let result = yunta_in!(&repo, &home, &["new", "../escape", "--shape", "one-node"]);
     assert!(!result.status.success());
 }
 
@@ -235,7 +198,7 @@ fn new_works_before_init_ever_ran() {
     // No `.yunta/config.yaml` exists yet — `check` must still pass, since
     // these skeletons never reference a `runner:` a missing config could
     // fail to resolve.
-    let result = yunta_in(&repo, &home, &["new", "standalone", "--shape", "ledger"]);
+    let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "ledger"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 }
 
@@ -250,7 +213,7 @@ fn init_never_replaces_an_unreadable_gitignore() {
     std::fs::write(&gitignore, [0xff, 0xfe, 0x00, 0x01, 0x02]).unwrap();
     let before = std::fs::read(&gitignore).unwrap();
 
-    let result = yunta_in(&repo, &home, &["init"]);
+    let result = yunta_in!(&repo, &home, &["init"]);
     assert!(
         !result.status.success(),
         "init must fail on an unreadable .gitignore, never clobber it: {}",
@@ -277,7 +240,7 @@ fn new_writes_only_a_parseable_skeleton() {
     // builds the type from its skeleton before the file ever touches disk.
     for shape in ["one-node", "lint-fix", "ledger"] {
         let name = format!("parseable-{shape}");
-        let result = yunta_in(&repo, &home, &["new", &name, "--shape", shape]);
+        let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(
             result.status.success(),
             "shape {shape}: {}",

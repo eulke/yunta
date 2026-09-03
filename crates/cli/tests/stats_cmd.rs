@@ -4,57 +4,7 @@
 //! runs — both driven through the real compiled binary, same style
 //! `run_flow.rs` uses.
 
-use std::path::Path;
-use std::process::Output;
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn run_id_from(output: &Output) -> String {
-    stdout(output)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .expect("run id in output")
-}
+use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
 
 fn bash_only_workflow() -> &'static str {
     r#"
@@ -80,7 +30,7 @@ fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
 
     write(&repo.join("wf.yaml"), bash_only_workflow());
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stderr: {}",
@@ -88,7 +38,7 @@ fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
     );
     let run_id = run_id_from(&run);
 
-    let stats = yunta_in(&repo, &home, &["stats", &run_id]);
+    let stats = yunta_in!(&repo, &home, &["stats", &run_id]);
     assert!(
         stats.status.success(),
         "stderr: {}",
@@ -125,7 +75,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     write(&repo.join(".yunta/workflows/wf.yaml"), bash_only_workflow());
 
     // Run 1: no history yet at all.
-    let first = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let first = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(first.status.success());
     assert!(
         !stdout(&first).contains("past run"),
@@ -134,7 +84,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     );
 
     // Run 2: only 1 finished run behind it — still below the floor of 3.
-    let second = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(second.status.success());
     assert!(
         !stdout(&second).contains("past run"),
@@ -143,7 +93,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     );
 
     // Run 3: only 2 finished runs behind it — still below the floor.
-    let third = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let third = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(third.status.success());
     assert!(
         !stdout(&third).contains("past run"),
@@ -152,7 +102,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     );
 
     // Run 4: now 3 finished runs are behind it — the floor is met.
-    let fourth = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let fourth = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(fourth.status.success());
     assert!(
         stdout(&fourth).contains("past run(s)"),
@@ -161,7 +111,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     );
 
     // `yunta list` (catalog view) shows the same estimation once earned.
-    let list = yunta_in(&repo, &home, &["list"]);
+    let list = yunta_in!(&repo, &home, &["list"]);
     assert!(list.status.success());
     assert!(
         stdout(&list).contains("past run(s)"),
@@ -171,7 +121,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
 
     // `stats --workflow` on the other hand reports history from any
     // count >= 1 — only its *estimation* line gates on the floor.
-    let workflow_stats = yunta_in(&repo, &home, &["stats", "--workflow", "bash-only-stats"]);
+    let workflow_stats = yunta_in!(&repo, &home, &["stats", "--workflow", "bash-only-stats"]);
     assert!(workflow_stats.status.success());
     let text = stdout(&workflow_stats);
     assert!(text.contains("4 run(s)"), "got: {text}");
@@ -189,9 +139,9 @@ fn stats_workflow_with_no_runs_says_so_without_failing() {
     // A storage root must exist for `stats --workflow` to open — running
     // `doctor` (harmless, no adapters configured) is enough to create it
     // the same way any real first command would.
-    let _ = yunta_in(&repo, &home, &["doctor"]);
+    let _ = yunta_in!(&repo, &home, &["doctor"]);
 
-    let result = yunta_in(&repo, &home, &["stats", "--workflow", "never-run"]);
+    let result = yunta_in!(&repo, &home, &["stats", "--workflow", "never-run"]);
     assert!(result.status.success());
     assert!(stdout(&result).contains("no runs of workflow"));
 }
@@ -204,6 +154,6 @@ fn stats_needs_a_run_id_or_workflow_flag() {
     init_repo(&repo);
     let home = root.path().join("state");
 
-    let result = yunta_in(&repo, &home, &["stats"]);
+    let result = yunta_in!(&repo, &home, &["stats"]);
     assert!(!result.status.success());
 }

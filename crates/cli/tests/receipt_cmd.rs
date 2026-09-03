@@ -4,61 +4,7 @@
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of
 //! `yunta_engine::receipt`'s own unit-tested derivation.
 
-use std::path::Path;
-use std::process::Output;
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn run_id_from(output: &Output) -> String {
-    stdout(output)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .expect("run id in output")
-}
+use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 fn bash_only_workflow() -> &'static str {
     r#"
@@ -87,15 +33,15 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
         bash_only_workflow(),
     );
 
-    let run_out = yunta_in(
+    let run_out = yunta_in!(
         &repo,
         &home,
-        &["run", ".yunta/workflows/bash-only-receipt.yaml"],
+        &["run", ".yunta/workflows/bash-only-receipt.yaml"]
     );
     assert!(run_out.status.success(), "{}", stderr(&run_out));
     let run_id = run_id_from(&run_out);
 
-    let receipt_out = yunta_in(&repo, &home, &["receipt", &run_id]);
+    let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
     let markdown = stdout(&receipt_out);
     assert!(markdown.starts_with(&format!("# Verified Work Receipt — run {run_id}")));
@@ -128,15 +74,15 @@ fn receipt_json_flag_prints_the_json_that_was_written() {
         bash_only_workflow(),
     );
 
-    let run_out = yunta_in(
+    let run_out = yunta_in!(
         &repo,
         &home,
-        &["run", ".yunta/workflows/bash-only-receipt.yaml"],
+        &["run", ".yunta/workflows/bash-only-receipt.yaml"]
     );
     assert!(run_out.status.success(), "{}", stderr(&run_out));
     let run_id = run_id_from(&run_out);
 
-    let receipt_out = yunta_in(&repo, &home, &["receipt", &run_id, "--json"]);
+    let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id, "--json"]);
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
     let printed: serde_json::Value = serde_json::from_str(&stdout(&receipt_out)).unwrap();
 
@@ -161,14 +107,14 @@ fn receipt_refuses_a_run_that_has_not_finished() {
         "name: never-finishes\nnodes:\n  - id: broken\n    kind: bash\n    run: \"false\"\n",
     );
 
-    let run_out = yunta_in(
+    let run_out = yunta_in!(
         &repo,
         &home,
-        &["run", ".yunta/workflows/never-finishes.yaml"],
+        &["run", ".yunta/workflows/never-finishes.yaml"]
     );
     let run_id = run_id_from(&run_out);
 
-    let receipt_out = yunta_in(&repo, &home, &["receipt", &run_id]);
+    let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(!receipt_out.status.success());
     let err = stderr(&receipt_out);
     assert!(err.contains("hasn't reached a terminal state"), "{err}");

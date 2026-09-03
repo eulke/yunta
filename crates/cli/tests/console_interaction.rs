@@ -8,7 +8,6 @@
 //! which happens only if the read is off the runtime thread.
 
 use std::io::Read;
-use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,29 +15,7 @@ use std::time::{Duration, Instant};
 use nix::pty::openpty;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, contents).unwrap();
-}
+use yunta_testkit::{git, init_repo, write};
 
 /// Polls `seen` until it contains `needle`, failing with `context` (and
 /// everything seen so far) if `timeout` elapses first — the bounded wait

@@ -5,46 +5,7 @@
 //! `yunta_engine::derive`) annotated: no new events, no agent involved
 //! in producing the graph itself, same as `status`.
 
-use std::path::Path;
-use std::process::{Command, Output};
-
-fn yunta_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .output()
-        .expect("failed to run the yunta binary")
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
+use yunta_testkit::{init_repo, stdout, write, yunta_in};
 
 const WORKFLOW: &str = r#"
 name: graph-fixture
@@ -71,7 +32,7 @@ fn graph_renders_mermaid_with_depends_on_and_differentiated_reroute_edges() {
     let home = root.path().join("state");
     write(&repo.join("wf.yaml"), WORKFLOW);
 
-    let output = yunta_in(&repo, &home, &["graph", "wf.yaml"]);
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -121,7 +82,7 @@ nodes:
 "#,
     );
 
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run.status.success(), "run failed: {}", stdout(&run));
     let run_id = stdout(&run)
         .lines()
@@ -132,7 +93,7 @@ nodes:
         })
         .expect("run id in output");
 
-    let output = yunta_in(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -168,7 +129,7 @@ nodes:
 "#,
     );
 
-    let output = yunta_in(&repo, &home, &["graph", "wf.yaml"]);
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
     assert!(!output.status.success());
 }
 
@@ -184,7 +145,7 @@ fn graph_resolves_a_bare_catalog_name() {
     let home = root.path().join("state");
     write(&repo.join(".yunta/workflows/review.yaml"), WORKFLOW);
 
-    let output = yunta_in(&repo, &home, &["graph", "review"]);
+    let output = yunta_in!(&repo, &home, &["graph", "review"]);
     assert!(
         output.status.success(),
         "a bare catalog name must resolve like check/run do — stdout: {}\nstderr: {}",
@@ -218,7 +179,7 @@ fn labels_are_escaped() {
 
     // The run fails (the node exits non-zero); its events still record the
     // failure, which is all `graph --run` derives from.
-    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     let run_id = stdout(&run)
         .lines()
         .find_map(|line| {
@@ -232,7 +193,7 @@ fn labels_are_escaped() {
     // it did, its `"`/`<`/`>` would break the syntax.
     let raw = "a\"b<c>d&e";
 
-    let mermaid = yunta_in(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let mermaid = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
     assert!(
         mermaid.status.success(),
         "stderr: {}",
@@ -250,10 +211,10 @@ fn labels_are_escaped() {
         );
     }
 
-    let dot = yunta_in(
+    let dot = yunta_in!(
         &repo,
         &home,
-        &["graph", "wf.yaml", "--run", &run_id, "--format", "dot"],
+        &["graph", "wf.yaml", "--run", &run_id, "--format", "dot"]
     );
     assert!(
         dot.status.success(),
@@ -280,7 +241,7 @@ fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
     let home = root.path().join("state");
     write(&repo.join("wf.yaml"), WORKFLOW);
 
-    let output = yunta_in(&repo, &home, &["graph", "wf.yaml", "--format", "dot"]);
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--format", "dot"]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
