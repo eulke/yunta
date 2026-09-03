@@ -1330,7 +1330,9 @@ fn orphaned_session(
     ) else {
         return OrphanedSession::NotAnOrphan;
     };
-    let window = &events[previous..current];
+    let Some(window) = events.get(previous..current) else {
+        return OrphanedSession::NotAnOrphan;
+    };
     let had_verdict = window.iter().filter(mine).any(|e| {
         matches!(
             e.payload(),

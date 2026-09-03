@@ -52,7 +52,9 @@ pub async fn doctor() -> ExitCode {
         let mut names: Vec<&AdapterId> = adapters.keys().collect();
         names.sort();
         for name in names {
-            let adapter = &adapters[name];
+            let Some(adapter) = adapters.get(name) else {
+                continue;
+            };
             match adapter.probe().await {
                 Ok(ProbeReport::Healthy { version }) => {
                     println!(

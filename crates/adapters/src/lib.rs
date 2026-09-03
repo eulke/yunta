@@ -6,16 +6,19 @@
 //! own scripted fake binary, never a real LLM in CI.
 
 // A panic is a bug, never a fallible path: production returns a typed
-// error instead of unwrapping, expecting, or panicking. Tests are the one
-// place a failed assertion is meant to abort — `clippy.toml` lifts these
-// there, and integration tests are separate crates this attribute never
-// reaches.
+// error instead of unwrapping, expecting, indexing, or panicking.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::unreachable
+    clippy::unreachable,
+    clippy::indexing_slicing
 )]
+// Tests are the one place a failed assertion is meant to abort. The panic
+// family is lifted there by `clippy.toml`; `indexing_slicing` has no such
+// switch, so it is lifted in test builds here. Integration tests are
+// separate crates neither reaches.
+#![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 mod claude_code;
 mod codex;

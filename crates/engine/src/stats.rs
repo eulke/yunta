@@ -210,11 +210,11 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStat
         let Some(&attempts) = node_max_attempt.get(&node.id) else {
             continue; // never started — nothing to report.
         };
-        let ready_at = if depends_on[&node.id].is_empty() {
+        let deps = depends_on.get(&node.id).copied().unwrap_or(&[]);
+        let ready_at = if deps.is_empty() {
             run_start
         } else {
-            depends_on[&node.id]
-                .iter()
+            deps.iter()
                 .filter_map(|dep| acc.last_terminal.get(dep))
                 .max()
                 .copied()

@@ -247,8 +247,8 @@ impl GitHubForge {
             "content": base64::engine::general_purpose::STANDARD.encode(content),
             "branch": branch,
         });
-        if let Some(sha) = existing_sha {
-            body["sha"] = serde_json::Value::String(sha);
+        if let (Some(sha), Some(object)) = (existing_sha, body.as_object_mut()) {
+            object.insert("sha".to_string(), serde_json::Value::String(sha));
         }
         let request = self
             .request(

@@ -39,16 +39,17 @@ pub struct InvalidId {
 const NAME_RULE: &str = "a letter followed by letters, digits, `_` or `-`";
 
 const fn is_name(bytes: &[u8]) -> bool {
-    if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
+    let Some((first, mut rest)) = bytes.split_first() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
         return false;
     }
-    let mut i = 1;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        if !(byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
+    while let Some((byte, tail)) = rest.split_first() {
+        if !(byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-') {
             return false;
         }
-        i += 1;
+        rest = tail;
     }
     true
 }
@@ -62,12 +63,14 @@ const FAN_OUT_SEPARATOR: u8 = b'@';
 
 const fn is_node_id(bytes: &[u8]) -> bool {
     let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == FAN_OUT_SEPARATOR {
-            let (base, rest) = bytes.split_at(i);
-            let (_, runner) = rest.split_at(1);
+    let mut rest = bytes;
+    while let Some((byte, tail)) = rest.split_first() {
+        if *byte == FAN_OUT_SEPARATOR {
+            let (base, after) = bytes.split_at(i);
+            let (_, runner) = after.split_at(1);
             return is_name(base) && is_name(runner);
         }
+        rest = tail;
         i += 1;
     }
     is_name(bytes)
@@ -81,12 +84,12 @@ const fn is_token(bytes: &[u8]) -> bool {
     if bytes.is_empty() {
         return false;
     }
-    let mut i = 0;
-    while i < bytes.len() {
-        if !bytes[i].is_ascii_graphic() {
+    let mut rest = bytes;
+    while let Some((byte, tail)) = rest.split_first() {
+        if !byte.is_ascii_graphic() {
             return false;
         }
-        i += 1;
+        rest = tail;
     }
     true
 }
@@ -103,12 +106,12 @@ const fn is_segment(bytes: &[u8]) -> bool {
     if matches!(bytes, b"." | b"..") {
         return false;
     }
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'/' || bytes[i] == b'\\' {
+    let mut rest = bytes;
+    while let Some((byte, tail)) = rest.split_first() {
+        if *byte == b'/' || *byte == b'\\' {
             return false;
         }
-        i += 1;
+        rest = tail;
     }
     true
 }
@@ -121,12 +124,12 @@ const fn is_opaque(bytes: &[u8]) -> bool {
     if bytes.is_empty() {
         return false;
     }
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] < 0x20 || bytes[i] == 0x7F {
+    let mut rest = bytes;
+    while let Some((byte, tail)) = rest.split_first() {
+        if *byte < 0x20 || *byte == 0x7F {
             return false;
         }
-        i += 1;
+        rest = tail;
     }
     true
 }

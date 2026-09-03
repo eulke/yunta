@@ -34,28 +34,42 @@ pub(crate) fn independent_top_level_pairs(workflow: &Workflow) -> Vec<(usize, us
         i: usize,
         nodes: &[Node],
         owner: &std::collections::HashMap<&NodeId, usize>,
-        reachable: &mut Vec<std::collections::HashSet<usize>>,
-        visiting: &mut Vec<bool>,
+        reachable: &mut [std::collections::HashSet<usize>],
+        visiting: &mut [bool],
     ) {
-        if visiting[i] || !reachable[i].is_empty() {
+        let resolved = reachable.get(i).is_some_and(|set| !set.is_empty());
+        if visiting.get(i).copied().unwrap_or(false) || resolved {
             return;
         }
-        visiting[i] = true;
-        let deps: Vec<usize> = nodes[i]
-            .depends_on
-            .iter()
-            .filter_map(|dep| owner.get(dep).copied())
-            .collect();
+        if let Some(flag) = visiting.get_mut(i) {
+            *flag = true;
+        }
+        let deps: Vec<usize> = nodes
+            .get(i)
+            .map(|node| {
+                node.depends_on
+                    .iter()
+                    .filter_map(|dep| owner.get(dep).copied())
+                    .collect()
+            })
+            .unwrap_or_default();
         for dep in deps {
             if dep == i {
                 continue;
             }
             walk(dep, nodes, owner, reachable, visiting);
-            let transitively: Vec<usize> = reachable[dep].iter().copied().collect();
-            reachable[i].insert(dep);
-            reachable[i].extend(transitively);
+            let transitively: Vec<usize> = reachable
+                .get(dep)
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default();
+            if let Some(set) = reachable.get_mut(i) {
+                set.insert(dep);
+                set.extend(transitively);
+            }
         }
-        visiting[i] = false;
+        if let Some(flag) = visiting.get_mut(i) {
+            *flag = false;
+        }
     }
     let mut visiting = vec![false; nodes.len()];
     for i in 0..nodes.len() {
@@ -65,7 +79,9 @@ pub(crate) fn independent_top_level_pairs(workflow: &Workflow) -> Vec<(usize, us
     let mut pairs = Vec::new();
     for i in 0..nodes.len() {
         for j in (i + 1)..nodes.len() {
-            if !reachable[i].contains(&j) && !reachable[j].contains(&i) {
+            let i_reaches_j = reachable.get(i).is_some_and(|set| set.contains(&j));
+            let j_reaches_i = reachable.get(j).is_some_and(|set| set.contains(&i));
+            if !i_reaches_j && !j_reaches_i {
                 pairs.push((i, j));
             }
         }
@@ -92,7 +108,9 @@ pub(crate) fn check_fanout_scopes(
         return;
     }
     for (i, j) in independent_top_level_pairs(workflow) {
-        let (a, b) = (&workflow.nodes[i], &workflow.nodes[j]);
+        let (Some(a), Some(b)) = (workflow.nodes.get(i), workflow.nodes.get(j)) else {
+            continue;
+        };
         if !(writes(a) && writes(b)) {
             continue;
         }
@@ -129,25 +147,38 @@ pub(crate) fn collect_fanout_warnings(
         .map(|node| writes(node) && node.scope.is_empty())
         .collect();
     for (i, j) in independent_top_level_pairs(workflow) {
-        if eligible[i] && eligible[j] {
-            adjacency[i].push(j);
-            adjacency[j].push(i);
+        let both_eligible =
+            eligible.get(i).copied().unwrap_or(false) && eligible.get(j).copied().unwrap_or(false);
+        if both_eligible {
+            if let Some(row) = adjacency.get_mut(i) {
+                row.push(j);
+            }
+            if let Some(row) = adjacency.get_mut(j) {
+                row.push(i);
+            }
         }
     }
     let mut seen = vec![false; nodes.len()];
     for start in 0..nodes.len() {
-        if seen[start] || adjacency[start].is_empty() {
+        let no_edges = adjacency.get(start).is_none_or(Vec::is_empty);
+        if seen.get(start).copied().unwrap_or(false) || no_edges {
             continue;
         }
         let mut component = Vec::new();
         let mut stack = vec![start];
         while let Some(i) = stack.pop() {
-            if seen[i] {
+            if seen.get(i).copied().unwrap_or(false) {
                 continue;
             }
-            seen[i] = true;
-            component.push(nodes[i].id.clone());
-            stack.extend(adjacency[i].iter().copied());
+            if let Some(flag) = seen.get_mut(i) {
+                *flag = true;
+            }
+            if let Some(node) = nodes.get(i) {
+                component.push(node.id.clone());
+            }
+            if let Some(row) = adjacency.get(i) {
+                stack.extend(row.iter().copied());
+            }
         }
         component.sort();
         warnings.push(CheckWarning::UndeclaredFanOutScope {
@@ -172,7 +203,9 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
     let mut overlaps = Vec::new();
     for i in 0..children.len() {
         for j in (i + 1)..children.len() {
-            let (a, b) = (&children[i], &children[j]);
+            let (Some(a), Some(b)) = (children.get(i), children.get(j)) else {
+                continue;
+            };
             for glob_a in &a.scope {
                 for glob_b in &b.scope {
                     if globs_might_overlap(glob_a, glob_b) {

@@ -54,7 +54,7 @@ fn visit<T: Clone + Ord>(
             }
             match color.get(dep).copied() {
                 Some(Color::Gray(pos)) => {
-                    let mut cycle = stack[pos..].to_vec();
+                    let mut cycle = stack.get(pos..).unwrap_or_default().to_vec();
                     cycle.push(dep.clone());
                     return Some(cycle);
                 }

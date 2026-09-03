@@ -50,19 +50,27 @@ pub(crate) fn collect_push_to_base_warnings(
         i: usize,
         nodes: &[Node],
         index_of: &HashMap<&NodeId, usize>,
-        cache: &mut Vec<Option<bool>>,
+        cache: &mut [Option<bool>],
     ) -> bool {
-        if let Some(known) = cache[i] {
+        if let Some(&Some(known)) = cache.get(i) {
             return known;
         }
-        cache[i] = Some(false); // cycle guard; real cycles error elsewhere
-        let protected = nodes[i].depends_on.iter().any(|dep| {
-            index_of.get(dep).is_some_and(|&d| {
-                matches!(nodes[d].kind, NodeKind::Gate { .. })
-                    || gate_protected(d, nodes, index_of, cache)
+        if let Some(slot) = cache.get_mut(i) {
+            *slot = Some(false); // cycle guard; real cycles error elsewhere
+        }
+        let protected = nodes.get(i).is_some_and(|node| {
+            node.depends_on.iter().any(|dep| {
+                index_of.get(dep).is_some_and(|&d| {
+                    nodes
+                        .get(d)
+                        .is_some_and(|n| matches!(n.kind, NodeKind::Gate { .. }))
+                        || gate_protected(d, nodes, index_of, cache)
+                })
             })
         });
-        cache[i] = Some(protected);
+        if let Some(slot) = cache.get_mut(i) {
+            *slot = Some(protected);
+        }
         protected
     }
     let mut cache: Vec<Option<bool>> = vec![None; nodes.len()];

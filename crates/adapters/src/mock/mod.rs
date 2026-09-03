@@ -220,7 +220,7 @@ impl MockAdapter {
                 .sessions
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| !consumed[*i])
+                .filter(|(i, _)| consumed.get(*i) != Some(&true))
                 .filter_map(|(i, script)| {
                     script
                         .match_prompt_contains
@@ -258,7 +258,9 @@ impl MockAdapter {
                     .sessions
                     .iter()
                     .enumerate()
-                    .find(|(i, script)| !consumed[*i] && script.match_prompt_contains.is_none())
+                    .find(|(i, script)| {
+                        consumed.get(*i) != Some(&true) && script.match_prompt_contains.is_none()
+                    })
                     .map(|(i, _)| i)
             });
             let Some(index) = claim else {
@@ -272,10 +274,17 @@ impl MockAdapter {
                     ),
                 });
             };
-            consumed[index] = true;
+            if let Some(slot) = consumed.get_mut(index) {
+                *slot = true;
+            }
             index
         };
-        let script = &self.fixture.sessions[index];
+        let Some(script) = self.fixture.sessions.get(index) else {
+            return Err(AdapterError::Adapter {
+                adapter: ID.clone(),
+                message: "internal: claimed a session index the fixture does not hold".to_string(),
+            });
+        };
 
         self.apply_effects(script, &req)?;
 

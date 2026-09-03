@@ -231,15 +231,15 @@ fn parse_last_percentage(text: &str) -> Option<f64> {
     let bytes = text.as_bytes();
     let mut best = None;
     for i in 0..bytes.len() {
-        if bytes[i] != b'%' {
+        if bytes.get(i) != Some(&b'%') {
             continue;
         }
         let mut start = i;
         let mut seen_dot = false;
         while start > 0 {
-            match bytes[start - 1] {
-                b'0'..=b'9' => start -= 1,
-                b'.' if !seen_dot => {
+            match bytes.get(start - 1) {
+                Some(b'0'..=b'9') => start -= 1,
+                Some(b'.') if !seen_dot => {
                     seen_dot = true;
                     start -= 1;
                 }

@@ -297,8 +297,12 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
             if available.is_empty() {
                 return (!discarding && !line.is_empty()).then(|| decode(&line));
             }
-            let (chunk, ended) = match available.iter().position(|byte| *byte == b'\n') {
-                Some(at) => (&available[..at], true),
+            let (chunk, ended) = match available
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .and_then(|at| available.get(..at))
+            {
+                Some(chunk) => (chunk, true),
                 None => (available, false),
             };
             let consumed = chunk.len() + usize::from(ended);

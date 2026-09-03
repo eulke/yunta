@@ -179,7 +179,9 @@ fn overlapping_scopes(tasks: &[Task]) -> Vec<LedgerError> {
 
     for i in 0..tasks.len() {
         for j in (i + 1)..tasks.len() {
-            let (a, b) = (&tasks[i], &tasks[j]);
+            let (Some(a), Some(b)) = (tasks.get(i), tasks.get(j)) else {
+                continue;
+            };
             if related.contains(&(a.id.clone(), b.id.clone())) {
                 continue;
             }

@@ -270,7 +270,11 @@ fn truncate(s: &str, width: usize) -> String {
     if chars.len() <= width {
         format!("{s:<width$}")
     } else {
-        let mut t: String = chars[..width.saturating_sub(1)].iter().collect();
+        let mut t: String = chars
+            .get(..width.saturating_sub(1))
+            .unwrap_or(chars.as_slice())
+            .iter()
+            .collect();
         t.push('…');
         format!("{t:<width$}")
     }
@@ -509,7 +513,10 @@ fn sparkline(values: &[f64]) -> String {
         .iter()
         .map(|&v| {
             let idx = ((v / max) * (SPARK_CHARS.len() - 1) as f64).round() as usize;
-            SPARK_CHARS[idx.min(SPARK_CHARS.len() - 1)]
+            SPARK_CHARS
+                .get(idx.min(SPARK_CHARS.len() - 1))
+                .copied()
+                .unwrap_or(' ')
         })
         .collect()
 }

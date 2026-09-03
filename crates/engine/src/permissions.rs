@@ -65,10 +65,10 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     let mut star: Option<(usize, usize)> = None;
 
     while t < text.len() {
-        if p < pattern.len() && pattern[p] == b'*' {
+        if pattern.get(p) == Some(&b'*') {
             star = Some((p, t));
             p += 1;
-        } else if p < pattern.len() && pattern[p] == text[t] {
+        } else if pattern.get(p) == text.get(t) {
             p += 1;
             t += 1;
         } else if let Some((star_p, star_t)) = star {
@@ -80,7 +80,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
             return false;
         }
     }
-    while p < pattern.len() && pattern[p] == b'*' {
+    while pattern.get(p) == Some(&b'*') {
         p += 1;
     }
     p == pattern.len()
