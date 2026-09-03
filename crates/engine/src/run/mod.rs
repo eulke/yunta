@@ -33,6 +33,7 @@ mod promote;
 mod questions_exec;
 mod schedule;
 mod step;
+mod steps;
 mod workflow_exec;
 
 use std::collections::{BTreeSet, HashMap};
@@ -43,9 +44,8 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge, ForgeError};
 use yunta_core::events::{
-    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeReroutedPayload,
-    PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics,
-    RunPausedPayload, RunResumedPayload, StoredEvent, TerminalState,
+    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, RunCreatedPayload,
+    RunPausedPayload, RunResumedPayload, StoredEvent,
 };
 use yunta_core::{
     AdapterError, AdapterId, Clock, FindingId, IdSource, Manifest, ModeName, NodeId, Pid, RunId,
@@ -55,9 +55,7 @@ use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
 use crate::replay::{derive, RunState};
-use crate::reserved::ReservedOption;
 use crate::scope::ScopeCheckError;
-use crate::stats::cptv;
 use crate::task_cycle::{Memo, TaskCycleError};
 pub use budget::session_token_budget;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
@@ -872,90 +870,9 @@ pub(crate) async fn execute_run_at_depth(
             mode_nodes.as_ref(),
         ) {
             ScheduleStep::Broken { diagnostic } => {
-                // A corrupt log is exactly the one you most want
-                // exported — each event serializes on its own, so a
-                // broken *sequence* doesn't stop the forensic copy.
-                // Best-effort by design: if the export itself fails, the
-                // original diagnostic wins (never masked by an IO error
-                // about its own post-mortem).
-                let diagnostic = match ctx.export_events_jsonl().await {
-                    Ok(()) => diagnostic,
-                    Err(export_error) => {
-                        format!("{diagnostic}; events.jsonl could not be exported: {export_error}")
-                    }
-                };
-                return Err(RunError::Broken { diagnostic });
+                return Err(steps::broken(&ctx, diagnostic).await)
             }
-            ScheduleStep::Finish => {
-                // Distill before `run_finished` — nothing is
-                // emitted after the close event, and its findings
-                // are events.
-                distill::run_distill(&ctx, &mode_name).await?;
-                let state = derive(&ctx.load_events().await?);
-                ctx.emit(
-                    None,
-                    EventPayload::RunFinished(RunFinishedPayload {
-                        terminal_state: TerminalState::Done,
-                        metrics: RunMetrics {
-                            cptv: cptv(&state),
-                            tokens: state.total_tokens,
-                        },
-                    }),
-                )
-                .await?;
-                ctx.export_events_jsonl().await?;
-                // `on_finish.cleanup: worktree` — after the
-                // export, only at a real Finish (a paused run expects a
-                // resume in that tree; a promoted one seeds its
-                // successor's worktree from it). A cleanup failure warns
-                // and never un-finishes the run the log already closed.
-                let wants_cleanup = manifest.workflow.on_finish.iter().any(|step| {
-                    matches!(
-                        step,
-                        yunta_core::OnFinishStep::Cleanup {
-                            cleanup: yunta_core::CleanupTarget::Worktree
-                        }
-                    )
-                });
-                if wants_cleanup && manifest.isolation == yunta_core::Isolation::Worktree {
-                    match crate::worktree::cleanup_worktree(
-                        ctx.worktree,
-                        &format!("yunta/{run_id}"),
-                    )
-                    .await
-                    {
-                        Ok(crate::worktree::WorktreeCleanup::Removed) => {}
-                        Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
-                            ctx.engine_finding(
-                                None,
-                                "cleanup-not-a-worktree",
-                                FindingSeverity::Minor,
-                                "on_finish.cleanup: worktree skipped".to_string(),
-                                ctx.worktree.display().to_string(),
-                                "the run's tree is not a linked git worktree, so removing \
-                                 it would delete a primary checkout — nothing was touched"
-                                    .to_string(),
-                            )
-                            .await?;
-                        }
-                        Err(e) => {
-                            ctx.engine_finding(
-                                None,
-                                "cleanup-failed",
-                                FindingSeverity::Minor,
-                                "on_finish.cleanup: worktree failed".to_string(),
-                                ctx.worktree.display().to_string(),
-                                format!("the run's linked worktree could not be removed: {e}"),
-                            )
-                            .await?;
-                        }
-                    }
-                }
-                return Ok(RunReport {
-                    terminal: RunTerminal::Finished,
-                    state,
-                });
-            }
+            ScheduleStep::Finish => return steps::finish(&ctx, &mode_name).await,
             ScheduleStep::Pause { reason } => return pause(&ctx, reason).await,
             ScheduleStep::Reroute {
                 from,
@@ -963,311 +880,57 @@ pub(crate) async fn execute_run_at_depth(
                 attempt,
                 max_reroutes,
                 cause,
-            } => {
-                ctx.emit(
-                    Some(&from),
-                    EventPayload::NodeRerouted(NodeReroutedPayload {
-                        to_node: to,
-                        cause,
-                        attempt: Some(attempt),
-                        max_reroutes: Some(max_reroutes),
-                        origin: RerouteOrigin::OnFailure,
-                    }),
-                )
-                .await?;
-            }
+            } => steps::reroute(&ctx, from, to, attempt, max_reroutes, cause).await?,
             ScheduleStep::GateExhaustedReroutes {
                 node,
                 goto,
                 max_reroutes,
                 cause,
             } => {
-                // The engine assembles the escalation (summary
-                // + mechanical evidence from the log) — never the node
-                // that failed, which has no further say once it's
-                // failed. Shared with `current_escalation` so
-                // a `resolve_gate` MCP call, running in a process that
-                // never paused this run, reconstructs the identical
-                // object instead of a second copy that could drift.
-                let suggested_mode = schedule::next_mode_after(&manifest.workflow, &mode_name);
-                let escalation = escalation::build_reroute_escalation(
-                    &manifest.workflow,
+                if let Some(report) = steps::gate_exhausted(
+                    &ctx,
+                    &events,
                     &mode_name,
-                    &node,
-                    &goto,
+                    node,
+                    goto,
                     max_reroutes,
-                    &cause,
-                );
-                // A decision `resolve_gate` pre-seeded onto the
-                // log while this run was parked is consumed here, by
-                // this same consequence code — never re-asked, and its
-                // escalation pair is already recorded so it is never
-                // re-emitted. The option is re-validated against the
-                // re-derived menu: a mismatch means ask normally.
-                let pre_seeded = escalation::pre_seeded_resolution(&events, &node).filter(|r| {
-                    r.chosen_option
-                        .as_deref()
-                        .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == chosen))
-                });
-                let already_recorded = pre_seeded.is_some();
-                let resolution = match pre_seeded {
-                    Some(resolution) => Some(resolution),
-                    None => ctx.human_interaction.resolve(&escalation).await,
-                };
-                let Some(resolution) = resolution else {
-                    // No live surface to ask (headless, no TTY, `yunta
-                    // test`): pause and let a later `yunta resume` (or a
-                    // future MCP client) carry the decision instead.
-                    return pause(&ctx, escalation.summary).await;
-                };
-                if !already_recorded {
-                    ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
-                        .await?;
-                    ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))
-                        .await?;
-                }
-                if resolution.chosen_option.as_deref() == Some(ReservedOption::Retry.as_str()) {
-                    ctx.emit(
-                        Some(&node),
-                        EventPayload::NodeRerouted(NodeReroutedPayload {
-                            to_node: goto,
-                            cause,
-                            attempt: Some(max_reroutes + 1),
-                            max_reroutes: Some(max_reroutes),
-                            origin: RerouteOrigin::OnFailure,
-                        }),
-                    )
-                    .await?;
-                } else if resolution.chosen_option.as_deref()
-                    == Some(ReservedOption::Promote.as_str())
+                    cause,
+                )
+                .await?
                 {
-                    // `suggested_mode` must be `Some` here — `"promote"`
-                    // only ever appeared as an option when it was.
-                    let next_mode = suggested_mode.expect("promote option implies a next mode");
-                    ctx.emit(
-                        None,
-                        EventPayload::PromotionSignaled(PromotionSignaledPayload {
-                            reason: format!(
-                                "node `{node}` exhausted its re-routes to `{goto}`: {cause}"
-                            ),
-                            evidence: cause,
-                            suggested_mode: next_mode.clone(),
-                        }),
-                    )
-                    .await?;
-                    // A promotion is a real close — the
-                    // short attempt's knowledge is knowledge, and the
-                    // successor inherits it through the repo layer.
-                    distill::run_distill(&ctx, &mode_name).await?;
-                    // Findings without an artifact (scope-expansion
-                    // denials, for instance) live only on this log —
-                    // derive them into an inheritable artifact so the
-                    // successor's copied context carries them. No
-                    // findings, no file.
-                    let events_for_close = ctx.load_events().await?;
-                    let inherited = crate::findings::inherited_findings(&events_for_close);
-                    if !inherited.is_empty() {
-                        let file = yunta_core::FindingsFile::from_findings(inherited);
-                        let yaml =
-                            yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
-                                diagnostic: format!("failed to serialize inherited findings: {e}"),
-                            })?;
-                        let path = ctx.run_dir.join("artifacts/findings-inherited.yaml");
-                        std::fs::write(&path, yaml).map_err(|source| RunError::Io {
-                            context: format!("write `{}`", path.display()),
-                            source,
-                        })?;
-                    }
-                    let state = derive(&events_for_close);
-                    ctx.emit(
-                        None,
-                        EventPayload::RunFinished(RunFinishedPayload {
-                            terminal_state: TerminalState::Promoted,
-                            metrics: RunMetrics {
-                                cptv: cptv(&state),
-                                tokens: state.total_tokens,
-                            },
-                        }),
-                    )
-                    .await?;
-                    ctx.export_events_jsonl().await?;
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Promoted {
-                            suggested_mode: next_mode,
-                        },
-                        state: derive(&ctx.load_events().await?),
-                    });
-                } else {
-                    let reason = format!(
-                        "node `{node}`'s gate was resolved to abort{}",
-                        resolution
-                            .free_text
-                            .as_deref()
-                            .map(|text| format!(": {text}"))
-                            .unwrap_or_default()
-                    );
-                    return pause(&ctx, reason).await;
+                    return Ok(report);
                 }
             }
             ScheduleStep::Execute(batch) => {
-                // The budget check guards exactly the steps
-                // that spend tokens — a run whose remaining work is gates
-                // and questions finishes without ever tripping it.
-                if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
-                    if let Some(cap) = manifest
-                        .config
-                        .limits
-                        .as_ref()
-                        .and_then(|limits| limits.max_tokens_per_run)
-                    {
-                        let spent = derive(&events).total_tokens.total();
-                        if spent >= cap {
-                            let (escalation, reason) =
-                                budget::over_budget_escalation(&ctx, spent, cap);
-                            match budget::escalate(&ctx, None, escalation, reason).await? {
-                                budget::BudgetDecision::Continue => ctx
-                                    .budget_lifted
-                                    .store(true, std::sync::atomic::Ordering::Relaxed),
-                                budget::BudgetDecision::Pause { reason } => {
-                                    return pause(&ctx, reason).await;
-                                }
-                            }
-                        }
-                    }
-                }
-                // A batch runs to completion together (every member reaches
-                // a terminal per-node state) before the next iteration
-                // decides what comes next — the same simplification
-                // `kind: parallel`'s `join: all` makes explicit, here
-                // implicit for scheduler-formed batches. Top-level DAG
-                // fan-out never interrupts a still-running sibling the
-                // moment one fails — that's `join: any`'s own semantics,
-                // scoped to a named `parallel` group, not implicit
-                // `max_parallel_nodes` batches — so each node gets a token
-                // nothing ever cancels.
-                let cancel_for_batch = root_cancel.child_token();
-                let executions = batch.into_iter().map(|(node_id, attempt)| {
-                    let ctx = &ctx;
-                    let cancel_for_batch = cancel_for_batch.clone();
-                    let node = &manifest.workflow;
-                    async move {
-                        let node = node
-                            .nodes
-                            .iter()
-                            .find(|n| n.id == node_id)
-                            .ok_or_else(|| RunError::Broken {
-                                diagnostic: format!(
-                                    "scheduler chose node `{node_id}` which the manifest's workflow does not define"
-                                ),
-                            })?;
-                        node_exec::execute_node(ctx, node, attempt, &cancel_for_batch).await
-                    }
-                });
-                // A workflow node whose child run paused can't
-                // close its node (the parent waits on the child's
-                // *terminal* state) — after the whole batch lands, the
-                // parent pauses too, naming the child. A root
-                // cancellation takes precedence: the loop-top check
-                // handles it as "cancelled by user".
-                let mut child_paused: Option<String> = None;
-                for result in futures::future::join_all(executions).await {
-                    if let node_exec::NodeEnd::ChildPaused { reason } = result? {
-                        child_paused.get_or_insert(reason);
-                    }
-                }
-                if let Some(reason) = child_paused {
-                    if !root_cancel.is_cancelled() {
-                        return pause(&ctx, reason).await;
-                    }
+                if let Some(report) = steps::execute_batch(&ctx, &events, batch).await? {
+                    return Ok(report);
                 }
             }
             ScheduleStep::PublishGate { node } => {
-                let node = find_node(&manifest.workflow, &node)?;
-                let yunta_core::NodeKind::Gate {
-                    assignee,
-                    external: Some(external),
-                    ..
-                } = &node.kind
-                else {
-                    return Err(RunError::Broken {
-                        diagnostic: format!(
-                            "scheduler chose node `{}` as an external gate to publish, but it isn't one",
-                            node.id
-                        ),
-                    });
-                };
-                let step = gate_exec::publish_gate(
-                    &ctx,
-                    node,
-                    assignee,
-                    external,
-                    forge,
-                    human_interaction,
-                )
-                .await?;
-                if let gate_exec::GateStep::StillWaiting { reason } = step {
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events().await?),
-                    });
+                if let Some(report) = steps::publish_gate(&ctx, node).await? {
+                    return Ok(report);
                 }
             }
             ScheduleStep::PollGate { node, external_ref } => {
-                let node = find_node(&manifest.workflow, &node)?;
-                let step =
-                    gate_exec::poll_gate(&ctx, node, &external_ref, forge, human_interaction)
-                        .await?;
-                if let gate_exec::GateStep::StillWaiting { reason } = step {
-                    return Ok(RunReport {
-                        terminal: RunTerminal::Paused { reason },
-                        state: derive(&ctx.load_events().await?),
-                    });
+                if let Some(report) = steps::poll_gate(&ctx, node, external_ref).await? {
+                    return Ok(report);
                 }
             }
             ScheduleStep::ResolveInternalGate { node } => {
-                let node = find_node(&manifest.workflow, &node)?;
-                let yunta_core::NodeKind::Gate {
-                    assignee,
-                    message,
-                    options,
-                    on,
-                    external: None,
-                } = &node.kind
-                else {
-                    return Err(RunError::Broken {
-                        diagnostic: format!(
-                            "scheduler chose node `{}` as an internal gate, but it isn't one",
-                            node.id
-                        ),
-                    });
-                };
-                let step = gate_exec::resolve_internal_gate(
-                    &ctx,
-                    node,
-                    assignee,
-                    message.as_deref(),
-                    options,
-                    on,
-                )
-                .await?;
-                if let gate_exec::GateStep::StillWaiting { reason } = step {
-                    return pause(&ctx, reason).await;
+                if let Some(report) = steps::resolve_internal_gate(&ctx, node).await? {
+                    return Ok(report);
                 }
             }
             ScheduleStep::AskQuestions { node } => {
-                let node = find_node(&manifest.workflow, &node)?;
-                match questions_exec::execute_ask(&ctx, node).await? {
-                    questions_exec::AskOutcome::Answered => {}
-                    questions_exec::AskOutcome::Pause { reason } => {
-                        return pause(&ctx, reason).await;
-                    }
+                if let Some(report) = steps::ask_questions(&ctx, node).await? {
+                    return Ok(report);
                 }
             }
         }
     }
 }
 
-fn find_node<'a>(
+pub(super) fn find_node<'a>(
     workflow: &'a yunta_core::Workflow,
     node_id: &NodeId,
 ) -> Result<&'a yunta_core::Node, RunError> {
