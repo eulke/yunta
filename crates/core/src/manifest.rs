@@ -12,22 +12,76 @@
 //! group isn't wired through yet).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
-/// Absolute, fully-resolved state roots at run creation —
-/// post `YUNTA_HOME`, post config layers. Frozen so a later
+/// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
+/// post config layers. Absolute by construction ([`FrozenPaths::new`] is
+/// the only way to author one): everything after the manifest is found
+/// reads these back from whatever directory the reader runs in
+/// (`resume`, `status`, `gc`, a detached child), so a relative root would
+/// resolve against the wrong place. Frozen so a later
 /// `paths.runs`/`paths.worktrees` change can never lose a run that
-/// already exists: everything after the manifest is found reads these,
-/// never the current config.
+/// already exists.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FrozenPaths {
-    pub runs_root: PathBuf,
-    pub worktrees_root: PathBuf,
+    runs_root: PathBuf,
+    worktrees_root: PathBuf,
+}
+
+/// A state root that cannot be frozen because it is not absolute. Named
+/// so the person who set the offending `paths.*` / `YUNTA_HOME` sees which
+/// one to fix — the same shape [`HomeExpansionError`](crate::HomeExpansionError)
+/// takes for a config path that cannot be resolved.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the {field} `{path}` is not absolute — a run freezes its state roots at creation and \
+     reads them back from any directory, so a relative one would resolve against the wrong \
+     place later; give an absolute path"
+)]
+pub struct RelativeRootError {
+    pub field: &'static str,
+    pub path: PathBuf,
+}
+
+impl FrozenPaths {
+    /// Freezes the two state roots, refusing either that is not absolute
+    /// with an error naming it. The single constructor, so no authored
+    /// manifest can carry a relative root a later reader would resolve
+    /// against its own directory.
+    pub fn new(runs_root: PathBuf, worktrees_root: PathBuf) -> Result<Self, RelativeRootError> {
+        if !runs_root.is_absolute() {
+            return Err(RelativeRootError {
+                field: "runs root",
+                path: runs_root,
+            });
+        }
+        if !worktrees_root.is_absolute() {
+            return Err(RelativeRootError {
+                field: "worktrees root",
+                path: worktrees_root,
+            });
+        }
+        Ok(Self {
+            runs_root,
+            worktrees_root,
+        })
+    }
+
+    /// The absolute root every run.dir of this run's tree sits under.
+    pub fn runs_root(&self) -> &Path {
+        &self.runs_root
+    }
+
+    /// The absolute root every isolated worktree of this run's tree sits
+    /// under.
+    pub fn worktrees_root(&self) -> &Path {
+        &self.worktrees_root
+    }
 }
 
 /// Which pack (and exactly which version of it) a run's top-level

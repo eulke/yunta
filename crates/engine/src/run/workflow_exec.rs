@@ -63,7 +63,7 @@ fn runs_root(ctx: &RunCtx<'_>) -> PathBuf {
 /// frozen paths get a deterministic location next to their runs root.
 fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
     if let Some(paths) = &ctx.manifest.paths {
-        return paths.worktrees_root.clone();
+        return paths.worktrees_root().to_path_buf();
     }
     let runs = runs_root(ctx);
     runs.parent()
@@ -364,10 +364,18 @@ pub(super) async fn execute_workflow(
     };
     let runs = runs_root(ctx);
     let trees = worktrees_root(ctx);
-    child_manifest.paths = Some(yunta_core::FrozenPaths {
-        runs_root: std::path::absolute(&runs).unwrap_or_else(|_| runs.clone()),
-        worktrees_root: std::path::absolute(&trees).unwrap_or_else(|_| trees.clone()),
-    });
+    child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
+        Ok(frozen) => Some(frozen),
+        Err(e) => {
+            return fail(
+                ctx,
+                node,
+                format!("child run of `{use_name}` cannot freeze its state roots: {e}"),
+                false,
+            )
+            .await;
+        }
+    };
 
     // A fresh id from the injected source: the link to this parent and
     // node is the `child_run_created` below, never the name.
@@ -483,7 +491,7 @@ async fn resume_child(
             let root = child_manifest
                 .paths
                 .as_ref()
-                .map(|paths| paths.worktrees_root.clone())
+                .map(|paths| paths.worktrees_root().to_path_buf())
                 .unwrap_or_else(|| worktrees_root(ctx));
             let tree = root.join(child_id.as_str());
             if !tree.exists() {

@@ -342,9 +342,11 @@ fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Wo
     Ok((resolved, workflow))
 }
 
-/// Builds the run's manifest and freezes its state roots absolute, so a
-/// later `paths.*` change can never lose the run — `resume`/`status`/`gc`
-/// read these from the manifest, not the then-current config.
+/// Builds the run's manifest and freezes its state roots, which
+/// [`FrozenPaths::new`](yunta_core::FrozenPaths::new) requires to be
+/// absolute — `resume`/`status`/`gc` read these back from any directory,
+/// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
+/// here, naming it, rather than silently rooted at the invocation's cwd.
 fn build_frozen_manifest(
     ctx: &Context,
     workflow: &Workflow,
@@ -360,12 +362,10 @@ fn build_frozen_manifest(
         &ctx.cwd,
         &provided_inputs,
     )?;
-    manifest.paths = Some(yunta_core::FrozenPaths {
-        runs_root: std::path::absolute(&ctx.project.runs_root)
-            .unwrap_or_else(|_| ctx.project.runs_root.clone()),
-        worktrees_root: std::path::absolute(&ctx.project.worktrees_root)
-            .unwrap_or_else(|_| ctx.project.worktrees_root.clone()),
-    });
+    manifest.paths = Some(yunta_core::FrozenPaths::new(
+        ctx.project.runs_root.clone(),
+        ctx.project.worktrees_root.clone(),
+    )?);
     Ok(manifest)
 }
 

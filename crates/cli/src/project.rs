@@ -49,7 +49,7 @@ impl Project {
         manifest
             .paths
             .as_ref()
-            .map(|paths| paths.worktrees_root.clone())
+            .map(|paths| paths.worktrees_root().to_path_buf())
             .unwrap_or_else(|| self.worktrees_root.clone())
     }
 }

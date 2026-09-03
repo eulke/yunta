@@ -1429,6 +1429,51 @@ fn a_manifest_without_frozen_paths_still_resumes_via_the_current_config() {
 }
 
 #[test]
+fn frozen_paths_are_absolute_or_run_creation_fails() {
+    // A run freezes its state roots so `resume`/`status`/`gc` find it from
+    // any directory. A relative `paths.runs` would resolve against whatever
+    // cwd a later reader happened to have, so run creation refuses it and
+    // names the path — never silently rooting the run wherever `yunta run`
+    // was invoked.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "paths:\n  runs: relative-runs\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: wf\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        !run.status.success(),
+        "a relative state root must fail run creation, not be silently rooted at cwd: {}",
+        stdout(&run)
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("relative-runs"),
+        "the error must name the offending path: {stderr}"
+    );
+    assert!(
+        stderr.contains("absolute"),
+        "the error must say the root has to be absolute: {stderr}"
+    );
+    // The rejection happens before any run is created — the relative root is
+    // never brought into being under the invocation directory.
+    assert!(
+        !repo.join("relative-runs").exists(),
+        "a rejected root must not be created"
+    );
+}
+
+#[test]
 fn a_cancelled_run_resumes_by_restarting_the_orphaned_node() {
     // A user cancellation leaves the interrupted node
     // orphaned — no fabricated terminal — so `resume` re-treats it per

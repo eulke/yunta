@@ -64,7 +64,9 @@ pub use ids::{
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use ledger::{Criterion, Ledger, Task};
-pub use manifest::{content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance};
+pub use manifest::{
+    content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance, RelativeRootError,
+};
 pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,

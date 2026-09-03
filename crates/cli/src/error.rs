@@ -69,6 +69,9 @@ pub enum CliError {
     #[error(transparent)]
     Worktree(#[from] yunta_engine::WorktreeError),
 
+    #[error(transparent)]
+    FrozenPaths(#[from] yunta_core::RelativeRootError),
+
     /// A condition specific to one command, already phrased as an
     /// actionable message at the point it is detected — the CLI's own
     /// border for something no shared type names.
