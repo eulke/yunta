@@ -12,7 +12,7 @@ use yunta_core::{NodeId, RunId, Workflow};
 use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
-use crate::commands::check_or_refuse;
+use crate::commands::{check_or_refuse, resolve_workflow_ref};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::{load_yaml, project};
@@ -33,9 +33,12 @@ pub fn graph(
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
 
-    let workflow: Workflow = load_yaml(workflow_path, "workflow")?;
+    // A bare catalog name resolves the same way `check` and `run` resolve
+    // it — `graph review` works without spelling out the path.
+    let workflow_path = resolve_workflow_ref(&ctx.cwd, workflow_path)?;
+    let workflow: Workflow = load_yaml(&workflow_path, "workflow")?;
 
-    check_or_refuse(&workflow, &ctx.project.config, workflow_path)?;
+    check_or_refuse(&workflow, &ctx.project.config, &workflow_path)?;
 
     let labels = match run_id {
         Some(run_id) => Some(derive_labels(&ctx.project, run_id)?),
@@ -93,11 +96,11 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
     let mut out = String::from("graph TD\n");
 
     for node in &workflow.nodes {
-        let text = match labels.and_then(|labels| labels.get(&node.id)) {
-            Some(state) => format!("{}: {}", node.id, escape_label(state)),
+        let label = match labels.and_then(|labels| labels.get(&node.id)) {
+            Some(state) => format!("{}: {}", node.id, state),
             None => node.id.to_string(),
         };
-        out.push_str(&format!("  {}[\"{text}\"]\n", node.id));
+        out.push_str(&format!("  {}[\"{}\"]\n", node.id, escape_mermaid(&label)));
     }
 
     for node in &workflow.nodes {
@@ -152,13 +155,69 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
     out
 }
 
-/// Mermaid node labels are double-quoted text — escape embedded quotes so
-/// an outcome message never breaks the diagram's syntax.
-fn escape_label(text: &str) -> String {
-    text.replace('"', "&quot;")
+/// Escapes a Mermaid node label. Labels sit inside `["..."]` and Mermaid
+/// renders them as HTML, so every character HTML or the quoting reads
+/// specially becomes an entity; a newline — an outcome message can carry
+/// one — collapses to a space so one label stays one line. `&` is handled
+/// in the same single pass as the rest, so an entity this inserts is never
+/// re-escaped.
+fn escape_mermaid(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\n' | '\r' => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
-/// DOT quoted strings escape backslashes and double quotes.
+/// Escapes a DOT quoted-string label: backslash and double quote are the
+/// two characters DOT reads specially inside `"..."`; a newline collapses
+/// to a space so one label stays one line.
 fn escape_dot(text: &str) -> String {
-    text.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' | '\r' => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{escape_dot, escape_mermaid};
+
+    #[test]
+    fn mermaid_escaping_covers_every_html_significant_character() {
+        assert_eq!(escape_mermaid("a\"b<c>d&e"), "a&quot;b&lt;c&gt;d&amp;e");
+    }
+
+    #[test]
+    fn mermaid_escaping_collapses_newlines_onto_one_line() {
+        let escaped = escape_mermaid("first\nsecond\r\nthird");
+        assert!(
+            !escaped.contains('\n') && !escaped.contains('\r'),
+            "got: {escaped}"
+        );
+        assert!(
+            escaped.contains("first") && escaped.contains("third"),
+            "got: {escaped}"
+        );
+    }
+
+    #[test]
+    fn dot_escaping_covers_quote_and_backslash_and_newlines() {
+        assert_eq!(escape_dot(r#"a\b"c"#), r#"a\\b\"c"#);
+        let escaped = escape_dot("first\nsecond");
+        assert!(!escaped.contains('\n'), "got: {escaped}");
+    }
 }

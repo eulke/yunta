@@ -21,6 +21,10 @@ use crate::error::{warn, CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::load_yaml;
 
+/// How often `--follow` re-reads the run's event log to print progress —
+/// the poll interval named once, matching the `run --follow` help text.
+const FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
 /// `inputs:` — this function only enforces the *syntax* of the flag
@@ -92,7 +96,7 @@ fn spawn_follower(
         loop {
             tokio::select! {
                 _ = stop_follower.notified() => return,
-                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                _ = tokio::time::sleep(FOLLOW_POLL_INTERVAL) => {}
             }
             let Ok(events) = storage.events_for_run(run_id.clone()).await else {
                 continue;
@@ -332,11 +336,7 @@ pub async fn run(
 /// a publisher's vendored packs (`acme/review`); anything with an
 /// extension is taken as a literal path.
 fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
-    let resolved = if workflow_path.extension().is_none() {
-        yunta_engine::resolve_workflow(&ctx.cwd, &workflow_path.to_string_lossy())?.path
-    } else {
-        workflow_path.to_path_buf()
-    };
+    let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
     let workflow: Workflow = load_yaml(&resolved, "workflow")?;
     super::check_or_refuse(&workflow, &ctx.project.config, &resolved)?;
     Ok((resolved, workflow))

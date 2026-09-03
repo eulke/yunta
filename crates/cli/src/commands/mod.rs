@@ -1,6 +1,7 @@
 //! One module per subcommand; `main.rs` only parses and dispatches.
 
 pub mod cancel;
+pub mod check;
 pub mod doctor;
 pub mod gc;
 pub mod init;
@@ -232,6 +233,20 @@ pub(crate) async fn probe_or_refuse(
         message.push_str(&format!("\n  {line}"));
     }
     Err(CliError::msg(message))
+}
+
+/// Resolves a workflow reference to a file, the one rule `check`, `run`
+/// and `graph` share: a bare catalog name (no extension) resolves through
+/// the repo catalog under `cwd`, then a publisher's vendored packs
+/// (`acme/review`); anything carrying an extension is taken as a literal
+/// path. `cwd` is injected rather than read here so each command resolves
+/// against the directory it already established.
+pub(crate) fn resolve_workflow_ref(cwd: &Path, reference: &Path) -> Result<PathBuf, CliError> {
+    if reference.extension().is_none() {
+        Ok(yunta_engine::resolve_workflow(cwd, &reference.to_string_lossy())?.path)
+    } else {
+        Ok(reference.to_path_buf())
+    }
 }
 
 /// `yunta check` before running anything — a workflow that fails static

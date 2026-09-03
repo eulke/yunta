@@ -173,6 +173,105 @@ nodes:
 }
 
 #[test]
+fn graph_resolves_a_bare_catalog_name() {
+    // A reference with no extension resolves through the repo catalog —
+    // the same rule `check` and `run` follow — so `graph <name>` works on
+    // a `.yunta/workflows/<name>.yaml` without spelling out the path.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join(".yunta/workflows/review.yaml"), WORKFLOW);
+
+    let output = yunta_in(&repo, &home, &["graph", "review"]);
+    assert!(
+        output.status.success(),
+        "a bare catalog name must resolve like check/run do — stdout: {}\nstderr: {}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout(&output).trim_start().starts_with("graph TD"),
+        "got: {}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn labels_are_escaped() {
+    // A node's derived-state label carries the run's own outcome text,
+    // which can hold characters that break a diagram: quotes, `<`/`>`/`&`
+    // (Mermaid renders labels as HTML) and backslashes (DOT). A failed
+    // bash node's outcome is `exit <code>: <stderr tail>`, so its stderr
+    // is a direct, controllable source of those characters.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join("wf.yaml"),
+        "name: escaping\nnodes:\n  - id: boom\n    kind: bash\n    \
+         run: \"printf '%s' 'a\\\"b<c>d&e' 1>&2; exit 1\"\n",
+    );
+
+    // The run fails (the node exits non-zero); its events still record the
+    // failure, which is all `graph --run` derives from.
+    let run = yunta_in(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = stdout(&run)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("run ")
+                .and_then(|rest| rest.split(':').next())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("run id in output: {}", stdout(&run)));
+
+    // The raw payload must never survive verbatim into either diagram — if
+    // it did, its `"`/`<`/`>` would break the syntax.
+    let raw = "a\"b<c>d&e";
+
+    let mermaid = yunta_in(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    assert!(
+        mermaid.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&mermaid.stderr)
+    );
+    let mermaid = stdout(&mermaid);
+    assert!(
+        !mermaid.contains(raw),
+        "the raw payload leaked unescaped into the Mermaid label: {mermaid}"
+    );
+    for entity in ["&quot;", "&lt;", "&gt;", "&amp;"] {
+        assert!(
+            mermaid.contains(entity),
+            "Mermaid label missing `{entity}`: {mermaid}"
+        );
+    }
+
+    let dot = yunta_in(
+        &repo,
+        &home,
+        &["graph", "wf.yaml", "--run", &run_id, "--format", "dot"],
+    );
+    assert!(
+        dot.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&dot.stderr)
+    );
+    let dot = stdout(&dot);
+    assert!(
+        !dot.contains(raw),
+        "the raw payload leaked unescaped into the DOT label: {dot}"
+    );
+    assert!(
+        dot.contains("a\\\"b"),
+        "DOT label must escape the double quote as \\\": {dot}"
+    );
+}
+
+#[test]
 fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");

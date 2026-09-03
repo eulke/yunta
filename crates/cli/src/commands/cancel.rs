@@ -29,6 +29,10 @@ use crate::error::{note, warn, CliError, Outcome};
 /// mid-batch engine finishes killing its sessions before it pauses.
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How often `cancel` re-reads the log while it waits for the engine to
+/// record its terminal after the SIGINT.
+const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
+
 pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
@@ -87,7 +91,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
 
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(ENGINE_SHUTDOWN_POLL).await;
             let events = storage.events_for_run(run_id.clone()).await?;
             let terminal = events.iter().any(|e| {
                 matches!(
@@ -135,13 +139,47 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-/// SIGKILL to every process group the engine registered. A group that
-/// is already gone is the end state wanted; any other refusal is
-/// printed, never hidden.
+/// SIGKILL to every process group the engine registered. A group that is
+/// already gone is the end state wanted; any other refusal is printed,
+/// never hidden. A pgid that isn't a real run process group (see
+/// [`signalable_group`]) is skipped with a loud note rather than signalled.
 fn kill_groups(groups: &[Pid]) {
     for pgid in groups {
+        if !signalable_group(*pgid) {
+            warn(format!(
+                "refusing to signal process group {pgid}: not a run's own process group — \
+                 engine.json is corrupt, skipping it"
+            ));
+            continue;
+        }
         if let Err(e) = signal_group(*pgid, Signal::SIGKILL) {
             warn(describe(&e));
         }
+    }
+}
+
+/// Whether `cancel` may signal a process group. `signal_group` is
+/// `killpg(pgid)` = `kill(-pgid)`, so `pgid` of 1 becomes `kill(-1)` —
+/// every process this user can signal, not one run's tree. The [`Pid`]
+/// type already makes 0 and negatives unrepresentable, so this rejects the
+/// one dangerous value that survives it: init's group (pgid 1). A registry
+/// carrying it is corrupt, and the safe reading is to skip it.
+fn signalable_group(pgid: Pid) -> bool {
+    pgid.as_u32() > 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::signalable_group;
+    use yunta_core::Pid;
+
+    #[test]
+    fn a_run_never_signals_init_or_a_lower_group() {
+        // pgid 1 -> killpg(1) -> kill(-1): every process, not one run's
+        // tree. `Pid` forbids 0 and negatives, so 1 is the sole dangerous
+        // value it still admits — and the one this must reject.
+        assert!(!signalable_group(Pid::try_from(1u32).unwrap()));
+        assert!(signalable_group(Pid::try_from(2u32).unwrap()));
+        assert!(signalable_group(Pid::try_from(4321u32).unwrap()));
     }
 }
