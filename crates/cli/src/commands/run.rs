@@ -489,15 +489,15 @@ pub(crate) async fn start_detached(
 
     let manifest = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
     let prepared = create_run_from(ctx, storage, &manifest, mode).await?;
-    super::spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).map_err(
-        |source| {
+    super::spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd)
+        .await
+        .map_err(|source| {
             CliError::io(
                 "spawn a detached",
                 format!("`yunta resume {}`", prepared.run_id),
                 source,
             )
-        },
-    )?;
+        })?;
     Ok(prepared.run_id)
 }
 

@@ -44,11 +44,13 @@ pub async fn resolve_gate(
     )
     .await?;
 
-    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd).map_err(|e| {
-        CliError::msg(format!(
-            "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
-        ))
-    })?;
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd)
+        .await
+        .map_err(|e| {
+            CliError::msg(format!(
+                "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
+            ))
+        })?;
     println!("run {run_id}: resolved `{option_id}`, driving forward independently");
     Ok(Outcome::Success)
 }

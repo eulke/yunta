@@ -297,6 +297,7 @@ async fn tool_resume_run(
         )
     })?;
     super::spawn_detached_resume(&run_dir, run_id, cwd)
+        .await
         .map_err(|e| format!("cannot spawn a detached `yunta resume {run_id}`: {e}"))?;
     Ok(format!(
         "run {run_id}: resumed, driving forward independently"
@@ -340,6 +341,7 @@ async fn tool_resolve_gate(
     .map_err(|e| e.to_string())?;
 
     super::spawn_detached_resume(&run_dir, run_id, cwd)
+        .await
         .map_err(|e| format!("decision recorded, but cannot spawn a detached resume: {e}"))?;
     Ok(format!(
         "run {run_id}: resolved `{option}`, driving forward independently"

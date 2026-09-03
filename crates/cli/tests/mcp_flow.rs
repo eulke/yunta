@@ -499,3 +499,116 @@ async fn run_workflow_accepts_pack_names() {
 
     client.cancel().await.unwrap();
 }
+
+/// The pids of any defunct (state `Z`) child of `ppid`, read from
+/// `/proc` — a finished process its parent never reaped. The `comm`
+/// field can hold spaces and parens, so the fields after the last `)`
+/// are state, then ppid.
+fn zombie_children(ppid: u32) -> Vec<u32> {
+    let mut zombies = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return zombies;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let Some((_, after_comm)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+        let state = fields.first().copied().unwrap_or_default();
+        let parent = fields.get(1).and_then(|f| f.parse::<u32>().ok());
+        if state == "Z" && parent == Some(ppid) {
+            zombies.push(pid);
+        }
+    }
+    zombies
+}
+
+#[tokio::test]
+async fn finished_detached_runs_leave_no_zombie() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join(".yunta/workflows/quick.yaml"),
+        "name: quick\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "catalog"]);
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let mcp_pid = transport.id().expect("the mcp server has a pid");
+    let client = ().serve(transport).await.unwrap();
+
+    let run = client
+        .call_tool(
+            CallToolRequestParams::new("run_workflow")
+                .with_arguments(json!({"workflow": "quick"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let run_id = tool_text(&run)
+        .strip_prefix("run_id: ")
+        .expect("run_workflow returns a run_id")
+        .trim()
+        .to_string();
+
+    // Drive the detached run to completion.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = client
+            .call_tool(
+                CallToolRequestParams::new("workflow_status")
+                    .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        if tool_text(&status).contains("finished") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the detached run never finished: {}",
+            tool_text(&status)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    // The finished detached child is a child of the long-lived server: it
+    // must be reaped, never left defunct. Give the reaper a moment.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let zombies = zombie_children(mcp_pid);
+        if zombies.is_empty() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a finished detached run is a zombie under the server: {zombies:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    client.cancel().await.unwrap();
+}

@@ -51,14 +51,22 @@ pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
 }
 
 /// Hands a run off to a fully independent `yunta resume` and returns
-/// without waiting on it — what `run --detach` and
-/// `resolve-gate` both need (a control-plane operation that must never
-/// block for the run's own duration). No new execution path: the
-/// detached child is an ordinary resume, exactly what a human would run
-/// by hand. Its own log goes to `run.dir/scratch/detached.log` (never
-/// silently discarded); its process group is its own so a signal to
-/// *this* invocation's group (a shell's Ctrl-C) can never reach it.
-pub(crate) fn spawn_detached_resume(
+/// without waiting on it — what `run --detach`, `resolve-gate` and the
+/// MCP `run_workflow`/`resume_run` tools all need (a control-plane
+/// operation that must never block for the run's own duration). No new
+/// execution path: the detached child is an ordinary resume, exactly what
+/// a human would run by hand. Its own log goes to
+/// `run.dir/scratch/detached.log` (never silently discarded); its process
+/// group is its own, so a signal to *this* invocation's group (a shell's
+/// Ctrl-C) can never reach it.
+///
+/// The launcher still owns reaping: a background task holds the child
+/// handle and awaits its exit, so a finished detached run never lingers
+/// as a zombie. `run --detach` exits right after and the child reparents
+/// to init; the long-lived MCP server would otherwise accumulate the
+/// defunct children of every run it started, so this owner task is what
+/// collects them.
+pub(crate) async fn spawn_detached_resume(
     run_dir: &Path,
     run_id: &str,
     cwd: &Path,
@@ -66,7 +74,7 @@ pub(crate) fn spawn_detached_resume(
     let log_path = run_dir.join("scratch/detached.log");
     let log = std::fs::File::create(&log_path)?;
     let log_err = log.try_clone()?;
-    let mut child_cmd = std::process::Command::new(
+    let mut child_cmd = tokio::process::Command::new(
         std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
     );
     child_cmd
@@ -77,15 +85,11 @@ pub(crate) fn spawn_detached_resume(
         .stdout(log)
         .stderr(log_err);
     #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        child_cmd.process_group(0);
-    }
-    child_cmd.spawn()?;
-    // Deliberately not awaited, not tracked: the whole point is that
-    // this run's life stops depending on this process the moment it's
-    // launched, the same rule applied here to the CLI launcher rather
-    // than an MCP session.
+    child_cmd.process_group(0);
+    let mut child = child_cmd.spawn()?;
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
     Ok(())
 }
 
