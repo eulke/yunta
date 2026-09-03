@@ -806,6 +806,7 @@ pub async fn run_task(
     let supervision = Supervision {
         registry,
         cancel: Some(cancel),
+        env: &[],
     };
     let ScopeGovernance {
         permissions,

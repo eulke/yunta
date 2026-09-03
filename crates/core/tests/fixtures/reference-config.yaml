@@ -48,7 +48,7 @@ mcp_servers:
   internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
 
 baseline:
-  suite: "cargo test --workspace"
+  suite: "make test"
 coverage:
   cmd: "cargo llvm-cov --summary-only"
   threshold: 90

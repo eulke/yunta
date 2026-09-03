@@ -67,6 +67,7 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
         Supervision {
             registry: None,
             cancel: Some(&cancel),
+            env: &[],
         },
     )
     .await

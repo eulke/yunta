@@ -59,7 +59,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             ],
         },
         baseline: Some(BaselineSummary {
-            suite: "cargo test --workspace".to_string(),
+            suite: "make test".to_string(),
             hash: "a3f2b1c4d5e6f7081234567890abcdef".to_string(),
             compared: 2,
             regressions: 0,
@@ -102,7 +102,7 @@ const EXPECTED_MARKDOWN_INTACT: &str = "\
 workflow: `release-cycle` · mode: `default` · state: Done
 
 - ✓ 3/3 criteria green (commands + exit codes below)
-- ✓ 0 regression(s) vs baseline across 2 comparison(s) (suite `cargo test --workspace`, hash `a3f2b1c4d5e6`)
+- ✓ 0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, hash `a3f2b1c4d5e6`)
 - ✓ scope: 4 file(s) touched, 0 violation(s)
 - ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
 - cost: 1540 tokens (1200 in / 340 out) · CPTV: 770.0 tokens/task · 2 reroute(s)
@@ -343,6 +343,7 @@ impl Bench {
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: None,
         })
         .await
         .unwrap();
@@ -449,6 +450,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();

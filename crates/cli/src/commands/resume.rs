@@ -47,6 +47,7 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
     // never the project's current one.
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();
+    let ambient = crate::project::process_env();
     let report = yunta_engine::execute_run(RunEnv {
         run_id,
         manifest: &manifest,
@@ -61,6 +62,7 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
         forge: forge.as_deref(),
         cancel: Some(&root_cancel),
         adapter_override: None,
+        ambient: Some(&ambient),
     })
     .await?;
 

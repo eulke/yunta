@@ -85,6 +85,7 @@ impl Bench {
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: None,
         })
         .await
         .unwrap();

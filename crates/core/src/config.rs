@@ -155,16 +155,37 @@ fn expand_path(
     Ok(())
 }
 
-/// The user state root: `$YUNTA_HOME`, or `~/.yunta` when unset. Shared by
-/// the CLI (which layers `config.yaml` from it) and the engine
-/// (which reads `knowledge/` from it live at context-resolution time)
-/// so the two never drift on what "the user layer" means. `None`
-/// only when neither `YUNTA_HOME` nor `HOME` is set.
-pub fn user_state_root() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("YUNTA_HOME") {
-        return Some(PathBuf::from(home));
+/// The ambient environment a run resolves against, captured once at a
+/// shell boundary so no code below the boundary reads the process itself —
+/// core stays pure, and a test injects a value instead of mutating the
+/// process. A shell (the CLI) fills this from `std::env`; everything else
+/// only reads the fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Env {
+    /// `$HOME` — the user's home directory.
+    pub home: Option<PathBuf>,
+    /// `$YUNTA_HOME` — the state-root override.
+    pub yunta_home: Option<PathBuf>,
+    /// `$YUNTA_ORG_CONFIG` — the org config path override.
+    pub org_config: Option<PathBuf>,
+    /// Variables layered onto every subprocess the run spawns (bash nodes,
+    /// hooks, executors) on top of the inherited environment — a test
+    /// prepends a stub directory to `PATH` here instead of mutating the
+    /// process. Empty in production: subprocesses inherit the run's own
+    /// environment unchanged.
+    pub subprocess_vars: Vec<(String, String)>,
+}
+
+/// The user state root: `$YUNTA_HOME` when set, otherwise `~/.yunta`.
+/// `None` only when neither is known. Reads the injected [`Env`], never the
+/// process, so the CLI (which layers `config.yaml` from it) and the engine
+/// (which reads `knowledge/` from it at context-resolution time) resolve
+/// the same "user layer" from one value neither of them read live.
+pub fn user_state_root(env: &Env) -> Option<PathBuf> {
+    if let Some(root) = &env.yunta_home {
+        return Some(root.clone());
     }
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".yunta"))
+    env.home.as_ref().map(|home| home.join(".yunta"))
 }
 
 /// How a first-level run isolates its working tree from the checkout
@@ -1050,5 +1071,35 @@ fn merge_paths_config(base: PathsConfig, more_specific: PathsConfig) -> PathsCon
     PathsConfig {
         runs: more_specific.runs.or(base.runs),
         worktrees: more_specific.worktrees.or(base.worktrees),
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::{user_state_root, Env};
+    use std::path::PathBuf;
+
+    #[test]
+    fn yunta_home_overrides_home() {
+        let env = Env {
+            home: Some(PathBuf::from("/home/u")),
+            yunta_home: Some(PathBuf::from("/scratch/state")),
+            ..Default::default()
+        };
+        assert_eq!(user_state_root(&env), Some(PathBuf::from("/scratch/state")));
+    }
+
+    #[test]
+    fn home_falls_back_to_dot_yunta() {
+        let env = Env {
+            home: Some(PathBuf::from("/home/u")),
+            ..Default::default()
+        };
+        assert_eq!(user_state_root(&env), Some(PathBuf::from("/home/u/.yunta")));
+    }
+
+    #[test]
+    fn neither_known_is_none() {
+        assert_eq!(user_state_root(&Env::default()), None);
     }
 }

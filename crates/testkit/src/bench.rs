@@ -42,6 +42,7 @@ pub struct Bench {
     /// The id of the run this bench creates.
     pub run_id: RunId,
     ids: SeqIdSource,
+    ambient: Option<yunta_core::Env>,
 }
 
 impl Default for Bench {
@@ -72,7 +73,19 @@ impl Bench {
             storage,
             run_id: RunId::from(run_id),
             ids: SeqIdSource::new("minted"),
+            ambient: None,
         }
+    }
+
+    /// Points the run's user state root at `root`, so a `knowledge:
+    /// { layers: [user] }` source resolves `root/knowledge` — injected here
+    /// rather than through a mutated `YUNTA_HOME`.
+    pub fn with_user_state_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.ambient = Some(yunta_core::Env {
+            yunta_home: Some(root.into()),
+            ..Default::default()
+        });
+        self
     }
 
     /// The absolute run dir this bench's run uses — known before the run
@@ -172,6 +185,7 @@ impl Bench {
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: self.ambient.as_ref(),
         })
         .await
         .expect("execute run");

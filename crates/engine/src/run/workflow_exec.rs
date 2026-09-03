@@ -566,6 +566,7 @@ async fn drive_child(
                     forge: ctx.forge,
                     cancel: Some(cancel),
                     adapter_override: ctx.adapter_override,
+                    ambient: ctx.ambient,
                 },
                 ctx.depth + 1,
             ));

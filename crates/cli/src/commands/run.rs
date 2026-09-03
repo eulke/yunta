@@ -261,6 +261,7 @@ pub async fn run(
 
     let forge = super::real_forge(&manifest.config);
     let root_cancel = super::cancel_on_ctrl_c();
+    let ambient = crate::project::process_env();
     let outcome = yunta_engine::execute_run(RunEnv {
         run_id: &run_id,
         manifest: &manifest,
@@ -275,6 +276,7 @@ pub async fn run(
         forge: forge.as_deref(),
         cancel: Some(&root_cancel),
         adapter_override: adapter_override.as_ref(),
+        ambient: Some(&ambient),
     })
     .await;
 

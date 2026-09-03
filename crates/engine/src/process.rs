@@ -19,17 +19,24 @@ use yunta_core::Pid;
 
 use crate::process_registry::{self, ProcessRegistry};
 
-/// Who watches a governed subprocess: the run's registry, so `yunta
-/// cancel` finds it, and the token whose firing kills it.
+/// The run context a governed subprocess runs under: who watches it — the
+/// run's registry, so `yunta cancel` finds it, and the token whose firing
+/// kills it — and the variables layered onto its environment (a run's
+/// injected `PATH` and the like, empty by default).
 #[derive(Clone, Copy, Default)]
 pub struct Supervision<'a> {
     pub registry: Option<&'a ProcessRegistry>,
     pub cancel: Option<&'a CancellationToken>,
+    /// Variables set on the child on top of the inherited environment —
+    /// the run's `subprocess_vars`, so a node's `PATH` is injected rather
+    /// than read from a mutated process. Empty leaves the child's
+    /// environment inherited unchanged.
+    pub env: &'a [(String, String)],
 }
 
 impl Supervision<'_> {
-    /// No registry and no cancellation: the child is bounded only by
-    /// its own timeout.
+    /// No registry, no cancellation and no env overrides: the child is
+    /// bounded only by its own timeout.
     pub fn none() -> Self {
         Supervision::default()
     }
@@ -40,6 +47,7 @@ impl fmt::Debug for Supervision<'_> {
         f.debug_struct("Supervision")
             .field("registered", &self.registry.is_some())
             .field("cancellable", &self.cancel.is_some())
+            .field("env_vars", &self.env.len())
             .finish()
     }
 }
@@ -196,6 +204,7 @@ pub async fn spawn_governed(
     std_cmd
         .args(&command.args)
         .current_dir(&command.cwd)
+        .envs(supervision.env.iter().map(|(k, v)| (k, v)))
         .stdin(if command.stdin.is_some() {
             Stdio::piped()
         } else {

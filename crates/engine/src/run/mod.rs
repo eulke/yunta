@@ -224,6 +224,12 @@ pub struct RunEnv<'a> {
     /// on this adapter, or fails naming what it tried. Invocation-scoped,
     /// never frozen: the log's `runner_resolved` records the discards.
     pub adapter_override: Option<&'a AdapterId>,
+    /// The ambient environment this run executes in, captured once at the
+    /// caller's boundary rather than read from the process below it: the
+    /// user state root the user knowledge layer resolves against, and the
+    /// variables layered onto every subprocess. `None` means no user layer
+    /// and no injected variables — the shape most tests want.
+    pub ambient: Option<&'a yunta_core::Env>,
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and

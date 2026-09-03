@@ -250,6 +250,10 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         forge: None,
         cancel: None,
         adapter_override: None,
+        // A test case is hermetic: no ambient user knowledge from the
+        // developer's own `~/.yunta`, and its nodes inherit this process's
+        // environment with nothing injected.
+        ambient: None,
     })
     .await
     .map_err(|e| e.to_string())?;

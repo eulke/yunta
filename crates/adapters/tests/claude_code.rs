@@ -5,8 +5,8 @@
 //! scripts: that is what the manual smoke test covers instead.
 //!
 //! Stub configuration travels through `SessionRequest.env` (the child
-//! process's own environment), never `std::env::set_var` on the test
-//! binary itself — cargo runs tests concurrently in one process, and a
+//! process's own environment), never by mutating the process environment
+//! in a test — cargo runs tests concurrently in one process, and a
 //! process-global env var would race across them.
 
 use std::collections::HashMap;

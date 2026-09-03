@@ -592,9 +592,10 @@ const KNOWLEDGE_PRECEDENCE: [yunta_core::KnowledgeLayer; 3] = [
 fn knowledge_dir(ctx: &RunCtx<'_>, layer: yunta_core::KnowledgeLayer) -> Option<PathBuf> {
     match layer {
         yunta_core::KnowledgeLayer::Repo => Some(ctx.worktree.join(".yunta").join("knowledge")),
-        yunta_core::KnowledgeLayer::User => {
-            yunta_core::user_state_root().map(|root| root.join("knowledge"))
-        }
+        yunta_core::KnowledgeLayer::User => ctx
+            .ambient
+            .and_then(yunta_core::user_state_root)
+            .map(|root| root.join("knowledge")),
         // Org is not one directory — it's the union of every installed
         // knowledge pack's declared contents; resolved by
         // `org_knowledge_files`, never through this single-dir path.

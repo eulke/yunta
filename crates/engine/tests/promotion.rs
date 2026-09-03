@@ -151,6 +151,7 @@ async fn run_with_mode_and_findings(
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();

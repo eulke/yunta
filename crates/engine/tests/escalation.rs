@@ -79,6 +79,7 @@ async fn paused_manifest_and_events(
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -271,6 +272,7 @@ impl GateBench {
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: None,
         })
         .await
         .unwrap();
@@ -415,6 +417,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: None,
         })
         .await
         .unwrap()

@@ -347,6 +347,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -748,6 +749,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -774,6 +776,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -943,6 +946,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -979,6 +983,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1098,6 +1103,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1164,6 +1170,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1245,6 +1252,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1336,6 +1344,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1599,6 +1608,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -1905,14 +1915,16 @@ async fn an_executor_node_completes_the_full_cycle_with_a_dependency_free_python
     let bench = Bench::new();
     write_executable_script(
         &bench.worktree.join("probe.py"),
-        r#"#!/usr/bin/env python3
-import json, sys
-data = json.load(sys.stdin)
-threshold = data["with"]["threshold"]
-run_dir = data["run"]["dir"]
-assert run_dir, "run.dir must be present in stdin"
-print(json.dumps({"summary": f"threshold was {threshold}"}))
-sys.exit(0)
+        r#"#!/bin/sh
+input=$(cat)
+threshold=$(printf '%s' "$input" | sed -n 's/.*"threshold":\([0-9]*\).*/\1/p')
+run_dir=$(printf '%s' "$input" | sed -n 's/.*"run":{"dir":"\([^"]*\)".*/\1/p')
+if [ -z "$run_dir" ]; then
+    printf '%s\n' 'run.dir must be present in stdin' >&2
+    exit 1
+fi
+printf '{"summary": "threshold was %s"}\n' "$threshold"
+exit 0
 "#,
     );
 
@@ -1943,10 +1955,9 @@ async fn an_executor_node_that_exits_non_zero_fails_the_node_with_its_stderr() {
     let bench = Bench::new();
     write_executable_script(
         &bench.worktree.join("probe.py"),
-        r#"#!/usr/bin/env python3
-import sys
-sys.stderr.write("threshold not met\n")
-sys.exit(1)
+        r#"#!/bin/sh
+printf '%s\n' 'threshold not met' >&2
+exit 1
 "#,
     );
 
@@ -1978,9 +1989,8 @@ async fn an_executor_node_that_exceeds_its_timeout_fails_with_a_diagnostic() {
     let bench = Bench::new();
     write_executable_script(
         &bench.worktree.join("probe.py"),
-        r#"#!/usr/bin/env python3
-import time
-time.sleep(5)
+        r#"#!/bin/sh
+sleep 5
 "#,
     );
 
@@ -2175,7 +2185,7 @@ async fn a_denied_executor_path_fails_the_node_citing_the_rule() {
     let bench = Bench::new();
     write_executable_script(
         &bench.worktree.join("probe.py"),
-        "#!/usr/bin/env python3\nprint('{}')\n",
+        "#!/bin/sh\nprintf '%s\\n' '{}'\n",
     );
 
     let workflow = r#"
@@ -2745,6 +2755,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -3922,37 +3933,8 @@ async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_di
 
 // --- knowledge layering, repo > user > org ---------------------
 
-/// `YUNTA_HOME` is process-global state (`yunta_core::user_state_root`
-/// reads it live, same as the CLI's own `project::resolve`), so any test
-/// that points it at a scratch directory must hold this for its entire
-/// critical section — never across an `.await`, so clippy's
-/// `await_holding_lock` stays clean and no tokio runtime blocks another
-/// task waiting on it.
-static KNOWLEDGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Runs `body` with `YUNTA_HOME` pointed at `user_home` for its duration,
-/// restoring whatever `YUNTA_HOME` held before (or clearing it) even if
-/// `body` panics — so a failing assertion never leaks a bad env var into
-/// whichever test runs next in this process.
-fn with_user_home<T>(user_home: &std::path::Path, body: impl FnOnce() -> T) -> T {
-    let _guard = KNOWLEDGE_ENV_LOCK.lock().unwrap();
-    let previous = std::env::var("YUNTA_HOME").ok();
-    std::env::set_var("YUNTA_HOME", user_home);
-
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
-
-    match previous {
-        Some(value) => std::env::set_var("YUNTA_HOME", value),
-        None => std::env::remove_var("YUNTA_HOME"),
-    }
-    match result {
-        Ok(value) => value,
-        Err(payload) => std::panic::resume_unwind(payload),
-    }
-}
-
-#[test]
-fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_is_replayable() {
+#[tokio::test]
+async fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_is_replayable() {
     let user_home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(user_home.path().join("knowledge")).unwrap();
     std::fs::write(
@@ -3961,25 +3943,21 @@ fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_is_rep
     )
     .unwrap();
 
-    with_user_home(user_home.path(), || {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let bench = Bench::new();
-            let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
-            let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let bench = Bench::new().with_user_state_root(user_home.path());
+    let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-            let (terminal, _state) = bench.run(&workflow, fixture).await;
-            assert_eq!(terminal, RunTerminal::Finished);
+    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
-            let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-            let sources = context_sources(&events, "ask");
-            assert_eq!(sources[0].kind, "knowledge");
-            assert_materialized(&bench.run_dir(), &sources[0]);
-        })
-    });
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].kind, "knowledge");
+    assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
-#[test]
-fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() {
+#[tokio::test]
+async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() {
     let user_home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(user_home.path().join("knowledge")).unwrap();
     // Same filename in both layers: repo must win.
@@ -3994,45 +3972,41 @@ fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collision() 
     )
     .unwrap();
 
-    with_user_home(user_home.path(), || {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let bench = Bench::new();
-            std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
-            std::fs::write(
-                bench.worktree.join(".yunta/knowledge/shared.md"),
-                "MARKER-FROM-REPO-WINS\n",
-            )
-            .unwrap();
+    let bench = Bench::new().with_user_state_root(user_home.path());
+    std::fs::create_dir_all(bench.worktree.join(".yunta/knowledge")).unwrap();
+    std::fs::write(
+        bench.worktree.join(".yunta/knowledge/shared.md"),
+        "MARKER-FROM-REPO-WINS\n",
+    )
+    .unwrap();
 
-            let workflow = context_workflow("      - knowledge: {}\n");
-            let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+    let workflow = context_workflow("      - knowledge: {}\n");
+    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
-            let (terminal, _state) = bench.run(&workflow, fixture).await;
-            assert_eq!(terminal, RunTerminal::Finished);
+    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
-            let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-            let sources = context_sources(&events, "ask");
-            assert_materialized(&bench.run_dir(), &sources[0]);
-            let path = bench
-                .run_dir()
-                .join("context")
-                .join(&sources[0].content_hash)
-                .join("content");
-            let content = std::fs::read_to_string(path).unwrap();
-            assert!(
-                content.contains("MARKER-FROM-REPO-WINS"),
-                "repo's `shared.md` must win over user's: {content}"
-            );
-            assert!(
-                !content.contains("MARKER-FROM-USER-LOSES"),
-                "user's overridden `shared.md` must not survive the merge: {content}"
-            );
-            assert!(
-                content.contains("MARKER-USER-ONLY"),
-                "user's own untouched file must still be present: {content}"
-            );
-        })
-    });
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+    let path = bench
+        .run_dir()
+        .join("context")
+        .join(&sources[0].content_hash)
+        .join("content");
+    let content = std::fs::read_to_string(path).unwrap();
+    assert!(
+        content.contains("MARKER-FROM-REPO-WINS"),
+        "repo's `shared.md` must win over user's: {content}"
+    );
+    assert!(
+        !content.contains("MARKER-FROM-USER-LOSES"),
+        "user's overridden `shared.md` must not survive the merge: {content}"
+    );
+    assert!(
+        content.contains("MARKER-USER-ONLY"),
+        "user's own untouched file must still be present: {content}"
+    );
 }
 
 // --- the org layer resolves from installed knowledge packs ------
@@ -4528,6 +4502,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -4656,6 +4631,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -4685,6 +4661,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -4898,6 +4875,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -4921,6 +4899,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -5398,6 +5377,7 @@ async fn run_with_recording_mock(
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -5651,6 +5631,7 @@ sessions:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -5781,6 +5762,7 @@ sessions:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -6099,6 +6081,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await;
 
@@ -6203,6 +6186,7 @@ async fn resume_orphan_with_mock(
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
@@ -6539,6 +6523,7 @@ nodes:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();

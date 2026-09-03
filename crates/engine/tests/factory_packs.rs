@@ -33,16 +33,16 @@ runners:
   executor:
     - { adapter: mock, model: mock-model }
 baseline:
-  suite: "cargo test"
+  suite: "true"
 "#;
 
 #[tokio::test]
 async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     // `gh` isn't installed in this environment (or anywhere CI runs) —
     // stub it so the `pr` node's real bash command has something to
-    // call. This is the only test in this file, so mutating PATH for
-    // the process is safe: nothing else in this binary runs concurrently
-    // against a `gh` invocation.
+    // call, and inject the stub's directory onto the run's subprocess
+    // `PATH` (through `ambient` below) so every governed child finds it
+    // without this test mutating its own process environment.
     let stub_dir = tempfile::tempdir().unwrap();
     let gh_stub = stub_dir.path().join("gh");
     write(&gh_stub, "#!/bin/sh\necho \"pr created (stub): $*\"\n");
@@ -51,8 +51,14 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&gh_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let path = std::env::var("PATH").unwrap_or_default();
-    std::env::set_var("PATH", format!("{}:{path}", stub_dir.path().display()));
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let ambient = yunta_core::Env {
+        subprocess_vars: vec![(
+            "PATH".to_string(),
+            format!("{}:{}", stub_dir.path().display(), inherited_path),
+        )],
+        ..Default::default()
+    };
 
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("worktree");
@@ -182,6 +188,7 @@ sessions:
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: Some(&ambient),
     })
     .await
     .unwrap();

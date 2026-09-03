@@ -104,6 +104,7 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();

@@ -86,13 +86,27 @@ pub enum ProjectError {
     },
 }
 
+/// The process environment, read once here at the CLI's boundary so no
+/// code below reads it live — `std::env` stays at the shell's edge and
+/// everything downstream (core's `user_state_root`, a run's ambient) takes
+/// the resulting [`Env`](yunta_core::Env). A run leaves `subprocess_vars`
+/// empty: its nodes inherit this process's environment unchanged.
+pub(crate) fn process_env() -> yunta_core::Env {
+    yunta_core::Env {
+        home: std::env::var_os("HOME").map(PathBuf::from),
+        yunta_home: std::env::var_os("YUNTA_HOME").map(PathBuf::from),
+        org_config: std::env::var_os("YUNTA_ORG_CONFIG").map(PathBuf::from),
+        subprocess_vars: Vec::new(),
+    }
+}
+
 fn user_root() -> Result<PathBuf, ProjectError> {
-    yunta_core::user_state_root().ok_or(ProjectError::NoStateRoot)
+    yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
 }
 
 fn org_config_path() -> PathBuf {
-    std::env::var_os("YUNTA_ORG_CONFIG")
-        .map(PathBuf::from)
+    process_env()
+        .org_config
         .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"))
 }
 

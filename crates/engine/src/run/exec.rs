@@ -301,6 +301,7 @@ fn build_ctx(
         forge,
         cancel,
         adapter_override,
+        ambient,
     } = env;
     let root_cancel = cancel.cloned().unwrap_or_default();
     let root_cancel_for_ctx = root_cancel.clone();
@@ -337,6 +338,7 @@ fn build_ctx(
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.
+        ambient,
         run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
             storage.clone(),
             run_id.clone(),

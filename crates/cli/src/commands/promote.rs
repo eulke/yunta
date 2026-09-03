@@ -77,6 +77,7 @@ pub(crate) async fn drive_promotions(
             successor.run_id
         );
 
+        let ambient = crate::project::process_env();
         let successor_report = yunta_engine::execute_run(yunta_engine::RunEnv {
             run_id: &successor.run_id,
             manifest: &successor.manifest,
@@ -91,6 +92,7 @@ pub(crate) async fn drive_promotions(
             forge: env.forge,
             cancel: env.cancel,
             adapter_override: None,
+            ambient: Some(&ambient),
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -231,6 +233,7 @@ nodes:
             forge: None,
             cancel: None,
             adapter_override: None,
+            ambient: None,
         })
         .await
         .unwrap();

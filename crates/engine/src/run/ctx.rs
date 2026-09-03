@@ -73,6 +73,10 @@ pub(crate) struct RunCtx<'a> {
     /// shares — it holds its own handle on the log, since listeners
     /// outlive any borrow of ours.
     pub run_tools_host: Arc<crate::run_tools::RunToolsHost>,
+    /// The ambient environment this run executes in, injected by the
+    /// caller: the user state root the user knowledge layer resolves
+    /// against, and the variables layered onto every subprocess.
+    pub ambient: Option<&'a yunta_core::Env>,
 }
 
 impl RunCtx<'_> {
@@ -85,6 +89,10 @@ impl RunCtx<'_> {
         crate::process::Supervision {
             registry: self.process_registry.as_ref(),
             cancel: Some(cancel),
+            env: self
+                .ambient
+                .map(|ambient| ambient.subprocess_vars.as_slice())
+                .unwrap_or(&[]),
         }
     }
 

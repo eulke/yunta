@@ -161,6 +161,7 @@ async fn run_with_config(
         forge: None,
         cancel: None,
         adapter_override: None,
+        ambient: None,
     })
     .await
     .unwrap();
