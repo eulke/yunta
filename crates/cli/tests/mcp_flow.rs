@@ -343,3 +343,159 @@ nodes:
     );
     fresh_client.cancel().await.unwrap();
 }
+
+/// Runs the binary once, synchronously — for the one-shot `pack add` a
+/// test needs before it starts the MCP server.
+fn yunta_once(dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(args)
+        .current_dir(dir)
+        .env("YUNTA_HOME", home)
+        .output()
+        .expect("failed to run the yunta binary")
+}
+
+/// An upstream repo holding one pure-`bash` pack (`acme/review-pack`),
+/// committed so `pack add` can clone and vendor it.
+fn write_pack(dir: &Path) {
+    std::fs::create_dir_all(dir.join("workflows")).unwrap();
+    std::fs::write(
+        dir.join("pack.yaml"),
+        "name: review-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         description: a runnable pack\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/review.yaml]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("workflows/review.yaml"),
+        "name: review\ndescription: pack-provided review\nnodes:\n  - id: noop\n    kind: bash\n    run: \"true\"\n",
+    )
+    .unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "v1"]);
+}
+
+#[tokio::test]
+async fn workflow_status_returns_versioned_json() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join(".yunta/workflows/greet.yaml"),
+        "name: greet\nnodes:\n  - id: hello\n    kind: bash\n    run: \"true\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "catalog"]);
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let run = client
+        .call_tool(
+            CallToolRequestParams::new("run_workflow")
+                .with_arguments(json!({"workflow": "greet"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let run_id = tool_text(&run)
+        .strip_prefix("run_id: ")
+        .expect("run_workflow returns a run_id")
+        .trim()
+        .to_string();
+
+    // workflow_status is machine-readable: a versioned JSON document —
+    // the same DTO `yunta status --json` prints — not the human status
+    // text a client would have to scrape.
+    let status = client
+        .call_tool(
+            CallToolRequestParams::new("workflow_status")
+                .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&status);
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("workflow_status must be JSON: {e}\ngot: {text}"));
+    assert!(
+        value.get("schema_version").is_some(),
+        "the DTO carries a schema_version: {text}"
+    );
+    assert_eq!(
+        value.get("run_id").and_then(|v| v.as_str()),
+        Some(run_id.as_str()),
+        "the DTO names its run: {text}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn run_workflow_accepts_pack_names() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = root.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    init_repo(&upstream);
+    write_pack(&upstream);
+
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let add = yunta_once(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(
+        add.status.success(),
+        "pack add: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    // A `publisher/name` names a vendored pack's workflow, resolved the
+    // same way `yunta run acme/review` resolves it — the control plane
+    // reaches the whole catalog, not only the repo's own
+    // `.yunta/workflows/`.
+    let run = client
+        .call_tool(
+            CallToolRequestParams::new("run_workflow").with_arguments(
+                json!({"workflow": "acme/review"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&run);
+    assert!(
+        !run.is_error.unwrap_or(false),
+        "run_workflow rejected a pack name: {text}"
+    );
+    assert!(
+        text.strip_prefix("run_id: ")
+            .map(|id| !id.trim().is_empty())
+            .unwrap_or(false),
+        "run_workflow returns a run_id for a pack workflow: {text}"
+    );
+
+    client.cancel().await.unwrap();
+}

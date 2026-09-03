@@ -127,7 +127,7 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
     summary
 }
 
-pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
+pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.storage()?;
     let events = storage.events_for_run(run_id)?;
@@ -147,6 +147,10 @@ pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
         .join("manifest.yaml");
     let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 
+    if json {
+        return crate::json::print_json(&status_json(run_id, &events, &manifest));
+    }
+
     println!("run {run_id}: {}", progress_summary(&events, &manifest));
 
     let state = yunta_engine::derive(&events);
@@ -155,16 +159,7 @@ pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
         let mut nodes: Vec<_> = state.nodes.iter().collect();
         nodes.sort_by(|a, b| a.0.cmp(b.0));
         for (id, node) in nodes {
-            let line = match node {
-                NodeState::Running { attempt } => format!("running (attempt {attempt})"),
-                NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
-                NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
-                NodeState::Waiting { external_ref } => match external_ref {
-                    Some(external_ref) => format!("waiting — {external_ref}"),
-                    None => "waiting".to_string(),
-                },
-            };
-            println!("  {id}: {line}");
+            println!("  {id}: {}", node_label(node));
         }
     }
 
@@ -182,6 +177,70 @@ pub fn status(run_id: &RunId) -> Result<Outcome, CliError> {
         state.total_tokens.input, state.total_tokens.output
     );
     Ok(Outcome::Success)
+}
+
+/// One display label for a node's derived state — the same text
+/// `yunta status` prints and the `status_json` DTO carries, so the two
+/// never drift.
+fn node_label(node: &NodeState) -> String {
+    match node {
+        NodeState::Running { attempt } => format!("running (attempt {attempt})"),
+        NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
+        NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+        NodeState::Waiting { external_ref } => match external_ref {
+            Some(external_ref) => format!("waiting — {external_ref}"),
+            None => "waiting".to_string(),
+        },
+    }
+}
+
+/// A run's derived state as the versioned JSON `yunta status --json`
+/// prints and the `workflow_status` control-plane tool returns — one DTO,
+/// so a machine reads the same shape from either surface.
+#[derive(serde::Serialize)]
+pub(crate) struct StatusJson {
+    schema_version: u32,
+    run_id: String,
+    summary: String,
+    nodes: std::collections::BTreeMap<String, String>,
+    tasks: std::collections::BTreeMap<String, &'static str>,
+    tokens: TokensJson,
+}
+
+#[derive(serde::Serialize)]
+struct TokensJson {
+    input: u64,
+    output: u64,
+}
+
+/// Derives a run's [`StatusJson`] from its event log and frozen manifest
+/// — the print-free core `status --json` and the control plane share, so
+/// a program reads the same document whichever surface it asks.
+pub(crate) fn status_json(
+    run_id: &RunId,
+    events: &[StoredEvent],
+    manifest: &Manifest,
+) -> StatusJson {
+    let state = yunta_engine::derive(events);
+    StatusJson {
+        schema_version: crate::json::SCHEMA_VERSION,
+        run_id: run_id.to_string(),
+        summary: progress_summary(events, manifest),
+        nodes: state
+            .nodes
+            .iter()
+            .map(|(id, node)| (id.to_string(), node_label(node)))
+            .collect(),
+        tasks: state
+            .tasks
+            .iter()
+            .map(|(id, status)| (id.to_string(), task_status_label(status)))
+            .collect(),
+        tokens: TokensJson {
+            input: state.total_tokens.input,
+            output: state.total_tokens.output,
+        },
+    }
 }
 
 /// The event schema's snake_case task-status names — user output never

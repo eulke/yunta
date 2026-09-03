@@ -17,8 +17,11 @@ use thiserror::Error;
 use yunta_adapters::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
-/// What the host says about a lock's holder.
-pub trait OwnerProbe {
+/// What the host says about a lock's holder. `Send + Sync` so a
+/// `&dyn OwnerProbe` can be held across the awaits in [`acquire`] inside a
+/// `Send` future — the in-process control plane prepares a worktree from
+/// one.
+pub trait OwnerProbe: Send + Sync {
     fn liveness(&self, pid: Pid) -> Liveness;
 
     /// When the process with `pid` started, where the host can tell.

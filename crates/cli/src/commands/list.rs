@@ -8,13 +8,16 @@
 //! `publisher/name` — a bare repo name never collides with a pack entry
 //! since the two are printed and looked up under different keys.
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use yunta_core::{InputSpec, Manifest, Workflow};
+use yunta_storage::Storage;
 
 use super::status::progress_summary;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::project::Project;
 
 /// One catalog entry ready to render — `display_name` already carries
 /// the `publisher/` prefix for a pack entry, nothing else needs to know
@@ -35,13 +38,23 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
         Some((ctx.project, storage))
     });
 
-    let mut entries = repo_catalog_entries(&cwd);
-    let shadowed: std::collections::HashSet<String> =
-        entries.iter().map(|e| e.display_name.clone()).collect();
-    let (pack_entries, broken_packs) = pack_catalog_entries(&cwd);
-    // A broken pack is named, never silently dropped from the listing.
+    print!("{}", render_catalog(&cwd, history_source.as_ref()));
+    Ok(Outcome::Success)
+}
+
+/// Renders the repo catalog — the repo's own `.yunta/workflows/` plus
+/// every installed pack's declared workflows, a pack entry shadowed by a
+/// repo file of the same `publisher/name` — as the text both `yunta list`
+/// prints and the `list_workflows` control-plane tool returns, so the two
+/// never drift. Given a project's storage, each workflow carries its prior
+/// estimation; a broken pack is named, never silently dropped.
+pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Storage)>) -> String {
+    let mut out = String::new();
+    let mut entries = repo_catalog_entries(cwd);
+    let shadowed: HashSet<String> = entries.iter().map(|e| e.display_name.clone()).collect();
+    let (pack_entries, broken_packs) = pack_catalog_entries(cwd);
     for err in &broken_packs {
-        println!("{err}");
+        out.push_str(&format!("{err}\n"));
     }
     entries.extend(
         pack_entries
@@ -51,13 +64,13 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
 
     if entries.is_empty() {
         if broken_packs.is_empty() {
-            println!(
-                "no workflows under {} or {}",
+            out.push_str(&format!(
+                "no workflows under {} or {}\n",
                 cwd.join(".yunta/workflows").display(),
                 cwd.join(".yunta/packs").display()
-            );
+            ));
         }
-        return Ok(Outcome::Success);
+        return out;
     }
 
     for entry in entries {
@@ -65,24 +78,24 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
         let contents = match std::fs::read_to_string(&entry.path) {
             Ok(c) => c,
             Err(e) => {
-                println!("{name}: unreadable ({e})");
+                out.push_str(&format!("{name}: unreadable ({e})\n"));
                 continue;
             }
         };
         let workflow: Workflow = match yunta_core::yaml::parse(&contents) {
             Ok(w) => w,
             Err(e) => {
-                println!("{name}: fails to parse ({e})");
+                out.push_str(&format!("{name}: fails to parse ({e})\n"));
                 continue;
             }
         };
-        println!(
-            "{name}: {}",
+        out.push_str(&format!(
+            "{name}: {}\n",
             workflow
                 .description
                 .as_deref()
                 .unwrap_or("(no description)")
-        );
+        ));
         for (input_name, spec) in &workflow.inputs {
             let optionality = if spec.is_required() {
                 "required"
@@ -90,25 +103,28 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
                 "optional"
             };
             let description = spec.description().unwrap_or("");
-            println!(
-                "  --input {input_name}=... ({}, {optionality}){}",
+            out.push_str(&format!(
+                "  --input {input_name}=... ({}, {optionality}){}\n",
                 input_type_label(spec),
                 if description.is_empty() {
                     String::new()
                 } else {
                     format!(" — {description}")
                 }
-            );
+            ));
         }
-        if let Some((project, storage)) = &history_source {
+        if let Some((project, storage)) = history_source {
             let history =
                 super::stats::collect_history(&project.runs_root, storage, &workflow.name);
             if let Some(estimation) = yunta_engine::prior_estimation(&history) {
-                println!("  {}", super::stats::format_estimation_line(&estimation));
+                out.push_str(&format!(
+                    "  {}\n",
+                    super::stats::format_estimation_line(&estimation)
+                ));
             }
         }
     }
-    Ok(Outcome::Success)
+    out
 }
 
 fn repo_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {

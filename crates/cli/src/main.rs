@@ -22,6 +22,7 @@ mod context;
 mod error;
 mod graph;
 mod human_interaction;
+mod json;
 mod pack;
 mod project;
 
@@ -86,11 +87,21 @@ enum Command {
         /// process to follow).
         #[arg(long, conflicts_with = "follow")]
         detach: bool,
+        /// Prints the run's outcome as one versioned JSON document
+        /// instead of the human progress lines — the same DTO the MCP
+        /// control plane returns. Suppresses `--follow`'s streaming.
+        #[arg(long, conflicts_with = "follow")]
+        json: bool,
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
     Status {
         /// The run id (as printed by `yunta run`).
         run_id: RunId,
+        /// Prints the derived state as one versioned JSON document
+        /// instead of the human view — the same DTO the control plane's
+        /// `workflow_status` returns.
+        #[arg(long)]
+        json: bool,
     },
     /// Resumes a run from its event log, restarting orphaned nodes.
     Resume {
@@ -311,6 +322,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             mode,
             follow,
             detach,
+            json,
         } => {
             commands::run::run(
                 &workflow,
@@ -320,10 +332,11 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 mode.as_ref(),
                 follow,
                 detach,
+                json,
             )
             .await
         }
-        Command::Status { run_id } => commands::status::status(&run_id),
+        Command::Status { run_id, json } => commands::status::status(&run_id, json),
         Command::Resume { run_id } => commands::resume::resume(&run_id).await,
         Command::ResolveGate {
             run_id,

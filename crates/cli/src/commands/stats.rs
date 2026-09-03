@@ -64,18 +64,9 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
 
     if json {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
-        return print_json(&dto);
+        return crate::json::print_json(&dto);
     }
     render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
-    Ok(Outcome::Success)
-}
-
-/// Prints a value as pretty JSON, reporting a serialization failure as
-/// the one error it can hit rather than unwrapping it.
-fn print_json<T: serde::Serialize>(value: &T) -> Result<Outcome, CliError> {
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|e| CliError::msg(format!("could not serialize output as JSON: {e}")))?;
-    println!("{text}");
     Ok(Outcome::Success)
 }
 
@@ -100,7 +91,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
 
     if json {
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
-        return print_json(&dto);
+        return crate::json::print_json(&dto);
     }
     render_workflow_history(workflow_name, &history);
     if let Some(findings) = &findings {
@@ -554,6 +545,7 @@ impl From<&NodeStat> for NodeStatJson {
 
 #[derive(Serialize)]
 struct RunStatsJson {
+    schema_version: u32,
     run_id: String,
     mode: String,
     cptv: Option<f64>,
@@ -579,6 +571,7 @@ impl RunStatsJson {
     ) -> Self {
         let total = stats.total_tokens.total();
         Self {
+            schema_version: crate::json::SCHEMA_VERSION,
             run_id: run_id.to_string(),
             mode: mode.to_string(),
             cptv: stats.cptv,
@@ -650,6 +643,7 @@ impl From<&yunta_engine::PriorEstimation> for EstimationJson {
 
 #[derive(Serialize)]
 struct WorkflowHistoryJson {
+    schema_version: u32,
     workflow: String,
     runs: Vec<RunSummaryJson>,
     estimation: Option<EstimationJson>,
@@ -663,6 +657,7 @@ impl WorkflowHistoryJson {
         findings: Option<&yunta_engine::VerificationFindings>,
     ) -> Self {
         Self {
+            schema_version: crate::json::SCHEMA_VERSION,
             workflow: workflow.to_string(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
             estimation: prior_estimation(history).as_ref().map(EstimationJson::from),

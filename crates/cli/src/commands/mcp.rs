@@ -19,6 +19,8 @@
 //! to describe — each names when reaching for a verified workflow
 //! beats implementing directly.
 
+use std::path::Path;
+
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
     ServerCapabilities, ServerInfo, Tool,
@@ -26,6 +28,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
+use yunta_core::{AdapterId, Manifest, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -83,7 +86,15 @@ impl ServerHandler for YuntaMcpServer {
             "run_workflow" => tool_run_workflow(&cwd, &args).await,
             "resume_run" => tool_resume_run(&cwd, &args).await,
             "resolve_gate" => tool_resolve_gate(&cwd, &args).await,
-            other => Err(format!("unknown tool `{other}`")),
+            // An unknown tool is a protocol error, not a tool that ran
+            // and failed — the client asked for something this server
+            // never advertised.
+            other => {
+                return Err(McpError::invalid_params(
+                    format!("unknown tool `{other}`"),
+                    None,
+                ))
+            }
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
@@ -173,32 +184,6 @@ fn tool_definitions() -> Vec<Tool> {
     ]
 }
 
-/// Shells out to this same binary's own `list`/`status` rendering
-/// rather than a second copy of it — `current_exe()` falling back to
-/// the bare name matches
-/// `spawn_detached_resume`'s own convention (PATH lookup is the worst
-/// case, not a silent failure).
-async fn run_self(cwd: &std::path::Path, args: &[&str]) -> Result<String, String> {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("yunta"));
-    let output = tokio::process::Command::new(exe)
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("failed to run `yunta {}`: {e}", args.join(" ")))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    if output.status.success() {
-        Ok(stdout)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        Err(format!("{stdout}{stderr}"))
-    }
-}
-
-async fn tool_list_workflows(cwd: &std::path::Path) -> Result<String, String> {
-    run_self(cwd, &["list"]).await
-}
-
 fn required_str<'a>(
     args: &'a serde_json::Map<String, Value>,
     name: &str,
@@ -208,57 +193,95 @@ fn required_str<'a>(
         .ok_or_else(|| format!("missing or non-string argument `{name}`"))
 }
 
+async fn tool_list_workflows(cwd: &Path) -> Result<String, String> {
+    // The same catalog `yunta list` renders, built in-process: shelling
+    // out to a subprocess would print onto this server's own stdout — the
+    // very stream its JSON-RPC replies travel on. Best-effort storage, so
+    // a repo with no state root yet still lists, just without estimates.
+    let history_source = Context::resolve_in(cwd.to_path_buf()).ok().and_then(|ctx| {
+        let storage = ctx.storage().ok()?;
+        Some((ctx.project, storage))
+    });
+    Ok(super::list::render_catalog(cwd, history_source.as_ref()))
+}
+
 async fn tool_workflow_status(
-    cwd: &std::path::Path,
+    cwd: &Path,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
-    let run_id = required_str(args, "run_id")?;
-    run_self(cwd, &["status", run_id]).await
+    let run_id: RunId = required_str(args, "run_id")?
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
+    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
+    let events = storage
+        .events_for_run(run_id.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    if events.is_empty() {
+        return Err(format!(
+            "no run `{run_id}` in {}",
+            ctx.project.storage_path.display()
+        ));
+    }
+    let manifest_path = ctx
+        .project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
+        .join("manifest.yaml");
+    let manifest: Manifest =
+        crate::load_yaml(&manifest_path, "run manifest").map_err(|e| e.to_string())?;
+    // The same versioned DTO `yunta status --json` prints, serialized to
+    // the tool result rather than to stdout.
+    crate::json::to_json_string(&super::status::status_json(&run_id, &events, &manifest))
 }
 
 async fn tool_run_workflow(
-    cwd: &std::path::Path,
+    cwd: &Path,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
     let name = required_str(args, "workflow")?;
-    let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
-    if !path.exists() {
-        return Err(format!(
-            "no workflow `{name}` in this repo's catalog (`{}`) — call list_workflows first",
-            path.display()
-        ));
-    }
-    let path_str = path.display().to_string();
-    let mut owned_args: Vec<String> = vec!["run".to_string(), path_str, "--detach".to_string()];
-    if let Some(inputs) = args.get("inputs").and_then(Value::as_object) {
-        for (key, value) in inputs {
+    let mut inputs: Vec<String> = Vec::new();
+    if let Some(object) = args.get("inputs").and_then(Value::as_object) {
+        for (key, value) in object {
             let rendered = match value {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            owned_args.push("--input".to_string());
-            owned_args.push(format!("{key}={rendered}"));
+            inputs.push(format!("{key}={rendered}"));
         }
     }
-    if let Some(adapter) = args.get("adapter").and_then(Value::as_str) {
-        owned_args.push("--adapter".to_string());
-        owned_args.push(adapter.to_string());
-    }
-    if let Some(mode) = args.get("mode").and_then(Value::as_str) {
-        owned_args.push("--mode".to_string());
-        owned_args.push(mode.to_string());
-    }
-    let arg_refs: Vec<&str> = owned_args.iter().map(String::as_str).collect();
-    let stdout = run_self(cwd, &arg_refs).await?;
-    stdout
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .map(|run_id| format!("run_id: {run_id}"))
-        .ok_or_else(|| format!("could not find a run id in `yunta run`'s own output: {stdout}"))
+    let adapter = args
+        .get("adapter")
+        .and_then(Value::as_str)
+        .map(str::parse::<AdapterId>)
+        .transpose()
+        .map_err(|e| format!("invalid adapter: {e}"))?;
+    let mode = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(str::parse::<ModeName>)
+        .transpose()
+        .map_err(|e| format!("invalid mode: {e}"))?;
+
+    // Resolves `name` against the whole catalog — the repo's own
+    // `.yunta/workflows/` then a publisher's vendored packs
+    // (`acme/review`) — then creates the run and hands it off, all
+    // in-process through the same `start_detached` `yunta run --detach`
+    // calls.
+    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
+    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
+    let run_id = super::run::start_detached(
+        &ctx,
+        &storage,
+        Path::new(name),
+        &inputs,
+        adapter.as_ref(),
+        mode.as_ref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(format!("run_id: {run_id}"))
 }
 
 async fn tool_resume_run(
