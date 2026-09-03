@@ -1,0 +1,29 @@
+[package]
+name = "yunta-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared test harness for the Yunta workspace — clocks, a git-repo fixture, a run bench, and scripted interactions."
+# A dev-only crate: every dependent uses it under [dev-dependencies], so it
+# is never part of a published package and never itself published.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
+yunta-storage.workspace = true
+yunta-adapters.workspace = true
+# The run bench drives the real engine against the mock adapter, so a run
+# can be exercised end to end from a workflow + fixture pair.
+yunta-engine.workspace = true
+chrono.workspace = true
+tempfile.workspace = true
+# Benches parse workflow/config/fixture YAML literals the tests write.
+serde_yaml.workspace = true
+# `ScriptedInteraction` implements the engine's dyn-safe async
+# `HumanInteraction`, same reason the CLI's console surface does.
+async-trait.workspace = true

@@ -2546,6 +2546,7 @@ dependencies = [
  "yunta-core",
  "yunta-engine",
  "yunta-storage",
+ "yunta-testkit",
 ]
 
 [[package]]
@@ -2612,6 +2613,7 @@ dependencies = [
  "yunta-adapters",
  "yunta-core",
  "yunta-storage",
+ "yunta-testkit",
 ]
 
 [[package]]
@@ -2625,6 +2627,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "yunta-core",
+ "yunta-testkit",
+]
+
+[[package]]
+name = "yunta-testkit"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde_yaml",
+ "tempfile",
+ "yunta-adapters",
+ "yunta-core",
+ "yunta-engine",
+ "yunta-storage",
 ]
 
 [[package]]

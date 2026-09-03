@@ -49,6 +49,8 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# The shared test harness: git-repo fixture, `yunta_in!`, fixed clock.
+yunta-testkit.workspace = true
 tempfile.workspace = true
 # Tests write their workflows and configs as YAML literals.
 serde_yaml.workspace = true
