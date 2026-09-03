@@ -41,9 +41,9 @@ fn loop_until_is_an_exhaustive_enum() {
     let text = refused::<Workflow>(
         "name: w\nnodes:\n  - id: l\n    kind: loop\n    until: forever\n    prompt: p\n",
     );
-    assert!(
-        text.contains("forever") && text.contains("all_tasks_complete"),
-        "{text}"
+    assert_eq!(
+        text,
+        "`nodes[0]`: nodes: node `l`: unknown variant `forever`, expected `all_tasks_complete` at line 3 column 3"
     );
 }
 
@@ -74,11 +74,17 @@ fn an_input_that_contradicts_itself_is_refused_at_parse() {
     let text = refused::<Workflow>(&format!(
         "name: w\ninputs:\n  idea: {{ type: string, required: true, default: x }}\n{BASH}"
     ));
-    assert!(text.contains("idea") && text.contains("default"), "{text}");
+    assert_eq!(
+        text,
+        "`inputs.idea`: inputs: `required: true` and a `default` contradict each other — the default is what makes an input optional; drop one of them at line 3 column 3"
+    );
     let text = refused::<Workflow>(&format!(
         "name: w\ninputs:\n  idea: {{ type: string, required: false }}\n{BASH}"
     ));
-    assert!(text.contains("idea") && text.contains("default"), "{text}");
+    assert_eq!(
+        text,
+        "`inputs.idea`: inputs: `required: false` with no `default` leaves the input without a value — give it a default, or drop `required: false` at line 3 column 3"
+    );
 }
 
 #[test]
@@ -160,9 +166,12 @@ fn a_number_input_with_a_non_finite_bound_or_default_is_refused_at_parse() {
         let text = refused::<Workflow>(&format!(
             "name: w\ninputs:\n  n: {{ type: number, {field}: {value} }}\n{BASH}"
         ));
-        assert!(
-            text.contains("inputs.n") && text.contains(field) && text.contains("finite"),
-            "{field}: {text}"
+        assert_eq!(
+            text,
+            format!(
+                "`inputs.n`: inputs: `{field}` is not a finite number — a number input's default and bounds are finite at line 3 column 3"
+            ),
+            "for {field}: {value}"
         );
     }
 }

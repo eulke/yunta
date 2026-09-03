@@ -56,12 +56,24 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     let doctor_out = yunta_in!(&repo, &home, &["doctor"]);
     assert!(!doctor_out.status.success());
     let text = stdout(&doctor_out);
-    assert!(text.contains("pack acme/review-pack requires"), "{text}");
-    assert!(text.contains("runner `reviewer`"), "{text}");
-    assert!(text.contains("mcp_server `internal-docs`"), "{text}");
     assert!(
-        text.contains("command `this-binary-almost-certainly-does-not-exist-anywhere`"),
-        "{text}"
+        text.lines().any(|l| l == "pack acme/review-pack requires:"),
+        "the pack's unmet requirements are reported under one header: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("  runner `reviewer` — ")),
+        "the unresolvable runner is named: {text}"
+    );
+    assert!(
+        text.lines().any(|l| l
+            == "  mcp_server `internal-docs` — not defined under `mcp_servers:`; add it there"),
+        "the undefined mcp_server is named: {text}"
+    );
+    assert!(
+        text.lines().any(|l| l
+            == "  command `this-binary-almost-certainly-does-not-exist-anywhere` — not found on PATH"),
+        "the missing command is named: {text}"
     );
 }
 

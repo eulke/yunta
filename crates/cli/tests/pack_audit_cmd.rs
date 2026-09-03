@@ -60,10 +60,19 @@ fn add_shows_the_full_inventory_before_vendoring() {
     let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("pack: acme/review-pack"), "{text}");
-    assert!(text.contains("node `noop` (kind: bash)"), "{text}");
-    assert!(text.contains("command: true"), "{text}");
-    assert!(text.contains("node `brief` (kind: prompt)"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "pack: acme/review-pack @ 1.0.0"),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|l| l == "  node `noop` (kind: bash)"),
+        "{text}"
+    );
+    assert!(text.lines().any(|l| l == "    command: true"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "  node `brief` (kind: prompt)"),
+        "{text}"
+    );
     assert!(
         text.contains("Line one of a distinctive multi-line prompt."),
         "{text}"
@@ -72,7 +81,7 @@ fn add_shows_the_full_inventory_before_vendoring() {
         text.contains("Line two, still here, not summarized."),
         "{text}"
     );
-    assert!(text.contains("tests: none shipped"), "{text}");
+    assert!(text.lines().any(|l| l == "tests: none shipped"), "{text}");
 }
 
 #[test]
@@ -86,7 +95,10 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     let out = yunta_in!(&repo, &home, &["pack", "audit", "acme/review-pack"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("pack: acme/review-pack"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "pack: acme/review-pack @ 1.0.0"),
+        "{text}"
+    );
     assert!(
         text.contains("Line two, still here, not summarized."),
         "{text}"

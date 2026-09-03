@@ -45,7 +45,10 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
     .unwrap();
     assert_eq!(precheck, Some(0));
     match decision {
-        Decision::Denied(reason) => assert!(reason.contains("already passes")),
+        Decision::Denied(reason) => assert_eq!(
+            reason,
+            "proposed criterion already passes — nothing to expand for"
+        ),
         other => panic!("expected Denied, got {other:?}"),
     }
 }
@@ -67,7 +70,9 @@ async fn deny_mode_denies_without_running_any_rule() {
     .await
     .unwrap();
     match decision {
-        Decision::Denied(reason) => assert!(reason.contains("deny")),
+        Decision::Denied(reason) => {
+            assert_eq!(reason, "scope_expansion mode is deny (the default)")
+        }
         other => panic!("expected Denied, got {other:?}"),
     }
 }
@@ -130,7 +135,10 @@ async fn rules_mode_denies_a_path_outside_within() {
     .await
     .unwrap();
     match decision {
-        Decision::Denied(reason) => assert!(reason.contains("within")),
+        Decision::Denied(reason) => assert_eq!(
+            reason,
+            "requested path(s) fall outside the declared `within` ceiling: [\"outside.rs\"]"
+        ),
         other => panic!("expected Denied, got {other:?}"),
     }
 }
@@ -153,7 +161,9 @@ async fn rules_mode_requires_a_proposed_criterion() {
     .await
     .unwrap();
     match decision {
-        Decision::Denied(reason) => assert!(reason.contains("proposed_criterion")),
+        Decision::Denied(reason) => {
+            assert_eq!(reason, "rules mode requires a proposed_criterion")
+        }
         other => panic!("expected Denied, got {other:?}"),
     }
 }
@@ -178,7 +188,10 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
     .await
     .unwrap();
     match decision {
-        Decision::Denied(reason) => assert!(reason.contains("bound")),
+        Decision::Denied(reason) => assert_eq!(
+            reason,
+            "diff at the requested paths touches 10 file(s), over the 5-file bound"
+        ),
         other => panic!("expected Denied, got {other:?}"),
     }
 }

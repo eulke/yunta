@@ -532,7 +532,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
     };
-    assert!(reason.contains("abort"), "got: {reason}");
+    assert_eq!(reason, "node `lint`'s gate was resolved to abort");
 
     // A later manual resume must NOT re-apply the stale abort — the
     // decision was consumed; with no live surface it parks on the
@@ -632,7 +632,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
     match err {
         ResolveGateError::UnknownOption { chosen, declared } => {
             assert_eq!(chosen, "nonexistent-option");
-            assert!(declared.contains("retry") && declared.contains("abort"));
+            assert_eq!(declared, "retry, abort");
         }
         other => panic!("expected UnknownOption, got {other:?}"),
     }

@@ -24,26 +24,19 @@ fn a_parse_error_names_the_path_of_the_failing_value() {
     let err =
         yaml::parse::<Doc>("items:\n  - name: a\n    count: 1\n  - name: b\n    count: many\n")
             .unwrap_err();
-    let text = err.to_string();
-    assert!(
-        text.contains("items[1].count"),
-        "the error must locate the value: {text}"
-    );
+    match &err {
+        YamlError::Parse { path, .. } => assert_eq!(path, "items[1].count"),
+        other => panic!("the error must locate the value, got {other:?}"),
+    }
 }
 
 #[test]
 fn an_unknown_key_is_named_with_the_keys_that_are_valid_there() {
     let err =
         yaml::parse::<Doc>("items:\n  - name: a\n    count: 1\n    colour: red\n").unwrap_err();
-    let text = err.to_string();
-    assert!(
-        text.contains("items[1]") || text.contains("items[0]"),
-        "{text}"
-    );
-    assert!(text.contains("colour"), "{text}");
-    assert!(
-        text.contains("`name`") && text.contains("`count`"),
-        "{text}"
+    assert_eq!(
+        err.to_string(),
+        "`items[0].colour`: items[0]: unknown field `colour`, expected `name` or `count` at line 4 column 5"
     );
 }
 

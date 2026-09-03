@@ -303,7 +303,11 @@ async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
         );
         let (is_error, text) = call(&client, "yunta_get_blackboard", json!({})).await;
         assert!(is_error, "node `{node}` calling anyway must be refused");
-        assert!(text.contains("blackboard"), "got: {text}");
+        assert_eq!(
+            text,
+            "this session's node is not in a `coordination: blackboard` group — the blackboard is never mounted outside one",
+            "node `{node}`"
+        );
         client.cancel().await.unwrap();
     }
 }
@@ -336,9 +340,14 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
     // else — not the sibling's, not the foreign node's.
     let (is_error, text) = call(&client, "yunta_get_blackboard", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("own-post"), "got: {text}");
-    assert!(!text.contains("sibling-post"), "got: {text}");
-    assert!(!text.contains("foreign-post"), "got: {text}");
+    let board: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let ids: Vec<&str> = board["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["own-post"]);
     client.cancel().await.unwrap();
 }
 
@@ -368,7 +377,8 @@ async fn task_status_reflects_the_ledger_derived_from_the_log() {
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_task_status", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("T001"), "got: {text}");
+    let status: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(status, json!({ "T001": "pending" }));
     client.cancel().await.unwrap();
 }
 
@@ -401,7 +411,10 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     )
     .await;
     assert!(is_error);
-    assert!(text.contains("already pending"), "got: {text}");
+    assert_eq!(
+        text,
+        "a scope expansion request is already pending for this attempt — one request per attempt"
+    );
 
     // The file the tool wrote is the exact artifact the engine's
     // existing post-attempt evaluation consumes — proven by parsing it
@@ -438,7 +451,10 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     )
     .await;
     assert!(is_error);
-    assert!(text.contains("task"), "got: {text}");
+    assert_eq!(
+        text,
+        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+    );
     client.cancel().await.unwrap();
 }
 

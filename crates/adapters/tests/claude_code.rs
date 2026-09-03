@@ -227,9 +227,21 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
 
-    let args = std::fs::read_to_string(&args_file).unwrap();
-    assert!(args.contains("--tools"), "got: {args}");
-    assert!(args.contains("acceptEdits"), "got: {args}");
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let tools_pos = args
+        .iter()
+        .position(|a| a == "--tools")
+        .expect("ReadOnly restricts the tools");
+    assert_eq!(args[tools_pos + 1], "Read,Grep,Glob,WebFetch,WebSearch");
+    let mode_pos = args
+        .iter()
+        .position(|a| a == "--permission-mode")
+        .expect("every profile sets an unattended permission mode");
+    assert_eq!(args[mode_pos + 1], "acceptEdits");
 }
 
 #[tokio::test]
@@ -252,7 +264,18 @@ async fn capability_permission_profiles_leave_full_the_whole_tool_set_unattended
     let _ = drain(session).await;
 
     let args = std::fs::read_to_string(&args_file).unwrap();
-    assert!(args.contains("acceptEdits"), "got: {args}");
+    let argv: Vec<&str> = args.lines().collect();
+    // Full leaves the whole tool set available: no --tools restriction.
+    assert!(
+        !argv.contains(&"--tools"),
+        "Full must not restrict the tools: {argv:?}"
+    );
+    // acceptEdits is the one mode that runs unattended as root (permissions.rs).
+    let mode_pos = argv
+        .iter()
+        .position(|a| *a == "--permission-mode")
+        .expect("every profile sets an unattended permission mode");
+    assert_eq!(argv[mode_pos + 1], "acceptEdits");
     // Both are refused when the CLI runs as root — confirmed empirically
     // (see permissions.rs) — so neither may appear in the built args.
     assert!(
@@ -513,7 +536,11 @@ fn debug_of_a_session_request_never_prints_secrets() {
         !debug.contains("bearer-secret"),
         "the token never prints: {debug}"
     );
-    assert!(debug.contains("[redacted]"), "{debug}");
+    assert_eq!(
+        debug.matches("[redacted]").count(),
+        2,
+        "both the env value and the endpoint token are redacted: {debug}"
+    );
 }
 
 /// `Edit` is its own tool set — file editing, no shell, no network —
@@ -546,12 +573,12 @@ async fn capability_permission_profiles_give_edit_a_bounded_tool_set() {
         .iter()
         .position(|a| a == "--tools")
         .expect("Edit restricts the tools");
-    let tools = &args[pos + 1];
-    assert!(tools.contains("Edit") && tools.contains("Write"), "{tools}");
-    assert!(!tools.contains("Bash"), "no shell for Edit: {tools}");
-    assert!(
-        !tools.contains("WebFetch") && !tools.contains("WebSearch"),
-        "no network for Edit: {tools}"
+    // The exact set: the file-editing tools plus read-only navigation,
+    // and nothing that reaches a shell (Bash) or the network (WebFetch,
+    // WebSearch) — the bound the profile's name promises.
+    assert_eq!(
+        args[pos + 1],
+        "Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"
     );
 }
 
@@ -682,7 +709,7 @@ async fn auth_errors_are_not_retryable() {
     .await;
 
     let message = non_retryable_failure(events.last().unwrap());
-    assert!(message.contains("Invalid API key"));
+    assert_eq!(message, "Invalid API key · Please run /login");
 }
 
 #[tokio::test]

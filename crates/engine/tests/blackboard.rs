@@ -186,8 +186,16 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     let output = bench
         .group_output("review")
         .expect("the blackboard group must consolidate into its node-output");
-    assert!(output.contains("from-a"), "got: {output}");
-    assert!(output.contains("from-b"), "got: {output}");
+    // The group's node-output wraps the consolidated findings in the same
+    // `stdout:`/`stderr:` envelope every node's captured output uses.
+    let doc: serde_json::Value = serde_yaml::from_str(&output).unwrap();
+    let ids: Vec<&str> = doc["stdout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["from-a", "from-b"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -379,6 +387,10 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
     let consolidated_forward = yunta_engine::consolidate_blackboard(&forward, &members);
     let consolidated_reversed = yunta_engine::consolidate_blackboard(&reversed, &members);
     assert_eq!(consolidated_forward, consolidated_reversed);
-    assert!(consolidated_forward.contains("one"));
-    assert!(consolidated_forward.contains("three"));
+    let consolidated: Vec<serde_json::Value> = serde_yaml::from_str(&consolidated_forward).unwrap();
+    let ids: Vec<&str> = consolidated
+        .iter()
+        .map(|finding| finding["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["one", "three", "two"]);
 }

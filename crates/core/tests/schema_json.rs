@@ -3,63 +3,96 @@
 //! the schema their emission.
 
 use serde_json::Value;
+use yunta_core::events::EventPayload;
 
 fn rendered(schema: schemars::Schema) -> Value {
     serde_json::to_value(schema).unwrap()
 }
 
+/// The `kind` discriminant pinned by every branch of a `oneOf`, in
+/// declaration order.
+fn one_of_kinds(schema: &Value) -> Vec<&str> {
+    schema["oneOf"]
+        .as_array()
+        .expect("a oneOf schema")
+        .iter()
+        .map(|branch| {
+            branch["properties"]["kind"]["const"]
+                .as_str()
+                .expect("each branch pins its kind")
+        })
+        .collect()
+}
+
 #[test]
 fn every_root_schema_names_itself_and_speaks_draft_2020_12() {
-    for (name, schema) in [
-        ("workflow", yunta_core::schema::workflow()),
-        ("config", yunta_core::schema::config()),
-        ("pack", yunta_core::schema::pack()),
-        ("ledger", yunta_core::schema::ledger()),
-        ("events", yunta_core::schema::events()),
+    for (title, schema) in [
+        ("yunta workflow", yunta_core::schema::workflow()),
+        ("yunta config layer", yunta_core::schema::config()),
+        ("yunta pack manifest", yunta_core::schema::pack()),
+        ("yunta task ledger", yunta_core::schema::ledger()),
+        ("yunta event", yunta_core::schema::events()),
     ] {
         let json = rendered(schema);
         assert_eq!(
             json["$schema"], "https://json-schema.org/draft/2020-12/schema",
-            "{name}"
+            "{title}"
         );
-        assert!(json["title"].is_string(), "{name} has a title: {json}");
+        assert_eq!(json["title"], title);
     }
 }
 
 #[test]
 fn the_workflow_schema_describes_nodes_by_kind_and_inputs_by_type() {
     let json = rendered(yunta_core::schema::workflow());
-    let text = json.to_string();
-    assert!(json["properties"]["nodes"].is_object(), "{text}");
-    assert!(json["properties"]["inputs"].is_object(), "{text}");
-    for kind in ["prompt", "bash", "loop", "gate", "workflow"] {
-        assert!(
-            text.contains(&format!("\"{kind}\"")),
-            "kind `{kind}`: {text}"
-        );
-    }
-    assert!(text.contains("all_tasks_complete"), "{text}");
-    // The authored form of an input, `required:` included.
-    assert!(text.contains("\"required\""), "{text}");
+    // `nodes:` is a list of nodes; `inputs:` a map to the authored input form.
+    assert_eq!(json["properties"]["nodes"]["items"]["$ref"], "#/$defs/Node");
+    assert_eq!(
+        json["properties"]["inputs"]["additionalProperties"]["$ref"],
+        "#/$defs/InputSpec"
+    );
+    // A node is described by kind: one branch per kind, each pinned by
+    // its `kind` discriminant.
+    assert_eq!(
+        one_of_kinds(&json["$defs"]["Node"]),
+        ["prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow"]
+    );
+    // The one loop-until condition, as an exhaustive enum.
+    assert_eq!(
+        json["$defs"]["LoopUntil"]["enum"],
+        serde_json::json!(["all_tasks_complete"])
+    );
+    // Every authored input form (one branch per type) declares `required:`.
+    let forms = json["$defs"]["InputSpec"]["oneOf"]
+        .as_array()
+        .expect("InputSpec is a oneOf over its types");
+    assert!(
+        forms
+            .iter()
+            .all(|form| form["properties"]["required"]["$ref"] == "#/$defs/Requiredness"),
+        "every authored input form declares `required:`: {forms:?}"
+    );
 }
 
 #[test]
 fn the_events_schema_is_one_stored_event_with_its_envelope_and_every_kind() {
     let json = rendered(yunta_core::schema::events());
-    let text = json.to_string();
-    for field in ["run_id", "seq", "timestamp"] {
-        assert!(text.contains(&format!("\"{field}\"")), "{field}: {text}");
-    }
-    for kind in yunta_core::events::EventPayload::KINDS {
-        assert!(
-            text.contains(&format!("\"{kind}\"")),
-            "kind `{kind}`: {text}"
-        );
-    }
+    // The envelope every stored event carries, side by side with its payload.
+    assert_eq!(
+        json["$defs"]["Envelope"]["required"],
+        serde_json::json!(["run_id", "seq", "timestamp"])
+    );
+    // One payload branch per kind, in the order the binary lists them.
+    assert_eq!(
+        one_of_kinds(&json["$defs"]["EventPayload"]),
+        EventPayload::KINDS.to_vec()
+    );
 }
 
 #[test]
 fn a_run_id_is_described_as_a_string_and_a_seq_as_a_positive_integer() {
-    let text = rendered(yunta_core::schema::events()).to_string();
-    assert!(text.contains("\"minimum\":1"), "{text}");
+    let json = rendered(yunta_core::schema::events());
+    assert_eq!(json["$defs"]["RunId"]["type"], "string");
+    assert_eq!(json["$defs"]["Seq"]["type"], "integer");
+    assert_eq!(json["$defs"]["Seq"]["minimum"], 1);
 }

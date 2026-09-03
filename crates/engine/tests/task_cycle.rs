@@ -181,7 +181,10 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         "no attempt should have been dispatched"
     );
     match report.outcome {
-        TaskOutcome::Blocked { reason } => assert!(reason.contains("already passes")),
+        TaskOutcome::Blocked { reason } => assert_eq!(
+            reason,
+            "criterion `true` already passes before any work — the criteria need fixing, not the task"
+        ),
         other => panic!("expected Blocked, got {other:?}"),
     }
 }
@@ -228,7 +231,12 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 
     assert!(report.attempts.is_empty());
     match report.outcome {
-        TaskOutcome::Blocked { reason } => assert!(reason.contains("guard")),
+        TaskOutcome::Blocked { reason } => {
+            assert_eq!(
+                reason,
+                "guard `false` is already red before any work started"
+            )
+        }
         other => panic!("expected Blocked, got {other:?}"),
     }
 }
@@ -587,7 +595,9 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => assert!(reason.contains("timeout")),
+        DispatchOutcome::BudgetExceeded { reason } => {
+            assert_eq!(reason, "exceeded timeout of 50ms")
+        }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
 }
@@ -646,7 +656,9 @@ outcome: { type: completed, summary: "should never be reached" }
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => assert!(reason.contains("max_tokens")),
+        DispatchOutcome::BudgetExceeded { reason } => {
+            assert_eq!(reason, "exceeded max_tokens 100 (150 used)")
+        }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
 }

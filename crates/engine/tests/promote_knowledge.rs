@@ -157,11 +157,12 @@ sessions:
     ));
 
     let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();
-    assert!(pack_yaml.contains("version: 1.1.0"), "{pack_yaml}");
+    let pack: serde_yaml::Value = serde_yaml::from_str(&pack_yaml).unwrap();
+    assert_eq!(pack["version"].as_str(), Some("1.1.0"));
     let tags = git_output(&worktree, &["tag", "--list"]);
     assert_eq!(tags, "v1.1.0");
-    let log = git_output(&worktree, &["log", "--oneline", "-1"]);
-    assert!(log.contains("promote to 1.1.0"), "{log}");
+    let subject = git_output(&worktree, &["log", "-1", "--format=%s"]);
+    assert_eq!(subject, "knowledge: promote to 1.1.0");
 }
 
 #[tokio::test]

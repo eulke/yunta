@@ -403,7 +403,10 @@ artifacts:
         other => panic!("expected one Oversized error, got {other:?}"),
     }
     let rendered = errors[0].to_string();
-    assert!(rendered.contains("max_artifact_bytes"), "got: {rendered}");
+    assert_eq!(
+        rendered,
+        "node `report` produced artifact `report.md` at 10 bytes — `limits.max_artifact_bytes` is 5"
+    );
 }
 
 #[test]

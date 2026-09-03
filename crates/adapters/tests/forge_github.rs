@@ -498,7 +498,7 @@ async fn a_refusal_keeps_its_status_and_body() {
     match error {
         ForgeError::Http { status, body, .. } => {
             assert_eq!(status, 422);
-            assert!(body.contains("base branch does not exist"));
+            assert_eq!(body, "Validation Failed: base branch does not exist");
         }
         other => panic!("expected an HTTP refusal, got {other:?}"),
     }

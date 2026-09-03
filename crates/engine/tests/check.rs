@@ -214,18 +214,21 @@ fn a_well_formed_workflow_has_no_errors() {
 fn duplicate_node_id_is_reported() {
     let wf = workflow(vec![bash("a", "true", &[]), bash("a", "false", &[])]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::DuplicateNodeId { id: "a".into() }));
+    assert_eq!(errors, vec![CheckError::DuplicateNodeId { id: "a".into() }]);
 }
 
 #[test]
 fn unknown_dependency_is_reported() {
     let wf = workflow(vec![bash("a", "true", &["ghost"])]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::BrokenReference {
-        node: "a".into(),
-        field: "depends_on".to_string(),
-        target: "ghost".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::BrokenReference {
+            node: "a".into(),
+            field: "depends_on".to_string(),
+            target: "ghost".into(),
+        }]
+    );
 }
 
 #[test]
@@ -236,11 +239,14 @@ fn unknown_goto_target_is_reported() {
         max_reroutes: 1,
     });
     let errors = check(&workflow(vec![node]), &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::BrokenReference {
-        node: "a".into(),
-        field: "on_failure.goto".to_string(),
-        target: "ghost".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::BrokenReference {
+            node: "a".into(),
+            field: "on_failure.goto".to_string(),
+            target: "ghost".into(),
+        }]
+    );
 }
 
 #[test]
@@ -295,29 +301,38 @@ fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
 fn runner_not_declared_in_config_is_reported() {
     let wf = workflow(vec![prompt("plan", "planner", &[])]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::UnknownRunner {
-        node: "plan".into(),
-        runner: "planner".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::UnknownRunner {
+            node: "plan".into(),
+            runner: "planner".into(),
+        }]
+    );
 }
 
 #[test]
 fn runner_declared_with_zero_candidates_is_reported() {
     let wf = workflow(vec![prompt("plan", "planner", &[])]);
     let errors = check(&wf, &config_with_runner("planner", 0));
-    assert!(errors.contains(&CheckError::RunnerHasNoCandidates {
-        node: "plan".into(),
-        runner: "planner".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::RunnerHasNoCandidates {
+            node: "plan".into(),
+            runner: "planner".into(),
+        }]
+    );
 }
 
 #[test]
 fn external_gate_without_forge_configured_is_rejected() {
     let wf = workflow(vec![gate("approve", &[])]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::ExternalGateWithoutForge {
-        node: "approve".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::ExternalGateWithoutForge {
+            node: "approve".into(),
+        }]
+    );
 }
 
 #[test]
@@ -363,10 +378,13 @@ fn a_mode_referencing_an_unknown_node_is_reported() {
         modes(&[("quick", included(&["a", "ghost"]))]),
     );
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::ModeReferencesUnknownNode {
-        mode: "quick".into(),
-        node: "ghost".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::ModeReferencesUnknownNode {
+            mode: "quick".into(),
+            node: "ghost".into(),
+        }]
+    );
 }
 
 #[test]
@@ -378,10 +396,13 @@ fn an_invariant_node_excluded_from_a_mode_is_reported() {
         modes(&[("quick", included(&["ship"]))]),
     );
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::InvariantNodeExcludedFromMode {
-        node: "lint".into(),
-        mode: "quick".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::InvariantNodeExcludedFromMode {
+            node: "lint".into(),
+            mode: "quick".into(),
+        }]
+    );
 }
 
 #[test]
@@ -418,11 +439,14 @@ fn a_reroute_target_excluded_from_a_mode_is_reported() {
         modes(&[("quick", included(&["lint"]))]),
     );
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::RerouteTargetExcludedFromMode {
-        mode: "quick".into(),
-        node: "lint".into(),
-        goto: "fix-lint".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::RerouteTargetExcludedFromMode {
+            mode: "quick".into(),
+            node: "lint".into(),
+            goto: "fix-lint".into(),
+        }]
+    );
 }
 
 #[test]
@@ -510,10 +534,13 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
         internal_gate("approve", &["aprobar"], &[("ajustar", "plan")]),
     ]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::GateOnUndeclaredOption {
-        node: "approve".into(),
-        option: "ajustar".to_string(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::GateOnUndeclaredOption {
+            node: "approve".into(),
+            option: "ajustar".to_string(),
+        }]
+    );
 }
 
 #[test]
@@ -524,11 +551,14 @@ fn a_gate_on_targeting_an_unknown_node_is_reported() {
         &[("ajustar", "ghost")],
     )]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::BrokenReference {
-        node: "approve".into(),
-        field: "on.ajustar".to_string(),
-        target: "ghost".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::BrokenReference {
+            node: "approve".into(),
+            field: "on.ajustar".to_string(),
+            target: "ghost".into(),
+        }]
+    );
 }
 
 #[test]
@@ -544,11 +574,14 @@ fn a_mode_excluding_a_gate_option_target_is_reported() {
         modes(&[("quick", included(&["approve"]))]),
     );
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::RerouteTargetExcludedFromMode {
-        mode: "quick".into(),
-        node: "approve".into(),
-        goto: "plan".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::RerouteTargetExcludedFromMode {
+            mode: "quick".into(),
+            node: "approve".into(),
+            goto: "plan".into(),
+        }]
+    );
 }
 
 #[test]
@@ -559,10 +592,13 @@ fn a_gate_cannot_be_a_parallel_child() {
         vec![gate("approve", &[])],
     )]);
     let errors = check(&wf, &config_with_forge());
-    assert!(errors.contains(&CheckError::GateInsideParallel {
-        node: "approve".into(),
-        group: "group".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::GateInsideParallel {
+            node: "approve".into(),
+            group: "group".into(),
+        }]
+    );
 }
 
 #[test]
@@ -575,9 +611,12 @@ fn a_parallel_group_s_child_id_colliding_with_another_node_is_a_duplicate() {
         parallel("group", JoinPolicy::All, vec![bash("shared", "true", &[])]),
     ]);
     let errors = check(&wf, &ConfigLayer::default());
-    assert!(errors.contains(&CheckError::DuplicateNodeId {
-        id: "shared".into()
-    }));
+    assert_eq!(
+        errors,
+        vec![CheckError::DuplicateNodeId {
+            id: "shared".into()
+        }]
+    );
 }
 
 #[test]
@@ -1027,10 +1066,12 @@ fn scopeless_independent_writers_warn_once_per_component() {
         1,
         "one warning per connected component, never per pair: {warnings:?}"
     );
-    let text = warnings[0].to_string();
-    for id in ["a", "b", "c"] {
-        assert!(text.contains(id), "must name `{id}`: {text}");
-    }
+    assert_eq!(
+        warnings[0],
+        CheckWarning::UndeclaredFanOutScope {
+            nodes: "`a`, `b`, `c`".to_string()
+        }
+    );
 
     // Sequential execution: nothing to warn about.
     assert_eq!(check_warnings(&wf, &config_with_fanout(1)), Vec::new());

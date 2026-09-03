@@ -60,7 +60,7 @@ fn duplicate_id_is_reported() {
         ],
     };
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::DuplicateId { id: "a".into() }));
+    assert_eq!(errors, vec![LedgerError::DuplicateId { id: "a".into() }]);
 }
 
 #[test]
@@ -69,10 +69,13 @@ fn unknown_dependency_is_reported() {
         tasks: vec![task("a", &["src/**"], vec![cmd("true")], &["ghost"])],
     };
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::UnknownDependency {
-        task: "a".into(),
-        unknown: "ghost".into(),
-    }));
+    assert_eq!(
+        errors,
+        vec![LedgerError::UnknownDependency {
+            task: "a".into(),
+            unknown: "ghost".into(),
+        }]
+    );
 }
 
 #[test]
@@ -95,7 +98,7 @@ fn empty_scope_is_reported() {
         tasks: vec![task("a", &[], vec![cmd("true")], &[])],
     };
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::EmptyScope { task: "a".into() }));
+    assert_eq!(errors, vec![LedgerError::EmptyScope { task: "a".into() }]);
 }
 
 #[test]
@@ -105,7 +108,7 @@ fn empty_title_is_reported() {
     };
     ledger.tasks[0].title = "   ".to_string();
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::EmptyTitle { task: "a".into() }));
+    assert_eq!(errors, vec![LedgerError::EmptyTitle { task: "a".into() }]);
 }
 
 #[test]
@@ -114,7 +117,7 @@ fn no_criteria_is_reported() {
         tasks: vec![task("a", &["src/**"], vec![], &[])],
     };
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::NoCriteria { task: "a".into() }));
+    assert_eq!(errors, vec![LedgerError::NoCriteria { task: "a".into() }]);
 }
 
 #[test]
@@ -128,7 +131,10 @@ fn all_criteria_being_guards_is_reported() {
         )],
     };
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::AllCriteriaAreGuards { task: "a".into() }));
+    assert_eq!(
+        errors,
+        vec![LedgerError::AllCriteriaAreGuards { task: "a".into() }]
+    );
 }
 
 #[test]
@@ -154,7 +160,10 @@ fn manual_review_without_justification_is_reported() {
     };
     ledger.tasks[0].manual_review = true;
     let errors = register(&ledger);
-    assert!(errors.contains(&LedgerError::ManualReviewWithoutJustification { task: "a".into() }));
+    assert_eq!(
+        errors,
+        vec![LedgerError::ManualReviewWithoutJustification { task: "a".into() }]
+    );
 }
 
 #[test]

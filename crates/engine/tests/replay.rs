@@ -124,8 +124,10 @@ fn node_finished_without_a_prior_node_started_is_broken() {
 
     let state = derive(&events);
     let diagnostic = state.broken.expect("expected a broken diagnostic");
-    assert!(diagnostic.contains("seq 1"));
-    assert!(diagnostic.contains("lint"));
+    assert_eq!(
+        diagnostic,
+        "seq 1: node `lint` got node_finished without a matching node_started"
+    );
 }
 
 #[test]

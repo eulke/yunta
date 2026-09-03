@@ -48,12 +48,16 @@ nodes:
     assert!(stdout(&run).contains("finished"));
 
     let run_id = run_id_from(&run);
-    let status = yunta_in!(&repo, &home, &["status", &run_id]);
-    assert!(status.status.success());
-    let text = stdout(&status);
-    assert!(text.contains("finished"), "got: {text}");
-    assert!(text.contains("touch"), "got: {text}");
-    assert!(text.contains("verify"), "got: {text}");
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    assert!(
+        status.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(state["summary"], "2/2 nodes · 0 reroutes · finished");
+    assert_eq!(state["nodes"]["touch"], "finished — exit 0");
+    assert_eq!(state["nodes"]["verify"], "finished — exit 0");
 
     // Resuming a finished run is a clean no-op.
     let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
@@ -102,7 +106,12 @@ nodes:
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("yunta test"), "got: {stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|l| l == "a test case under .yunta/tests/ and run `yunta test`."),
+        "the refusal's closing line directs the user to the mock adapter via `yunta test`: {stderr}"
+    );
     assert!(
         !home.join("runs").exists(),
         "no run must be created when the refusal happens up front"
@@ -184,7 +193,11 @@ expect:
         "stdout: {text}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(text.contains("case happy-path ... ok"), "got: {text}");
+    assert_eq!(
+        text.trim_end(),
+        "case happy-path ... ok\n1 case(s), 0 failed",
+        "the one case runs against the mock adapter and every expectation holds"
+    );
 }
 
 #[test]
@@ -222,8 +235,15 @@ expect:
     let output = yunta_in!(&repo, &home, &["test"]);
     assert!(!output.status.success());
     let text = stdout(&output);
-    assert!(text.contains("FAILED"), "got: {text}");
-    assert!(text.contains("final_state"), "got: {text}");
+    assert!(
+        text.lines().any(|l| l == "case wrong-expect ... FAILED"),
+        "got: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("  final_state: expected Finished, got ")),
+        "the mismatch names the field, the expected state and the actual one: {text}"
+    );
 }
 
 #[test]
@@ -628,8 +648,11 @@ nodes:
 
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("idea"), "got: {stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stderr).trim_end(),
+        "error: input `idea` is required and has no default — pass `--input idea=...`",
+        "the refusal names the missing input and how to supply it"
+    );
     assert!(
         !home.join("runs").exists(),
         "no run must be created when input resolution fails"
@@ -651,8 +674,12 @@ fn mode_is_refused_since_modes_have_no_schema_yet() {
 
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "ship"]);
     assert!(!run.status.success());
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("mode"), "got: {stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stderr).trim_end(),
+        "error: workflow `only-node` declares no mode `ship` — declared modes: \
+         (none — this workflow declares no modes:)",
+        "the refusal names the unknown mode and that the workflow declares none"
+    );
 }
 
 // --- list, doctor, cancel ----------------------------------------------
@@ -684,10 +711,11 @@ nodes:
 
     let list = yunta_in!(&repo, &home, &["list"]);
     assert!(list.status.success());
-    let text = stdout(&list);
-    assert!(text.contains("greet: Says hello"), "got: {text}");
-    assert!(text.contains("greeting"), "got: {text}");
-    assert!(text.contains("optional"), "got: {text}");
+    assert_eq!(
+        stdout(&list).trim_end(),
+        "greet: Says hello\n  --input greeting=... (string, optional) — What to say",
+        "list shows the workflow, its description, and its one optional input"
+    );
 }
 
 #[test]
@@ -708,10 +736,11 @@ fn list_runs_shows_local_runs_with_their_progress_summary() {
 
     let list = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(list.status.success());
-    let text = stdout(&list);
-    assert!(text.contains(&run_id), "got: {text}");
-    assert!(text.contains("nodes"), "got: {text}");
-    assert!(text.contains("finished"), "got: {text}");
+    assert_eq!(
+        stdout(&list).trim_end(),
+        format!("{run_id}: 1/1 nodes · 0 reroutes · finished"),
+        "list --runs shows the run id with its derived progress summary"
+    );
 }
 
 #[test]
@@ -774,12 +803,17 @@ nodes:
     assert!(run.status.success());
     let run_id = run_id_from(&run);
 
-    let status = yunta_in!(&repo, &home, &["status", &run_id]);
-    assert!(status.status.success());
-    let text = stdout(&status);
-    assert!(text.contains("2/2 nodes"), "got: {text}");
-    assert!(text.contains("0 reroutes"), "got: {text}");
-    assert!(text.contains("finished"), "got: {text}");
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    assert!(
+        status.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        state["summary"], "2/2 nodes · 0 reroutes · finished",
+        "the normative counters read both nodes done, no reroutes, finished"
+    );
 }
 
 #[test]
@@ -822,7 +856,12 @@ nodes:
 
     assert!(!output.status.success());
     let text = stdout(&output);
-    assert!(text.contains("paused"), "got: {text}");
+    let run_id = run_id_from(&output);
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with(&format!("run {run_id}: paused — "))),
+        "a gate with no TTY degrades to a paused run instead of hanging: {text}"
+    );
 }
 
 #[test]
@@ -1973,8 +2012,11 @@ nodes:
 
     let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "nonexistent"]);
     assert!(!resolve.status.success());
-    let err = String::from_utf8_lossy(&resolve.stderr);
-    assert!(err.contains("retry") && err.contains("abort"), "got: {err}");
+    assert_eq!(
+        String::from_utf8_lossy(&resolve.stderr).trim_end(),
+        "error: option `nonexistent` isn't valid here — declared options: retry, abort",
+        "the rejection lists exactly the options on this decision's menu"
+    );
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(

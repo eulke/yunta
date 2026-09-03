@@ -43,7 +43,11 @@ fn graph_renders_mermaid_with_depends_on_and_differentiated_reroute_edges() {
 
     assert!(text.trim_start().starts_with("graph TD"), "got: {text}");
     for id in ["lint", "fix-lint", "tests"] {
-        assert!(text.contains(id), "missing node `{id}` in: {text}");
+        let declaration = format!("  {id}[\"{id}\"]");
+        assert!(
+            text.lines().any(|l| l == declaration),
+            "missing node declaration for `{id}` in: {text}"
+        );
     }
     // depends_on: tests depends on lint -> lint runs before tests.
     assert!(

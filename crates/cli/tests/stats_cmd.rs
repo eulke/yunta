@@ -45,7 +45,10 @@ fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
         String::from_utf8_lossy(&stats.stderr)
     );
     let text = stdout(&stats);
-    assert!(text.contains("CPTV"), "got: {text}");
+    assert!(
+        text.lines().any(|l| l == "CPTV: n/a (no task done yet)"),
+        "got: {text}"
+    );
 
     for line in text.lines() {
         assert!(
@@ -124,8 +127,15 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let workflow_stats = yunta_in!(&repo, &home, &["stats", "--workflow", "bash-only-stats"]);
     assert!(workflow_stats.status.success());
     let text = stdout(&workflow_stats);
-    assert!(text.contains("4 run(s)"), "got: {text}");
-    assert!(text.contains("past run(s)"), "got: {text}");
+    assert!(
+        text.lines()
+            .any(|l| l == "workflow `bash-only-stats` — 4 run(s)"),
+        "got: {text}"
+    );
+    assert!(
+        text.lines().any(|l| l.starts_with("4 past run(s) · ")),
+        "got: {text}"
+    );
 }
 
 #[test]

@@ -541,7 +541,11 @@ fn debug_of_a_session_request_never_prints_secrets() {
         !debug.contains("bearer-secret"),
         "the token never prints: {debug}"
     );
-    assert!(debug.contains("[redacted]"), "{debug}");
+    assert_eq!(
+        debug.matches("[redacted]").count(),
+        2,
+        "both the env value and the endpoint token are redacted: {debug}"
+    );
 }
 
 /// `adapter_settings.sandbox` is the mode the `Edit` profile runs

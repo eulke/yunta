@@ -63,10 +63,13 @@ fn add_refuses_a_publisher_outside_a_non_empty_allow_list() {
         &["pack", "add", globex.path().to_str().unwrap()]
     );
     assert!(!out.status.success());
-    let err = stderr(&out);
-    assert!(err.contains("globex"), "{err}");
-    assert!(err.contains("permissions.packs.publishers.allow"), "{err}");
-    assert!(err.contains("repo"), "must cite the declaring layer: {err}");
+    assert_eq!(
+        stderr(&out).trim_end(),
+        "error: publisher `globex` is not in `permissions.packs.publishers.allow` \
+         (declared by the repo config layer) — allowed: acme. Add the publisher there, \
+         or install a pack from an allowed publisher.",
+        "the refusal names the publisher, the policy field and the declaring layer"
+    );
     assert!(
         !repo.join(".yunta/packs/globex").exists(),
         "a refused add must not vendor anything"
@@ -94,9 +97,13 @@ fn executors_deny_refuses_even_with_yes() {
         &["pack", "add", source.path().to_str().unwrap(), "--yes"]
     );
     assert!(!out.status.success());
-    let err = stderr(&out);
-    assert!(err.contains("deny"), "{err}");
-    assert!(err.contains("repo"), "must cite the declaring layer: {err}");
+    assert_eq!(
+        stderr(&out).trim_end(),
+        "error: this pack declares 1 executor(s) and `permissions.packs.executors` is `deny` \
+         (declared by the repo config layer) — `--yes` cannot override a permissions ceiling. \
+         Change the policy there, or install a pack without executors.",
+        "the refusal names the deny policy, the declaring layer and that --yes cannot override it"
+    );
     assert!(
         !repo.join(".yunta/packs/acme").exists(),
         "deny must refuse even with --yes"
@@ -164,11 +171,13 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
     );
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
-    let vendored =
-        std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap();
-    assert!(
-        vendored.contains("1.0.0"),
-        "a refused update must leave the old version vendored: {vendored}"
+    let vendored: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        vendored["version"], "1.0.0",
+        "a refused update must leave the old version vendored"
     );
 
     let ok = yunta_in!(
@@ -177,9 +186,14 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
         &["pack", "update", "acme/tools-pack", INITIAL_BRANCH, "--yes"]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
-    let vendored =
-        std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap();
-    assert!(vendored.contains("2.0.0"), "{vendored}");
+    let vendored: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        vendored["version"], "2.0.0",
+        "the confirmed update re-vendors the pack at the new version"
+    );
 }
 
 #[test]
@@ -217,7 +231,12 @@ fn update_refuses_a_publisher_no_longer_allowed() {
         "{}",
         stderr(&out)
     );
-    let vendored =
-        std::fs::read_to_string(repo.join(".yunta/packs/globex/tools-pack/pack.yaml")).unwrap();
-    assert!(vendored.contains("1.0.0"), "{vendored}");
+    let vendored: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(repo.join(".yunta/packs/globex/tools-pack/pack.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        vendored["version"], "1.0.0",
+        "an update refused on the new allow-list keeps the old version vendored"
+    );
 }

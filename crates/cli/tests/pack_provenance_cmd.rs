@@ -94,9 +94,14 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
         &["pack", "update", "acme/review-pack", INITIAL_BRANCH]
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
-    let vendored_after_update =
-        std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
-    assert!(vendored_after_update.contains("2.0.0"));
+    let vendored_after_update: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        vendored_after_update["version"], "2.0.0",
+        "the pack on disk is now v2, so resume ignoring it is a real test"
+    );
 
     // The manifest on disk must be exactly what it was before the
     // update — resume never re-reads the pack.

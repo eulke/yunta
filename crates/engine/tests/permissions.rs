@@ -21,7 +21,10 @@ fn perms(deny: &[&str], allow: &[&str]) -> PermissionsConfig {
 fn a_denied_prefix_pattern_blocks_the_command_and_names_the_rule() {
     let violation = command_violation("sudo rm -rf /", Some(&perms(&["sudo *"], &[])));
     let rule = violation.expect("sudo must be blocked");
-    assert!(rule.contains("sudo *"), "must cite the pattern: {rule}");
+    assert_eq!(
+        rule,
+        "command `sudo rm -rf /` matches denied pattern `sudo *` (permissions.commands.deny)"
+    );
 }
 
 #[test]

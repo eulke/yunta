@@ -103,6 +103,9 @@ fn check_refuses_a_node_that_exceeds_the_packs_declared_ceiling() {
     let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
     assert!(!check_out.status.success());
     let text = stderr(&check_out);
-    assert!(text.contains("declares a ceiling"), "{text}");
-    assert!(text.contains("acme/review-pack"), "{text}");
+    assert!(
+        text.lines().any(|l| l
+            == "  node `draft` requests permissions `edit` but pack `acme/review-pack` declares a ceiling of `read-only` — lower the node's permissions or raise the pack's declared ceiling"),
+        "check names the node, the pack, and the ceiling the node exceeds: {text}"
+    );
 }

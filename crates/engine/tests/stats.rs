@@ -469,8 +469,10 @@ fn a_cap_below_the_historical_p90_produces_the_warning() {
     let estimation = prior_estimation(&history);
     let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
         .expect("cap 250 < p90 300 must warn");
-    assert!(warning.contains("250"), "must name the cap: {warning}");
-    assert!(warning.contains("300"), "must name the p90: {warning}");
+    assert_eq!(
+        warning,
+        "warning: `limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 run(s)) — the run may pause on its budget"
+    );
 }
 
 #[test]

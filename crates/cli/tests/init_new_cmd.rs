@@ -29,14 +29,30 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
         .is_file());
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
-    assert!(config.contains("project:"), "got: {config}");
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&config).unwrap();
+    assert_eq!(
+        parsed["project"]["name"], "repo",
+        "init writes a project section naming the repo: {config}"
+    );
 
     let gitignore = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
-    assert!(gitignore.contains(".yunta/runs/"), "got: {gitignore}");
+    assert!(
+        gitignore.lines().any(|l| l == ".yunta/runs/"),
+        "init ignores the run-state directory: {gitignore}"
+    );
 
     let out = stdout(&result);
-    assert!(out.contains("CLAUDE.md"), "got: {out}");
-    assert!(out.contains("doctor"), "got: {out}");
+    assert!(
+        out.lines().any(|l| l
+            == "suggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to that file):"),
+        "init points at CLAUDE.md without ever writing it: {out}"
+    );
+    assert!(
+        out.lines().any(
+            |l| l == "next: run `yunta doctor` to confirm everything above is actually usable."
+        ),
+        "init directs the user to `yunta doctor` next: {out}"
+    );
 }
 
 #[test]

@@ -142,7 +142,12 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
         listed.contains(&format!("acme/review-pack @ {INITIAL_BRANCH}")),
         "{listed}"
     );
-    assert!(listed.contains(") — ok"), "{listed}");
+    assert!(
+        listed
+            .lines()
+            .any(|l| l.starts_with("acme/review-pack @ ") && l.ends_with(") — ok")),
+        "the vendored pack verifies clean against the lock: {listed}"
+    );
 
     // Tamper with the vendored content directly (never through `add`) —
     // `list` must notice the mismatch against the lock, not just echo
@@ -194,9 +199,14 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
         stdout(&update_out)
     );
 
-    let vendored_manifest =
-        std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
-    assert!(vendored_manifest.contains("version: 2.0.0"));
+    let vendored_manifest: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        vendored_manifest["version"], "2.0.0",
+        "update re-vendors the manifest at the new version"
+    );
 
     let lock: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())

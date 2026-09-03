@@ -145,7 +145,10 @@ fn test_dir_runs_a_packs_own_cases_from_outside_its_root() {
     let out = yunta_in!(&repo, &home, &["test", "--dir", pack.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("2 case(s), 0 failed"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "2 case(s), 0 failed"),
+        "the pack's own two cases run and pass: {text}"
+    );
 }
 
 /// Uninstalling either pack leaves the engine's own capabilities

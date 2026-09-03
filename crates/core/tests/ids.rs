@@ -47,10 +47,16 @@ fn an_invalid_identifier_names_the_value_the_kind_and_the_rule() {
 
 #[test]
 fn a_node_id_is_a_short_name_or_a_fan_out_sibling() {
-    assert!("review".parse::<NodeId>().is_ok());
-    assert!("review@alt".parse::<NodeId>().is_ok());
+    assert_eq!("review".parse::<NodeId>().unwrap().as_str(), "review");
+    assert_eq!(
+        "review@alt".parse::<NodeId>().unwrap().as_str(),
+        "review@alt"
+    );
     for refused in ["review@", "@alt", "review@alt@x", "review@1", "a b@c"] {
-        assert!(refused.parse::<NodeId>().is_err(), "{refused:?}");
+        assert!(
+            matches!(refused.parse::<NodeId>(), Err(InvalidId { .. })),
+            "{refused:?}"
+        );
     }
 }
 
@@ -81,9 +87,10 @@ nodes:
     let error = yunta_core::yaml::parse::<Workflow>(yaml)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("review@alt"), "{error}");
-    assert!(error.contains("`@`"), "{error}");
-    assert!(error.contains("runners:"), "{error}");
+    assert_eq!(
+        error,
+        "`nodes[0]`: nodes: node `review@alt`: `@` is reserved for the fan-out siblings the manifest expands `runners:` into; an authored id is a letter followed by letters, digits, `_` or `-` at line 3 column 3"
+    );
 }
 
 #[test]
@@ -129,12 +136,25 @@ fn a_run_id_is_one_path_segment() {
 
 #[test]
 fn a_session_id_is_opaque_but_never_empty_or_control_characters() {
-    assert!("8f0c1e1a-3b2d-4c5e-9f7a-0b1c2d3e4f5a"
-        .parse::<SessionId>()
-        .is_ok());
-    assert!("thread with spaces".parse::<SessionId>().is_ok());
-    assert!("".parse::<SessionId>().is_err());
-    assert!("a\nb".parse::<SessionId>().is_err());
+    assert_eq!(
+        "8f0c1e1a-3b2d-4c5e-9f7a-0b1c2d3e4f5a"
+            .parse::<SessionId>()
+            .unwrap()
+            .as_str(),
+        "8f0c1e1a-3b2d-4c5e-9f7a-0b1c2d3e4f5a"
+    );
+    assert_eq!(
+        "thread with spaces".parse::<SessionId>().unwrap().as_str(),
+        "thread with spaces"
+    );
+    assert!(
+        matches!("".parse::<SessionId>(), Err(InvalidId { .. })),
+        "an empty session id is refused"
+    );
+    assert!(
+        matches!("a\nb".parse::<SessionId>(), Err(InvalidId { .. })),
+        "a session id with a control character is refused"
+    );
 }
 
 #[test]
@@ -163,7 +183,10 @@ fn a_pack_reference_is_publisher_slash_name() {
         assert!(refused.parse::<PackRef>().is_err(), "{refused:?}");
     }
     let message = rule_of("acme".parse::<PackRef>());
-    assert!(message.contains("publisher/name"), "{message}");
+    assert_eq!(
+        message,
+        "`acme` is not a valid pack reference: `publisher/name`, each one path segment"
+    );
 }
 
 #[test]
@@ -210,15 +233,9 @@ tasks:
     let error = yunta_core::yaml::parse::<Ledger>(yaml)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("tasks[0]"), "{error}");
-    assert!(error.contains("line 2"), "{error}");
-    assert!(
-        error.contains("`1-bad-id` is not a valid task id"),
-        "{error}"
-    );
-    assert!(
-        error.contains("a letter followed by letters, digits, `_` or `-`"),
-        "{error}"
+    assert_eq!(
+        error,
+        "`tasks[0].id`: tasks[0]: `1-bad-id` is not a valid task id: a letter followed by letters, digits, `_` or `-` at line 2 column 5"
     );
 }
 
@@ -245,8 +262,10 @@ declares:
     let error = yunta_core::yaml::parse::<PackManifest>(&former)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("roles"), "{error}");
-    assert!(error.contains("runners"), "{error}");
+    assert_eq!(
+        error,
+        "`requires.roles`: requires: unknown field `roles`, expected one of `runners`, `mcp_servers`, `commands` at line 5 column 3"
+    );
 }
 
 #[test]
@@ -261,8 +280,10 @@ declares:
     let error = yunta_core::yaml::parse::<PackManifest>(yaml)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("publisher"), "{error}");
-    assert!(error.contains("acme/evil"), "{error}");
+    assert_eq!(
+        error,
+        "`publisher`: `acme/evil` is not a valid publisher: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`"
+    );
 }
 
 #[test]

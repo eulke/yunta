@@ -57,7 +57,13 @@ nodes:
     let output = yunta(&["check", workflow.to_str().unwrap()]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("runner `planner`"));
+    assert!(
+        stderr
+            .lines()
+            .any(|l| l
+                == "  node `plan` references runner `planner`, which `runners:` does not define"),
+        "check names the unresolved runner and the field that must define it: {stderr}"
+    );
 }
 
 #[test]
@@ -103,7 +109,10 @@ fn a_missing_workflow_file_is_a_clean_error_not_a_panic() {
     let output = yunta(&["check", "/nonexistent/workflow.yaml"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("failed to read workflow"));
+    assert!(
+        stderr.starts_with("error: failed to read workflow at /nonexistent/workflow.yaml"),
+        "a missing workflow file is one clean read error, not a panic: {stderr}"
+    );
 }
 
 #[test]
@@ -114,7 +123,10 @@ fn malformed_yaml_is_a_clean_error_not_a_panic() {
     let output = yunta(&["check", workflow.to_str().unwrap()]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("failed to parse workflow"));
+    assert!(
+        stderr.starts_with("error: failed to parse workflow at "),
+        "malformed YAML is one clean parse error, not a panic: {stderr}"
+    );
 }
 
 #[test]
@@ -155,14 +167,10 @@ fn a_repo_re_allowing_an_org_denied_pattern_fails_check_citing_the_layer() {
     assert!(!output.status.success(), "check must refuse the re-allow");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("org"),
-        "must cite the ceiling layer: {stderr}"
+        stderr.lines().any(|l| l
+            == "  layer `repo` re-allows command pattern `sudo *` denied by layer `org` — permissions only narrow"),
+        "the refusal cites both layers and the re-allowed pattern: {stderr}"
     );
-    assert!(
-        stderr.contains("repo"),
-        "must cite the lower layer: {stderr}"
-    );
-    assert!(stderr.contains("sudo *"), "must cite the pattern: {stderr}");
 }
 
 #[test]
@@ -193,5 +201,9 @@ fn a_workflow_command_denied_by_the_org_layer_fails_check() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("sudo *"), "must cite the rule: {stderr}");
+    assert!(
+        stderr.lines().any(|l| l
+            == "  node `escalate`: command `sudo make install` matches denied pattern `sudo *` (permissions.commands.deny)"),
+        "the refusal cites the node, its command and the rule it matched: {stderr}"
+    );
 }

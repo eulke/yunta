@@ -45,12 +45,25 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
     let markdown = stdout(&receipt_out);
     assert!(markdown.starts_with(&format!("# Verified Work Receipt — run {run_id}")));
-    assert!(markdown.contains("baseline: not used by this workflow"));
-    assert!(markdown.contains("event chain:"));
+    assert!(
+        markdown
+            .lines()
+            .any(|l| l == "- baseline: not used by this workflow"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.lines().any(|l| l.starts_with("- ✓ event chain: ")),
+        "{markdown}"
+    );
 
-    // A bash-only workflow has no ledger tasks at all — 0/0 criteria,
-    // the honest reading, never a manufactured pass.
-    assert!(markdown.contains("0/0 criteria green"), "{markdown}");
+    // A bash-only workflow has no ledger tasks at all — 0/0 criteria, the
+    // honest reading (marked ✗, not a green ✓), never a manufactured pass.
+    assert!(
+        markdown
+            .lines()
+            .any(|l| l == "- ✗ 0/0 criteria green (commands + exit codes below)"),
+        "{markdown}"
+    );
 
     let run_dir = home.join("runs").join(&run_id);
     let written_md = std::fs::read_to_string(run_dir.join("receipt.md")).unwrap();
@@ -116,9 +129,15 @@ fn receipt_refuses_a_run_that_has_not_finished() {
 
     let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(!receipt_out.status.success());
-    let err = stderr(&receipt_out);
-    assert!(err.contains("hasn't reached a terminal state"), "{err}");
-    assert!(err.contains("yunta status"), "{err}");
+    assert_eq!(
+        stderr(&receipt_out).trim_end(),
+        format!(
+            "error: run `{run_id}` hasn't reached a terminal state yet — \
+             `yunta status {run_id}` shows where it is; a receipt is only generated \
+             once a run finishes"
+        ),
+        "the refusal explains the run is not terminal and points at `yunta status`"
+    );
 
     let run_dir = home.join("runs").join(&run_id);
     assert!(!run_dir.join("receipt.md").exists());

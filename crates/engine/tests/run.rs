@@ -242,7 +242,10 @@ sessions:
 
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("re-route"), "got: {reason}");
+            assert_eq!(
+                reason,
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -263,7 +266,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("build"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 3: "),
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
@@ -300,7 +303,10 @@ sessions:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("plan") {
         Some(NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("plan.yaml"), "got: {outcome}");
+            assert_eq!(
+                *outcome,
+                "node `plan` declared artifact `plan.yaml` but never produced it"
+            );
         }
         other => panic!("expected Failed, got {other:?}"),
     }
@@ -388,7 +394,10 @@ nodes:
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("before hook"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `implement` failed: before hook `exit 1` failed"
+        ),
         other => panic!("expected Paused, got {other:?}"),
     }
 }
@@ -411,7 +420,9 @@ nodes:
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("after hook"), "got: {reason}"),
+        RunTerminal::Paused { reason } => {
+            assert_eq!(reason, "node `only` failed: after hook `exit 1` failed")
+        }
         other => panic!("expected Paused, got {other:?}"),
     }
 }
@@ -458,7 +469,10 @@ nodes:
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("before hook"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `only` failed: before hook `tail -f /dev/null` failed"
+        ),
         other => panic!("expected Paused, got {other:?}"),
     }
 }
@@ -671,8 +685,10 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("q1"), "reason must name q1: {reason}");
-            assert!(reason.contains("q2"), "reason must name q2: {reason}");
+            assert_eq!(
+                *reason,
+                "node `ask` asked 2 question(s) awaiting an answer: q1, q2"
+            );
         }
         other => panic!("expected the run to pause on unanswered questions, got {other:?}"),
     }
@@ -879,7 +895,7 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("q1"), "must cite the missing q1: {reason}");
+            assert_eq!(*reason, "node `ask` asked 1 question(s) awaiting an answer: required question `q1` has no answer");
         }
         other => panic!("an incomplete reply must pause, got {other:?}"),
     }
@@ -1345,7 +1361,7 @@ nodes:
     .unwrap();
 
     match report.terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("only"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(reason, "node(s) `only` were running with no terminal event when the engine last stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether they finished; verify manually before resuming"),
         other => panic!("expected Paused, got {other:?}"),
     }
     // Never restarted: no second node_started attempt was ever emitted.
@@ -1462,7 +1478,10 @@ nodes:
 
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("load-test"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `pre-launch` failed: child `load-test` failed under join: all"
+        ),
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
@@ -1734,8 +1753,10 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("below"), "unexpected reason: {reason}");
-            assert!(reason.contains("40"), "unexpected reason: {reason}");
+            assert_eq!(
+                reason,
+                "node `coverage` failed: coverage 40% is below the 80% threshold"
+            );
         }
         other => panic!("expected the coverage gate to pause the run, got {other:?}"),
     }
@@ -1775,7 +1796,10 @@ sessions:
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("f1")),
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `gate` failed: 1 finding(s) at or above Major: f1"
+        ),
         other => panic!("expected the gate to pause the run, got {other:?}"),
     }
 }
@@ -1837,9 +1861,7 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 
     let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert!(progress.contains("- **write** — Writes the output file"));
-    assert!(progress.contains("- **verify** — verify"));
-    assert!(progress.contains("_none_"), "nothing should have failed");
+    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **write** — Writes the output file\n  outcome: exit 0\n- **verify** — verify\n  outcome: exit 0\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
 }
 
 #[tokio::test]
@@ -1874,9 +1896,7 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
 
     let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert!(progress.contains("- **review** — Reviews the diff for issues"));
-    assert!(progress.contains("artifact:"));
-    assert!(progress.contains("findings.yaml"));
+    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  outcome: reviewed\n  artifact: artifacts/findings.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
 }
 
 const CONFIG_WITH_EXECUTOR: &str = r#"
@@ -1965,10 +1985,9 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("exited 1"), "unexpected reason: {reason}");
-            assert!(
-                reason.contains("threshold not met"),
-                "unexpected reason: {reason}"
+            assert_eq!(
+                reason,
+                "node `probe` failed: executor `probe` exited 1: threshold not met"
             );
         }
         other => panic!("expected the run to pause, got {other:?}"),
@@ -1999,7 +2018,10 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("timeout"), "unexpected reason: {reason}");
+            assert_eq!(
+                reason,
+                "node `probe` failed: executor `probe` exceeded its 1s timeout"
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -2095,7 +2117,7 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("denied"), "must cite the rule: {reason}");
+            assert_eq!(reason, "node `build` failed: command `echo forbidden-marker` matches denied pattern `*forbidden-marker*` (permissions.commands.deny)");
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -2204,7 +2226,13 @@ permissions:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("denied"), "must cite the rule: {reason}");
+            assert_eq!(
+                reason,
+                format!(
+                    "node `probe` failed: command `{}` matches denied pattern `*probe.py` (permissions.commands.deny)",
+                    bench.worktree.join("probe.py").display()
+                )
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -2463,7 +2491,11 @@ nodes:
 
     // task-a must have succeeded and stayed succeeded, unaffected by
     // task-b's fate.
-    assert_eq!(state.nodes.get("implement"), state.nodes.get("implement"),);
+    assert_eq!(
+        state.tasks.get("task-a"),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "task-a stays Done regardless of task-b's fate"
+    );
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let a_statuses: Vec<_> = events
         .iter()
@@ -2516,10 +2548,17 @@ nodes:
     // a.txt" once a.txt is permanently integrated) — that's expected, not
     // a test bug: the point here is task-a's own success was untouched.
     match terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("task-b")),
+        RunTerminal::Paused { reason } => assert!(
+            reason.contains("task-b"),
+            "the pause names the task the run gave up on: {reason}"
+        ),
         other => panic!("expected the run to eventually pause on task-b, got {other:?}"),
     }
-    let _ = state;
+    assert_eq!(
+        state.tasks.get("task-b"),
+        Some(&yunta_core::events::TaskStatus::Blocked),
+        "the run pauses because task-b exhausted its retries into Blocked"
+    );
 }
 
 #[tokio::test]
@@ -3101,7 +3140,10 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         let workflow = scope_expansion_workflow(mode, &[], None);
         let mut fixture = plan_session(&artifacts_dir, &ledger);
         fixture.push_str(&session);
-        let _ = bench.run(&workflow, &fixture).await;
+        // The terminal deliberately differs by mode (rules grants, ask
+        // pauses, deny blocks); this test's subject is the request event
+        // recorded below, which the `unwrap_or_else` then asserts exists.
+        bench.run(&workflow, &fixture).await;
 
         let events = bench.storage.events_for_run(&bench.run_id).unwrap();
         let requested = events
@@ -3615,7 +3657,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
         Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("brief.md"), "got: {outcome}");
+            assert_eq!(*outcome, "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -3647,7 +3689,16 @@ nodes:
     let fixture =
         "sessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
 
-    let _ = bench.run(workflow, fixture).await;
+    let (terminal, _state) = bench.run(workflow, fixture).await;
+    match terminal {
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+        ),
+        other => panic!(
+            "lint stays red, so the run pauses once its single reroute is exhausted, got {other:?}"
+        ),
+    }
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let sources = context_sources(&events, "fix-lint");
@@ -3801,7 +3852,7 @@ nodes:
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("inputs.idea"), "got: {reason}");
+            assert_eq!(reason, "node `only` failed: template references `{{inputs.idea}}`, which is not defined here");
         }
         other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
     }
@@ -4122,9 +4173,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     let (terminal, state) = bench.run(&workflow, fixture).await;
     match &state.nodes.get("ask") {
         Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("conventions.md"), "got: {outcome}");
-            assert!(outcome.contains("acme/pack-a"), "got: {outcome}");
-            assert!(outcome.contains("globex/pack-b"), "got: {outcome}");
+            assert_eq!(*outcome, "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }
@@ -4285,8 +4334,10 @@ async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
 
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("abort"), "got: {reason}");
-            assert!(reason.contains("not worth chasing today"), "got: {reason}");
+            assert_eq!(
+                reason,
+                "node `lint`'s gate was resolved to abort: not worth chasing today"
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -4308,7 +4359,10 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before_t
 
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("re-route"), "got: {reason}");
+            assert_eq!(
+                reason,
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -4627,7 +4681,9 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     .await
     .unwrap();
     match &first.terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("approve"), "got: {reason}"),
+        RunTerminal::Paused { reason } => {
+            assert_eq!(*reason, "gate `approve` (assignee: lead) awaits a decision")
+        }
         other => panic!("headless internal gate must pause, got {other:?}"),
     }
     // Unresolved: nothing recorded (re-asks on resume, same gate convention).
@@ -4710,7 +4766,7 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("budget"), "got: {reason}");
+            assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort");
         }
         other => panic!("an exhausted budget with no surface must pause, got {other:?}"),
     }
@@ -4783,7 +4839,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
         .await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("budget"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort"),
         other => panic!("abort must pause the run, got {other:?}"),
     }
     assert_eq!(state.nodes.get("fix"), None);
@@ -4871,7 +4927,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     .await
     .unwrap();
     match &first.terminal {
-        RunTerminal::Paused { reason } => assert!(reason.contains("budget"), "got: {reason}"),
+        RunTerminal::Paused { reason } => assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort"),
         other => panic!("expected the headless invocation to pause, got {other:?}"),
     }
 
@@ -5161,7 +5217,7 @@ sessions:
         .find(|m| m.message_type == yunta_core::events::AgentMessageType::Note)
         .unwrap();
     let summary = note.text.as_deref().unwrap_or_default();
-    assert!(summary.contains("bytes"), "got: {summary}");
+    assert_eq!(summary, "41 bytes, sha256 052f9656f4d7");
 
     let usage = messages
         .iter()
@@ -5234,7 +5290,10 @@ sessions:
     ));
     match state.nodes.get("slow-loop") {
         Some(NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("interrupted"), "got: {outcome}");
+            assert_eq!(
+                *outcome,
+                "interrupted: a sibling in this join: any group finished first"
+            );
         }
         other => panic!("the losing loop must be recorded interrupted, got {other:?}"),
     }
@@ -5274,7 +5333,10 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.get("slow-check") {
         Some(NodeState::Failed { outcome, .. }) => {
-            assert!(outcome.contains("interrupted"), "got: {outcome}");
+            assert_eq!(
+                *outcome,
+                "interrupted: a sibling in this join: any group finished first"
+            );
         }
         other => panic!("the losing check must be recorded interrupted, got {other:?}"),
     }
@@ -5403,8 +5465,13 @@ sessions:
         run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert!(reason.contains("grill"), "got: {reason}");
-            assert!(reason.contains("skills.paths"), "got: {reason}");
+            assert_eq!(
+                *reason,
+                format!(
+                    "node `work` failed: skill `grill` not found under `{}` — add the directory, fix `skills.paths` in the config, or install the pack that declares it",
+                    bench.worktree.join(".yunta/skills").display()
+                )
+            );
         }
         other => panic!("a missing skill must fail the node, got {other:?}"),
     }
@@ -5489,7 +5556,7 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
         .join(".yunta/knowledge/distilled/distiller")
         .join(bench.run_id.as_str());
     let copied = std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land");
-    assert!(copied.contains("DISTILLED-MARKER"));
+    assert_eq!(copied, "DISTILLED-MARKER: the durable decision\n");
 
     let provenance: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
@@ -6071,8 +6138,23 @@ nodes:
     // The corrupt log is exactly the one you most want exported — the
     // forensic copy exists even though the run errored.
     let exported = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-    assert!(exported.contains("node_finished"));
-    assert!(exported.contains("run_created"));
+    let kinds: Vec<String> = exported
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .unwrap_or_else(|e| panic!("each exported line is canonical JSON ({line:?}): {e}"))
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .expect("each event line names its kind")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        ["run_created", "node_finished", "run_resumed"],
+        "the forensic export preserves every event even though the run errored: {exported}"
+    );
 }
 
 // --- on_interrupt: resume_session -------------------------------------

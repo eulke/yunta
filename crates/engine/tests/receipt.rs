@@ -163,13 +163,33 @@ fn renders_the_json_receipt_as_pretty_printed_structured_data() {
     }
 }
 
+const EXPECTED_MARKDOWN_NO_BASELINE: &str = "\
+# Verified Work Receipt — run run-2026-08-21-0001
+
+workflow: `release-cycle` · mode: `default` · state: Done
+
+- ✓ 3/3 criteria green (commands + exit codes below)
+- baseline: not used by this workflow
+- ✓ scope: 4 file(s) touched, 0 violation(s)
+- ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
+- cost: 1540 tokens (1200 in / 340 out) · CPTV: 770.0 tokens/task · 2 reroute(s)
+- ✓ event chain: 10 event(s), hash-linked, replayable
+
+## Criteria
+
+- ✓ `T001` — `test -f hello.txt` (exit 0)
+- ✓ `T002` — `cargo test -p yunta-core` (exit 0)
+- ✓ `T002` — `cargo clippy --workspace -- -D warnings` (exit 0)
+";
+
 #[test]
 fn baseline_absent_never_invents_a_zero_regression_line() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
     receipt.baseline = None;
-    let markdown = render_receipt_markdown(&receipt);
-    assert!(markdown.contains("baseline: not used by this workflow"));
-    assert!(!markdown.contains("regression"));
+    assert_eq!(
+        render_receipt_markdown(&receipt),
+        EXPECTED_MARKDOWN_NO_BASELINE
+    );
 }
 
 // --- derivation: build_receipt over a real run's own log --------------------
@@ -395,7 +415,10 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     // panicking or needing extra data — same contract a real `pr` node
     // relies on.
     let markdown = render_receipt_markdown(&receipt);
-    assert!(markdown.contains("Reviewed by 2 independent runner(s)"));
+    assert!(
+        markdown.contains("Reviewed by 2 independent runner(s)"),
+        "got: {markdown}"
+    );
     render_receipt_json(&receipt).unwrap();
 }
 
