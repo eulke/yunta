@@ -7,50 +7,21 @@
 //! never waiting on one that was never going to run.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, Clock, ConfigLayer, ModeName, RunId, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunError, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{init_repo, FixedClock};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
 static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
 
 const WORKFLOW: &str = r#"
 name: mode-scenario

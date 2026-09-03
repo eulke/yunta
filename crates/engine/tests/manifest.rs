@@ -1,26 +1,8 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{build_manifest, ManifestError};
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed");
-}
-
-fn init_repo(dir: &Path) {
-    git(dir, &["init", "-q"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "user.name", "Test"]);
-    std::fs::write(dir.join(".gitkeep"), "").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "initial"]);
-}
+use yunta_testkit::{git_output, init_repo};
 
 fn workflow(yaml: &str) -> Workflow {
     serde_yaml::from_str(yaml).unwrap()
@@ -178,12 +160,7 @@ fn base_commit_is_the_repository_head() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let head = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
+    let head = git_output(dir.path(), &["rev-parse", "HEAD"]);
 
     let manifest = build_manifest(
         &workflow(WORKFLOW),

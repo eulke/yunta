@@ -10,69 +10,19 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, Clock, ConfigLayer, RunId, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, CreateRunParams, RunEnv, RunTerminal,
+    DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
+use yunta_testkit::{git, write, ApproveEverything, FixedClock};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
 static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&Utc)
-    }
-}
-
-/// Always picks the escalation's first option — for `ship`'s
-/// `[approve]` (the default single option), that's approval; the
-/// same stand-in `workflow_compose.rs`'s own release-cycle test uses.
-struct ApproveEverything;
-
-#[async_trait::async_trait]
-impl HumanInteraction for ApproveEverything {
-    async fn resolve(
-        &self,
-        escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        Some(yunta_core::events::GateResolvedPayload {
-            chosen_option: escalation.options.first().map(|o| o.id.clone()),
-            resolved_by: Some("test".to_string()),
-            free_text: None,
-            approved_sha: None,
-        })
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn write(path: &Path, contents: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, contents).unwrap();
-}
 
 const CONFIG: &str = r#"
 project:
@@ -228,7 +178,7 @@ sessions:
         clock: std::sync::Arc::new(FixedClock),
         ids: &IDS,
         max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &ApproveEverything,
+        human_interaction: &ApproveEverything::new("test"),
         forge: None,
         cancel: None,
         adapter_override: None,
