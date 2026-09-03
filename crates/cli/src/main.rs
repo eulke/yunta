@@ -2,6 +2,18 @@
 //! clap, delegate everything else to the library crates and the command
 //! modules.
 
+// A panic is a bug, never a fallible path: production returns a typed
+// error instead of unwrapping, expecting, or panicking. Tests are the one
+// place a failed assertion is meant to abort — `clippy.toml` lifts these
+// there, and integration tests are separate crates this attribute never
+// reaches.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 mod commands;
 mod graph;
 mod human_interaction;

@@ -764,6 +764,9 @@ impl schemars::JsonSchema for Seq {
 /// Test convenience: a literal that is not a position panics. Production
 /// code takes the seq storage assigned.
 #[cfg(any(test, feature = "testkit"))]
+// A bad literal in a fixture is a test-authoring mistake, meant to abort
+// the test loudly — the one place a panic is the right answer.
+#[allow(clippy::panic)]
 impl From<u64> for Seq {
     fn from(value: u64) -> Self {
         match i64::try_from(value).ok().map(Seq::try_from) {

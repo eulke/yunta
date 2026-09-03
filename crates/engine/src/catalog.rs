@@ -168,35 +168,37 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
         }
     }
 
-    match candidates.len() {
-        0 => Err(CatalogError::NotFound {
-            name: name.to_string(),
-            repo_path,
-            publisher: publisher.to_string(),
-            workflow: workflow.to_string(),
-        }),
-        1 => {
-            let (pack_name, path) = candidates.into_iter().next().unwrap();
-            Ok(ResolvedWorkflow {
-                path,
-                origin: WorkflowOrigin::Pack {
-                    publisher: publisher_id,
-                    pack_name,
-                },
-            })
-        }
-        count => Err(CatalogError::Ambiguous {
+    if candidates.len() > 1 {
+        return Err(CatalogError::Ambiguous {
             name: name.to_string(),
             publisher: publisher.to_string(),
             workflow: workflow.to_string(),
-            count,
+            count: candidates.len(),
             candidates: candidates
                 .iter()
                 .map(|(pack_name, _)| pack_name.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
-        }),
+        });
     }
+    // Exactly one match resolves; an empty set is `NotFound` — the
+    // `else` here is the zero case, so taking the single element needs no
+    // unwrap.
+    let Some((pack_name, path)) = candidates.into_iter().next() else {
+        return Err(CatalogError::NotFound {
+            name: name.to_string(),
+            repo_path,
+            publisher: publisher.to_string(),
+            workflow: workflow.to_string(),
+        });
+    };
+    Ok(ResolvedWorkflow {
+        path,
+        origin: WorkflowOrigin::Pack {
+            publisher: publisher_id,
+            pack_name,
+        },
+    })
 }
 
 /// Every pack vendored under `.yunta/packs/<publisher>/` whose manifest

@@ -45,6 +45,9 @@ impl SeqIdSource {
 }
 
 #[cfg(any(test, feature = "testkit"))]
+// A deterministic id source for tests: `<prefix>-<n>` is a run id by
+// construction, so a fixture whose prefix breaks that aborts the test.
+#[allow(clippy::expect_used)]
 impl IdSource for SeqIdSource {
     fn mint_run_id(&self, _at: DateTime<Utc>) -> RunId {
         let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

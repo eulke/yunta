@@ -189,9 +189,16 @@ pub(super) async fn gate_exhausted(
         .await?;
         Ok(None)
     } else if resolution.chosen_option.as_deref() == Some(ReservedOption::Promote.as_str()) {
-        // `suggested_mode` must be `Some` here — `"promote"` only ever
-        // appeared as an option when it was.
-        let next_mode = suggested_mode.expect("promote option implies a next mode");
+        // `"promote"` only ever appears as an option when a successor
+        // mode was carried with it; a run whose log offers `promote`
+        // without one is corrupt, reported rather than unwrapped.
+        let Some(next_mode) = suggested_mode else {
+            return Err(RunError::Broken {
+                diagnostic: format!(
+                    "node `{node}` chose `promote` but its gate carried no successor mode"
+                ),
+            });
+        };
         ctx.emit(
             None,
             EventPayload::PromotionSignaled(PromotionSignaledPayload {

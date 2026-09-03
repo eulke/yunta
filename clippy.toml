@@ -1,0 +1,7 @@
+# A panic is a bug, never a fallible path: production code returns a
+# typed error instead of unwrapping, expecting, or panicking. Tests are
+# the one place a failed assertion is meant to abort, so the restriction
+# lints in `[workspace.lints.clippy]` are lifted there.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

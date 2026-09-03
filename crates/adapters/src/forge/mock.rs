@@ -9,6 +9,11 @@
 //! `execute_run` call (simulating "person A's machine, a later
 //! `resume`") polls the same state through the ordinary `Forge` trait.
 
+// A test double whose state lives behind a `Mutex`: the lock is only
+// ever poisoned by a test that already panicked while holding it, so a
+// double has nothing to recover and unwrapping is the honest response.
+#![allow(clippy::unwrap_used)]
+
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;

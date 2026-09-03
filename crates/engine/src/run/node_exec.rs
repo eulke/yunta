@@ -179,9 +179,14 @@ pub(super) async fn execute_node(
         // the only other way a node reaches this function without going
         // through the top-level scheduler (`parallel`'s own children).
         NodeKind::Gate { .. } => {
-            unreachable!(
-                "kind: gate never dispatches through execute_node — see this arm's own comment"
-            )
+            return Err(RunError::Broken {
+                diagnostic: format!(
+                    "node `{}` is a `kind: gate` but reached node execution, which only \
+                     dispatches sessions and checks — a gate resolves through its own \
+                     scheduler step (see this arm's own comment)",
+                    node.id
+                ),
+            });
         }
     };
     Ok(end)

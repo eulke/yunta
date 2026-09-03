@@ -91,11 +91,25 @@ fn stats_run(run_id: &RunId, json: bool) -> ExitCode {
 
     if json {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
-        println!("{}", serde_json::to_string_pretty(&dto).unwrap());
-    } else {
-        render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
+        return print_json(&dto);
     }
+    render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
     ExitCode::SUCCESS
+}
+
+/// Prints a value as pretty JSON, reporting a serialization failure as a
+/// diagnostic and a failing exit rather than unwrapping it.
+fn print_json<T: serde::Serialize>(value: &T) -> ExitCode {
+    match serde_json::to_string_pretty(value) {
+        Ok(text) => {
+            println!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: could not serialize output as JSON: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
@@ -127,14 +141,13 @@ fn stats_workflow(workflow_name: &str, json: bool) -> ExitCode {
 
     if json {
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
-        println!("{}", serde_json::to_string_pretty(&dto).unwrap());
-    } else {
-        render_workflow_history(workflow_name, &history);
-        if let Some(findings) = &findings {
-            let text = render_verification_findings(findings);
-            if !text.is_empty() {
-                println!("\n{text}");
-            }
+        return print_json(&dto);
+    }
+    render_workflow_history(workflow_name, &history);
+    if let Some(findings) = &findings {
+        let text = render_verification_findings(findings);
+        if !text.is_empty() {
+            println!("\n{text}");
         }
     }
     ExitCode::SUCCESS

@@ -101,8 +101,8 @@ impl ServerHandler for YuntaMcpServer {
 fn empty_schema() -> serde_json::Map<String, Value> {
     json!({"type": "object", "properties": {}})
         .as_object()
-        .unwrap()
-        .clone()
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn tool_definitions() -> Vec<Tool> {
@@ -131,9 +131,7 @@ fn tool_definitions() -> Vec<Tool> {
                 },
                 "required": ["workflow"],
             })
-            .as_object()
-            .unwrap()
-            .clone(),
+            .as_object().cloned().unwrap_or_default(),
         ),
         Tool::new(
             "workflow_status",
@@ -145,9 +143,7 @@ fn tool_definitions() -> Vec<Tool> {
                 "properties": {"run_id": {"type": "string"}},
                 "required": ["run_id"],
             })
-            .as_object()
-            .unwrap()
-            .clone(),
+            .as_object().cloned().unwrap_or_default(),
         ),
         Tool::new(
             "resume_run",
@@ -159,9 +155,7 @@ fn tool_definitions() -> Vec<Tool> {
                 "properties": {"run_id": {"type": "string"}},
                 "required": ["run_id"],
             })
-            .as_object()
-            .unwrap()
-            .clone(),
+            .as_object().cloned().unwrap_or_default(),
         ),
         Tool::new(
             "resolve_gate",
@@ -180,9 +174,7 @@ fn tool_definitions() -> Vec<Tool> {
                 },
                 "required": ["run_id", "option"],
             })
-            .as_object()
-            .unwrap()
-            .clone(),
+            .as_object().cloned().unwrap_or_default(),
         ),
     ]
 }
