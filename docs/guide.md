@@ -72,9 +72,13 @@ retry forever unattended.
 `scope: [globs]` on a `prompt` or `loop` node is a hard post-check boundary: after
 the session closes, the engine diffs what actually changed against those globs. An
 edit outside `scope` fails the node — not a warning, not something the agent can talk
-its way past. `permissions: read-only | edit | full` is the corresponding *pre-check*
-ceiling, mapped onto the adapter's own session profile so the agent's tools are
-constrained before it ever gets a chance to write outside scope.
+its way past. That diff is the *only* thing enforcing scope: no adapter today blocks
+an out-of-scope write while it happens, so an agent can write outside `scope` and the
+node fails afterward for it.
+
+`permissions: read-only | edit | full` is a separate, coarser ceiling, mapped onto the
+adapter's own session profile: it governs which *tools* the agent may use at all — a
+`read-only` node is handed no editing tools — not which files `scope` allows.
 
 Config-level `permissions:` (in `.yunta/config.yaml`, and any org/user layer above
 it) works the other way from every other config key: layers only ever *narrow*, never
