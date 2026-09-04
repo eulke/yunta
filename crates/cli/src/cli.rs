@@ -257,6 +257,13 @@ enum PackAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Scaffolds a new pack at `./<name>`: a manifest, one verified
+    /// workflow, a self-test config and case, and a README. Checks and
+    /// tests it on creation, so the scaffold passes from the first command.
+    New {
+        /// `publisher/name`.
+        pack: PackRef,
+    },
     /// Removes a pack's vendored directory and its lock entry.
     Remove {
         /// `publisher/name`.
@@ -348,6 +355,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             PackAction::Update { pack, r#ref, yes } => {
                 commands::pack::update(&pack, &r#ref, yes).await
             }
+            PackAction::New { pack } => commands::pack::new_pack(&pack).await,
             PackAction::Remove { pack } => commands::pack::remove(&pack),
             PackAction::List => commands::pack::list(),
             PackAction::Audit { pack } => commands::pack_audit::audit(&pack).await,

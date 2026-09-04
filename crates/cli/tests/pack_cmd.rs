@@ -500,3 +500,36 @@ fn update_keeps_the_installed_tree_when_the_new_ref_cannot_be_vendored() {
         lock_before
     );
 }
+
+#[test]
+fn pack_new_produces_a_pack_that_passes_check_and_test() {
+    let (_root, _upstream, repo, home) = setup();
+    let out = yunta_in!(&repo, &home, &["pack", "new", "acme/demo"]);
+    assert!(out.status.success(), "pack new failed: {}", stderr(&out));
+
+    let pack = repo.join("demo");
+    assert!(pack.join("pack.yaml").is_file(), "pack.yaml is written");
+    assert!(pack.join("README.md").is_file(), "a README is written");
+    assert!(
+        pack.join(".yunta/workflows/example.yaml").is_file(),
+        "a workflow is written"
+    );
+    assert!(
+        pack.join(".yunta/tests/example.yaml").is_file(),
+        "a test case is written"
+    );
+
+    // The scaffold passes its own test run, unassisted — the shape it
+    // teaches is a verified one from the first command.
+    let tested = yunta_in!(&repo, &home, &["test", "--dir", "demo"]);
+    assert!(
+        tested.status.success(),
+        "the scaffolded pack must pass `yunta test`: {}",
+        stderr(&tested)
+    );
+    assert!(
+        stdout(&tested).contains("0 failed"),
+        "test output: {}",
+        stdout(&tested)
+    );
+}

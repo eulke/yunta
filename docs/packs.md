@@ -116,9 +116,12 @@ prompts, config) already has.
 ## Creating a pack
 
 A pack is a directory with a `pack.yaml` manifest at its root, plus whatever
-workflows, skills, knowledge and docs it lists. There's no scaffolding
-command yet — copy the shape of [`packs/starter`](../packs/starter) (the
-smaller of the two examples) and adjust:
+workflows, skills, knowledge and docs it lists. `yunta pack new
+<publisher>/<name>` scaffolds one at `./<name>` — a manifest, one verified
+`example` workflow, a self-test config and case, and a README — then checks
+and runs it, so the scaffold passes from the first command. Or copy the
+shape of [`packs/starter`](../packs/starter) (the smaller of the two
+examples) and adjust:
 
 ```
 my-pack/
