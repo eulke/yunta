@@ -3,7 +3,11 @@
 //! `schema` writes the JSON Schema of every authored document and of
 //! one event of the log under `schemas/`, generated from the types that
 //! read them; `schema --check` verifies the committed files are exactly
-//! what the types emit, which is what CI runs.
+//! what the types emit, which is what CI runs. `smells` measures the
+//! rebuild's ratchet counts against `xtask/smells.baseline`; `smells
+//! --check` fails when one rises — both run in CI.
+
+mod smells;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -18,7 +22,9 @@ fn main() -> ExitCode {
     {
         ["schema"] => schema(Mode::Write),
         ["schema", "--check"] => schema(Mode::Check),
-        _ => Err("usage: cargo xtask schema [--check]".to_string()),
+        ["smells"] => smells::write(),
+        ["smells", "--check"] => smells::check(),
+        _ => Err("usage: cargo xtask <schema|smells> [--check]".to_string()),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
