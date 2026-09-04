@@ -25,8 +25,13 @@ negocio. Yunta no tiene daemon ni feature `serve`.
 **A-05 · Registry central de packs.** Búsqueda, ratings, `pack publish` con métricas
 agregadas.
 
-**A-06 · Firma criptográfica de packs y recibos.** El hash del lock da integridad, no
-autoría.
+**A-06 · Firma criptográfica de packs, recibos y la cadena de eventos.** El hash del
+lock y la cadena de hashes del event log (D102) dan integridad y orden —nadie alteró
+lo escrito— nunca autoría: quién lo escribió. La firma es la capa separada que agrega
+autenticidad. Forma propuesta: una firma detached sobre la cabeza de cadena que el
+recibo ya publica (el `event_hash` final) y sobre el hash del lock del pack,
+verificable sin reprocesar el contenido; la gestión de claves —qué identidad firma,
+dónde viven las claves— queda fuera de v1 y entra con su propio ADR de activación.
 
 **A-07 · Dependencias transitivas entre packs.** Deliberadamente fuera; si se
 habilita, profundidad acotada y sin resolución de grafos de versiones estilo npm.

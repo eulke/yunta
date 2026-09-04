@@ -18,6 +18,10 @@ Bloqueado en decisiones explícitas porque cada paso es una acción pública o d
 - Sitio de documentación público y separación de los packs de fábrica en repositorios propios.
 - Empujar el primer tag `vX.Y.Z`, que dispara todo lo anterior.
 
+### Deuda consciente
+
+Lo deliberadamente diferido —cada ítem requiere una decisión registrada antes de codearse— vive en [`deuda-consciente.md`](deuda-consciente.md): A-01…A-10. Entre ellos, A-06 registra la firma criptográfica (packs, recibos y la cadena de eventos del log) como la capa de autoría, separada de la integridad que el hash chain ya da, con su forma propuesta.
+
 ## Posturas cerradas
 
 Restricciones que se mantienen por decisión; reabrirlas requiere una decisión registrada.
