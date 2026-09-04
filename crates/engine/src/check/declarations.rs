@@ -2,21 +2,16 @@
 
 use super::*;
 
-/// Config values the schema parses but nothing implements yet
-/// must be refused, never accepted and ignored. Today that is
-/// `defaults.on_failure` beyond `pause` (the built behavior), and a
-/// `defaults.runner` that `runners:` doesn't define.
+/// Config `defaults:` values that only `check` can catch before a run:
+/// a `max_parallel_nodes` of zero (which would schedule nothing), and a
+/// `defaults.runner` that `runners:` doesn't define. Every
+/// `defaults.on_failure` value is now built, so none is refused here.
 pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     let Some(defaults) = &config.defaults else {
         return;
     };
     if defaults.max_parallel_nodes == Some(0) {
         errors.push(CheckError::MaxParallelNodesZero);
-    }
-    if let Some(on_failure) = defaults.on_failure {
-        if on_failure != yunta_core::DefaultOnFailure::Pause {
-            errors.push(CheckError::DefaultOnFailureUnsupported { on_failure });
-        }
     }
     if let Some(runner) = &defaults.runner {
         let defined = config

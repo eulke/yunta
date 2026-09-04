@@ -107,6 +107,10 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
             println!("run {run_id}: paused — {reason}");
             Outcome::Reported
         }
+        RunTerminal::Failed { reason } => {
+            println!("run {run_id}: failed — {reason}");
+            Outcome::Reported
+        }
         // `run`/`resume` always route a fresh `RunReport` through
         // `promote::drive_promotions` first — by the time anything
         // calls `report_outcome`, a `Promoted` terminal has already

@@ -85,7 +85,11 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
     .map_err(CliError::msg)?;
     // A user cancellation also releases `none`'s lock — the engine
     // process is exiting, and a Ctrl-C is designed to leave nothing held.
-    if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
+    if matches!(
+        report.terminal,
+        RunTerminal::Finished | RunTerminal::Failed { .. }
+    ) || root_cancel.is_cancelled()
+    {
         yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
     }
     Ok(super::report_outcome(run_id.as_str(), &report))

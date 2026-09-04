@@ -640,6 +640,18 @@ impl ConfigLayer {
             .unwrap_or_default()
     }
 
+    /// `defaults.on_failure`, with the schema's own default (`pause`)
+    /// applied — what a failed node with no `on_failure:` re-route of its
+    /// own does to the run: `pause` freezes it resumable, `abort` closes
+    /// it failed at once, `continue` skips the failed node's dependents
+    /// and closes failed once the rest of the graph has run.
+    pub fn resolved_on_failure(&self) -> DefaultOnFailure {
+        self.defaults
+            .as_ref()
+            .and_then(|defaults| defaults.on_failure)
+            .unwrap_or(DefaultOnFailure::Pause)
+    }
+
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
     /// hidden default: absent means unlimited, exactly as before.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {

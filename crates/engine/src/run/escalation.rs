@@ -201,6 +201,7 @@ fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleS
         events,
         manifest.max_parallel_nodes,
         manifest.config.resolved_on_interrupt(),
+        manifest.config.resolved_on_failure(),
         mode_nodes.as_ref(),
     );
     match step {

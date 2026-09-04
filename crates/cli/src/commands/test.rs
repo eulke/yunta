@@ -18,7 +18,7 @@
 //! A case names the `workflow`, the `mode` it runs in (absent: the whole
 //! graph), the `inputs` it provides (absent: each input's own default),
 //! the `worktree` seed (absent: an empty repository), the `fixture`, and
-//! an `expect` block with `final_state` (`finished` | `paused`), `nodes`
+//! an `expect` block with `final_state` (`finished` | `paused` | `failed`), `nodes`
 //! and `tasks`.
 
 use std::collections::{BTreeMap, HashMap};
@@ -76,6 +76,9 @@ struct Expect {
 enum FinalState {
     Finished,
     Paused,
+    /// The run closed as failed — a node failed under
+    /// `defaults.on_failure: abort | continue`.
+    Failed,
     /// Never actually reachable under `NoInteraction` — the `promote`
     /// option needs a live `HumanInteraction` to be chosen at all —
     /// kept for schema completeness rather than making `RunTerminal`'s
@@ -263,6 +266,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let got_state = match &report.terminal {
         RunTerminal::Finished => FinalState::Finished,
         RunTerminal::Paused { .. } => FinalState::Paused,
+        RunTerminal::Failed { .. } => FinalState::Failed,
         RunTerminal::Promoted { .. } => FinalState::Promoted,
     };
     if got_state != case.expect.final_state {

@@ -314,7 +314,11 @@ pub async fn run(
             // A user cancellation also releases `none`'s lock — the
             // engine process is exiting, and a Ctrl-C is designed to
             // leave nothing held.
-            if matches!(report.terminal, RunTerminal::Finished) || root_cancel.is_cancelled() {
+            if matches!(
+                report.terminal,
+                RunTerminal::Finished | RunTerminal::Failed { .. }
+            ) || root_cancel.is_cancelled()
+            {
                 yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
             }
             if json {
@@ -511,7 +515,7 @@ struct RunJson {
     schema_version: u32,
     run_id: String,
     /// `detached`, or the run's terminal: `finished`, `paused`,
-    /// `promoted`.
+    /// `failed`, `promoted`.
     outcome: &'static str,
 }
 
@@ -528,6 +532,7 @@ impl RunJson {
         let outcome = match &report.terminal {
             RunTerminal::Finished => "finished",
             RunTerminal::Paused { .. } => "paused",
+            RunTerminal::Failed { .. } => "failed",
             RunTerminal::Promoted { .. } => "promoted",
         };
         Self {

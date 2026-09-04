@@ -121,6 +121,7 @@ pub(crate) async fn execute_run_at_depth(
             &events,
             ctx.manifest.max_parallel_nodes,
             ctx.manifest.config.resolved_on_interrupt(),
+            ctx.manifest.config.resolved_on_failure(),
             mode_nodes.as_ref(),
         ) {
             ScheduleStep::Broken { diagnostic } => {
@@ -128,6 +129,7 @@ pub(crate) async fn execute_run_at_depth(
             }
             ScheduleStep::Finish => return steps::finish(&ctx, &mode_name).await,
             ScheduleStep::Pause { reason } => return pause(&ctx, reason).await,
+            ScheduleStep::Fail { reason } => return steps::run_failed(&ctx, reason).await,
             ScheduleStep::Reroute {
                 from,
                 to,

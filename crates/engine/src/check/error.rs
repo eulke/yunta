@@ -59,17 +59,6 @@ pub enum CheckError {
         glob_b: String,
     },
 
-    /// `defaults.on_failure` values beyond `pause` (today's
-    /// behavior) have no implementation — refused, never silently read
-    /// as `pause`.
-    #[error(
-        "`defaults.on_failure: {on_failure:?}` is not built yet — only `pause` is; remove \
-         the field or declare `pause`"
-    )]
-    DefaultOnFailureUnsupported {
-        on_failure: yunta_core::DefaultOnFailure,
-    },
-
     /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
     #[error("node `{node}` declares both `runner:` and `runners:` — use exactly one")]

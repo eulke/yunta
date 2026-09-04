@@ -654,6 +654,28 @@ async fn drive_child(
                 current_run_dir = successor.run_dir;
                 current_tree = successor.worktree;
             }
+            RunTerminal::Failed { reason } => {
+                // A child that closed itself as failed (`defaults.on_failure`)
+                // fails the workflow node — the link records the failure with
+                // its spend, and the diagnostic names the child.
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                        child_run_id: current_id.clone(),
+                        child_workflow_hash: current_manifest.workflow_hash.clone(),
+                        terminal_state: TerminalState::Failed,
+                        tokens: report.state.total_tokens,
+                    }),
+                )
+                .await?;
+                return fail(
+                    ctx,
+                    node,
+                    format!("child run `{current_id}` failed: {reason}"),
+                    false,
+                )
+                .await;
+            }
             RunTerminal::Paused { reason } => {
                 if ctx.root_cancel.is_cancelled() || cancel.is_cancelled() {
                     // The child paused because a cancellation reached

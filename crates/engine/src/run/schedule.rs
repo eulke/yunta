@@ -2,7 +2,7 @@
 //!
 //! `next_step` looks at the workflow and the event log and says what the
 //! run does next: execute a batch of independently-ready nodes (up to
-//! `max_parallel_nodes`), emit a re-route, pause, or finish. It performs
+//! `max_parallel_nodes`), emit a re-route, pause, fail, or finish. It performs
 //! no IO and holds no state of its own — the log is the state, which
 //! is what makes `yunta run` and `yunta resume` the same code path: both
 //! just keep asking "what's next" until the answer is terminal.
@@ -23,7 +23,7 @@
 use std::collections::HashSet;
 
 use yunta_core::events::{EventPayload, ResumePolicy, StoredEvent};
-use yunta_core::{ModeName, Node, NodeId, NodeKind, OnInterrupt, Seq, Workflow};
+use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Seq, Workflow};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState, RunState};
@@ -61,6 +61,15 @@ pub enum ScheduleStep {
         cause: String,
     },
     Pause {
+        reason: String,
+    },
+    /// A node failed with no re-route of its own and the run's
+    /// `defaults.on_failure` closes the run as failed rather than pausing:
+    /// `abort` at the first such failure, `continue` once every node not
+    /// blocked behind a failure has run. `reason` names a causing node,
+    /// the same shape a `Pause` reason takes. The imperative shell writes
+    /// `run_finished { terminal_state: Failed }` and stops.
+    Fail {
         reason: String,
     },
     /// A node's re-routes are exhausted — the one pause that
@@ -206,6 +215,7 @@ pub fn next_step(
     events: &[StoredEvent],
     max_parallel_nodes: u32,
     default_on_interrupt: OnInterrupt,
+    default_on_failure: DefaultOnFailure,
     mode_nodes: Option<&HashSet<NodeId>>,
 ) -> ScheduleStep {
     let state = derive(events);
@@ -437,9 +447,18 @@ pub fn next_step(
                         cause: outcome.clone(),
                     };
                 }
-                return ScheduleStep::Pause {
-                    reason: format!("node `{}` failed: {outcome}", node.id),
-                };
+                // No re-route of its own: `defaults.on_failure` decides.
+                // `abort` closes the run failed at this first failure;
+                // `pause` freezes it resumable; `continue` leaves the node
+                // failed and falls through, so its dependents stay
+                // unscheduled (their dependency is not `Finished`) while
+                // the rest of the graph keeps running.
+                let reason = format!("node `{}` failed: {outcome}", node.id);
+                match default_on_failure {
+                    DefaultOnFailure::Pause => return ScheduleStep::Pause { reason },
+                    DefaultOnFailure::Abort => return ScheduleStep::Fail { reason },
+                    DefaultOnFailure::Continue => {}
+                }
             }
             Some((reroute_seq, to)) => {
                 let corrective = hist(&to);
@@ -545,11 +564,28 @@ pub fn next_step(
             || (is_reroute_only_target(&node.id) && !state.nodes.contains_key(&node.id))
     });
     if all_finished {
-        ScheduleStep::Finish
-    } else {
-        ScheduleStep::Pause {
-            reason: "no node is runnable: pending nodes are blocked behind unresolved failures"
-                .to_string(),
+        return ScheduleStep::Finish;
+    }
+    // Not everything finished and nothing is runnable: the run is blocked
+    // behind a failure this pass left unresolved. Under `continue` that is
+    // the run's end — every node not behind the failure has run — so it
+    // closes failed, naming a node that failed; under `pause` it freezes
+    // resumable, as it always has.
+    if default_on_failure == DefaultOnFailure::Continue {
+        if let Some(reason) = nodes
+            .iter()
+            .find_map(|node| match state.nodes.get(&node.id) {
+                Some(NodeState::Failed { outcome, .. }) => {
+                    Some(format!("node `{}` failed: {outcome}", node.id))
+                }
+                _ => None,
+            })
+        {
+            return ScheduleStep::Fail { reason };
         }
+    }
+    ScheduleStep::Pause {
+        reason: "no node is runnable: pending nodes are blocked behind unresolved failures"
+            .to_string(),
     }
 }

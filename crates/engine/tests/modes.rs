@@ -83,10 +83,24 @@ impl Bench {
         run_id: &str,
         mode: &str,
     ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
+        self.run_with_config(workflow_yaml, run_id, mode, ConfigLayer::default())
+            .await
+    }
+
+    /// The one run driver — `run_workflow` is this with the default config
+    /// layer; the `on_failure` tests pass a layer that sets
+    /// `defaults.on_failure`.
+    async fn run_with_config(
+        &self,
+        workflow_yaml: &str,
+        run_id: &str,
+        mode: &str,
+        config: ConfigLayer,
+    ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
         let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
         let manifest = build_manifest(
             &workflow,
-            &ConfigLayer::default(),
+            &config,
             &self.worktree,
             &self.worktree,
             &HashMap::new(),
@@ -293,5 +307,102 @@ async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() 
         matches!(state.nodes.get("start"), Some(NodeState::Finished { .. })),
         "`start` must finish before the gate that transitively depends on it is asked; got {:?}",
         state.nodes.get("start")
+    );
+}
+
+/// A failing root (`boom`) with a dependent (`after`), plus an
+/// independent chain (`side` -> `tail`). `boom` declares no `on_failure`
+/// of its own, so `defaults.on_failure` decides what the run does.
+const ON_FAILURE_WORKFLOW: &str = r#"
+name: on-failure
+nodes:
+  - id: boom
+    kind: bash
+    run: "false"
+  - id: after
+    kind: bash
+    depends_on: [boom]
+    run: "true"
+  - id: side
+    kind: bash
+    run: "true"
+  - id: tail
+    kind: bash
+    depends_on: [side]
+    run: "true"
+"#;
+
+#[tokio::test]
+async fn on_failure_abort_ends_the_run() {
+    // `abort`: the first failed node with no re-route of its own closes
+    // the run as failed at once — nothing new starts after it, not even a
+    // node whose own dependencies are already satisfied (`tail`).
+    let bench = Bench::new();
+    let (terminal, state) = bench
+        .run_with_config(
+            ON_FAILURE_WORKFLOW,
+            "run-abort",
+            "default",
+            serde_yaml::from_str("defaults:\n  on_failure: abort\n").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(terminal, RunTerminal::Failed { .. }),
+        "abort closes the run as failed, got {terminal:?}"
+    );
+    assert!(
+        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        "the causing node is failed: {:?}",
+        state.nodes.get("boom")
+    );
+    assert_eq!(
+        state.nodes.get("tail"),
+        None,
+        "abort starts nothing after the failure, even a ready node"
+    );
+    assert_eq!(state.nodes.get("after"), None, "the dependent never ran");
+}
+
+#[tokio::test]
+async fn on_failure_continue_skips_dependents() {
+    // `continue`: the failed node's dependents are skipped (`after`), the
+    // rest of the graph runs to completion (`side` -> `tail`), and the run
+    // still closes as failed at the end.
+    let bench = Bench::new();
+    let (terminal, state) = bench
+        .run_with_config(
+            ON_FAILURE_WORKFLOW,
+            "run-continue",
+            "default",
+            serde_yaml::from_str("defaults:\n  on_failure: continue\n").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(terminal, RunTerminal::Failed { .. }),
+        "continue still closes the run as failed, got {terminal:?}"
+    );
+    assert!(
+        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        "the causing node is failed: {:?}",
+        state.nodes.get("boom")
+    );
+    assert_eq!(
+        state.nodes.get("after"),
+        None,
+        "a dependent of the failed node is skipped, never run"
+    );
+    assert!(
+        matches!(state.nodes.get("side"), Some(NodeState::Finished { .. })),
+        "an independent node runs: {:?}",
+        state.nodes.get("side")
+    );
+    assert!(
+        matches!(state.nodes.get("tail"), Some(NodeState::Finished { .. })),
+        "a dependent of an independent node runs: {:?}",
+        state.nodes.get("tail")
     );
 }
