@@ -407,7 +407,9 @@ Hallazgos y sus lecturas, cada uno acompañado del conteo que lo sostiene — si
 
 ## 8.8 Exportación de telemetría (OpenTelemetry, post-v1)
 
-Inerte por default (`telemetry.enabled: false`, T13.3): cuando se activa, el engine exporta cada run como **trace** y cada nodo como **span**, generados por **replay del event log** — nunca una fuente de verdad paralela, así que un run viejo puede exportarse retroactivamente si la telemetría se activa después, y jamás hay dos historias del mismo run.
+La clave de config `telemetry:` está retirada del schema hasta que este exportador exista (D121): una clave que el engine solo parsea y nunca aplica es una degradación silenciosa, así que vuelve junto con el exportador y su propio ADR de activación. Lo que sigue es el diseño que esa clave gobernará cuando llegue.
+
+Cuando se active, el engine exporta cada run como **trace** y cada nodo como **span**, generados por **replay del event log** — nunca una fuente de verdad paralela, así que un run viejo puede exportarse retroactivamente si la telemetría se activa después, y jamás hay dos historias del mismo run.
 
 Atributos de trace (`service.name: "yunta"`): `yunta.run_id`, `yunta.workflow`, `yunta.workflow_version`, `yunta.mode`, `yunta.manifest_hash`, `yunta.outcome`, `yunta.tokens_total`, `yunta.cptv`. Atributos de span, uno por nodo, proyectados uno a uno desde el event log: `yunta.node_id`, `yunta.node_kind`, `yunta.runner_role`, `yunta.runner_resolved` (adapter+model), `yunta.outcome`, `yunta.retries`, `yunta.tokens_input/output/cached`.
 

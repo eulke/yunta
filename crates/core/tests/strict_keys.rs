@@ -116,7 +116,7 @@ fn a_config_layer_refuses_unknown_keys_at_every_level() {
     let text = err::<ConfigLayer>("versio: 1\n");
     assert_eq!(
         text,
-        "`versio`: unknown field `versio`, expected one of `version`, `runners`, `adapters`, `mcp_servers`, `project`, `storage`, `paths`, `defaults`, `baseline`, `coverage`, `skills`, `permissions`, `limits`, `pricing`, `forge`, `secrets`, `telemetry`"
+        "`versio`: unknown field `versio`, expected one of `version`, `runners`, `adapters`, `mcp_servers`, `project`, `storage`, `paths`, `defaults`, `baseline`, `coverage`, `skills`, `permissions`, `limits`, `pricing`, `forge`, `secrets`"
     );
     let text = err::<ConfigLayer>("defaults:\n  on_failur: pause\n");
     assert_eq!(

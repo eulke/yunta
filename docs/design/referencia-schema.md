@@ -95,11 +95,6 @@ pricing:                            # opcional — sin esto, stats y recibo son 
 
 secrets:                            # nombres de env vars; valores JAMÁS acá
   - GITHUB_TOKEN
-
-telemetry:
-  enabled: false                    # inerte hasta que exista el exportador OTel; ver Contrato §8.8
-  endpoint: "http://localhost:4317" # OTLP; default un collector local
-  protocol: grpc                    # grpc | http
 ```
 
 ## Workflow de referencia: build-feature.yaml

@@ -256,8 +256,7 @@
       "type": "string",
       "enum": [
         "tty",
-        "mcp",
-        "pr"
+        "mcp"
       ]
     },
     "ChildRunCreatedPayload": {

@@ -1,11 +1,9 @@
 //! Layered config types: every group of the
 //! reference config parses and round-trips — `runners`, `adapters`,
 //! `mcp_servers`, `skills`, `baseline`/`coverage`, `storage`, `limits`,
-//! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets`,
-//! `telemetry` (the one sanctioned parse-and-hold group — inert until
-//! the telemetry exporter is built) and `version`. Each field
-//! entered with its consumer or an explicit refusal in `check` — never
-//! accepted and silently ignored.
+//! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets` and
+//! `version`. Each field entered with its consumer or an explicit refusal
+//! in `check` — never accepted and silently ignored.
 //!
 //! Merge semantics: maps merge key by key, more specific layer
 //! wins per key; arrays (like a role's candidate list) replace wholesale
@@ -259,27 +257,6 @@ pub enum DefaultOnFailure {
 #[serde(deny_unknown_fields)]
 pub struct PricingEntry {
     pub cost_per_1k_tokens: f64,
-}
-
-/// `telemetry:` — parsed so the reference config round-trips;
-/// **inert until the OTel exporter is built**, and the reference text itself says so:
-/// this is the one sanctioned parse-and-hold group.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol: Option<TelemetryProtocol>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TelemetryProtocol {
-    Grpc,
-    Http,
 }
 
 /// `limits:` — declared budgets and guards. Every field is
@@ -546,8 +523,6 @@ pub struct ConfigLayer {
     /// nothing undeclared reaches a session's env at all.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry: Option<TelemetryConfig>,
 }
 
 /// A path in a config layer that starts with `~` and cannot be
@@ -719,7 +694,6 @@ fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
             }
             secrets
         },
-        telemetry: more_specific.telemetry.or(base.telemetry),
         runners: merge_map_replacing_values(base.runners, more_specific.runners),
         adapters: merge_map_of_fields(
             base.adapters,

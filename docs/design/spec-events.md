@@ -305,7 +305,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `answers_hash` | string | sí | hash del artifact de respuestas |
-| `channel` | enum `tty \| mcp \| pr` | sí | — |
+| `channel` | enum `tty \| mcp` | sí | — |
 | `responder` | `Option<string>` | no | si el canal lo identifica |
 
 ### 5.20 `loop_iteration` — engine

@@ -31,7 +31,6 @@ fn the_reference_config_parses_and_round_trips() {
         0.015
     );
     assert_eq!(layer.secrets, vec!["GITHUB_TOKEN"]);
-    assert!(!layer.telemetry.as_ref().unwrap().enabled);
     assert_eq!(
         layer.adapters.as_ref().unwrap()["codex"]
             .adapter_settings

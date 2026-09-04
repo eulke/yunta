@@ -444,3 +444,15 @@ fn a_known_kind_whose_fields_do_not_fit_names_the_kind_and_keeps_the_cause() {
         "the serde cause travels with the error"
     );
 }
+
+#[test]
+fn pr_is_not_a_questions_channel() {
+    // No surface answers a `kind: questions` artifact over a PR, so the
+    // channel enum carries only the two that do: tty and mcp.
+    assert!(serde_json::from_str::<Channel>("\"tty\"").is_ok());
+    assert!(serde_json::from_str::<Channel>("\"mcp\"").is_ok());
+    assert!(
+        serde_json::from_str::<Channel>("\"pr\"").is_err(),
+        "`pr` is retired — no emitter produces it"
+    );
+}

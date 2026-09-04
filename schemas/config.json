@@ -151,16 +151,6 @@
         }
       ]
     },
-    "telemetry": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TelemetryConfig"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "version": {
       "description": "`version: 1` (reference config) — the layer file's own format\nversion. The loader refuses any value this binary doesn't speak.",
       "type": [
@@ -797,40 +787,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "TelemetryConfig": {
-      "description": "`telemetry:` — parsed so the reference config round-trips;\n**inert until the OTel exporter is built**, and the reference text itself says so:\nthis is the one sanctioned parse-and-hold group.",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": false
-        },
-        "endpoint": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "protocol": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TelemetryProtocol"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "TelemetryProtocol": {
-      "type": "string",
-      "enum": [
-        "grpc",
-        "http"
-      ]
     }
   }
 }

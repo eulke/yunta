@@ -84,8 +84,3 @@ pricing:
 
 secrets:
   - GITHUB_TOKEN
-
-telemetry:
-  enabled: false
-  endpoint: "http://localhost:4317"
-  protocol: grpc

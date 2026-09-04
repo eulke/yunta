@@ -103,7 +103,6 @@ pub struct GateOption {
 pub enum Channel {
     Tty,
     Mcp,
-    Pr,
 }
 
 /// `severity`: `blocking | major | minor | note` — confirmed against the

@@ -48,8 +48,7 @@ pub use config::{
     ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
     Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProjectConfig,
-    PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig, TelemetryConfig,
-    TelemetryProtocol,
+    PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 pub use error::{describe, AdapterError, Result};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
