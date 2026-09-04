@@ -68,11 +68,11 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
     let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
     let run_id = RunId::from("run-spans");
 
-    let workflow: Workflow = serde_yaml::from_str(
+    let workflow: Workflow = serde_norway::from_str(
         "name: spans\nnodes:\n  - id: build\n    kind: bash\n    run: \"true\"\n",
     )
     .unwrap();
-    let config: ConfigLayer = serde_yaml::from_str("runners: {}\n").unwrap();
+    let config: ConfigLayer = serde_norway::from_str("runners: {}\n").unwrap();
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(

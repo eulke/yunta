@@ -131,7 +131,7 @@ fn intra_pack_composition_is_allowed_in_check() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_yaml::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
     let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
     assert!(errors.is_empty(), "got: {errors:?}");
@@ -162,7 +162,7 @@ fn cross_pack_composition_is_rejected_in_check() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_yaml::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
     let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
     assert!(
@@ -194,7 +194,7 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_yaml::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
     let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
     assert!(
@@ -278,7 +278,7 @@ fn a_malformed_pack_manifest_fails_the_ceiling_check() {
         &root.path().join(".yunta/packs/acme/review-pack/pack.yaml"),
         "this is not a pack manifest\n",
     );
-    let workflow: Workflow = serde_yaml::from_str(LEAF).unwrap();
+    let workflow: Workflow = serde_norway::from_str(LEAF).unwrap();
     let origin = WorkflowOrigin::Pack {
         publisher: "acme".parse().unwrap(),
         pack_name: "review-pack".parse().unwrap(),

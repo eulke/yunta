@@ -4,7 +4,7 @@ use yunta_core::{sha256_hex, Node};
 use yunta_engine::{close_artifacts, ArtifactError};
 
 fn node(yaml: &str) -> Node {
-    serde_yaml::from_str(yaml).unwrap()
+    serde_norway::from_str(yaml).unwrap()
 }
 
 fn write_artifact(run_dir: &Path, name: &str, content: &str) {

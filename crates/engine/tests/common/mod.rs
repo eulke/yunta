@@ -716,8 +716,8 @@ pub async fn run_with_recording_mock(
     fixture_yaml: &str,
     config_yaml: &str,
 ) -> (RunTerminal, yunta_engine::RunState, Arc<MockAdapter>) {
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -807,8 +807,8 @@ pub async fn resume_orphan_with_mock(
     Arc<MockAdapter>,
 ) {
     let bench = Bench::new();
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,

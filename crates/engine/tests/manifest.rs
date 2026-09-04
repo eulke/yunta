@@ -5,11 +5,11 @@ use yunta_engine::{build_manifest, ManifestError};
 use yunta_testkit::{git_output, init_repo};
 
 fn workflow(yaml: &str) -> Workflow {
-    serde_yaml::from_str(yaml).unwrap()
+    serde_norway::from_str(yaml).unwrap()
 }
 
 fn config(yaml: &str) -> ConfigLayer {
-    serde_yaml::from_str(yaml).unwrap()
+    serde_norway::from_str(yaml).unwrap()
 }
 
 const WORKFLOW: &str = r#"
@@ -238,8 +238,8 @@ fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
     )
     .unwrap();
 
-    let yaml = serde_yaml::to_string(&manifest).unwrap();
-    let reread: yunta_core::Manifest = serde_yaml::from_str(&yaml).unwrap();
+    let yaml = serde_norway::to_string(&manifest).unwrap();
+    let reread: yunta_core::Manifest = serde_norway::from_str(&yaml).unwrap();
 
     assert_eq!(manifest.manifest_hash(), reread.manifest_hash());
     assert_eq!(manifest, reread);
@@ -391,8 +391,8 @@ nodes:
     depends_on: [review]
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(yaml).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(
+    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(
         "runners:\n  reviewer:\n    - { adapter: mock, model: m }\n  reviewer-alt:\n    - { adapter: mock, model: m }\n",
     )
     .unwrap();

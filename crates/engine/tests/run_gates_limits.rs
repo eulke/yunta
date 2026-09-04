@@ -164,8 +164,8 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
     // scheduler section into a permanent "blocked behind unresolved
     // failures" pause that never touches the gate again.
     let bench = Bench::new();
-    let workflow: Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -325,8 +325,8 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
     let _ = artifacts_dir; // same Bench shape as every other e2e here
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: yunta_core::Workflow = serde_norway::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -530,8 +530,8 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     // "continue" — proving the ask happens per invocation and nothing in
     // the log pre-authorizes new spend.
     let bench = Bench::new();
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(BUDGET_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(BUDGET_CONFIG).unwrap();
+    let workflow: yunta_core::Workflow = serde_norway::from_str(BUDGET_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(BUDGET_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,

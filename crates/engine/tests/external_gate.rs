@@ -83,7 +83,7 @@ impl Bench {
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-gate-1");
 
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
         let manifest = build_manifest(
             &workflow,
             &ConfigLayer::default(),

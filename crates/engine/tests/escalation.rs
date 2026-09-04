@@ -42,8 +42,8 @@ async fn paused_manifest_and_events(
     let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
     let run_id = RunId::from("run-escalation-1");
 
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(
@@ -222,8 +222,8 @@ impl GateBench {
         let runs_root = root.path().join("runs");
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-gate-bench");
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
         let manifest =
             build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
         let run_dir = create_run(
@@ -375,8 +375,8 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     init_repo(&worktree);
     let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
     let run_id = RunId::from("run-preseed-promote");
-    let workflow: Workflow = serde_yaml::from_str(PROMOTABLE_WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(PROMOTABLE_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(

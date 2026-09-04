@@ -11,7 +11,7 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-pub use serde_yaml::{Mapping, Value};
+pub use serde_norway::{Mapping, Value};
 
 /// A YAML document that could not be read or written.
 #[derive(Debug, thiserror::Error)]
@@ -42,7 +42,7 @@ fn locate(path: &str, message: &str) -> String {
 /// path from the document's root, and keeps the parser's own line and
 /// column.
 pub fn parse<T: DeserializeOwned>(text: &str) -> Result<T, YamlError> {
-    serde_path_to_error::deserialize(serde_yaml::Deserializer::from_str(text)).map_err(|error| {
+    serde_path_to_error::deserialize(serde_norway::Deserializer::from_str(text)).map_err(|error| {
         YamlError::Parse {
             path: error.path().to_string(),
             message: error.into_inner().to_string(),
@@ -68,7 +68,7 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, YamlError> {
 
 /// Serializes `value` as a YAML document.
 pub fn to_string<T: Serialize>(value: &T) -> Result<String, YamlError> {
-    serde_yaml::to_string(value).map_err(|error| YamlError::Serialize {
+    serde_norway::to_string(value).map_err(|error| YamlError::Serialize {
         message: error.to_string(),
     })
 }

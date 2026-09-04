@@ -88,7 +88,7 @@ yunta-testkit.workspace = true
 # Property tests for the replay guarantees (derive, JSONL wire form, resume).
 proptest.workspace = true
 # Tests write their workflows and fixtures as YAML literals.
-serde_yaml.workspace = true
+serde_norway.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
 # A capturing subscriber asserts a run's spans carry their run_id/node_id.

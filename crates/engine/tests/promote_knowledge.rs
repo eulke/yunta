@@ -60,8 +60,8 @@ fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manif
         "/../core/tests/fixtures/promote-knowledge.yaml"
     ))
     .unwrap();
-    let workflow: Workflow = serde_yaml::from_str(&workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     build_manifest(&workflow, &config, worktree, worktree, inputs).unwrap()
 }
 
@@ -72,8 +72,8 @@ fn the_reference_workflow_passes_static_check() {
         "/../core/tests/fixtures/promote-knowledge.yaml"
     ))
     .unwrap();
-    let workflow: Workflow = serde_yaml::from_str(&workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let errors = check(&workflow, &config);
     assert!(errors.is_empty(), "{errors:?}");
 }
@@ -157,7 +157,7 @@ sessions:
     ));
 
     let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();
-    let pack: serde_yaml::Value = serde_yaml::from_str(&pack_yaml).unwrap();
+    let pack: serde_norway::Value = serde_norway::from_str(&pack_yaml).unwrap();
     assert_eq!(pack["version"].as_str(), Some("1.1.0"));
     let tags = git_output(&worktree, &["tag", "--list"]);
     assert_eq!(tags, "v1.1.0");

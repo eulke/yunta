@@ -320,8 +320,8 @@ impl Bench {
         workflow_yaml: &str,
         fixture_yaml: &str,
     ) -> (yunta_core::Manifest, Vec<StoredEvent>) {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
         let manifest = build_manifest(
             &workflow,
             &config,
@@ -434,8 +434,8 @@ nodes:
     kind: bash
     run: "false"
 "#;
-    let workflow_parsed: Workflow = serde_yaml::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow_parsed: Workflow = serde_norway::from_str(workflow).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow_parsed,
         &config,

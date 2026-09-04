@@ -35,8 +35,9 @@ nodes:
     kind: bash
     run: 'touch c.started; while :; do set -- *.started; [ "$#" -ge 2 ] && break; done'
 "#;
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer =
+        serde_norway::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -101,7 +102,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config = ConfigLayer::default();
     let manifest = build_manifest(
         &workflow,
@@ -164,8 +165,8 @@ nodes:
     kind: bash
     run: "test -f present.txt"
 "#;
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -258,8 +259,8 @@ nodes:
     run: "test -f present.txt"
     on_interrupt: fail_if_uncertain
 "#;
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -499,8 +500,8 @@ nodes:
         kind: bash
         run: "test -f present.txt"
 "#;
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -842,8 +843,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
 
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(&concurrency_workflow(2)).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(CONCURRENCY_CONFIG).unwrap();
+    let workflow: yunta_core::Workflow = serde_norway::from_str(&concurrency_workflow(2)).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(CONCURRENCY_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,

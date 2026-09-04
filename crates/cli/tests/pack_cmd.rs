@@ -89,8 +89,8 @@ fn add_vendors_the_pack_and_writes_a_lock_entry() {
         "vendored tree must not carry .git"
     );
 
-    let lock: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     let entry = &lock["packs"]["acme/review-pack"];
     assert_eq!(entry["publisher"], "acme");
@@ -108,8 +108,8 @@ fn add_with_an_explicit_ref_pins_and_records_it() {
     let out = yunta_in!(&repo, &home, &["pack", "add", &source]);
     assert!(out.status.success(), "{}", stderr(&out));
 
-    let lock: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert_eq!(lock["packs"]["acme/review-pack"]["ref"], "v1.0.0");
 }
@@ -199,7 +199,7 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
         stdout(&update_out)
     );
 
-    let vendored_manifest: serde_yaml::Value = serde_yaml::from_str(
+    let vendored_manifest: serde_norway::Value = serde_norway::from_str(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -208,8 +208,8 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
         "update re-vendors the manifest at the new version"
     );
 
-    let lock: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert_eq!(lock["packs"]["acme/review-pack"]["ref"], "v2.0.0");
 }
@@ -236,8 +236,8 @@ fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
     assert!(remove_out.status.success(), "{}", stderr(&remove_out));
 
     assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
-    let lock: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert!(lock["packs"].as_mapping().unwrap().is_empty());
 }

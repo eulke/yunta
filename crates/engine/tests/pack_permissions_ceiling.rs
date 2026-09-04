@@ -33,7 +33,7 @@ fn pack_dir(root: &Path, publisher: &str, pack_name: &str) -> std::path::PathBuf
 fn check(root: &Path, publisher: &str, pack_name: &str, workflow_yaml: &str) -> Vec<CheckError> {
     let path = pack_dir(root, publisher, pack_name).join("review.yaml");
     write(&path, workflow_yaml);
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let origin = origin_of(root, &path);
     check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin)
 }
@@ -120,7 +120,7 @@ fn a_repo_origin_workflow_has_no_ceiling_to_enforce() {
     let text =
         "name: review\nnodes:\n  - { id: draft, kind: prompt, prompt: hi, permissions: full }\n";
     write(&path, text);
-    let workflow: Workflow = serde_yaml::from_str(text).unwrap();
+    let workflow: Workflow = serde_norway::from_str(text).unwrap();
     let origin = origin_of(root.path(), &path);
 
     let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
@@ -144,7 +144,7 @@ fn a_node_exceeding_the_ceiling_inside_a_composed_child_is_also_caught() {
     let parent_text = "name: review\nnodes:\n  - { id: sub, kind: workflow, use: acme/qa }\n";
     let parent_path = dir.join("review.yaml");
     write(&parent_path, parent_text);
-    let parent: Workflow = serde_yaml::from_str(parent_text).unwrap();
+    let parent: Workflow = serde_norway::from_str(parent_text).unwrap();
     let origin = origin_of(root.path(), &parent_path);
 
     let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);

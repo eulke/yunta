@@ -171,7 +171,7 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
     );
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
-    let vendored: serde_yaml::Value = serde_yaml::from_str(
+    let vendored: serde_norway::Value = serde_norway::from_str(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -186,7 +186,7 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
         &["pack", "update", "acme/tools-pack", INITIAL_BRANCH, "--yes"]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
-    let vendored: serde_yaml::Value = serde_yaml::from_str(
+    let vendored: serde_norway::Value = serde_norway::from_str(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -231,7 +231,7 @@ fn update_refuses_a_publisher_no_longer_allowed() {
         "{}",
         stderr(&out)
     );
-    let vendored: serde_yaml::Value = serde_yaml::from_str(
+    let vendored: serde_norway::Value = serde_norway::from_str(
         &std::fs::read_to_string(repo.join(".yunta/packs/globex/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();

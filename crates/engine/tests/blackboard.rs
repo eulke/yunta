@@ -48,8 +48,8 @@ impl Bench {
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-blackboard");
 
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
         let manifest =
             build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
         let run_dir = create_run(
@@ -188,7 +188,7 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
         .expect("the blackboard group must consolidate into its node-output");
     // The group's node-output wraps the consolidated findings in the same
     // `stdout:`/`stderr:` envelope every node's captured output uses.
-    let doc: serde_json::Value = serde_yaml::from_str(&output).unwrap();
+    let doc: serde_json::Value = serde_norway::from_str(&output).unwrap();
     let ids: Vec<&str> = doc["stdout"]
         .as_array()
         .unwrap()
@@ -387,7 +387,8 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
     let consolidated_forward = yunta_engine::consolidate_blackboard(&forward, &members);
     let consolidated_reversed = yunta_engine::consolidate_blackboard(&reversed, &members);
     assert_eq!(consolidated_forward, consolidated_reversed);
-    let consolidated: Vec<serde_json::Value> = serde_yaml::from_str(&consolidated_forward).unwrap();
+    let consolidated: Vec<serde_json::Value> =
+        serde_norway::from_str(&consolidated_forward).unwrap();
     let ids: Vec<&str> = consolidated
         .iter()
         .map(|finding| finding["id"].as_str().unwrap())

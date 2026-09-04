@@ -97,7 +97,7 @@ impl Bench {
         mode: &str,
         config: ConfigLayer,
     ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
         let manifest = build_manifest(
             &workflow,
             &config,
@@ -343,7 +343,7 @@ async fn on_failure_abort_ends_the_run() {
             ON_FAILURE_WORKFLOW,
             "run-abort",
             "default",
-            serde_yaml::from_str("defaults:\n  on_failure: abort\n").unwrap(),
+            serde_norway::from_str("defaults:\n  on_failure: abort\n").unwrap(),
         )
         .await
         .unwrap();
@@ -376,7 +376,7 @@ async fn on_failure_continue_skips_dependents() {
             ON_FAILURE_WORKFLOW,
             "run-continue",
             "default",
-            serde_yaml::from_str("defaults:\n  on_failure: continue\n").unwrap(),
+            serde_norway::from_str("defaults:\n  on_failure: continue\n").unwrap(),
         )
         .await
         .unwrap();

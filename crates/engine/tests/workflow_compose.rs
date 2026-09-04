@@ -98,8 +98,8 @@ impl Bench {
         config_yaml: &str,
         inputs: &HashMap<String, String>,
     ) -> Manifest {
-        let workflow: Workflow = serde_yaml::from_str(parent_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(config_yaml).unwrap();
+        let workflow: Workflow = serde_norway::from_str(parent_yaml).unwrap();
+        let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
         let manifest =
             build_manifest(&workflow, &config, &self.worktree, &self.worktree, inputs).unwrap();
         create_run(
@@ -215,7 +215,7 @@ impl Bench {
 
     fn child_manifest(&self, child_id: &RunId) -> Manifest {
         let path = self.runs_root.join(child_id.as_str()).join("manifest.yaml");
-        serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+        serde_norway::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
     }
 }
 
@@ -583,7 +583,7 @@ nodes:
     // `evolving@current`.
     let pinned = bench.child_manifest(&first_child);
     assert_eq!(pinned.workflow_hash, v1_hash);
-    let v1_workflow: Workflow = serde_yaml::from_str(CHILD_V1).unwrap();
+    let v1_workflow: Workflow = serde_norway::from_str(CHILD_V1).unwrap();
     assert_eq!(pinned.workflow.nodes[0], v1_workflow.nodes[0]);
 }
 

@@ -61,8 +61,8 @@ impl Bench {
         workflow_yaml: &str,
         sabotage: impl FnOnce(&Path),
     ) -> RunTerminal {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
         let manifest = build_manifest(
             &workflow,
             &config,

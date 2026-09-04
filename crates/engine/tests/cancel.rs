@@ -38,8 +38,8 @@ const COMPLETING_FIXTURE: &str = "sessions:\n  - { outcome: { type: completed, s
 /// Builds the manifest and creates the run both tests execute, so they
 /// share one setup and differ only in what happens while the run hangs.
 async fn prepare(bench: &Bench) -> (Manifest, std::path::PathBuf) {
-    let workflow: Workflow = serde_yaml::from_str(HANGING_WORKFLOW).expect("parse workflow");
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).expect("parse config");
+    let workflow: Workflow = serde_norway::from_str(HANGING_WORKFLOW).expect("parse workflow");
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).expect("parse config");
     let manifest = build_manifest(
         &workflow,
         &config,

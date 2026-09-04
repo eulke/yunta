@@ -29,7 +29,7 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
         .is_file());
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
-    let parsed: serde_yaml::Value = serde_yaml::from_str(&config).unwrap();
+    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
     assert_eq!(
         parsed["project"]["name"], "repo",
         "init writes a project section naming the repo: {config}"

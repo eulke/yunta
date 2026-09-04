@@ -200,8 +200,8 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let copied = std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land");
     assert_eq!(copied, "DISTILLED-MARKER: the durable decision\n");
 
-    let provenance: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     assert_eq!(
         provenance["source_run"].as_str(),
@@ -278,8 +278,8 @@ sessions:
     );
     // Run in `quick` mode: `notes` never runs, its artifact never
     // exists, but distill declares it.
-    let workflow_parsed: Workflow = serde_yaml::from_str(&workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow_parsed: Workflow = serde_norway::from_str(&workflow).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow_parsed,
         &config,
@@ -343,8 +343,8 @@ sessions:
     assert!(finding.title.contains("notes.md"), "got: {finding:?}");
     assert_eq!(finding.severity, yunta_core::events::FindingSeverity::Minor);
 
-    let provenance: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     let listed: Vec<&str> = provenance["artifacts"]
         .as_sequence()
@@ -408,8 +408,8 @@ sessions:
   - match_prompt_contains: "DISTILLED-MARKER"
     outcome: { type: completed, summary: "informed" }
 "#;
-    let workflow: Workflow = serde_yaml::from_str(second_workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(second_workflow).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -643,8 +643,8 @@ nodes:
 "#;
     // Corrupt the log by hand: a node_finished with no node_started —
     // exactly the class of inconsistency `derive` refuses to guess over.
-    let wf: Workflow = serde_yaml::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let wf: Workflow = serde_norway::from_str(workflow).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &wf,
         &config,

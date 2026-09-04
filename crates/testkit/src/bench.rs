@@ -141,8 +141,8 @@ impl Bench {
         config_yaml: &str,
         human_interaction: &dyn HumanInteraction,
     ) -> (RunTerminal, RunState) {
-        let workflow: Workflow = serde_yaml::from_str(workflow_yaml).expect("parse workflow");
-        let config: ConfigLayer = serde_yaml::from_str(config_yaml).expect("parse config");
+        let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
+        let config: ConfigLayer = serde_norway::from_str(config_yaml).expect("parse config");
         let manifest = build_manifest(
             &workflow,
             &config,

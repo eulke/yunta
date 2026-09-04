@@ -76,7 +76,7 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     // exact version it was resolved against at creation time.
     let manifest_path = home.join("runs").join(&run_id).join("manifest.yaml");
     let manifest_text = std::fs::read_to_string(&manifest_path).unwrap();
-    let manifest: serde_yaml::Value = serde_yaml::from_str(&manifest_text).unwrap();
+    let manifest: serde_norway::Value = serde_norway::from_str(&manifest_text).unwrap();
     assert_eq!(manifest["pack"]["publisher"], "acme");
     assert_eq!(manifest["pack"]["name"], "review-pack");
     assert_eq!(manifest["pack"]["version"], "1.0.0");
@@ -94,7 +94,7 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
         &["pack", "update", "acme/review-pack", INITIAL_BRANCH]
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
-    let vendored_after_update: serde_yaml::Value = serde_yaml::from_str(
+    let vendored_after_update: serde_norway::Value = serde_norway::from_str(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap(),
     )
     .unwrap();

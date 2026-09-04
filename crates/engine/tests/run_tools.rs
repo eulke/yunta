@@ -67,7 +67,7 @@ impl Bench {
         let root = tempfile::tempdir().unwrap();
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
         let run_id = RunId::from("run-tools-1");
-        let workflow: Workflow = serde_yaml::from_str(BLACKBOARD_WORKFLOW).unwrap();
+        let workflow: Workflow = serde_norway::from_str(BLACKBOARD_WORKFLOW).unwrap();
         // Every log opens with run_created — the listener's own
         // appends land on an already-born run in production too.
         storage

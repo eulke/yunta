@@ -66,8 +66,8 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     // de devolver la misma pausa.
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -185,7 +185,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // the given values, consumable by a later node via `artifact:`.
     let answers_path = artifacts_dir.join("questions.yaml.answers.yaml");
     let raw = std::fs::read_to_string(&answers_path).expect("answers artifact must exist");
-    let parsed: yunta_core::AnswersFile = serde_yaml::from_str(&raw).unwrap();
+    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
 }
 
@@ -225,8 +225,8 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     // conversational state, no new agent session.
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
-    let workflow: yunta_core::Workflow = serde_yaml::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
+    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -316,7 +316,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     let raw = std::fs::read_to_string(artifacts_dir.join("questions.yaml.answers.yaml")).unwrap();
-    let parsed: yunta_core::AnswersFile = serde_yaml::from_str(&raw).unwrap();
+    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "production")]);
 }
 

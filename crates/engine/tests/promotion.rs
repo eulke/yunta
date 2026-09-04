@@ -97,8 +97,8 @@ async fn run_with_mode_and_findings(
     let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
     let run_id = RunId::from("run-promo-1");
 
-    let workflow: Workflow = serde_yaml::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest =
         build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
     let run_dir = create_run(
@@ -268,7 +268,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 
     let path = run_dir.join("artifacts/findings-inherited.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
-    let file: yunta_core::FindingsFile = serde_yaml::from_slice(&bytes).unwrap();
+    let file: yunta_core::FindingsFile = serde_norway::from_slice(&bytes).unwrap();
     assert!(
         yunta_engine::register_findings(&file).is_empty(),
         "the derived file must satisfy the findings-file parser"

@@ -12,7 +12,7 @@ fn specs(yaml: &str) -> BTreeMap<String, InputSpec> {
     struct Workflow {
         inputs: BTreeMap<String, InputSpec>,
     }
-    let workflow: Workflow = serde_yaml::from_str(yaml).unwrap();
+    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
     workflow.inputs
 }
 

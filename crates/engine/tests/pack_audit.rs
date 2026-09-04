@@ -17,7 +17,7 @@ fn write(path: &Path, contents: &str) {
 
 fn manifest(pack_dir: &Path) -> PackManifest {
     let text = std::fs::read_to_string(pack_dir.join("pack.yaml")).unwrap();
-    serde_yaml::from_str(&text).unwrap()
+    serde_norway::from_str(&text).unwrap()
 }
 
 /// A pack exercising every audit-worthy surface in one workflow: a

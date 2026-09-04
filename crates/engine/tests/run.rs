@@ -324,8 +324,8 @@ nodes:
 
     // Second execution: same log, no new adapter, still Finished — and
     // no duplicate node execution (the log would show a second start).
-    let workflow: Workflow = serde_yaml::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -653,7 +653,7 @@ impl BirthBench {
         std::fs::create_dir_all(&worktree).unwrap();
         init_repo(&worktree);
         let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let workflow: Workflow = serde_yaml::from_str(
+        let workflow: Workflow = serde_norway::from_str(
             "name: birth\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n",
         )
         .unwrap();
@@ -740,7 +740,7 @@ async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log(
 #[tokio::test]
 async fn run_created_freezes_resolved_inputs() {
     let bench = Bench::new();
-    let workflow: Workflow = serde_yaml::from_str(
+    let workflow: Workflow = serde_norway::from_str(
         r#"
 name: with-inputs
 inputs:
@@ -757,7 +757,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let provided = HashMap::from([("idea".to_string(), "ship it".to_string())]);
     let manifest = build_manifest(
         &workflow,
@@ -806,7 +806,7 @@ nodes:
 #[tokio::test]
 async fn run_resumed_records_the_policy_each_orphan_resolved_to() {
     let bench = Bench::new();
-    let workflow: Workflow = serde_yaml::from_str(
+    let workflow: Workflow = serde_norway::from_str(
         r#"
 name: resumable
 nodes:
@@ -817,7 +817,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let config: ConfigLayer = serde_yaml::from_str(MOCK_CONFIG).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,

@@ -6,7 +6,7 @@ use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest, PackRef
 fn the_reference_pack_parses_and_round_trips() {
     let yaml = include_str!("fixtures/reference-pack.yaml");
     let pack: PackManifest =
-        serde_yaml::from_str(yaml).expect("the reference pack manifest must parse whole");
+        serde_norway::from_str(yaml).expect("the reference pack manifest must parse whole");
 
     assert_eq!(pack.name, "review-pack");
     assert_eq!(pack.publisher, "acme");
@@ -43,8 +43,8 @@ fn the_reference_pack_parses_and_round_trips() {
 
     // Round-trip at the serde-tree level: what parses serializes back to
     // the same value.
-    let reserialized = serde_yaml::to_string(&pack).unwrap();
-    let reparsed: PackManifest = serde_yaml::from_str(&reserialized).unwrap();
+    let reserialized = serde_norway::to_string(&pack).unwrap();
+    let reparsed: PackManifest = serde_norway::from_str(&reserialized).unwrap();
     assert_eq!(pack, reparsed);
 }
 
@@ -59,7 +59,8 @@ declares:
 contents:
   knowledge: [adrs/, conventions.md]
 "#;
-    let pack: PackManifest = serde_yaml::from_str(yaml).expect("a knowledge-only pack must parse");
+    let pack: PackManifest =
+        serde_norway::from_str(yaml).expect("a knowledge-only pack must parse");
     assert!(pack.contents.workflows.is_empty());
     assert!(pack.contents.skills.is_empty());
     assert_eq!(pack.contents.knowledge, vec!["adrs/", "conventions.md"]);
@@ -74,8 +75,8 @@ version: 0.1.0
 declares:
   permissions: full
 "#;
-    let pack: PackManifest =
-        serde_yaml::from_str(yaml).expect("declares is the only hard requirement beyond identity");
+    let pack: PackManifest = serde_norway::from_str(yaml)
+        .expect("declares is the only hard requirement beyond identity");
     assert!(pack.requires.runners.is_empty());
     assert!(pack.requires.mcp_servers.is_empty());
     assert!(pack.requires.commands.is_empty());
@@ -89,7 +90,7 @@ name: no-ceiling
 publisher: acme
 version: 0.1.0
 "#;
-    let result: Result<PackManifest, _> = serde_yaml::from_str(yaml);
+    let result: Result<PackManifest, _> = serde_norway::from_str(yaml);
     assert!(
         result.is_err(),
         "a pack with no declared ceiling must fail to parse, not default to some assumed one"
@@ -113,8 +114,8 @@ fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
         },
     );
 
-    let yaml = serde_yaml::to_string(&lock).unwrap();
-    let reparsed: PackLock = serde_yaml::from_str(&yaml).unwrap();
+    let yaml = serde_norway::to_string(&lock).unwrap();
+    let reparsed: PackLock = serde_norway::from_str(&yaml).unwrap();
     assert_eq!(lock, reparsed);
     assert_eq!(reparsed.packs[&key].commit, "abc123def456");
 }

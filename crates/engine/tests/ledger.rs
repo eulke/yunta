@@ -262,7 +262,7 @@ tasks:
         type: guard
     notes: "Ver Contrato del Run."
 "#;
-    let ledger: Ledger = serde_yaml::from_str(yaml).expect("reference ledger should parse");
+    let ledger: Ledger = serde_norway::from_str(yaml).expect("reference ledger should parse");
     assert_eq!(ledger.tasks.len(), 2);
     // Overlapping scope with its own dependency ancestor is fine; the
     // registration should be clean.
