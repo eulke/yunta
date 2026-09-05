@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, run_id_from, stdout, write, yunta_in};
+use yunta_testkit::{git, init_repo, run_id_from, stdout, wait_for, wait_until, write, yunta_in};
 
 fn claude_code_stub() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
@@ -1088,14 +1088,10 @@ nodes:
     // the pid content, not just the file, so a tight loop never reads it
     // half-written.
     let pid_path = repo.join("child.pid");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !marker_written(&pid_path) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the bash node never wrote its pid"
-        );
-        std::thread::yield_now();
-    }
+    wait_until(
+        || marker_written(&pid_path),
+        || "the bash node never wrote its pid".into(),
+    );
     let child_pid = std::fs::read_to_string(&pid_path)
         .unwrap()
         .trim()
@@ -1149,15 +1145,21 @@ fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Chi
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !marker_written(marker) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the bash node never started"
-        );
-        std::thread::yield_now();
-    }
+    wait_until(
+        || marker_written(marker),
+        || "the bash node never started".into(),
+    );
     child
+}
+
+/// The process state `ps` reports for `pid`: empty once the process is
+/// gone, `Z` while it is a zombie nobody reaped.
+fn process_state(pid: &str) -> String {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "state=", "-p", pid])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 /// The one run id under `home/runs` — usable before the run's own
@@ -1286,19 +1288,22 @@ nodes:
     // The orphaned child is dead, the registry is gone, the log records
     // the crash-cancellation. `kill -0` succeeds on a zombie (the
     // SIGKILLed engine never reaped it), so check the process state:
-    // gone or Z both mean the kill landed.
+    // gone or Z both mean the kill landed. `cancel` returns once the kill
+    // is sent; the child leaves the process table on the kernel's
+    // schedule, not ours.
     let child_pid = std::fs::read_to_string(repo.join("child.pid"))
         .unwrap()
         .trim()
         .to_string();
-    let state = std::process::Command::new("ps")
-        .args(["-o", "state=", "-p", &child_pid])
-        .output()
-        .unwrap();
-    let state = String::from_utf8_lossy(&state.stdout).trim().to_string();
-    assert!(
-        state.is_empty() || state.starts_with('Z'),
-        "the orphaned child must be dead, ps state: {state}"
+    let dead = |state: &str| state.is_empty() || state.starts_with('Z');
+    wait_until(
+        || dead(&process_state(&child_pid)),
+        || {
+            format!(
+                "the orphaned child must be dead, ps state: {}",
+                process_state(&child_pid)
+            )
+        },
     );
     assert!(!engine_json.exists());
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
@@ -1340,21 +1345,20 @@ nodes:
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let worktree = loop {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the node never started"
-        );
-        if let Ok(entries) = std::fs::read_dir(home.join("worktrees")) {
-            if let Some(entry) = entries.flatten().next() {
-                if entry.path().join("started.txt").exists() {
-                    break entry.path();
-                }
-            }
-        }
-        std::thread::yield_now();
-    };
+    let worktree = wait_for(
+        || {
+            let entry = std::fs::read_dir(home.join("worktrees"))
+                .ok()?
+                .flatten()
+                .next()?;
+            entry
+                .path()
+                .join("started.txt")
+                .exists()
+                .then(|| entry.path())
+        },
+        || "the node never started".into(),
+    );
     let run_id = only_run_id(&home);
     signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
     let _ = yunta.wait();
@@ -1796,19 +1800,11 @@ nodes:
     // Release the node and watch the detached child carry the run to
     // completion on its own.
     write(&repo.join("go.txt"), "go");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = yunta_in!(&repo, &home, &["status", &run_id]);
-        if stdout(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the detached run never reached finished: {}",
-            stdout(&status)
-        );
-        std::thread::yield_now();
-    }
+    let status = || stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    wait_until(
+        || status().contains("finished"),
+        || format!("the detached run never reached finished: {}", status()),
+    );
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
             .unwrap()
@@ -1875,19 +1871,16 @@ nodes:
     // the signal lands; release it and confirm the detached run survived
     // the signal and finished on its own.
     write(&repo.join("go.txt"), "go");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = yunta_in!(&repo, &home, &["status", &run_id]);
-        if stdout(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the detached run must survive a signal to its launcher's group, got: {}",
-            stdout(&status)
-        );
-        std::thread::yield_now();
-    }
+    let status = || stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    wait_until(
+        || status().contains("finished"),
+        || {
+            format!(
+                "the detached run must survive a signal to its launcher's group, got: {}",
+                status()
+            )
+        },
+    );
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
             .unwrap()
