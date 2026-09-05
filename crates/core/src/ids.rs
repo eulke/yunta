@@ -143,6 +143,17 @@ pub fn is_path_segment(value: &str) -> bool {
 
 // --- String identifiers ------------------------------------------------
 
+/// The indefinite article a schema description opens with, by the
+/// noun's first letter; the descriptions are generated, so the grammar
+/// is decided here once.
+pub(crate) fn article(noun: &str) -> &'static str {
+    if noun.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "An"
+    } else {
+        "A"
+    }
+}
+
 /// Defines a newtyped string identifier: its rule, its parsers, its
 /// serde forms, and — under `testkit` — unchecked `From` for tests.
 macro_rules! string_id {
@@ -256,7 +267,7 @@ macro_rules! string_id {
                 schemars::json_schema!({
                     "type": "string",
                     "minLength": 1,
-                    "description": format!("A {}: {}", $what, $rule),
+                    "description": format!("{} {}: {}", $crate::ids::article($what), $what, $rule),
                 })
             }
         }
@@ -403,6 +414,20 @@ string_id!(
     /// A question's id within a `kind: questions` artifact, and the key
     /// its answer names: `^[A-Za-z][A-Za-z0-9_-]*$`.
     QuestionId, what = "question id", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// One choice of a gate's escalation: an author's `options:` entry,
+    /// a key of `on:`, or one of the engine's own reserved options
+    /// (`abort`, `retry`, ...): `^[A-Za-z][A-Za-z0-9_-]*$`.
+    OptionId, what = "option id", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// Who a human decision is attributed to — a claimed identity
+    /// recorded verbatim, or an ambient one marked `unverified:`. Opaque
+    /// to the engine beyond being one non-empty line.
+    Responder, what = "responder", rule = OPAQUE_RULE, check = is_opaque
 );
 
 string_id!(

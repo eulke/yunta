@@ -505,13 +505,13 @@ async fn the_mock_forge_reports_a_merged_pr() {
     let forge = MockForge::new(state.clone());
     let published = forge.publish(&gate_request("run-1")).await.unwrap();
 
-    let merge_sha = state.merge("run-1", "octocat");
+    let merge_sha = state.merge("run-1", &"octocat".into());
 
     let polled = forge.poll(&published).await.unwrap();
     assert_eq!(
         polled.review,
         ReviewOutcome::Merged {
-            by: "octocat".to_string(),
+            by: "octocat".into(),
             merge_sha,
         }
     );

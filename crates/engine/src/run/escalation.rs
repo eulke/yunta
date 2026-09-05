@@ -8,7 +8,7 @@
 //! that could drift apart.
 
 use yunta_core::events::{EventDraft, EventPayload, GateOption, GateWaitingPayload, StoredEvent};
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, RunId, Seq, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, Responder, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 use crate::reserved::ReservedOption;
@@ -33,7 +33,7 @@ pub(crate) fn build_reroute_escalation(
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
     let mut options = vec![
         GateOption {
-            id: ReservedOption::Retry.as_str().to_string(),
+            id: ReservedOption::Retry.id(),
             label: format!("Re-route to `{goto}` once more"),
             tradeoff: format!(
                 "Uses one extra correction attempt beyond the declared max_reroutes \
@@ -41,14 +41,14 @@ pub(crate) fn build_reroute_escalation(
             ),
         },
         GateOption {
-            id: ReservedOption::Abort.as_str().to_string(),
+            id: ReservedOption::Abort.id(),
             label: "Abort the run".to_string(),
             tradeoff: "Stops here; nothing further executes".to_string(),
         },
     ];
     if let Some(next_mode) = &suggested_mode {
         options.push(GateOption {
-            id: ReservedOption::Promote.as_str().to_string(),
+            id: ReservedOption::Promote.id(),
             label: format!("Promote to mode `{next_mode}`"),
             tradeoff: format!(
                 "Closes this run (`run_finished: promoted`) and starts a successor in \
@@ -77,11 +77,11 @@ pub(crate) fn build_internal_gate_escalation(
     node: &NodeId,
     assignee: &str,
     message: Option<&str>,
-    options: &[String],
-    on: &indexmap::IndexMap<String, NodeId>,
+    options: &[OptionId],
+    on: &indexmap::IndexMap<OptionId, NodeId>,
 ) -> GateWaitingPayload {
-    let declared: Vec<String> = if options.is_empty() {
-        vec![ReservedOption::Approve.as_str().to_string()]
+    let declared: Vec<OptionId> = if options.is_empty() {
+        vec![ReservedOption::Approve.id()]
     } else {
         options.to_vec()
     };
@@ -89,7 +89,7 @@ pub(crate) fn build_internal_gate_escalation(
         .iter()
         .map(|id| GateOption {
             id: id.clone(),
-            label: id.clone(),
+            label: id.to_string(),
             tradeoff: match on.get(id) {
                 Some(target) => {
                     format!("re-routes to `{target}` and asks again once it completes")
@@ -100,10 +100,10 @@ pub(crate) fn build_internal_gate_escalation(
         .collect();
     let engine_abort = !declared
         .iter()
-        .any(|id| id == ReservedOption::Abort.as_str());
+        .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
     if engine_abort {
         gate_options.push(GateOption {
-            id: ReservedOption::Abort.as_str().to_string(),
+            id: ReservedOption::Abort.id(),
             label: "Abort the run".to_string(),
             tradeoff: "Pauses here; nothing further executes".to_string(),
         });
@@ -232,8 +232,8 @@ pub async fn resolve_gate(
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
-    option_id: &str,
-    resolved_by: Option<String>,
+    option: OptionId,
+    resolved_by: Responder,
     free_text: Option<String>,
 ) -> Result<(), ResolveGateError> {
     let events = storage.events_for_run(run_id.clone()).await?;
@@ -243,9 +243,9 @@ pub async fn resolve_gate(
     let Some((node, escalation)) = current_escalation(manifest, &events) else {
         return Err(ResolveGateError::NothingToResolve);
     };
-    if !escalation.options.iter().any(|o| o.id == option_id) {
+    if !escalation.options.iter().any(|o| o.id == option) {
         return Err(ResolveGateError::UnknownOption {
-            chosen: option_id.to_string(),
+            chosen: option.clone(),
             declared: escalation
                 .options
                 .iter()
@@ -255,8 +255,8 @@ pub async fn resolve_gate(
         });
     }
     let resolution = yunta_core::events::GateResolvedPayload {
-        chosen_option: Some(option_id.to_string()),
-        resolved_by,
+        chosen_option: Some(option),
+        resolved_by: Some(resolved_by),
         free_text,
         approved_sha: None,
     };
@@ -336,7 +336,7 @@ pub enum ResolveGateError {
     )]
     NothingToResolve,
     #[error("option `{chosen}` isn't valid here — declared options: {declared}")]
-    UnknownOption { chosen: String, declared: String },
+    UnknownOption { chosen: OptionId, declared: String },
     #[error(transparent)]
     Storage(#[from] yunta_storage::StorageError),
 }

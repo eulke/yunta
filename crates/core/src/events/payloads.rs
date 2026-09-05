@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::config::RunnerCandidate;
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{
-    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, Seq,
-    SessionId, TaskId,
+    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, OptionId, Responder, RunId,
+    RunnerName, Seq, SessionId, TaskId,
 };
 use crate::policy::ScopeExpansionMode;
 use crate::workflow::OnInterrupt;
@@ -72,7 +72,7 @@ pub enum TaskStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Decider {
     Rule,
-    Person { id: String },
+    Person { id: Responder },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -94,7 +94,7 @@ pub enum HookPhase {
 /// this type can omit it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateOption {
-    pub id: String,
+    pub id: OptionId,
     pub label: String,
     pub tradeoff: String,
 }
@@ -472,9 +472,9 @@ pub struct GateWaitingPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateResolvedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chosen_option: Option<String>,
+    pub chosen_option: Option<OptionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_by: Option<String>,
+    pub resolved_by: Option<Responder>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free_text: Option<String>,
     /// The commit SHA the forge's approval covered —
@@ -490,7 +490,7 @@ pub struct QuestionsAnsweredPayload {
     pub answers_hash: ContentHash,
     pub channel: Channel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub responder: Option<String>,
+    pub responder: Option<Responder>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

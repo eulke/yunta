@@ -69,7 +69,7 @@
   ],
   "$defs": {
     "AgentName": {
-      "description": "A agent name: printable ASCII without whitespace",
+      "description": "An agent name: printable ASCII without whitespace",
       "type": "string",
       "minLength": 1
     },
@@ -253,7 +253,7 @@
       ]
     },
     "ExecutorName": {
-      "description": "A executor name: a letter followed by letters, digits, `_` or `-`",
+      "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
     },
@@ -1036,7 +1036,7 @@
               "description": "Declared choices, free ids (reference: `[aprobar, ajustar,\nabortar]`). Empty means the single default option `approve`;\nthe engine always appends its own `abort` (aborting is\nalways a valid exit, the same convention every escalation uses).",
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/OptionId"
               }
             }
           },
@@ -1202,6 +1202,11 @@
           "const": "resume_session"
         }
       ]
+    },
+    "OptionId": {
+      "description": "An option id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "PromptSource": {
       "description": "The prompt's text, or `{ file: <path> }` to read it from disk",

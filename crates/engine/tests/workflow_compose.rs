@@ -791,8 +791,8 @@ impl yunta_engine::HumanInteraction for AlwaysPromote {
         _escalation: &yunta_core::events::GateWaitingPayload,
     ) -> Option<yunta_core::events::GateResolvedPayload> {
         Some(yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("promote".to_string()),
-            resolved_by: Some("test".to_string()),
+            chosen_option: Some("promote".into()),
+            resolved_by: Some("test".into()),
             free_text: None,
             approved_sha: None,
         })

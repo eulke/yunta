@@ -112,9 +112,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
             task_id: "graph-cmd".into(),
-            decided_by: Decider::Person {
-                id: "eulke".to_string(),
-            },
+            decided_by: Decider::Person { id: "eulke".into() },
             mode: ScopeExpansionMode::Ask,
             count_this_run: 2,
             denial_reason: Some("out of declared scope".to_string()),
@@ -148,22 +146,22 @@ fn all_kinds() -> Vec<EventPayload> {
             summary: "Ready to open the PR?".to_string(),
             evidence: "all criteria green".to_string(),
             options: vec![GateOption {
-                id: "approve".to_string(),
+                id: "approve".into(),
                 label: "Approve and open the PR".to_string(),
                 tradeoff: "opens the PR now".to_string(),
             }],
             external_ref: Some("https://github.com/example/repo/pull/1".to_string()),
         }),
         EventPayload::GateResolved(GateResolvedPayload {
-            chosen_option: Some("approve".to_string()),
-            resolved_by: Some("eulke".to_string()),
+            chosen_option: Some("approve".into()),
+            resolved_by: Some("eulke".into()),
             free_text: None,
             approved_sha: Some("deadbeef".into()),
         }),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: yunta_core::sha256_hex(b"sha256:333"),
             channel: Channel::Tty,
-            responder: Some("eulke".to_string()),
+            responder: Some("eulke".into()),
         }),
         EventPayload::LoopIteration(LoopIterationPayload {
             iteration: 3,

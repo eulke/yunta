@@ -424,7 +424,7 @@ async fn merged_pr_is_not_closed() {
     assert_eq!(
         polled.review,
         ReviewOutcome::Merged {
-            by: "octocat".to_string(),
+            by: "octocat".into(),
             merge_sha: MERGE_SHA.parse().unwrap(),
         }
     );
@@ -454,7 +454,7 @@ async fn reviews_are_paginated() {
     assert_eq!(
         polled.review,
         ReviewOutcome::Approved {
-            by: "late-approver".to_string(),
+            by: "late-approver".into(),
             reviewed_sha: format!("{:040x}", 3).parse().unwrap(),
         },
         "the approval on the second page is found"

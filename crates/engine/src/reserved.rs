@@ -5,6 +5,8 @@
 
 use std::str::FromStr;
 
+use yunta_core::OptionId;
+
 /// An option the engine appends to an escalation and acts on when a human
 /// picks it — as opposed to an author-declared option, which the engine
 /// only records. Everything the run loop decides on goes through this
@@ -21,6 +23,12 @@ pub(crate) enum ReservedOption {
     Approve,
     /// Grant a scope expansion a task requested.
     Grant,
+    /// Deny a scope expansion a task requested.
+    Deny,
+    /// Lift a budget cap for this invocation only.
+    Continue,
+    /// Reject a published gate resolved from the console.
+    Reject,
 }
 
 impl ReservedOption {
@@ -33,7 +41,20 @@ impl ReservedOption {
             ReservedOption::Promote => "promote",
             ReservedOption::Approve => "approve",
             ReservedOption::Grant => "grant",
+            ReservedOption::Deny => "deny",
+            ReservedOption::Continue => "continue",
+            ReservedOption::Reject => "reject",
         }
+    }
+
+    /// The option as an escalation offers it.
+    pub(crate) fn id(self) -> OptionId {
+        OptionId::from_static(self.as_str())
+    }
+
+    /// The reserved option `id` spells, or `None` for an author's own.
+    pub(crate) fn of(id: &OptionId) -> Option<Self> {
+        id.as_str().parse().ok()
     }
 }
 
@@ -47,6 +68,9 @@ impl FromStr for ReservedOption {
             "promote" => Ok(ReservedOption::Promote),
             "approve" => Ok(ReservedOption::Approve),
             "grant" => Ok(ReservedOption::Grant),
+            "deny" => Ok(ReservedOption::Deny),
+            "continue" => Ok(ReservedOption::Continue),
+            "reject" => Ok(ReservedOption::Reject),
             _ => Err(()),
         }
     }

@@ -951,3 +951,24 @@ nodes:
         vec!["conventions".to_string()]
     );
 }
+
+#[test]
+fn a_gate_option_that_is_not_a_name_is_refused_naming_the_field() {
+    // Options are identifiers: a `yunta resolve-gate` argument, a key of
+    // `on:`, a value the log records. One with a space is not one.
+    let yaml = r#"
+name: fixture
+nodes:
+  - id: approve
+    kind: gate
+    assignee: lead
+    options: ["go ahead", abort]
+"#;
+    let error = serde_norway::from_str::<Workflow>(yaml)
+        .expect_err("an option that is not an identifier is refused");
+    let text = error.to_string();
+    assert!(
+        text.contains("go ahead") && text.contains("option id"),
+        "the refusal names the value and what it had to be: {text}"
+    );
+}

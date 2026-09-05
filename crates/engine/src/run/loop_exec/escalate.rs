@@ -55,13 +55,23 @@ pub(super) async fn resolve_escalations(
                 EventPayload::GateResolved(resolution.clone()),
             )
             .await?;
-        let decided_by = Decider::Person {
-            id: resolution
-                .resolved_by
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string()),
+        // A scope decision is a person's; a resolution that names nobody is
+        // a log this engine did not write.
+        let Some(by) = resolution.resolved_by.clone() else {
+            return Err(RunError::Broken {
+                diagnostic: format!(
+                    "task `{}`: a scope expansion decision names no responder",
+                    pending.task_id
+                ),
+            });
         };
-        if resolution.chosen_option.as_deref() == Some(ReservedOption::Grant.as_str()) {
+        let decided_by = Decider::Person { id: by };
+        if resolution
+            .chosen_option
+            .as_ref()
+            .and_then(ReservedOption::of)
+            == Some(ReservedOption::Grant)
+        {
             *expansions_granted_this_run += 1;
             ctx.emit(
                 Some(&node.id),
@@ -203,14 +213,14 @@ fn expansion_escalation(
         ),
         options: vec![
             yunta_core::events::GateOption {
-                id: ReservedOption::Grant.as_str().to_string(),
+                id: ReservedOption::Grant.id(),
                 label: format!("Grant access to {}", request.paths.join(", ")),
                 tradeoff: "The task's final diff is evaluated against its scope plus these \
                            paths; consumes 1 of max_per_run"
                     .to_string(),
             },
             yunta_core::events::GateOption {
-                id: "deny".to_string(),
+                id: ReservedOption::Deny.id(),
                 label: "Deny the expansion".to_string(),
                 tradeoff: "The denial becomes a finding; the task retries within its \
                            original scope"

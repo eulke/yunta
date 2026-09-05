@@ -164,7 +164,7 @@
   "additionalProperties": false,
   "$defs": {
     "AdapterId": {
-      "description": "A adapter id: a letter followed by letters, digits, `_` or `-`",
+      "description": "An adapter id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
     },
@@ -189,7 +189,7 @@
       "additionalProperties": false
     },
     "AgentName": {
-      "description": "A agent name: printable ASCII without whitespace",
+      "description": "An agent name: printable ASCII without whitespace",
       "type": "string",
       "minLength": 1
     },
@@ -328,7 +328,7 @@
       ]
     },
     "ExecutorName": {
-      "description": "A executor name: a letter followed by letters, digits, `_` or `-`",
+      "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
     },

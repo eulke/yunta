@@ -310,7 +310,12 @@ async fn tool_resolve_gate(
 ) -> Result<String, String> {
     let run_id = required_str(args, "run_id")?;
     let option = required_str(args, "option")?;
-    let by = args.get("by").and_then(Value::as_str).map(str::to_string);
+    let by = args
+        .get("by")
+        .and_then(Value::as_str)
+        .map(str::parse::<yunta_core::Responder>)
+        .transpose()
+        .map_err(|e| e.to_string())?;
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
@@ -333,8 +338,10 @@ async fn tool_resolve_gate(
         &storage,
         &run_id_typed,
         &yunta_core::SystemClock,
-        option,
-        by,
+        option
+            .parse::<yunta_core::OptionId>()
+            .map_err(|e| e.to_string())?,
+        crate::identity::responder(by.as_ref()),
         text,
     )
     .await

@@ -507,10 +507,10 @@ fn internal_gate(id: &str, options: &[&str], on: &[(&str, &str)]) -> Node {
         unreachable!()
     };
     *external = None;
-    *node_options = options.iter().map(|o| o.to_string()).collect();
+    *node_options = options.iter().map(|o| (*o).into()).collect();
     *node_on = on
         .iter()
-        .map(|(option, target)| (option.to_string(), (*target).into()))
+        .map(|(option, target)| ((*option).into(), (*target).into()))
         .collect();
     node
 }
@@ -538,7 +538,7 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
         errors,
         vec![CheckError::GateOnUndeclaredOption {
             node: "approve".into(),
-            option: "ajustar".to_string(),
+            option: "ajustar".into(),
         }]
     );
 }

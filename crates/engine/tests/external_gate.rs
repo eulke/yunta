@@ -178,7 +178,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
 
     // Person B: reviews and approves directly on the forge — no Yunta
     // involved on their end at all.
-    forge_state.approve(bench.run_id.as_str(), "person-b");
+    forge_state.approve(bench.run_id.as_str(), &"person-b".into());
 
     // Person A's machine, a second, wholly separate `execute_run` call
     // (simulating `yunta resume`): picks the approval up on its own.
@@ -195,7 +195,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         _ => None,
     });
     assert_eq!(
-        resolved.and_then(|p| p.resolved_by.as_deref()),
+        resolved.and_then(|p| p.resolved_by.as_ref().map(|r| r.as_str())),
         Some("person-b")
     );
     assert!(
@@ -215,7 +215,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 
     let (terminal, _) = bench.wake(Some(&forge)).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    forge_state.approve(bench.run_id.as_str(), "person-b");
+    forge_state.approve(bench.run_id.as_str(), &"person-b".into());
     let (terminal, state) = bench.wake(Some(&forge)).await;
     // The gate itself resolved (Finished), but `after` failed on its own
     // with nowhere to reroute — the run as a whole is still Paused, not
@@ -257,7 +257,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 
     // A fresh approval at the new head resolves it again, same as the
     // first time.
-    forge_state.approve(bench.run_id.as_str(), "person-b");
+    forge_state.approve(bench.run_id.as_str(), &"person-b".into());
     let (_, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(
         state.nodes.get("approve"),
@@ -274,7 +274,7 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     bench.wake(Some(&forge)).await;
     forge_state.request_changes(
         bench.run_id.as_str(),
-        "person-b",
+        &"person-b".into(),
         vec![yunta_adapters::ReviewComment {
             author: "person-b".to_string(),
             body: "please add a test".to_string(),
@@ -314,7 +314,7 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
 
     bench.wake(Some(&forge)).await;
     // Person B merges the PR outright: an approval that also landed.
-    let merge_sha = forge_state.merge(bench.run_id.as_str(), "person-b");
+    let merge_sha = forge_state.merge(bench.run_id.as_str(), &"person-b".into());
 
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -330,7 +330,10 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
             _ => None,
         })
         .expect("the gate resolves");
-    assert_eq!(resolved.resolved_by.as_deref(), Some("person-b"));
+    assert_eq!(
+        resolved.resolved_by.as_ref().map(|r| r.as_str()),
+        Some("person-b")
+    );
     assert_eq!(
         resolved.approved_sha.as_ref(),
         Some(&merge_sha),
@@ -347,7 +350,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
     let forge = MockForge::new(forge_state.clone());
 
     bench.wake(Some(&forge)).await;
-    forge_state.merge(bench.run_id.as_str(), "person-b");
+    forge_state.merge(bench.run_id.as_str(), &"person-b".into());
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(

@@ -17,7 +17,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use yunta_core::CommitSha;
+use yunta_core::{CommitSha, Responder};
 
 use super::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
@@ -27,17 +27,17 @@ use super::{
 enum Review {
     Pending,
     Approved {
-        by: String,
+        by: Responder,
         reviewed_sha: CommitSha,
     },
     ChangesRequested {
-        by: String,
+        by: Responder,
         reviewed_sha: CommitSha,
         comments: Vec<ReviewComment>,
     },
     Closed,
     Merged {
-        by: String,
+        by: Responder,
         merge_sha: CommitSha,
     },
 }
@@ -89,21 +89,21 @@ impl MockForgeState {
     /// Person B approves — no Yunta involved on their end, just this
     /// call standing in for "clicked Approve in the forge's own UI".
     /// The approval covers whatever the PR's head is *right now*.
-    pub fn approve(&self, run_id: &str, by: &str) {
+    pub fn approve(&self, run_id: &str, by: &Responder) {
         let mut inner = self.0.lock().unwrap();
         if let Some(pr) = inner.latest_for(run_id) {
             pr.review = Review::Approved {
-                by: by.to_string(),
+                by: by.clone(),
                 reviewed_sha: pr.head_sha.clone(),
             };
         }
     }
 
-    pub fn request_changes(&self, run_id: &str, by: &str, comments: Vec<ReviewComment>) {
+    pub fn request_changes(&self, run_id: &str, by: &Responder, comments: Vec<ReviewComment>) {
         let mut inner = self.0.lock().unwrap();
         if let Some(pr) = inner.latest_for(run_id) {
             pr.review = Review::ChangesRequested {
-                by: by.to_string(),
+                by: by.clone(),
                 reviewed_sha: pr.head_sha.clone(),
                 comments,
             };
@@ -120,13 +120,13 @@ impl MockForgeState {
     }
 
     /// Person B merges the PR; returns the merge commit.
-    pub fn merge(&self, run_id: &str, by: &str) -> CommitSha {
+    pub fn merge(&self, run_id: &str, by: &Responder) -> CommitSha {
         let mut inner = self.0.lock().unwrap();
         let merge_sha = inner.fresh_sha();
         if let Some(pr) = inner.latest_for(run_id) {
             pr.open = false;
             pr.review = Review::Merged {
-                by: by.to_string(),
+                by: by.clone(),
                 merge_sha: merge_sha.clone(),
             };
         }

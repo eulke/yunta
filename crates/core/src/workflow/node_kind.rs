@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, nested};
 use super::{LoopUntil, Node, ScopeExpansion};
-use crate::ids::{ExecutorName, NodeId};
+use crate::ids::{ExecutorName, NodeId, OptionId};
 use crate::yaml::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -114,7 +114,7 @@ pub enum NodeKind {
         /// the engine always appends its own `abort` (aborting is
         /// always a valid exit, the same convention every escalation uses).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        options: Vec<String>,
+        options: Vec<OptionId>,
         /// Option → re-route target (`on: { ajustar: plan }`): choosing
         /// a mapped option re-routes exactly like `on_failure.goto`
         /// — the target and its subgraph complete, then the
@@ -123,7 +123,7 @@ pub enum NodeKind {
         /// `max_reroutes` exists to cap. An unmapped option resolves
         /// the gate and the DAG continues.
         #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-        on: IndexMap<String, NodeId>,
+        on: IndexMap<OptionId, NodeId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         external: Option<ExternalGate>,
     },

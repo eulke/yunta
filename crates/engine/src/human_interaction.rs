@@ -13,7 +13,7 @@
 
 use async_trait::async_trait;
 use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
-use yunta_core::{Answer, QuestionsFile};
+use yunta_core::{Answer, QuestionsFile, Responder};
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the
@@ -23,7 +23,7 @@ use yunta_core::{Answer, QuestionsFile};
 pub struct QuestionsReply {
     pub answers: Vec<Answer>,
     pub channel: Channel,
-    pub responder: Option<String>,
+    pub responder: Option<Responder>,
 }
 
 /// Resolves one gate's escalation, or reports that this surface can't

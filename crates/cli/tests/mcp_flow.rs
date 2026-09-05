@@ -236,6 +236,28 @@ nodes:
     )
     .await;
 
+    // A decision without `by` still names who made it: the ambient identity
+    // of the process that answered, marked unverified — the same rule the
+    // CLI applies, never an absent responder.
+    let storage = yunta_storage::Storage::open(&home.join("yunta.db")).unwrap();
+    let events = storage.events_for_run(&run_id.parse().unwrap()).unwrap();
+    let resolved = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("resolve_gate records a gate_resolved");
+    let responder = resolved
+        .resolved_by
+        .as_ref()
+        .map(|by| by.as_str().to_string())
+        .expect("the decision names a responder");
+    assert!(
+        responder.starts_with("unverified:"),
+        "an MCP decision without `by` carries the ambient identity: {responder}"
+    );
+
     client.cancel().await.unwrap();
 }
 

@@ -308,8 +308,8 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     );
 
     let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("grant".to_string()),
-        resolved_by: Some("eulke".to_string()),
+        chosen_option: Some("grant".into()),
+        resolved_by: Some("eulke".into()),
         free_text: None,
         approved_sha: None,
     });
@@ -342,9 +342,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         .expect("a human grant must be recorded as scope_expansion_granted");
     assert_eq!(
         granted.decided_by,
-        yunta_core::events::Decider::Person {
-            id: "eulke".to_string()
-        }
+        yunta_core::events::Decider::Person { id: "eulke".into() }
     );
     assert_eq!(
         granted.paths,
@@ -359,7 +357,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_deref() == Some("grant")
+        Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_ref().map(|o| o.as_str()) == Some("grant")
     )));
 }
 
@@ -382,8 +380,8 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
     );
 
     let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("deny".to_string()),
-        resolved_by: Some("eulke".to_string()),
+        chosen_option: Some("deny".into()),
+        resolved_by: Some("eulke".into()),
         free_text: Some("out of this sprint".to_string()),
         approved_sha: None,
     });
@@ -411,9 +409,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         .expect("the human denial must be recorded");
     assert_eq!(
         denied.decided_by,
-        yunta_core::events::Decider::Person {
-            id: "eulke".to_string()
-        }
+        yunta_core::events::Decider::Person { id: "eulke".into() }
     );
     assert!(denied
         .denial_reason

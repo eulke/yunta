@@ -140,8 +140,8 @@ mod tests {
     impl HumanInteraction for AlwaysPromote {
         async fn resolve(&self, _e: &GateWaitingPayload) -> Option<GateResolvedPayload> {
             Some(GateResolvedPayload {
-                chosen_option: Some("promote".to_string()),
-                resolved_by: Some("eulke".to_string()),
+                chosen_option: Some("promote".into()),
+                resolved_by: Some("eulke".into()),
                 free_text: None,
                 approved_sha: None,
             })

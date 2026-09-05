@@ -60,8 +60,8 @@ pub use id_source::SeqIdSource;
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InvalidId,
-    ModeName, ModelName, NodeId, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName,
-    Seq, SessionId, TaskId,
+    ModeName, ModelName, NodeId, OptionId, PackName, PackRef, Pid, Publisher, QuestionId,
+    Responder, RunId, RunnerName, Seq, SessionId, TaskId,
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use ledger::{Criterion, Ledger, Task};

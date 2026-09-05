@@ -196,10 +196,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     // escalation added it, not that this test just got lucky with a
     // fallback.
     let options = interaction.seen_options();
-    assert!(
-        options[0].contains(&"promote".to_string()),
-        "got: {options:?}"
-    );
+    assert!(options[0].contains(&"promote".into()), "got: {options:?}");
 }
 
 #[tokio::test]
@@ -210,7 +207,7 @@ async fn promote_is_never_offered_with_no_later_mode() {
 
     let options = interaction.seen_options();
     assert!(
-        !options[0].contains(&"promote".to_string()),
+        !options[0].contains(&"promote".into()),
         "the last declared mode has nowhere to promote to — got: {options:?}"
     );
 }

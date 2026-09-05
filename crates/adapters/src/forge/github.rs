@@ -17,7 +17,7 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use yunta_core::{CommitSha, GitHubRepo, Secret};
+use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
 use super::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
@@ -467,10 +467,10 @@ impl Forge for GitHubForge {
         if detail.state != "open" {
             let review = if detail.merged {
                 ReviewOutcome::Merged {
-                    by: detail
-                        .merged_by
-                        .map(|user| user.login)
-                        .unwrap_or_else(|| "(unknown)".to_string()),
+                    by: match detail.merged_by {
+                        Some(user) => parse_responder("read the pull request", &user.login)?,
+                        None => Responder::from_static("(unknown)"),
+                    },
                     merge_sha: match detail.merge_commit_sha {
                         Some(sha) => parse_sha("read the pull request", &sha)?,
                         None => head_sha.clone(),
@@ -506,13 +506,13 @@ impl Forge for GitHubForge {
             None => ReviewOutcome::Pending,
             Some(r) => match r.commit_id.as_deref().map(str::parse::<CommitSha>) {
                 Some(Ok(reviewed_sha)) if r.state == "APPROVED" => ReviewOutcome::Approved {
-                    by: r.user.login,
+                    by: parse_responder("read the pull request reviews", &r.user.login)?,
                     reviewed_sha,
                 },
                 Some(Ok(reviewed_sha)) => {
                     let comments = self.review_comments(gate.number).await?;
                     ReviewOutcome::ChangesRequested {
-                        by: r.user.login,
+                        by: parse_responder("read the pull request reviews", &r.user.login)?,
                         reviewed_sha,
                         comments,
                     }
@@ -537,5 +537,13 @@ impl Forge for GitHubForge {
 /// A commit id the API reported, or the answer refused for not being one.
 fn parse_sha(action: &'static str, sha: &str) -> Result<CommitSha, ForgeError> {
     sha.parse()
+        .map_err(|source| ForgeError::Malformed { action, source })
+}
+
+/// A reviewer's login the API reported, or the answer refused for an
+/// empty one.
+fn parse_responder(action: &'static str, login: &str) -> Result<Responder, ForgeError> {
+    login
+        .parse()
         .map_err(|source| ForgeError::Malformed { action, source })
 }

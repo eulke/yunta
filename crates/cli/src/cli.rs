@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use yunta_core::{AdapterId, ModeName, PackRef, RunId};
+use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder, RunId};
 
 use crate::commands;
 use crate::error::{CliError, Outcome};
@@ -103,12 +103,12 @@ enum Command {
         /// The run id waiting on a decision.
         run_id: RunId,
         /// The chosen option id, as printed by `yunta status`.
-        option: String,
+        option: OptionId,
         /// Who's answering, for the audit trail
         /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
         /// as `unverified:$USER` — an ambient identity, not a claimed one.
         #[arg(long)]
-        by: Option<String>,
+        by: Option<Responder>,
         /// Free-form context alongside the choice.
         #[arg(long = "text")]
         free_text: Option<String>,
@@ -322,7 +322,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             commands::resolve_gate::resolve_gate(
                 &run_id,
                 &option,
-                by.as_deref(),
+                by.as_ref(),
                 free_text.as_deref(),
             )
             .await

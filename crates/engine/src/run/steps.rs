@@ -182,8 +182,8 @@ pub(super) async fn gate_exhausted(
     // mismatch means ask normally.
     let pre_seeded = escalation::pre_seeded_resolution(events, &node).filter(|r| {
         r.chosen_option
-            .as_deref()
-            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == chosen))
+            .as_ref()
+            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == *chosen))
     });
     let already_recorded = pre_seeded.is_some();
     let resolution = match pre_seeded {
@@ -202,7 +202,11 @@ pub(super) async fn gate_exhausted(
         ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))
             .await?;
     }
-    if resolution.chosen_option.as_deref() == Some(ReservedOption::Retry.as_str()) {
+    let chosen = resolution
+        .chosen_option
+        .as_ref()
+        .and_then(ReservedOption::of);
+    if chosen == Some(ReservedOption::Retry) {
         ctx.emit(
             Some(&node),
             EventPayload::NodeRerouted(NodeReroutedPayload {
@@ -215,7 +219,7 @@ pub(super) async fn gate_exhausted(
         )
         .await?;
         Ok(None)
-    } else if resolution.chosen_option.as_deref() == Some(ReservedOption::Promote.as_str()) {
+    } else if chosen == Some(ReservedOption::Promote) {
         // `"promote"` only ever appears as an option when a successor
         // mode was carried with it; a run whose log offers `promote`
         // without one is corrupt, reported rather than unwrapped.

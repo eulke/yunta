@@ -25,7 +25,7 @@ use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
     GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
-use yunta_core::{CommitSha, ExternalGate, FindingId, Node};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
 
 use crate::human_interaction::HumanInteraction;
 
@@ -164,7 +164,7 @@ pub(super) async fn poll_gate(
 async fn resolve_approved(
     ctx: &RunCtx<'_>,
     node: &Node,
-    by: &str,
+    by: &Responder,
     approved_sha: &CommitSha,
     outcome: String,
 ) -> Result<GateStep, RunError> {
@@ -173,7 +173,7 @@ async fn resolve_approved(
         Some(&node.id),
         EventPayload::GateResolved(GateResolvedPayload {
             chosen_option: None,
-            resolved_by: Some(by.to_string()),
+            resolved_by: Some(by.clone()),
             free_text: None,
             approved_sha: Some(approved_sha.clone()),
         }),
@@ -395,8 +395,8 @@ pub(super) async fn resolve_internal_gate(
     node: &Node,
     assignee: &str,
     message: Option<&str>,
-    options: &[String],
-    on: &indexmap::IndexMap<String, yunta_core::NodeId>,
+    options: &[OptionId],
+    on: &indexmap::IndexMap<OptionId, yunta_core::NodeId>,
 ) -> Result<GateStep, RunError> {
     // Shared with `current_escalation` so a `resolve_gate`
     // MCP call, running in a process that never paused this run,
@@ -412,8 +412,8 @@ pub(super) async fn resolve_internal_gate(
     let events = ctx.load_events().await?;
     let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id).filter(|r| {
         r.chosen_option
-            .as_deref()
-            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == chosen))
+            .as_ref()
+            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == *chosen))
     });
     let already_recorded = pre_seeded.is_some();
     let resolution = match pre_seeded {
@@ -431,14 +431,23 @@ pub(super) async fn resolve_internal_gate(
         },
     };
 
-    let chosen = resolution.chosen_option.clone().unwrap_or_default();
+    // A gate's resolution is a choice from its menu; one that names no
+    // option is a log this engine did not write.
+    let Some(chosen) = resolution.chosen_option.clone() else {
+        return Err(RunError::Broken {
+            diagnostic: format!(
+                "gate `{}` carries a resolution that names no option",
+                node.id
+            ),
+        });
+    };
     // Whether `abort` is the engine's own appended option (never the
     // author's) — same rule `build_internal_gate_escalation` used to
     // decide whether to append it in the first place.
     let engine_abort = !options
         .iter()
-        .any(|id| id == ReservedOption::Abort.as_str());
-    if engine_abort && chosen == ReservedOption::Abort.as_str() {
+        .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
+    if engine_abort && ReservedOption::of(&chosen) == Some(ReservedOption::Abort) {
         // The usual escalation convention exactly: record the
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
@@ -508,7 +517,7 @@ pub(super) async fn resolve_internal_gate(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::NodeFinished(NodeFinishedPayload {
-                    outcome: chosen,
+                    outcome: chosen.to_string(),
                     tokens_used: TokenUsage::default(),
                 }),
             )
@@ -567,12 +576,12 @@ async fn degrade_to_console(
         evidence: "no forge reachable from this machine".to_string(),
         options: vec![
             GateOption {
-                id: ReservedOption::Approve.as_str().to_string(),
+                id: ReservedOption::Approve.id(),
                 label: "Approve".to_string(),
                 tradeoff: "Marks the gate as passed; the run continues".to_string(),
             },
             GateOption {
-                id: "reject".to_string(),
+                id: ReservedOption::Reject.id(),
                 label: "Reject".to_string(),
                 tradeoff: "Fails the node; its declared re-route (if any) takes over".to_string(),
             },
@@ -592,7 +601,12 @@ async fn degrade_to_console(
     )
     .await?;
     emit_started(ctx, node).await?;
-    if resolution.chosen_option.as_deref() == Some(ReservedOption::Approve.as_str()) {
+    if resolution
+        .chosen_option
+        .as_ref()
+        .and_then(ReservedOption::of)
+        == Some(ReservedOption::Approve)
+    {
         ctx.emit(
             Some(&node.id),
             EventPayload::NodeFinished(NodeFinishedPayload {
@@ -600,7 +614,7 @@ async fn degrade_to_console(
                     "approved from the console{}",
                     resolution
                         .resolved_by
-                        .as_deref()
+                        .as_ref()
                         .map(|by| format!(" by {by}"))
                         .unwrap_or_default()
                 ),

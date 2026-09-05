@@ -18,8 +18,8 @@ use common::*;
 async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_finish() {
     let bench = Bench::new();
     let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("retry".to_string()),
-        resolved_by: Some("eulke".to_string()),
+        chosen_option: Some("retry".into()),
+        resolved_by: Some("eulke".into()),
         free_text: None,
         approved_sha: None,
     });
@@ -64,7 +64,7 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
         _ => None,
     });
     assert_eq!(
-        resolved.and_then(|p| p.chosen_option.as_deref()),
+        resolved.and_then(|p| p.chosen_option.as_ref().map(|o| o.as_str())),
         Some("retry")
     );
 }
@@ -73,8 +73,8 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
 async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
     let bench = Bench::new();
     let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("abort".to_string()),
-        resolved_by: Some("eulke".to_string()),
+        chosen_option: Some("abort".into()),
+        resolved_by: Some("eulke".into()),
         free_text: Some("not worth chasing today".to_string()),
         approved_sha: None,
     });
@@ -477,7 +477,10 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
         })
         .expect("the authorization must be recorded");
     assert_eq!(resolved.0, None);
-    assert_eq!(resolved.1.chosen_option.as_deref(), Some("continue"));
+    assert_eq!(
+        resolved.1.chosen_option.as_ref().map(|o| o.as_str()),
+        Some("continue")
+    );
 }
 
 #[tokio::test]
@@ -497,7 +500,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_deref() == Some("abort")
+            Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_ref().map(|o| o.as_str()) == Some("abort")
         )),
         "the abort decision must be auditable in the log"
     );

@@ -70,7 +70,7 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
         Some(yunta_engine::QuestionsReply {
             answers: self.answers.clone(),
             channel: yunta_core::events::Channel::Tty,
-            responder: Some("eulke".to_string()),
+            responder: Some("eulke".into()),
         })
     }
 }
@@ -513,8 +513,8 @@ impl SequencedInteraction {
                 options
                     .iter()
                     .map(|option| yunta_core::events::GateResolvedPayload {
-                        chosen_option: Some(option.to_string()),
-                        resolved_by: Some("lead".to_string()),
+                        chosen_option: Some((*option).into()),
+                        resolved_by: Some("lead".into()),
                         free_text: None,
                         approved_sha: None,
                     })

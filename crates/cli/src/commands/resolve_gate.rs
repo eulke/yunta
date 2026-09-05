@@ -10,7 +10,7 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
-use yunta_core::{Manifest, RunId};
+use yunta_core::{Manifest, OptionId, Responder, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -18,8 +18,8 @@ use crate::load_yaml;
 
 pub async fn resolve_gate(
     run_id: &RunId,
-    option_id: &str,
-    resolved_by: Option<&str>,
+    option: &OptionId,
+    resolved_by: Option<&Responder>,
     free_text: Option<&str>,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -38,8 +38,8 @@ pub async fn resolve_gate(
         &storage,
         run_id,
         &ctx.clock,
-        option_id,
-        Some(crate::identity::responder(resolved_by)),
+        option.clone(),
+        crate::identity::responder(resolved_by),
         free_text.map(str::to_string),
     )
     .await?;
@@ -51,6 +51,6 @@ pub async fn resolve_gate(
                 "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
             ))
         })?;
-    println!("run {run_id}: resolved `{option_id}`, driving forward independently");
+    println!("run {run_id}: resolved `{option}`, driving forward independently");
     Ok(Outcome::Success)
 }

@@ -285,8 +285,8 @@ impl GateBench {
             &self.storage.async_handle(),
             &self.run_id,
             &FixedClock,
-            option,
-            Some("mcp".to_string()),
+            option.into(),
+            "mcp".into(),
             None,
         )
         .await
@@ -431,8 +431,8 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
         &storage.async_handle(),
         &run_id,
         &FixedClock,
-        "promote",
-        Some("mcp".to_string()),
+        "promote".into(),
+        "mcp".into(),
         None,
     )
     .await
@@ -564,8 +564,8 @@ async fn live_and_pre_seeded_retry_reach_the_same_final_state() {
             _escalation: &yunta_core::events::GateWaitingPayload,
         ) -> Option<yunta_core::events::GateResolvedPayload> {
             Some(yunta_core::events::GateResolvedPayload {
-                chosen_option: Some("retry".to_string()),
-                resolved_by: Some("mcp".to_string()),
+                chosen_option: Some("retry".into()),
+                resolved_by: Some("mcp".into()),
                 free_text: None,
                 approved_sha: None,
             })

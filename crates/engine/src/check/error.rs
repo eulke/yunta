@@ -2,6 +2,7 @@
 
 use super::*;
 use thiserror::Error;
+use yunta_core::OptionId;
 
 /// A `yunta_schema:` range the parser cannot read.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -210,7 +211,7 @@ pub enum CheckError {
     /// `on:` may only map options the gate itself declares —
     /// mapping an undeclared one is a choice no human can ever make.
     #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
-    GateOnUndeclaredOption { node: NodeId, option: String },
+    GateOnUndeclaredOption { node: NodeId, option: OptionId },
 
     /// The same broken-reference class as `BrokenReference` —
     /// catching it here means the run never starts with a mode that

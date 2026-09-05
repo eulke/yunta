@@ -273,7 +273,7 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
                 Some("approve"),
                 EventPayload::GateResolved(GateResolvedPayload {
                     chosen_option: None,
-                    resolved_by: Some("reviewer".to_string()),
+                    resolved_by: Some("reviewer".into()),
                     free_text: None,
                     approved_sha: Some("deadbeef".into()),
                 }),
@@ -295,7 +295,7 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
                 Some("approve"),
                 EventPayload::GateResolved(GateResolvedPayload {
                     chosen_option: None,
-                    resolved_by: Some("reviewer".to_string()),
+                    resolved_by: Some("reviewer".into()),
                     free_text: None,
                     approved_sha: Some("deadbeef".into()),
                 }),
@@ -307,7 +307,7 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
         Some("approve"),
         EventPayload::GateResolved(GateResolvedPayload {
             chosen_option: None,
-            resolved_by: Some("reviewer".to_string()),
+            resolved_by: Some("reviewer".into()),
             free_text: None,
             approved_sha: None, // changes requested / closed / retry
         }),

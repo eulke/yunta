@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use thiserror::Error;
-use yunta_core::{CommitSha, InvalidId};
+use yunta_core::{CommitSha, InvalidId, Responder};
 
 #[derive(Debug, Error)]
 pub enum ForgeError {
@@ -123,11 +123,11 @@ pub struct PolledGate {
 pub enum ReviewOutcome {
     Pending,
     Approved {
-        by: String,
+        by: Responder,
         reviewed_sha: CommitSha,
     },
     ChangesRequested {
-        by: String,
+        by: Responder,
         reviewed_sha: CommitSha,
         comments: Vec<ReviewComment>,
     },
@@ -135,7 +135,7 @@ pub enum ReviewOutcome {
     Closed,
     /// Merged: approved and landed. `merge_sha` is the merge commit.
     Merged {
-        by: String,
+        by: Responder,
         merge_sha: CommitSha,
     },
 }

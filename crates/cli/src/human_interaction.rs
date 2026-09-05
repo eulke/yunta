@@ -77,8 +77,8 @@ impl HumanInteraction for ConsoleInteraction {
 
         let chosen_option = loop {
             let line = prompt("choose an option id: ").await?;
-            if escalation.options.iter().any(|o| o.id == line) {
-                break line;
+            if let Some(option) = escalation.options.iter().find(|o| o.id.as_str() == line) {
+                break option.id.clone();
             }
             println!(
                 "`{line}` isn't one of: {}",

@@ -14,6 +14,7 @@
 use yunta_core::events::{EventPayload, GateOption, GateWaitingPayload};
 
 use super::{RunCtx, RunError};
+use crate::reserved::ReservedOption;
 
 /// What the invocation does after the human (or their absence) weighs in.
 pub enum BudgetDecision {
@@ -45,7 +46,7 @@ pub async fn escalate(
                 .await?;
             ctx.emit(node_id, EventPayload::GateResolved(resolution))
                 .await?;
-            if chosen.as_deref() == Some("continue") {
+            if chosen.as_ref().and_then(ReservedOption::of) == Some(ReservedOption::Continue) {
                 Ok(BudgetDecision::Continue)
             } else {
                 Ok(BudgetDecision::Pause {
@@ -78,14 +79,14 @@ pub fn over_budget_escalation(
         ),
         options: vec![
             GateOption {
-                id: "continue".to_string(),
+                id: ReservedOption::Continue.id(),
                 label: "Continue past the cap".to_string(),
                 tradeoff: "Lifts the cap for this invocation only; a later resume \
                            will ask again before spending more"
                     .to_string(),
             },
             GateOption {
-                id: "abort".to_string(),
+                id: ReservedOption::Abort.id(),
                 label: "Pause the run".to_string(),
                 tradeoff: "The run pauses with reason `budget`; a resume re-asks".to_string(),
             },
@@ -121,14 +122,14 @@ pub fn loop_overrun_escalation(
         ),
         options: vec![
             GateOption {
-                id: "continue".to_string(),
+                id: ReservedOption::Continue.id(),
                 label: "Keep iterating".to_string(),
                 tradeoff: "Lifts the cap for this invocation only; a later resume \
                            will ask again"
                     .to_string(),
             },
             GateOption {
-                id: "abort".to_string(),
+                id: ReservedOption::Abort.id(),
                 label: "Fail the loop node".to_string(),
                 tradeoff: "The node fails naming the limit and the run pauses; a \
                            resume re-runs the loop and re-asks"

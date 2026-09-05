@@ -151,7 +151,7 @@ fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
         panic!("`approve-promotion` must be a gate, got {:?}", gate.kind);
     };
     assert_eq!(assignee, "curator");
-    assert_eq!(options, &vec!["approve".to_string()]);
+    assert_eq!(options, &["approve"]);
 
     let publish = workflow
         .nodes
