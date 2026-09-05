@@ -16,7 +16,8 @@ use thiserror::Error;
 use yunta_core::events::Finding;
 use yunta_core::FindingsFile;
 use yunta_core::{
-    sha256_hex, ArtifactKind, ArtifactSpec, Ledger, Node, NodeId, Question, QuestionsFile,
+    sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, NodeId, Question,
+    QuestionsFile,
 };
 
 use crate::findings::FindingsError;
@@ -109,7 +110,7 @@ pub struct VerifiedArtifact {
     pub name: String,
     /// Relative to the run directory (`artifacts/<name>`).
     pub path: PathBuf,
-    pub content_hash: String,
+    pub content_hash: ContentHash,
     /// The declared `kind:`, if any — carried onto `artifact_written`
     /// so replay can recognize interpreted artifacts by type.
     pub kind: Option<ArtifactKind>,

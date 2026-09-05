@@ -275,7 +275,7 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
                     chosen_option: None,
                     resolved_by: Some("reviewer".to_string()),
                     free_text: None,
-                    approved_sha: Some("deadbeef".to_string()),
+                    approved_sha: Some("deadbeef".into()),
                 }),
             )]
         })
@@ -297,7 +297,7 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
                     chosen_option: None,
                     resolved_by: Some("reviewer".to_string()),
                     free_text: None,
-                    approved_sha: Some("deadbeef".to_string()),
+                    approved_sha: Some("deadbeef".into()),
                 }),
             )]
         })
@@ -373,13 +373,13 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
         0,
         None,
         EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
-            manifest_hash: "h".to_string(),
+            manifest_hash: yunta_core::sha256_hex(b"h"),
             inputs: std::collections::BTreeMap::new(),
             mode: mode.into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),
-            base_commit: "abc".to_string(),
+            base_commit: "deadbeef".into(),
         }),
     )]
 }

@@ -38,7 +38,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
 async fn a_session_that_makes_the_criterion_pass_reaches_done() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
         "write-output",
@@ -95,7 +95,7 @@ outcome: { type: completed, summary: "wrote it" }
 async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_done() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
         "write-output",
@@ -144,7 +144,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
 async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // `true` always exits 0 — a non-guard criterion that already passes.
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
@@ -193,7 +193,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // `false` always exits 1 — a guard that's already red.
     let t = task(
@@ -245,7 +245,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // The criterion only cares about marker.txt (in scope) — but the
     // fixture also writes elsewhere.txt (outside scope). Criteria go
@@ -303,7 +303,7 @@ outcome: { type: completed, summary: "done" }
 async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
         "always-red",
@@ -356,7 +356,7 @@ sessions:
 async fn a_non_retryable_failure_ends_the_cycle() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // Criteria stay red (nothing writes the file) and the session reports a
     // failure it marks non-retryable — retrying cannot help, so the cycle
@@ -420,7 +420,7 @@ sessions:
 async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
@@ -465,7 +465,7 @@ async fn pre_check_and_post_check_run_every_criterion() {
         &["a.txt", "b.txt"],
         vec![cmd("test -f a.txt"), cmd("test -f b.txt")],
     );
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
         .await
         .unwrap();
@@ -491,7 +491,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
         &["output.txt"],
         vec![guard(&format!("echo ran >> {} && true", marker.display()))],
     );
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
         .await
@@ -527,7 +527,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
         &["output.txt"],
         vec![guard(&format!("echo ran >> {} && true", marker.display()))],
     );
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
         .await
@@ -552,7 +552,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
@@ -606,7 +606,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
 async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
         "token-limit",
@@ -669,7 +669,7 @@ outcome: { type: completed, summary: "should never be reached" }
 async fn pre_check_orders_criteria_by_learned_median_duration() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     // The duration is the subject under test here: one criterion genuinely
     // takes longer to run than the other, so the learned median has a real
     // difference to sort by.
@@ -711,7 +711,7 @@ async fn pre_check_orders_criteria_by_learned_median_duration() {
 async fn reused_criteria_carry_no_duration() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
     let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
@@ -747,7 +747,7 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     ];
     let mut verdicts = Vec::new();
     for (i, permutation) in permutations.drain(..).enumerate() {
-        let memo = Memo::new(format!("config-{i}"));
+        let memo = Memo::new(yunta_core::sha256_hex(format!("config-{i}").as_bytes()));
         let t = task("T1", &["**"], permutation);
         let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
             .await
@@ -800,7 +800,7 @@ async fn a_lost_session_audit_event_fails_the_task() {
     // so the trail never silently loses an event.
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
-    let memo = Memo::new("config-hash");
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
         "write-output",

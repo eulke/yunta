@@ -141,7 +141,7 @@
           ]
         },
         "content_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "path": {
           "type": "string"
@@ -159,7 +159,7 @@
           "type": "string"
         },
         "hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "results": {
           "$ref": "#/$defs/BaselineResults"
@@ -282,7 +282,7 @@
           "$ref": "#/$defs/RunId"
         },
         "child_workflow_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         }
       },
       "required": [
@@ -297,7 +297,7 @@
           "$ref": "#/$defs/RunId"
         },
         "child_workflow_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "terminal_state": {
           "$ref": "#/$defs/TerminalState"
@@ -317,6 +317,16 @@
         "terminal_state"
       ]
     },
+    "CommitSha": {
+      "description": "A commit sha: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
+      "type": "string",
+      "minLength": 1
+    },
+    "ContentHash": {
+      "description": "A content hash: 64 lowercase hex digits, the SHA-256 of the content",
+      "type": "string",
+      "minLength": 1
+    },
     "ContextAssembledPayload": {
       "type": "object",
       "properties": {
@@ -324,7 +334,7 @@
           "description": "Keys are `\"stable\" | \"run-stable\" | \"volatile\"` (the fixed\nstability classes) — kept as plain strings rather than an enum key\nto sidestep serde's map-key-as-enum ceremony for no real benefit.",
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "$ref": "#/$defs/ContentHash"
           }
         },
         "sources": {
@@ -355,7 +365,7 @@
       "type": "object",
       "properties": {
         "content_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "kind": {
           "type": "string"
@@ -1045,9 +1055,13 @@
       "properties": {
         "approved_sha": {
           "description": "The commit SHA the forge's approval covered —\n`None` for the internal escalation case, which has no SHA to\nspeak of. What a later drift check compares against the PR's\ncurrent head to decide whether the approval still holds.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "chosen_option": {
@@ -1313,7 +1327,7 @@
       "type": "object",
       "properties": {
         "answers_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "channel": {
           "$ref": "#/$defs/Channel"
@@ -1360,14 +1374,14 @@
           "type": "string"
         },
         "base_commit": {
-          "type": "string"
+          "$ref": "#/$defs/CommitSha"
         },
         "inputs": {
           "type": "object",
           "additionalProperties": true
         },
         "manifest_hash": {
-          "type": "string"
+          "$ref": "#/$defs/ContentHash"
         },
         "mode": {
           "$ref": "#/$defs/ModeName"

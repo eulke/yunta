@@ -110,7 +110,7 @@ fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
             source: "https://github.com/acme/review-pack".to_string(),
             r#ref: "v1.2.0".to_string(),
             commit: "abc123def456".to_string(),
-            content_hash: "deadbeef".to_string(),
+            content_hash: yunta_core::sha256_hex(b"deadbeef"),
         },
     );
 

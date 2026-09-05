@@ -25,13 +25,13 @@ fn sample_events() -> Vec<StoredEvent> {
             1,
             None,
             EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: "deadbeef".to_string(),
+                manifest_hash: yunta_core::sha256_hex(b"deadbeef"),
                 inputs: Default::default(),
                 mode: "default".into(),
                 promoted_from: None,
                 yunta_schema: None,
                 base_branch: "main".to_string(),
-                base_commit: "abc123".to_string(),
+                base_commit: "deadbeef".into(),
             }),
         ),
         event(

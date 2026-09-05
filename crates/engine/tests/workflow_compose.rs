@@ -165,7 +165,7 @@ impl Bench {
 
     /// Every `(child_run_id, child_workflow_hash)` the parent recorded,
     /// in log order.
-    fn children_created(&self, run_id: &RunId) -> Vec<(RunId, String)> {
+    fn children_created(&self, run_id: &RunId) -> Vec<(RunId, yunta_core::ContentHash)> {
         self.storage
             .events_for_run(run_id)
             .unwrap()

@@ -8,7 +8,7 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Phase,
     ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
 };
-use yunta_core::{Node, Seq, Task};
+use yunta_core::{CommitSha, InvalidId, Node, Seq, Task};
 
 use crate::scope::scope_check;
 use crate::task_cycle::{post_check, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
@@ -226,7 +226,7 @@ async fn integrate_task(
     commit_task_work(task_worktree, task).await?;
 
     let integration_head = head_commit(ctx.worktree).await?;
-    if !run_git_ok(task_worktree, &["rebase", &integration_head]).await? {
+    if !run_git_ok(task_worktree, &["rebase", integration_head.as_str()]).await? {
         let _ = crate::git::success(task_worktree, &["rebase", "--abort"]).await;
         // No `post_check` ran — nothing to attach the reason to but the
         // rebase itself, so it's recorded the same way any other command
@@ -280,7 +280,7 @@ async fn integrate_task(
     }
 
     let task_head = head_commit(task_worktree).await?;
-    if !run_git_ok(ctx.worktree, &["merge", "--ff-only", &task_head]).await? {
+    if !run_git_ok(ctx.worktree, &["merge", "--ff-only", task_head.as_str()]).await? {
         // Integration is strictly serial (the engine itself, not
         // an external actor, is the only writer to `ctx.worktree` between
         // reading `integration_head` above and this merge) — a non-fast-
@@ -341,13 +341,19 @@ async fn run_git_ok(cwd: &Path, args: &[&str]) -> Result<bool, RunError> {
         })
 }
 
-pub(super) async fn head_commit(repo: &Path) -> Result<String, RunError> {
+pub(super) async fn head_commit(repo: &Path) -> Result<CommitSha, RunError> {
+    let context = "read the integration HEAD commit";
     crate::git::output(repo, &["rev-parse", "HEAD"])
         .await
-        .map(|stdout| stdout.trim().to_string())
         .map_err(|e| RunError::Git {
-            context: "read the integration HEAD commit".to_string(),
+            context: context.to_string(),
             detail: e.detail(),
+        })?
+        .trim()
+        .parse()
+        .map_err(|e: InvalidId| RunError::Git {
+            context: context.to_string(),
+            detail: e.to_string(),
         })
 }
 

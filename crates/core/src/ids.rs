@@ -276,6 +276,8 @@ macro_rules! string_id {
     };
 }
 
+pub(crate) use string_id;
+
 string_id!(
     /// A node's id, unique within a workflow: `^[A-Za-z][A-Za-z0-9_-]*$`
     /// as authored. A fan-out sibling — one of the nodes the manifest

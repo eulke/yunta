@@ -109,7 +109,7 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
 fn field_or_hash(item: &Value, key: &str) -> String {
     match item.get(key).and_then(Value::as_str) {
         Some(s) => s.to_string(),
-        None => sha256_hex(item.to_string().as_bytes()),
+        None => sha256_hex(item.to_string().as_bytes()).to_string(),
     }
 }
 
@@ -124,7 +124,7 @@ fn file_change_digest(item: &Value) -> String {
         .and_then(|change| change.get("path"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .unwrap_or_else(|| sha256_hex(item.to_string().as_bytes()))
+        .unwrap_or_else(|| sha256_hex(item.to_string().as_bytes()).to_string())
 }
 
 fn mcp_tool_call_digest(item: &Value) -> String {
@@ -133,7 +133,7 @@ fn mcp_tool_call_digest(item: &Value) -> String {
         item.get("tool").and_then(Value::as_str),
     ) {
         (Some(server), Some(tool)) => format!("{server}:{tool}"),
-        _ => sha256_hex(item.to_string().as_bytes()),
+        _ => sha256_hex(item.to_string().as_bytes()).to_string(),
     }
 }
 

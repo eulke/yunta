@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use thiserror::Error;
+use yunta_core::{CommitSha, InvalidId};
 
 #[derive(Debug, Error)]
 pub enum ForgeError {
@@ -57,6 +58,14 @@ pub enum ForgeError {
         action: &'static str,
         #[source]
         source: reqwest::Error,
+    },
+    /// The forge answered with a value that is not what it stands for —
+    /// a commit id that is not hex, for instance.
+    #[error("forge: the answer to {action}: {source}")]
+    Malformed {
+        action: &'static str,
+        #[source]
+        source: InvalidId,
     },
     /// A gate handle the forge does not know.
     #[error("forge: no gate #{number}")]
@@ -105,7 +114,7 @@ pub struct ReviewComment {
 /// approval survive a later push" — the engine detects that drift by SHA.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolledGate {
-    pub head_sha: String,
+    pub head_sha: CommitSha,
     pub review: ReviewOutcome,
 }
 
@@ -115,11 +124,11 @@ pub enum ReviewOutcome {
     Pending,
     Approved {
         by: String,
-        reviewed_sha: String,
+        reviewed_sha: CommitSha,
     },
     ChangesRequested {
         by: String,
-        reviewed_sha: String,
+        reviewed_sha: CommitSha,
         comments: Vec<ReviewComment>,
     },
     /// Closed without merging.
@@ -127,7 +136,7 @@ pub enum ReviewOutcome {
     /// Merged: approved and landed. `merge_sha` is the merge commit.
     Merged {
         by: String,
-        merge_sha: String,
+        merge_sha: CommitSha,
     },
 }
 

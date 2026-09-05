@@ -903,7 +903,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             payload: yunta_core::events::EventPayload::ArtifactWritten(
                 yunta_core::events::ArtifactWrittenPayload {
                     path: "artifacts/plan.yaml".into(),
-                    content_hash: "irrelevant".to_string(),
+                    content_hash: yunta_core::sha256_hex(b"irrelevant"),
                     artifact_kind: None,
                 },
             ),

@@ -164,7 +164,7 @@ async fn create_pull(
             merged: false,
             merged_by: None,
             body: body["body"].as_str().unwrap_or_default().to_string(),
-            head_sha: format!("sha-{number}"),
+            head_sha: format!("{number:040x}"),
             merge_commit_sha: None,
         };
         s.prs.push(pr.clone());
@@ -324,7 +324,7 @@ fn stub_pr(number: u64, branch: &str, run_id: &str, state: &'static str) -> Stub
         merged: false,
         merged_by: None,
         body: marker(run_id),
-        head_sha: format!("sha-{number}"),
+        head_sha: format!("{number:040x}"),
         merge_commit_sha: None,
     }
 }
@@ -398,6 +398,9 @@ async fn an_open_pr_without_the_run_marker_is_not_reused() {
     assert_eq!(published.number, 2);
 }
 
+/// The merge commit the stub reports for a merged pull request.
+const MERGE_SHA: &str = "0000000000000000000000000000000000feed00";
+
 #[tokio::test]
 async fn merged_pr_is_not_closed() {
     let stub = Stub::default();
@@ -405,7 +408,7 @@ async fn merged_pr_is_not_closed() {
         let mut pr = stub_pr(7, "yunta/run-1/gate", "run-1", "closed");
         pr.merged = true;
         pr.merged_by = Some("octocat");
-        pr.merge_commit_sha = Some("merge-sha".to_string());
+        pr.merge_commit_sha = Some(MERGE_SHA.to_string());
         s.prs.push(pr);
     });
     let forge = forge_at(serve(stub.clone()).await);
@@ -422,7 +425,7 @@ async fn merged_pr_is_not_closed() {
         polled.review,
         ReviewOutcome::Merged {
             by: "octocat".to_string(),
-            merge_sha: "merge-sha".to_string(),
+            merge_sha: MERGE_SHA.parse().unwrap(),
         }
     );
 }
@@ -433,9 +436,9 @@ async fn reviews_are_paginated() {
     stub.with(|s| {
         s.prs.push(stub_pr(3, "yunta/run-1/gate", "run-1", "open"));
         let mut reviews: Vec<Value> = (0..100)
-            .map(|i| json!({ "state": "COMMENTED", "user": { "login": format!("c{i}") }, "commit_id": "sha-3" }))
+            .map(|i| json!({ "state": "COMMENTED", "user": { "login": format!("c{i}") }, "commit_id": format!("{:040x}", 3) }))
             .collect();
-        reviews.push(json!({ "state": "APPROVED", "user": { "login": "late-approver" }, "commit_id": "sha-3" }));
+        reviews.push(json!({ "state": "APPROVED", "user": { "login": "late-approver" }, "commit_id": format!("{:040x}", 3) }));
         s.reviews.insert(3, reviews);
     });
     let forge = forge_at(serve(stub.clone()).await);
@@ -452,7 +455,7 @@ async fn reviews_are_paginated() {
         polled.review,
         ReviewOutcome::Approved {
             by: "late-approver".to_string(),
-            reviewed_sha: "sha-3".to_string(),
+            reviewed_sha: format!("{:040x}", 3).parse().unwrap(),
         },
         "the approval on the second page is found"
     );
@@ -528,4 +531,31 @@ async fn an_unanswered_request_is_a_transport_error() {
         "got: {error:?}"
     );
     drop(listener);
+}
+
+#[tokio::test]
+async fn a_review_without_a_commit_id_is_not_a_decision() {
+    let stub = Stub::default();
+    stub.with(|s| {
+        s.prs.push(stub_pr(4, "yunta/run-1/gate", "run-1", "open"));
+        s.reviews.insert(
+            4,
+            vec![json!({ "state": "APPROVED", "user": { "login": "octocat" } })],
+        );
+    });
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let polled = forge
+        .poll(&PublishedGate {
+            url: "https://github.example/pr/4".to_string(),
+            number: 4,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        polled.review,
+        ReviewOutcome::Pending,
+        "an approval that names no commit covers no code, so the gate keeps waiting"
+    );
 }

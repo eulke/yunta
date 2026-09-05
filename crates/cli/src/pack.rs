@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{sha256_hex, PackLock, PackManifest, PackRef};
+use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
@@ -159,7 +159,7 @@ fn parse_manifest(dir: &Path) -> Result<PackManifest, PackError> {
 /// filesystem's own directory-entry order, and independent of file
 /// mtimes/permissions surviving a copy (only path + content matter,
 /// same as any other content-addressed hash in this codebase).
-pub fn hash_tree(dir: &Path) -> Result<String, PackError> {
+pub fn hash_tree(dir: &Path) -> Result<ContentHash, PackError> {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_files(dir, dir, &mut files)?;
     files.sort();
@@ -176,7 +176,7 @@ pub fn hash_tree(dir: &Path) -> Result<String, PackError> {
         })?;
         digest_input.push_str(relative_str);
         digest_input.push('\0');
-        digest_input.push_str(&sha256_hex(&bytes));
+        digest_input.push_str(sha256_hex(&bytes).as_str());
         digest_input.push('\n');
     }
     Ok(sha256_hex(digest_input.as_bytes()))

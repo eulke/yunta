@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use yunta_core::events::{EventPayload, Phase, StoredEvent, TerminalState, TokenUsage};
+use yunta_core::ContentHash;
 use yunta_core::{
     AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
     Seq,
@@ -53,7 +54,7 @@ pub struct CriteriaSummary {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BaselineSummary {
     pub suite: String,
-    pub hash: String,
+    pub hash: ContentHash,
     /// `baseline_compare` nodes that actually compared against the
     /// capture (the run's first `baseline_compare` only captures — it
     /// has nothing yet to regress against).
@@ -319,7 +320,7 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             b.regressions,
             b.compared,
             b.suite,
-            &b.hash[..b.hash.len().min(12)]
+            b.hash.as_str().get(..12).unwrap_or_default()
         )),
         None => out.push_str("- baseline: not used by this workflow\n"),
     }

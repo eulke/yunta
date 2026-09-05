@@ -332,8 +332,8 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
         .expect("the gate resolves");
     assert_eq!(resolved.resolved_by.as_deref(), Some("person-b"));
     assert_eq!(
-        resolved.approved_sha.as_deref(),
-        Some(merge_sha.as_str()),
+        resolved.approved_sha.as_ref(),
+        Some(&merge_sha),
         "the evidence is the merge commit"
     );
 }

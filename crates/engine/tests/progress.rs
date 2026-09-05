@@ -99,7 +99,7 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
             "plan",
             EventPayload::ArtifactWritten(ArtifactWrittenPayload {
                 path: "artifacts/ledger.yaml".into(),
-                content_hash: "deadbeef".to_string(),
+                content_hash: yunta_core::sha256_hex(b"deadbeef"),
                 artifact_kind: None,
             }),
         ),

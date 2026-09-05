@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
+use crate::hash::{sha256_hex, CommitSha, ContentHash};
 use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
@@ -125,7 +125,7 @@ pub struct Manifest {
     /// creation; `"HEAD"` when detached).
     pub base_branch: String,
     /// Commit the run starts from (`git rev-parse HEAD` at creation).
-    pub base_commit: String,
+    pub base_commit: CommitSha,
     /// Resolved `defaults.isolation` — a run's own mode
     /// never changes after creation, even if config does.
     pub isolation: Isolation,
@@ -133,8 +133,8 @@ pub struct Manifest {
     /// independently-ready DAG nodes the scheduler may run at once for
     /// this run, frozen the same way as `isolation`.
     pub max_parallel_nodes: u32,
-    pub workflow_hash: String,
-    pub config_hash: String,
+    pub workflow_hash: ContentHash,
+    pub config_hash: ContentHash,
     /// `None` on manifests written before this field existed (tolerant
     /// reader): those fall back to the current config's paths — exactly the
     /// pre-freeze behavior, so old runs stay resumable.
@@ -151,7 +151,7 @@ impl Manifest {
     /// records, and what the storage derives the event hash chain's
     /// genesis from (`H0 = SHA-256(manifest_hash)`): one chain per run,
     /// anchored in the run's own frozen inputs rather than a constant.
-    pub fn manifest_hash(&self) -> String {
+    pub fn manifest_hash(&self) -> ContentHash {
         content_hash(self)
     }
 }
@@ -161,7 +161,7 @@ impl Manifest {
 /// done here explicitly instead of trusting the serializer's map order,
 /// so the hash can never silently depend on a feature flag or on
 /// `HashMap` iteration order.
-pub fn content_hash<T: Serialize>(value: &T) -> String {
+pub fn content_hash<T: Serialize>(value: &T) -> ContentHash {
     // Serializing our own plain-data types into a JSON value cannot fail
     // (no non-string map keys, no non-serializable leaves); a change that
     // breaks this breaks every manifest test immediately.
@@ -170,19 +170,6 @@ pub fn content_hash<T: Serialize>(value: &T) -> String {
     write_canonical(&value, &mut canonical);
 
     sha256_hex(canonical.as_bytes())
-}
-
-/// Lowercase-hex SHA-256 of raw bytes — what `artifact_written` records
-/// for a file's content (artifacts are verified by existence and
-/// hash, never by format).
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write;
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex
 }
 
 fn write_canonical(value: &serde_json::Value, out: &mut String) {

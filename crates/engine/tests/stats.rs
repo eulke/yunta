@@ -98,13 +98,13 @@ fn fixture_events() -> Vec<StoredEvent> {
             0,
             None,
             EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: "h".to_string(),
+                manifest_hash: yunta_core::sha256_hex(b"h"),
                 inputs: Default::default(),
                 mode: "default".into(),
                 promoted_from: None,
                 yunta_schema: None,
                 base_branch: "main".to_string(),
-                base_commit: "deadbeef".to_string(),
+                base_commit: "deadbeef".into(),
             }),
         ),
         event(
@@ -276,13 +276,13 @@ fn cache_rate_is_none_without_input() {
             0,
             None,
             EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: "h".to_string(),
+                manifest_hash: yunta_core::sha256_hex(b"h"),
                 inputs: Default::default(),
                 mode: "default".into(),
                 promoted_from: None,
                 yunta_schema: None,
                 base_branch: "main".to_string(),
-                base_commit: "deadbeef".to_string(),
+                base_commit: "deadbeef".into(),
             }),
         ),
         event(
@@ -387,7 +387,7 @@ fn summary(tokens: u64, wall_clock_secs: u64, tasks_total: usize) -> RunSummary 
     RunSummary {
         run_id: "r".into(),
         mode: "default".into(),
-        workflow_hash: "h".to_string(),
+        workflow_hash: yunta_core::sha256_hex(b"h"),
         tokens,
         wall_clock: Some(std::time::Duration::from_secs(wall_clock_secs)),
         tasks_total,
@@ -428,7 +428,7 @@ fn wall_clock_percentiles_are_absent_when_no_run_measured_one() {
         .map(|i| RunSummary {
             run_id: "r".into(),
             mode: "default".into(),
-            workflow_hash: "h".to_string(),
+            workflow_hash: yunta_core::sha256_hex(b"h"),
             tokens: 100 * (i + 1),
             wall_clock: None,
             tasks_total: (i + 1) as usize,
@@ -447,7 +447,7 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     let summary = run_summary(
         "run-1".into(),
         "default".into(),
-        "workflow-hash".to_string(),
+        yunta_core::sha256_hex(b"workflow-hash"),
         &wf,
         &events,
     );

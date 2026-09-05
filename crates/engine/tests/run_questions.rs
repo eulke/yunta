@@ -179,7 +179,6 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
         .expect("questions_answered must be on the log");
     assert_eq!(answered.channel, yunta_core::events::Channel::Tty);
     assert_eq!(answered.responder.as_deref(), Some("eulke"));
-    assert!(!answered.answers_hash.is_empty());
 
     // The answers are a real artifact next to the questions, with
     // the given values, consumable by a later node via `artifact:`.

@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::hash::ContentHash;
 use crate::ids::{PackName, PackRef, Publisher, RunnerName};
 use crate::workflow::NodePermissions;
 
@@ -154,7 +155,7 @@ pub struct PackLockEntry {
     /// relative-path + file-content pairs, `.git` excluded) — what an
     /// offline `add`/CI verifies the vendoring on disk against,
     /// independent of git metadata surviving the copy.
-    pub content_hash: String,
+    pub content_hash: ContentHash,
 }
 
 /// `yunta.lock` — every vendored pack, keyed by its [`PackRef`]

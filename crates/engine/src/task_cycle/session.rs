@@ -88,7 +88,7 @@ pub enum DispatchError {
 /// a content-hash prefix — enough to audit a claimed note against,
 /// never enough to reconstruct or leak it.
 fn note_summary(text: &str) -> String {
-    let hash = yunta_core::sha256_hex(text.as_bytes());
+    let hash = yunta_core::sha256_hex(text.as_bytes()).to_string();
     format!("{} bytes, sha256 {}", text.len(), &hash[..12])
 }
 

@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::{
-    content_hash, ConfigLayer, Manifest, Node, NodeId, NodeKind, PromptSource, Workflow,
+    content_hash, CommitSha, ConfigLayer, InvalidId, Manifest, Node, NodeId, NodeKind,
+    PromptSource, Workflow,
 };
 
 use crate::inputs::{resolve_inputs, InputsError};
@@ -30,6 +31,12 @@ pub enum ManifestError {
         args: String,
         cwd: PathBuf,
         detail: String,
+    },
+    #[error("the base commit of `{cwd}` is not a commit id: {source}")]
+    BaseCommit {
+        cwd: PathBuf,
+        #[source]
+        source: InvalidId,
     },
     #[error(transparent)]
     Inputs(#[from] InputsError),
@@ -61,7 +68,13 @@ pub fn build_manifest(
         freeze_prompt(node, workflow_dir, &mut prompts)?;
     }
 
-    let base_commit = git_line(repo, &["rev-parse", "HEAD"])?;
+    let base_commit: CommitSha =
+        git_line(repo, &["rev-parse", "HEAD"])?
+            .parse()
+            .map_err(|source| ManifestError::BaseCommit {
+                cwd: repo.to_path_buf(),
+                source,
+            })?;
     let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
 
     Ok(Manifest {

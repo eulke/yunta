@@ -14,6 +14,7 @@ use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
 use super::{create_run, BirthArtifact, CreateRunParams, RunError};
+use yunta_core::{CommitSha, InvalidId};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -144,11 +145,17 @@ fn read_inherited_artifacts(from_run_dir: &Path) -> std::io::Result<Vec<BirthArt
     Ok(inherited)
 }
 
-fn head_commit(worktree: &Path) -> Result<String, RunError> {
+fn head_commit(worktree: &Path) -> Result<CommitSha, RunError> {
+    let context = || format!("resolve HEAD in `{}`", worktree.display());
     crate::git::output_blocking(worktree, &["rev-parse", "HEAD"])
-        .map(|stdout| stdout.trim().to_string())
         .map_err(|e| RunError::Git {
-            context: format!("resolve HEAD in `{}`", worktree.display()),
+            context: context(),
             detail: e.detail(),
+        })?
+        .trim()
+        .parse()
+        .map_err(|e: InvalidId| RunError::Git {
+            context: context(),
+            detail: e.to_string(),
         })
 }

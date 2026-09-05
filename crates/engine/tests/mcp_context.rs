@@ -217,7 +217,7 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
 
     let materialized = run_dir
         .join("context")
-        .join(&sources[0].content_hash)
+        .join(sources[0].content_hash.as_str())
         .join("content");
     let bytes = std::fs::read(&materialized).expect("materialized mcp response");
     assert_eq!(yunta_core::sha256_hex(&bytes), sources[0].content_hash);

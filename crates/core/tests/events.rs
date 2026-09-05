@@ -8,13 +8,13 @@ use yunta_core::{Capability, RunId, RunnerCandidate};
 fn all_kinds() -> Vec<EventPayload> {
     vec![
         EventPayload::RunCreated(RunCreatedPayload {
-            manifest_hash: "sha256:abc".to_string(),
+            manifest_hash: yunta_core::sha256_hex(b"sha256:abc"),
             inputs: BTreeMap::new(),
             mode: "default".into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),
-            base_commit: "deadbeef".to_string(),
+            base_commit: "deadbeef".into(),
         }),
         EventPayload::RunnerResolved(RunnerResolvedPayload {
             runner: "executor".into(),
@@ -31,7 +31,7 @@ fn all_kinds() -> Vec<EventPayload> {
                 exit_code: 0,
                 summary: "12 passed".to_string(),
             },
-            hash: "sha256:def".to_string(),
+            hash: yunta_core::sha256_hex(b"sha256:def"),
         }),
         EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
         EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
@@ -51,7 +51,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::ArtifactWritten(ArtifactWrittenPayload {
             path: "artifacts/ledger.yaml".into(),
-            content_hash: "sha256:111".to_string(),
+            content_hash: yunta_core::sha256_hex(b"sha256:111"),
             artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
@@ -59,9 +59,12 @@ fn all_kinds() -> Vec<EventPayload> {
             sources: vec![ContextSourceRef {
                 source_id: "files:docs".to_string(),
                 kind: "files".to_string(),
-                content_hash: "sha256:333".to_string(),
+                content_hash: yunta_core::sha256_hex(b"sha256:333"),
             }],
-            segment_hashes: BTreeMap::from([("stable".to_string(), "sha256:222".to_string())]),
+            segment_hashes: BTreeMap::from([(
+                "stable".to_string(),
+                yunta_core::sha256_hex(b"222"),
+            )]),
         }),
         EventPayload::TaskRegistered(TaskRegisteredPayload {
             task_id: "graph-cmd".into(),
@@ -155,10 +158,10 @@ fn all_kinds() -> Vec<EventPayload> {
             chosen_option: Some("approve".to_string()),
             resolved_by: Some("eulke".to_string()),
             free_text: None,
-            approved_sha: Some("deadbeef".to_string()),
+            approved_sha: Some("deadbeef".into()),
         }),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
-            answers_hash: "sha256:333".to_string(),
+            answers_hash: yunta_core::sha256_hex(b"sha256:333"),
             channel: Channel::Tty,
             responder: Some("eulke".to_string()),
         }),
@@ -183,11 +186,11 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {
             child_run_id: "run-child-1".into(),
-            child_workflow_hash: "sha256:444".to_string(),
+            child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
         }),
         EventPayload::ChildRunFinished(ChildRunFinishedPayload {
             child_run_id: "run-child-1".into(),
-            child_workflow_hash: "sha256:444".to_string(),
+            child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
             terminal_state: TerminalState::Done,
             tokens: TokenUsage::default(),
         }),

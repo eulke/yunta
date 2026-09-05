@@ -25,7 +25,7 @@ use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
     GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
-use yunta_core::{ExternalGate, FindingId, Node};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node};
 
 use crate::human_interaction::HumanInteraction;
 
@@ -165,7 +165,7 @@ async fn resolve_approved(
     ctx: &RunCtx<'_>,
     node: &Node,
     by: &str,
-    approved_sha: &str,
+    approved_sha: &CommitSha,
     outcome: String,
 ) -> Result<GateStep, RunError> {
     emit_started(ctx, node).await?;
@@ -175,7 +175,7 @@ async fn resolve_approved(
             chosen_option: None,
             resolved_by: Some(by.to_string()),
             free_text: None,
-            approved_sha: Some(approved_sha.to_string()),
+            approved_sha: Some(approved_sha.clone()),
         }),
     )
     .await?;
@@ -359,7 +359,7 @@ pub(super) async fn recheck_approved_gates(
 fn last_approved_sha(
     events: &[yunta_core::events::StoredEvent],
     node_id: &yunta_core::NodeId,
-) -> Option<String> {
+) -> Option<CommitSha> {
     events.iter().rev().find_map(|e| match e.payload() {
         Some(EventPayload::GateResolved(p)) if e.node_id.as_ref() == Some(node_id) => {
             p.approved_sha.clone()

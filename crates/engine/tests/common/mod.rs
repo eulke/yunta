@@ -382,7 +382,7 @@ pub fn assert_materialized(
 ) {
     let path = run_dir
         .join("context")
-        .join(&source.content_hash)
+        .join(source.content_hash.as_str())
         .join("content");
     let bytes = std::fs::read(&path)
         .unwrap_or_else(|e| panic!("materialized file missing at {path:?}: {e}"));
@@ -407,7 +407,7 @@ pub async fn run_stable_first(
 ) -> (
     yunta_core::events::ContextSourceRef,
     yunta_core::events::ContextSourceRef,
-    BTreeMap<String, String>,
+    BTreeMap<String, yunta_core::ContentHash>,
 ) {
     std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
     let artifacts_dir = bench.run_dir().join("artifacts");

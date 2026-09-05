@@ -27,6 +27,7 @@ mod error;
 pub mod events;
 mod findings;
 mod glob;
+mod hash;
 mod id_source;
 mod ids;
 mod inputs;
@@ -53,6 +54,7 @@ pub use config::{
 pub use error::{describe, AdapterError, Result};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
+pub use hash::{sha256_hex, CommitSha, ContentHash};
 #[cfg(any(test, feature = "testkit"))]
 pub use id_source::SeqIdSource;
 pub use id_source::{IdSource, SystemIdSource};
@@ -63,9 +65,7 @@ pub use ids::{
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use ledger::{Criterion, Ledger, Task};
-pub use manifest::{
-    content_hash, sha256_hex, FrozenPaths, Manifest, PackProvenance, RelativeRootError,
-};
+pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
 pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,

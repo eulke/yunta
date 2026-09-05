@@ -102,7 +102,7 @@ fn tool_target_digest(input: &Value) -> String {
             return s.to_string();
         }
     }
-    sha256_hex(input.to_string().as_bytes())
+    sha256_hex(input.to_string().as_bytes()).to_string()
 }
 
 fn result_events(value: &Value) -> Vec<AgentEvent> {

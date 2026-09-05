@@ -171,7 +171,7 @@ fn base_commit_is_the_repository_head() {
     )
     .unwrap();
 
-    assert_eq!(manifest.base_commit, head);
+    assert_eq!(manifest.base_commit.as_str(), head);
 }
 
 #[test]

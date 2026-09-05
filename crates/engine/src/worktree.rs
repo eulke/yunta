@@ -27,6 +27,7 @@ use yunta_adapters::signal::Liveness;
 use yunta_core::{Isolation, Pid, SystemClock};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
+use yunta_core::CommitSha;
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -116,7 +117,7 @@ pub enum WorktreePrepared {
 pub async fn prepare_worktree(
     repo: &Path,
     worktree_path: &Path,
-    base_commit: &str,
+    base_commit: &CommitSha,
     branch_name: &str,
     isolation: Isolation,
 ) -> Result<WorktreePrepared, WorktreeError> {
@@ -139,7 +140,7 @@ pub async fn prepare_worktree(
                     &worktree_path.display().to_string(),
                     "-b",
                     branch_name,
-                    base_commit,
+                    base_commit.as_str(),
                 ],
             )
             .await?;

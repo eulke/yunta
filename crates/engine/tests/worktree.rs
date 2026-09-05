@@ -3,13 +3,16 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::signal::Liveness;
-use yunta_core::{Isolation, Pid, SystemClock};
+use yunta_core::{CommitSha, Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
 use yunta_engine::{prepare_worktree, release_worktree, WorktreeError};
 use yunta_testkit::{git_output, init_repo};
 
-fn head(dir: &Path) -> String {
+fn head(dir: &Path) -> CommitSha {
     git_output(dir, &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap()
 }
 
 #[tokio::test]

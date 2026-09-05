@@ -463,13 +463,13 @@ fn created_draft(run_id: &str) -> EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
         payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
-            manifest_hash: "abc123manifest".to_string(),
+            manifest_hash: yunta_core::sha256_hex(b"abc123manifest"),
             inputs: Default::default(),
             mode: "default".into(),
             promoted_from: None,
             yunta_schema: None,
             base_branch: "main".to_string(),
-            base_commit: "deadbeef".to_string(),
+            base_commit: "deadbeef".into(),
         }),
     }
 }

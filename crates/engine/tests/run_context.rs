@@ -426,7 +426,7 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     let path = bench
         .run_dir()
         .join("context")
-        .join(&sources[0].content_hash)
+        .join(sources[0].content_hash.as_str())
         .join("content");
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
@@ -502,7 +502,7 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     let path = bench
         .run_dir()
         .join("context")
-        .join(&sources[0].content_hash)
+        .join(sources[0].content_hash.as_str())
         .join("content");
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
@@ -581,7 +581,7 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     let path = bench
         .run_dir()
         .join("context")
-        .join(&sources[0].content_hash)
+        .join(sources[0].content_hash.as_str())
         .join("content");
     let content = std::fs::read_to_string(path).unwrap();
     assert!(

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
+use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{
     AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, RunId, RunnerName, Seq,
     SessionId, TaskId,
@@ -208,14 +209,14 @@ pub struct DiscardedCandidate {
 pub struct ContextSourceRef {
     pub source_id: String,
     pub kind: String,
-    pub content_hash: String,
+    pub content_hash: ContentHash,
 }
 
 // --- Per-kind payloads ------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
-    pub manifest_hash: String,
+    pub manifest_hash: ContentHash,
     pub inputs: BTreeMap<String, serde_json::Value>,
     pub mode: ModeName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -223,7 +224,7 @@ pub struct RunCreatedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yunta_schema: Option<String>,
     pub base_branch: String,
-    pub base_commit: String,
+    pub base_commit: CommitSha,
 }
 
 /// `runner` names the `runners:` entry the node resolved through. The
@@ -241,7 +242,7 @@ pub struct RunnerResolvedPayload {
 pub struct BaselineCapturedPayload {
     pub command: String,
     pub results: BaselineResults,
-    pub hash: String,
+    pub hash: ContentHash,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -295,7 +296,7 @@ pub struct AgentMessagePayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
-    pub content_hash: String,
+    pub content_hash: ContentHash,
     /// The artifact's declared `kind:` when it has one — what
     /// lets `derive()` recognize a `questions` artifact without reading
     /// any file (state comes from events alone). `None` for opaque
@@ -321,7 +322,7 @@ pub struct ContextAssembledPayload {
     /// Keys are `"stable" | "run-stable" | "volatile"` (the fixed
     /// stability classes) — kept as plain strings rather than an enum key
     /// to sidestep serde's map-key-as-enum ceremony for no real benefit.
-    pub segment_hashes: BTreeMap<String, String>,
+    pub segment_hashes: BTreeMap<String, ContentHash>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -481,12 +482,12 @@ pub struct GateResolvedPayload {
     /// speak of. What a later drift check compares against the PR's
     /// current head to decide whether the approval still holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_sha: Option<String>,
+    pub approved_sha: Option<CommitSha>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct QuestionsAnsweredPayload {
-    pub answers_hash: String,
+    pub answers_hash: ContentHash,
     pub channel: Channel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responder: Option<String>,
@@ -516,13 +517,13 @@ pub struct PromotionSignaledPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunCreatedPayload {
     pub child_run_id: RunId,
-    pub child_workflow_hash: String,
+    pub child_workflow_hash: ContentHash,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunFinishedPayload {
     pub child_run_id: RunId,
-    pub child_workflow_hash: String,
+    pub child_workflow_hash: ContentHash,
     pub terminal_state: TerminalState,
     /// The child run's whole derived spend at its close — a child
     /// run's usage always aggregates up into its parent, so replay adds

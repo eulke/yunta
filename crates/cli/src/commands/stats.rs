@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use yunta_core::events::StoredEvent;
-use yunta_core::{Manifest, ModeName, RunId};
+use yunta_core::{ContentHash, Manifest, ModeName, RunId};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
 };
@@ -594,7 +594,7 @@ impl RunStatsJson {
 struct RunSummaryJson {
     run_id: String,
     mode: String,
-    workflow_hash: String,
+    workflow_hash: ContentHash,
     tokens: u64,
     wall_clock_secs: Option<f64>,
     tasks_total: usize,

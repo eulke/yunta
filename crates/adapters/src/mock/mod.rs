@@ -551,6 +551,6 @@ async fn call_run_tool(
             text,
         });
     }
-    let hash = yunta_core::sha256_hex(text.as_bytes());
+    let hash = yunta_core::sha256_hex(text.as_bytes()).to_string();
     Ok(format!("{tool}:{}", &hash[..12]))
 }

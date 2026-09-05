@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use yunta_core::events::CriterionType;
 use yunta_core::Criterion;
-use yunta_core::{Task, TaskId};
+use yunta_core::{ContentHash, Task, TaskId};
 
 use super::{CriterionRun, PreCheckOutcome, TaskCycleError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
@@ -24,8 +24,8 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervis
 /// resolved config` — `declared env` drops out here because criteria
 /// have no `env:` field in the schema yet (nothing to declare yet).
 pub struct Memo {
-    config_hash: String,
-    cache: Mutex<HashMap<String, i32>>,
+    config_hash: ContentHash,
+    cache: Mutex<HashMap<ContentHash, i32>>,
     /// Observed wall-clock durations per criterion command, this
     /// invocation only — the same lifetime discipline as the result
     /// cache above (a resume starts cold and re-learns, which only
@@ -37,9 +37,9 @@ pub struct Memo {
 }
 
 impl Memo {
-    pub fn new(config_hash: impl Into<String>) -> Self {
+    pub fn new(config_hash: ContentHash) -> Self {
         Self {
-            config_hash: config_hash.into(),
+            config_hash,
             cache: Mutex::new(HashMap::new()),
             durations: Mutex::new(HashMap::new()),
         }
@@ -64,16 +64,16 @@ impl Memo {
         crate::stats::median(&sorted).map(|ms| ms as u64)
     }
 
-    fn key(&self, cmd: &str, tree_hash: &str) -> String {
+    fn key(&self, cmd: &str, tree_hash: &ContentHash) -> ContentHash {
         yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
     }
 
-    fn get(&self, cmd: &str, tree_hash: &str) -> Option<i32> {
+    fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<i32> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.get(&self.key(cmd, tree_hash)).copied()
     }
 
-    fn put(&self, cmd: &str, tree_hash: &str, exit_code: i32) {
+    fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32) {
         let key = self.key(cmd, tree_hash);
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, exit_code);
@@ -87,7 +87,7 @@ impl Memo {
 /// genuinely different trees hash the same and wrongly reuse a stale
 /// result; a bare filename list (from `git status`) isn't enough since a
 /// file can change content without its name changing.
-async fn tree_hash(cwd: &Path) -> Result<String, TaskCycleError> {
+async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
     let run_git = |args: &'static [&'static str]| async move {
         crate::git::output(cwd, args).await.map_err(|e| {
             let detail = e.detail();
@@ -108,7 +108,7 @@ async fn tree_hash(cwd: &Path) -> Result<String, TaskCycleError> {
         let bytes = std::fs::read(cwd.join(path)).unwrap_or_default();
         untracked_fingerprint.push_str(path);
         untracked_fingerprint.push(':');
-        untracked_fingerprint.push_str(&yunta_core::sha256_hex(&bytes));
+        untracked_fingerprint.push_str(yunta_core::sha256_hex(&bytes).as_str());
         untracked_fingerprint.push('\n');
     }
 

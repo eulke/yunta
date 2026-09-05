@@ -17,7 +17,7 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use yunta_core::{GitHubRepo, Secret};
+use yunta_core::{CommitSha, GitHubRepo, Secret};
 
 use super::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
@@ -463,6 +463,7 @@ impl Forge for GitHubForge {
             )
             .await?;
 
+        let head_sha = parse_sha("read the pull request", &detail.head.sha)?;
         if detail.state != "open" {
             let review = if detail.merged {
                 ReviewOutcome::Merged {
@@ -470,17 +471,15 @@ impl Forge for GitHubForge {
                         .merged_by
                         .map(|user| user.login)
                         .unwrap_or_else(|| "(unknown)".to_string()),
-                    merge_sha: detail
-                        .merge_commit_sha
-                        .unwrap_or_else(|| detail.head.sha.clone()),
+                    merge_sha: match detail.merge_commit_sha {
+                        Some(sha) => parse_sha("read the pull request", &sha)?,
+                        None => head_sha.clone(),
+                    },
                 }
             } else {
                 ReviewOutcome::Closed
             };
-            return Ok(PolledGate {
-                head_sha: detail.head.sha,
-                review,
-            });
+            return Ok(PolledGate { head_sha, review });
         }
 
         #[derive(Deserialize)]
@@ -505,23 +504,38 @@ impl Forge for GitHubForge {
 
         let review = match last_decision {
             None => ReviewOutcome::Pending,
-            Some(r) if r.state == "APPROVED" => ReviewOutcome::Approved {
-                by: r.user.login,
-                reviewed_sha: r.commit_id.unwrap_or_default(),
-            },
-            Some(r) => {
-                let comments = self.review_comments(gate.number).await?;
-                ReviewOutcome::ChangesRequested {
+            Some(r) => match r.commit_id.as_deref().map(str::parse::<CommitSha>) {
+                Some(Ok(reviewed_sha)) if r.state == "APPROVED" => ReviewOutcome::Approved {
                     by: r.user.login,
-                    reviewed_sha: r.commit_id.unwrap_or_default(),
-                    comments,
+                    reviewed_sha,
+                },
+                Some(Ok(reviewed_sha)) => {
+                    let comments = self.review_comments(gate.number).await?;
+                    ReviewOutcome::ChangesRequested {
+                        by: r.user.login,
+                        reviewed_sha,
+                        comments,
+                    }
                 }
-            }
+                // A review that names no commit covers no code: it decides
+                // nothing, so the gate keeps waiting and the log says why.
+                _ => {
+                    tracing::warn!(
+                        review_state = %r.state,
+                        commit_id = ?r.commit_id,
+                        "a review without a commit id is not a decision; the gate keeps waiting"
+                    );
+                    ReviewOutcome::Pending
+                }
+            },
         };
 
-        Ok(PolledGate {
-            head_sha: detail.head.sha,
-            review,
-        })
+        Ok(PolledGate { head_sha, review })
     }
+}
+
+/// A commit id the API reported, or the answer refused for not being one.
+fn parse_sha(action: &'static str, sha: &str) -> Result<CommitSha, ForgeError> {
+    sha.parse()
+        .map_err(|source| ForgeError::Malformed { action, source })
 }

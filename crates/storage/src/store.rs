@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent};
+use yunta_core::ContentHash;
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
 use crate::error::{Cause, Result, StorageError};
@@ -76,7 +77,7 @@ struct ChainHashFields<'a> {
 /// computed over the bytes exactly as persisted, before any read-time
 /// normalization. An absent `node_id` hashes as the empty field; an
 /// empty node id is not constructible from any workflow.
-fn chain_hash(fields: ChainHashFields) -> String {
+fn chain_hash(fields: ChainHashFields) -> ContentHash {
     let mut input = Vec::new();
     input.extend_from_slice(fields.prev_hash.as_bytes());
     for field in [
@@ -98,7 +99,7 @@ fn chain_hash(fields: ChainHashFields) -> String {
 
 /// Genesis: `H0 = SHA-256(manifest_hash)` — deterministic, unique per
 /// run, no arbitrary constant.
-fn genesis_hash(manifest_hash: &str) -> String {
+fn genesis_hash(manifest_hash: &str) -> ContentHash {
     yunta_core::sha256_hex(manifest_hash.as_bytes())
 }
 
@@ -246,7 +247,7 @@ impl Storage {
                     run_id: draft.run_id.clone(),
                 });
             };
-            genesis_hash(&created.manifest_hash)
+            genesis_hash(created.manifest_hash.as_str()).to_string()
         } else {
             tx.query_row(
                 "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
@@ -285,7 +286,7 @@ impl Storage {
                 draft.payload.kind_name(),
                 payload_json,
                 draft.payload.schema_version(),
-                event_hash,
+                event_hash.as_str(),
             ],
         )
         .map_err(append_err)?;
@@ -379,7 +380,7 @@ impl Storage {
                 payload_json: &row.payload_json,
                 schema_version: row.schema_version,
             });
-            if &recomputed != stored_hash {
+            if recomputed.as_str() != stored_hash.as_str() {
                 return Ok(ChainVerification::Broken {
                     seq,
                     detail: "stored hash does not match the recomputed chain — the event or \
@@ -602,7 +603,7 @@ fn genesis_from_first_row(run_id: &RunId, row: &StoredRow) -> Result<String> {
                 .and_then(|hash| hash.as_str().map(String::from))
         });
     manifest_hash
-        .map(|hash| genesis_hash(&hash))
+        .map(|hash| genesis_hash(&hash).to_string())
         .ok_or_else(|| StorageError::CorruptGenesis {
             run_id: run_id.clone(),
         })

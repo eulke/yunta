@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{Isolation, Node, Task};
+use yunta_core::{CommitSha, Isolation, Node, Task};
 
 use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
 use crate::worktree::prepare_worktree;
@@ -61,7 +61,7 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
 #[derive(Clone, Copy)]
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
-    pub(super) base_commit: &'a str,
+    pub(super) base_commit: &'a CommitSha,
     pub(super) adapter: &'a dyn yunta_adapters::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,

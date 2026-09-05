@@ -17,6 +17,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use yunta_core::CommitSha;
 
 use super::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
@@ -27,17 +28,17 @@ enum Review {
     Pending,
     Approved {
         by: String,
-        reviewed_sha: String,
+        reviewed_sha: CommitSha,
     },
     ChangesRequested {
         by: String,
-        reviewed_sha: String,
+        reviewed_sha: CommitSha,
         comments: Vec<ReviewComment>,
     },
     Closed,
     Merged {
         by: String,
-        merge_sha: String,
+        merge_sha: CommitSha,
     },
 }
 
@@ -46,7 +47,7 @@ struct MockPr {
     run_id: String,
     branch: String,
     url: String,
-    head_sha: String,
+    head_sha: CommitSha,
     open: bool,
     review: Review,
 }
@@ -66,9 +67,11 @@ impl Inner {
         self.prs.iter_mut().rev().find(|pr| pr.run_id == run_id)
     }
 
-    fn fresh_sha(&mut self) -> String {
+    /// Mints the next commit id — a real hex id, as git would print one,
+    /// so nothing downstream can tell a fixture from a forge.
+    fn fresh_sha(&mut self) -> CommitSha {
         self.next_sha += 1;
-        format!("sha{:040}", self.next_sha)
+        CommitSha::from_bytes(&self.next_sha.to_be_bytes())
     }
 }
 
@@ -117,7 +120,7 @@ impl MockForgeState {
     }
 
     /// Person B merges the PR; returns the merge commit.
-    pub fn merge(&self, run_id: &str, by: &str) -> String {
+    pub fn merge(&self, run_id: &str, by: &str) -> CommitSha {
         let mut inner = self.0.lock().unwrap();
         let merge_sha = inner.fresh_sha();
         if let Some(pr) = inner.latest_for(run_id) {
@@ -137,7 +140,7 @@ impl MockForgeState {
     /// not `GitHubForge`) is what compares the two and decides the
     /// approval no longer covers the current code, detecting the drift
     /// by SHA.
-    pub fn push_commit(&self, run_id: &str) -> String {
+    pub fn push_commit(&self, run_id: &str) -> CommitSha {
         let mut inner = self.0.lock().unwrap();
         let sha = inner.fresh_sha();
         if let Some(pr) = inner.latest_for(run_id) {

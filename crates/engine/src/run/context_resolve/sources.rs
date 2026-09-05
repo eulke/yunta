@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{sha256_hex, Node, NodeId};
+use yunta_core::{sha256_hex, ContentHash, Node, NodeId};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::render_template;
@@ -233,9 +233,12 @@ pub(in crate::run) fn write_node_output(
     })
 }
 
-pub(super) fn materialize(run_dir: &Path, content: &[u8]) -> std::io::Result<(PathBuf, String)> {
+pub(super) fn materialize(
+    run_dir: &Path,
+    content: &[u8],
+) -> std::io::Result<(PathBuf, ContentHash)> {
     let hash = sha256_hex(content);
-    let dir = run_dir.join("context").join(&hash);
+    let dir = run_dir.join("context").join(hash.as_str());
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("content");
     std::fs::write(&path, content)?;

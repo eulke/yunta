@@ -74,7 +74,7 @@ fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
         &repo.path().join(".yunta/yunta.lock"),
         "packs:\n  acme/review-pack:\n    publisher: acme\n    name: review-pack\n    \
          source: https://example.invalid/acme/review-pack\n    ref: v1.2.3\n    \
-         commit: abcdef0123456789abcdef0123456789abcdef01\n    content_hash: deadbeef\n",
+         commit: abcdef0123456789abcdef0123456789abcdef01\n    content_hash: 4862f447f2c7f272fa2f4aaf89dadb3b1ac09105bd5864f8d1a0c9452bb0a226\n",
     );
 
     let workflow = serde_norway::from_str(LEAF).unwrap();

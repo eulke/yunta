@@ -42,6 +42,7 @@ use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
+use yunta_core::ContentHash;
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
 /// children flattened in place, same convention `crate::progress` uses).
@@ -320,7 +321,7 @@ struct OpenAttempt {
 pub struct RunSummary {
     pub run_id: RunId,
     pub mode: ModeName,
-    pub workflow_hash: String,
+    pub workflow_hash: ContentHash,
     pub tokens: u64,
     pub wall_clock: Option<Duration>,
     pub tasks_total: usize,
@@ -332,7 +333,7 @@ pub struct RunSummary {
 pub fn run_summary(
     run_id: RunId,
     mode: ModeName,
-    workflow_hash: String,
+    workflow_hash: ContentHash,
     workflow: &Workflow,
     events: &[StoredEvent],
 ) -> RunSummary {

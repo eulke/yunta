@@ -615,7 +615,7 @@ nodes:
         bench
             .run_dir()
             .join("context")
-            .join(&source.content_hash)
+            .join(source.content_hash.as_str())
             .join("content"),
     )
     .unwrap();
