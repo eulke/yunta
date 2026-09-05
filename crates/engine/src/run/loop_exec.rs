@@ -292,7 +292,8 @@ async fn prepare_loop<'a>(
                 ctx,
                 node,
                 format!(
-                    "node `{}` is in a `coordination: blackboard` group but adapter                      `{}` declares no `run_tools` capability — the blackboard cannot                      be mounted",
+                    "node `{}` is in a `coordination: blackboard` group but adapter `{}` \
+                     declares no `run_tools` capability — the blackboard cannot be mounted",
                     node.id, chosen.adapter
                 ),
                 false,

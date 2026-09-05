@@ -266,7 +266,54 @@ fn measure() -> BTreeMap<String, usize> {
         }),
     );
 
+    // A run of spaces inside a message is a `\` continuation that went
+    // missing: the reader gets the source's indentation in the text.
+    counts.insert(
+        "space_runs_in_prod_strings".to_string(),
+        prod.iter()
+            .flat_map(|text| text.lines())
+            .filter(|line| has_inner_space_run(line))
+            .count(),
+    );
+
     counts
+}
+
+/// Whether `line` carries a string literal with eight or more spaces
+/// between two visible characters — the trace a `\` line continuation
+/// leaves when it goes missing: the message reaches its reader with a
+/// source line's indentation inside it, never shallower than two
+/// nesting levels. Alignment an author writes into a message (a table
+/// column, a commented YAML template) uses a few spaces, and spaces a
+/// literal opens with or that follow a `\n` escape are layout; comment
+/// lines are not messages.
+fn has_inner_space_run(line: &str) -> bool {
+    if line.trim_start().starts_with("//") {
+        return false;
+    }
+    let Some(open) = line.find('"') else {
+        return false;
+    };
+    let bytes = line.as_bytes();
+    let mut i = open + 1;
+    while let Some(&byte) = bytes.get(i) {
+        if byte != b' ' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while bytes.get(i) == Some(&b' ') {
+            i += 1;
+        }
+        let before = start.checked_sub(1).and_then(|j| bytes.get(j));
+        let after_escape = start >= 2 && bytes.get(start - 2..start) == Some(b"\\n".as_slice());
+        let visible_before = before.is_some_and(|&b| b != b'"' && b != b'\\');
+        let visible_after = bytes.get(i).is_some_and(|&b| b != b'"');
+        if i - start >= 8 && visible_before && !after_escape && visible_after {
+            return true;
+        }
+    }
+    false
 }
 
 /// How many function bodies in `source` exceed `max` lines, measured from
@@ -501,6 +548,27 @@ pub fn check() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inner_space_runs_are_the_trace_of_a_lost_continuation() {
+        assert!(has_inner_space_run(
+            r#"    "the adapter declares no                 session resume""#
+        ));
+        // A few spaces align a column; the trace is a source line's indentation.
+        assert!(!has_inner_space_run(
+            r#"    "  {} {:>3} run(s)    median CPTV {}    median tokens {}","#
+        ));
+        // Indentation a literal opens with is layout, not a trace.
+        assert!(!has_inner_space_run(
+            r#"    println!("      tradeoff: {}", x);"#
+        ));
+        // So is indentation after a `\n` escape, and a comment is not a message.
+        assert!(!has_inner_space_run(
+            r#"    "add e.g.:\n      runners:\n        \"#
+        ));
+        assert!(!has_inner_space_run("    // a          comment"));
+        assert!(!has_inner_space_run("    let x = 1;"));
+    }
 
     #[test]
     fn functions_over_counts_only_bodies_past_the_budget() {

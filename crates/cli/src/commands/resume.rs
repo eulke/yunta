@@ -18,7 +18,8 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
         return Err(CliError::msg(format!(
-            "no run `{run_id}` under {} (or the default state root) — nothing to              resume; a run created under roots no longer in any config layer needs              YUNTA_HOME pointing there",
+            "no run `{run_id}` under {} (or the default state root) — nothing to resume; a run \
+             created under roots no longer in any config layer needs YUNTA_HOME pointing there",
             ctx.project.runs_root.display()
         )));
     };

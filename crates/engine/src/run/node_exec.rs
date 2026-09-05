@@ -1254,11 +1254,14 @@ async fn execute_prompt(
                             yunta_core::events::CapabilityDegradedPayload {
                                 capability: "resume_session".to_string(),
                                 adapter: chosen.adapter.clone(),
-                                policy_applied: "restart_node — the adapter declares no                                                  session resume; a fresh session replaces                                                  the interrupted one"
-                                    .to_string(),
+                                policy_applied: "restart_node — the adapter declares no session \
+                                                 resume; a fresh session replaces the interrupted \
+                                                 one"
+                                .to_string(),
                             },
                         ),
-                    ).await?;
+                    )
+                    .await?;
                 }
             }
             OrphanedSession::NoneRecorded => {
@@ -1268,11 +1271,13 @@ async fn execute_prompt(
                         yunta_core::events::CapabilityDegradedPayload {
                             capability: "resume_session".to_string(),
                             adapter: chosen.adapter.clone(),
-                            policy_applied: "restart_node — no session was recorded before                                              the interruption; started fresh"
+                            policy_applied: "restart_node — no session was recorded before the \
+                                             interruption; started fresh"
                                 .to_string(),
                         },
                     ),
-                ).await?;
+                )
+                .await?;
             }
             OrphanedSession::NotAnOrphan => {}
         }
