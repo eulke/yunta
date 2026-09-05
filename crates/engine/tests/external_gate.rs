@@ -339,6 +339,48 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
 }
 
 #[tokio::test]
+async fn a_merged_gate_stays_resolved_on_later_wakes() {
+    // Needs a still-open run (see this workflow's own doc comment): the
+    // drift recheck only runs while the run is open.
+    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
+    let forge_state = MockForgeState::new();
+    let forge = MockForge::new(forge_state.clone());
+
+    bench.wake(Some(&forge)).await;
+    forge_state.merge(bench.run_id.as_str(), "person-b");
+    let (terminal, state) = bench.wake(Some(&forge)).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    assert!(matches!(
+        state.nodes.get("approve"),
+        Some(NodeState::Finished { .. })
+    ));
+
+    // A merged pull request cannot move, and its evidence is the merge
+    // commit, not the branch head. A later wake leaves the gate as it
+    // resolved instead of reading the difference as drift.
+    let (_, state) = bench.wake(Some(&forge)).await;
+    assert!(matches!(
+        state.nodes.get("approve"),
+        Some(NodeState::Finished { .. })
+    ));
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let resolutions = events
+        .iter()
+        .filter(|e| {
+            e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
+                && matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::GateResolved(_))
+                )
+        })
+        .count();
+    assert_eq!(
+        resolutions, 1,
+        "a merged gate resolves once; a later wake records neither drift nor a second resolution"
+    );
+}
+
+#[tokio::test]
 async fn a_closed_pr_fails_the_node_non_retryably() {
     let bench = Bench::new().await;
     let forge_state = MockForgeState::new();

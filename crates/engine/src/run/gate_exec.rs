@@ -343,6 +343,12 @@ pub(super) async fn recheck_approved_gates(
                 context: format!("re-check node `{}`'s external gate", node.id),
                 source,
             })?;
+        // A merged pull request cannot move, and its evidence is the merge
+        // commit rather than the branch head: comparing the two would read
+        // every merge as drift and re-open a gate that landed.
+        if matches!(polled.review, ReviewOutcome::Merged { .. }) {
+            continue;
+        }
         if polled.head_sha != approved_sha {
             emit_started(ctx, node).await?;
         }
