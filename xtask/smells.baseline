@@ -4,5 +4,5 @@ git_command_new_files 2
 let_underscore_in_prod 26
 prod_fns_over_50_lines 90
 space_runs_in_prod_strings 0
-src_files_over_500_lines 17
+src_files_over_500_lines 16
 utc_now_outside_clock 0
