@@ -40,7 +40,7 @@ mod secret;
 mod workflow;
 pub mod yaml;
 
-pub use capabilities::Capabilities;
+pub use capabilities::{Capabilities, Capability};
 pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,

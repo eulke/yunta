@@ -14,7 +14,7 @@ use crate::ids::{
 };
 use crate::policy::ScopeExpansionMode;
 use crate::workflow::OnInterrupt;
-use crate::Capabilities;
+use crate::{Capabilities, Capability};
 
 /// A ledger criterion, frozen into `task_registered` — the same shape
 /// the ledger parser produces.
@@ -537,7 +537,8 @@ pub struct ChildRunFinishedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityDegradedPayload {
-    pub capability: String,
+    /// The capability the engine consulted and the adapter does not declare.
+    pub capability: Capability,
     pub adapter: AdapterId,
     pub policy_applied: String,
 }

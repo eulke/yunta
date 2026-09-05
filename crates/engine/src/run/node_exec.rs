@@ -987,10 +987,11 @@ pub(super) async fn resolve_node_runner(
             // An adapter without `custom_agents` fails the node
             // rather than silently dropping the requested agent.
             if chosen.agent.is_some() {
-                let has_custom_agents = ctx
-                    .adapters
-                    .get(&chosen.adapter)
-                    .is_some_and(|adapter| adapter.capabilities().custom_agents);
+                let has_custom_agents = ctx.adapters.get(&chosen.adapter).is_some_and(|adapter| {
+                    adapter
+                        .capabilities()
+                        .declares(yunta_core::Capability::CustomAgents)
+                });
                 if !has_custom_agents {
                     let end = fail(
                         ctx,
@@ -1076,7 +1077,10 @@ pub(super) async fn open_run_tools(
 ) -> Result<RunToolsResolution, RunToolsSetupError> {
     let host = &ctx.run_tools_host;
     let needs_blackboard = host.is_blackboard_member(&node.id);
-    if !adapter.capabilities().run_tools {
+    if !adapter
+        .capabilities()
+        .declares(yunta_core::Capability::RunTools)
+    {
         if needs_blackboard {
             return Err(RunToolsSetupError::NoRunToolsCapability {
                 node: node.id.clone(),
@@ -1126,11 +1130,15 @@ pub(super) async fn report_declarative_network(
     adapter: &dyn yunta_adapters::Adapter,
     adapter_id: &AdapterId,
 ) -> Result<(), RunError> {
-    if node.network == Some(false) && !adapter.capabilities().network_isolation {
+    if node.network == Some(false)
+        && !adapter
+            .capabilities()
+            .declares(yunta_core::Capability::NetworkIsolation)
+    {
         ctx.emit(
             Some(&node.id),
             EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: "network_isolation".to_string(),
+                capability: yunta_core::Capability::NetworkIsolation,
                 adapter: adapter_id.clone(),
                 policy_applied: "declarative-only — the adapter declares no network isolation; \
                                  `network: false` is recorded for policy and audit, not enforced"
@@ -1180,11 +1188,15 @@ async fn execute_prompt(
         Ok(skills) => skills,
         Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
-    let skills = if !skills.is_empty() && !adapter.capabilities().skills {
+    let skills = if !skills.is_empty()
+        && !adapter
+            .capabilities()
+            .declares(yunta_core::Capability::Skills)
+    {
         ctx.emit(
             Some(&node.id),
             EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: "skills".to_string(),
+                capability: yunta_core::Capability::Skills,
                 adapter: chosen.adapter.clone(),
                 policy_applied: "skills not mounted — the adapter declares no native \
                                  mechanism; the session runs without them"
@@ -1208,7 +1220,7 @@ async fn execute_prompt(
                     Some(&node.id),
                     EventPayload::CapabilityDegraded(
                         yunta_core::events::CapabilityDegradedPayload {
-                            capability: "run_tools".to_string(),
+                            capability: yunta_core::Capability::RunTools,
                             adapter: chosen.adapter.clone(),
                             policy_applied,
                         },
@@ -1245,14 +1257,17 @@ async fn execute_prompt(
     if policy == yunta_core::OnInterrupt::ResumeSession {
         match orphaned_session(&ctx.load_events().await?, &node.id) {
             OrphanedSession::Open(session_id) => {
-                if adapter.capabilities().resume_session {
+                if adapter
+                    .capabilities()
+                    .declares(yunta_core::Capability::ResumeSession)
+                {
                     resume_session = Some(session_id);
                 } else {
                     ctx.emit(
                         Some(&node.id),
                         EventPayload::CapabilityDegraded(
                             yunta_core::events::CapabilityDegradedPayload {
-                                capability: "resume_session".to_string(),
+                                capability: yunta_core::Capability::ResumeSession,
                                 adapter: chosen.adapter.clone(),
                                 policy_applied: "restart_node — the adapter declares no session \
                                                  resume; a fresh session replaces the interrupted \
@@ -1269,7 +1284,7 @@ async fn execute_prompt(
                     Some(&node.id),
                     EventPayload::CapabilityDegraded(
                         yunta_core::events::CapabilityDegradedPayload {
-                            capability: "resume_session".to_string(),
+                            capability: yunta_core::Capability::ResumeSession,
                             adapter: chosen.adapter.clone(),
                             policy_applied: "restart_node — no session was recorded before the \
                                              interruption; started fresh"

@@ -20,6 +20,7 @@ use yunta_adapters::{
     Adapter, AgentEvent, AgentOutcome, Budget, PermissionProfile, SessionRequest,
 };
 use yunta_core::events::{CapabilityDegradedPayload, CriterionType, EventPayload, TokenUsage};
+use yunta_core::Capability;
 use yunta_core::Criterion;
 use yunta_core::{AdapterError, Task, TaskId};
 use yunta_storage::StorageError;
@@ -1120,7 +1121,7 @@ async fn open_and_dispatch(
                         .emit_session_event(
                             obs_node,
                             EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-                                capability: "run_tools".to_string(),
+                                capability: Capability::RunTools,
                                 adapter: adapter.id().clone(),
                                 policy_applied: format!("the attempt runs without run tools: {e}"),
                             }),

@@ -265,11 +265,15 @@ async fn prepare_loop<'a>(
             ))
         }
     };
-    let skills = if !skills.is_empty() && !adapter.capabilities().skills {
+    let skills = if !skills.is_empty()
+        && !adapter
+            .capabilities()
+            .declares(yunta_core::Capability::Skills)
+    {
         ctx.emit(
             Some(&node.id),
             EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: "skills".to_string(),
+                capability: yunta_core::Capability::Skills,
                 adapter: chosen.adapter.clone(),
                 policy_applied: "skills not mounted — the adapter declares no native \
                                  mechanism; task sessions run without them"
@@ -284,7 +288,10 @@ async fn prepare_loop<'a>(
     // Same gating as a prompt session — the capability decides, and a
     // blackboard-group loop on a capability-less adapter fails rather than
     // silently dropping its declared coordination.
-    let run_tools = if adapter.capabilities().run_tools {
+    let run_tools = if adapter
+        .capabilities()
+        .declares(yunta_core::Capability::RunTools)
+    {
         Some((ctx.run_tools_host.clone(), node.id.clone()))
     } else {
         if ctx.run_tools_host.is_blackboard_member(&node.id) {

@@ -182,7 +182,7 @@ sessions:
             _ => None,
         })
         .expect("the degradation must be an event, never silence");
-    assert_eq!(degraded.capability, "skills");
+    assert_eq!(degraded.capability, yunta_core::Capability::Skills);
     assert_eq!(degraded.adapter, "mock");
 }
 
@@ -748,7 +748,7 @@ sessions:
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
         )),
         "a successful resume degrades nothing"
     );
@@ -768,7 +768,7 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
                     && p.policy_applied.contains("restart_node")
         )),
         "degrading to a fresh session must be an event, never a silence"
@@ -789,7 +789,7 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == "resume_session"
+            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
                     && p.policy_applied.contains("no session")
         )),
         "a crash before the session opened restarts WITH an explicit event"
@@ -850,7 +850,7 @@ sessions:
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
-                if p.capability == "network_isolation" =>
+                if p.capability == yunta_core::Capability::NetworkIsolation =>
             {
                 Some(p)
             }
@@ -882,7 +882,7 @@ sessions:
         !events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
-                if p.capability == "network_isolation"
+                if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an unset network policy is not a degradation"
     );
@@ -908,7 +908,7 @@ sessions:
         !events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
-                if p.capability == "network_isolation"
+                if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an adapter that declares network isolation leaves nothing to degrade"
     );

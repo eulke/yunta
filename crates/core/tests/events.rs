@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
 use yunta_core::ScopeExpansionMode;
-use yunta_core::{RunId, RunnerCandidate};
+use yunta_core::{Capability, RunId, RunnerCandidate};
 
 fn all_kinds() -> Vec<EventPayload> {
     vec![
@@ -192,7 +192,7 @@ fn all_kinds() -> Vec<EventPayload> {
             tokens: TokenUsage::default(),
         }),
         EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-            capability: "resume_session".to_string(),
+            capability: Capability::ResumeSession,
             adapter: "mock".into(),
             policy_applied: "on_interrupt: resume_session degraded to restart_node".to_string(),
         }),
@@ -455,4 +455,41 @@ fn pr_is_not_a_questions_channel() {
         serde_json::from_str::<Channel>("\"pr\"").is_err(),
         "`pr` is retired — no emitter produces it"
     );
+}
+
+#[test]
+fn a_capability_outside_capabilities_fields_is_not_an_event() {
+    // `capability_degraded.capability` names a field of `Capabilities`
+    // (spec-events §5.24); a name no adapter can declare is a payload that
+    // does not fit its kind, reported like any other misshapen body.
+    let mut object = serde_json::Map::new();
+    object.insert("kind".to_string(), serde_json::json!("capability_degraded"));
+    object.insert("capability".to_string(), serde_json::json!("teleport"));
+    object.insert("adapter".to_string(), serde_json::json!("mock"));
+    object.insert("policy_applied".to_string(), serde_json::json!("none"));
+    let error = EventBody::from_object(object, 1).unwrap_err();
+    assert!(
+        matches!(&error, EventShapeError::Payload { kind, .. } if kind == "capability_degraded"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_capability_parses_to_the_capabilities_field_it_names() {
+    let mut object = serde_json::Map::new();
+    object.insert("kind".to_string(), serde_json::json!("capability_degraded"));
+    object.insert(
+        "capability".to_string(),
+        serde_json::json!("network_isolation"),
+    );
+    object.insert("adapter".to_string(), serde_json::json!("mock"));
+    object.insert(
+        "policy_applied".to_string(),
+        serde_json::json!("declarative-only"),
+    );
+    let body = EventBody::from_object(object, 1).unwrap();
+    let EventBody::Known(EventPayload::CapabilityDegraded(payload)) = body else {
+        panic!("a capability_degraded body parses as its payload: {body:?}");
+    };
+    assert_eq!(payload.capability, Capability::NetworkIsolation);
 }

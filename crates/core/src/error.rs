@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::ids::AdapterId;
+use crate::Capability;
 
 /// What an adapter can fail with — the one error type every adapter
 /// speaks, so the engine handles a failure by its kind and the edge
@@ -12,7 +13,7 @@ pub enum AdapterError {
     #[error("adapter `{adapter}` does not support `{what}`")]
     Unsupported {
         adapter: AdapterId,
-        what: &'static str,
+        what: Capability,
     },
 
     /// An adapter operation failed at the I/O boundary — e.g. `mock`

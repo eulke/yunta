@@ -1,10 +1,10 @@
-use yunta_core::AdapterError;
+use yunta_core::{AdapterError, Capability};
 
 #[test]
 fn unsupported_displays_adapter_and_capability() {
     let err = AdapterError::Unsupported {
         adapter: "mock".into(),
-        what: "resume_session",
+        what: Capability::ResumeSession,
     };
     assert_eq!(
         err.to_string(),
@@ -16,7 +16,7 @@ fn unsupported_displays_adapter_and_capability() {
 fn unsupported_is_a_std_error() {
     let err = AdapterError::Unsupported {
         adapter: "mock".into(),
-        what: "resume_session",
+        what: Capability::ResumeSession,
     };
     let _: &dyn std::error::Error = &err;
 }

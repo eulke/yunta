@@ -17,7 +17,8 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use thiserror::Error;
 use yunta_core::{
-    AdapterError, AdapterId, AgentName, Capabilities, ModelName, Pid, Result, Secret, SessionId,
+    AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
+    SessionId,
 };
 
 /// A node's declared write scope, passed through to an adapter with
@@ -233,7 +234,7 @@ pub trait Adapter: Send + Sync {
     ) -> Result<Box<dyn AgentSession>> {
         Err(AdapterError::Unsupported {
             adapter: self.id().clone(),
-            what: "resume_session",
+            what: Capability::ResumeSession,
         })
     }
 }

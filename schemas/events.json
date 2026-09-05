@@ -233,6 +233,20 @@
         }
       }
     },
+    "Capability": {
+      "description": "One capability an adapter can declare: the closed set of\n[`Capabilities`] fields, spelled the way `capability_degraded` records\nthem (`resume_session`, `run_tools`, …). The engine names the\ncapability it consulted with this type, so a degradation can never\ncite a capability no adapter has.",
+      "type": "string",
+      "enum": [
+        "resume_session",
+        "edit_hooks",
+        "permission_profiles",
+        "custom_agents",
+        "usage_reporting",
+        "skills",
+        "run_tools",
+        "network_isolation"
+      ]
+    },
     "CapabilityDegradedPayload": {
       "type": "object",
       "properties": {
@@ -240,7 +254,8 @@
           "$ref": "#/$defs/AdapterId"
         },
         "capability": {
-          "type": "string"
+          "description": "The capability the engine consulted and the adapter does not declare.",
+          "$ref": "#/$defs/Capability"
         },
         "policy_applied": {
           "type": "string"
