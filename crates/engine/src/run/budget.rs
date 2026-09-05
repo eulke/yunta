@@ -11,7 +11,7 @@
 //! resume re-asks; the decision it gets is still audited in the log as
 //! a run-level gate pair (`node_id: None`).
 
-use yunta_core::events::{EventPayload, GateOption, GateWaitingPayload};
+use yunta_core::events::{EventPayload, GateOption, GateResolvedPayload, GateWaitingPayload};
 
 use super::{RunCtx, RunError};
 use crate::reserved::ReservedOption;
@@ -20,8 +20,7 @@ use crate::reserved::ReservedOption;
 pub enum BudgetDecision {
     /// The cap is lifted for the rest of *this invocation* only.
     Continue,
-    /// Pause with this reason — chosen `abort`, an unrecognized option,
-    /// or no surface to ask.
+    /// Pause with this reason — chosen `abort`, or no surface to ask.
     Pause { reason: String },
 }
 
@@ -30,8 +29,7 @@ pub enum BudgetDecision {
 /// records a `gate_waiting`/`gate_resolved` pair only once actually resolved
 /// (no resolution records nothing, so a resume re-asks, the convention every
 /// node gate follows). `Continue` lifts the cap for this invocation only;
-/// anything else — abort, an unrecognized option, or no surface to ask —
-/// pauses with the caller's reason. `node_id` scopes the audited pair: the
+/// `abort`, or no surface to ask, pauses with the caller's reason. `node_id` scopes the audited pair: the
 /// run budget is run-level (`None`), a loop overrun is the loop node's.
 pub async fn escalate(
     ctx: &RunCtx<'_>,
@@ -39,14 +37,17 @@ pub async fn escalate(
     escalation: GateWaitingPayload,
     pause_reason: String,
 ) -> Result<BudgetDecision, RunError> {
-    match ctx.human_interaction.resolve(&escalation).await {
-        Some(resolution) => {
-            let chosen = resolution.chosen_option.clone();
+    match ctx.ask_human(&escalation).await? {
+        Some(choice) => {
+            let continues = ReservedOption::of(&choice.option) == Some(ReservedOption::Continue);
             ctx.emit(node_id, EventPayload::GateWaiting(escalation))
                 .await?;
-            ctx.emit(node_id, EventPayload::GateResolved(resolution))
-                .await?;
-            if chosen.as_ref().and_then(ReservedOption::of) == Some(ReservedOption::Continue) {
+            ctx.emit(
+                node_id,
+                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice)),
+            )
+            .await?;
+            if continues {
                 Ok(BudgetDecision::Continue)
             } else {
                 Ok(BudgetDecision::Pause {

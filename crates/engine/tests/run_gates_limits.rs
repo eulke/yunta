@@ -7,21 +7,28 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::{AdapterId, ConfigLayer, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
+    RunError, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_testkit::{Bench, FixedClock, ScriptedInteraction, MOCK_CONFIG};
 
 mod common;
 use common::*;
 
+/// The option a human chose, for a resolution that is a human's choice.
+fn chosen_option(resolution: &yunta_core::events::GateResolvedPayload) -> Option<&str> {
+    match resolution {
+        yunta_core::events::GateResolvedPayload::Chosen(choice) => Some(choice.option.as_str()),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_finish() {
     let bench = Bench::new();
-    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("retry".into()),
-        resolved_by: Some("eulke".into()),
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "retry".into(),
+        by: "eulke".into(),
         free_text: None,
-        approved_sha: None,
     });
 
     let (terminal, state) = bench
@@ -63,20 +70,16 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
         Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
         _ => None,
     });
-    assert_eq!(
-        resolved.and_then(|p| p.chosen_option.as_ref().map(|o| o.as_str())),
-        Some("retry")
-    );
+    assert_eq!(resolved.and_then(chosen_option), Some("retry"));
 }
 
 #[tokio::test]
 async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
     let bench = Bench::new();
-    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("abort".into()),
-        resolved_by: Some("eulke".into()),
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "abort".into(),
+        by: "eulke".into(),
         free_text: Some("not worth chasing today".to_string()),
-        approved_sha: None,
     });
 
     let (terminal, _) = bench
@@ -154,6 +157,77 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
     assert!(waiting.options.iter().all(|o| !o.tradeoff.is_empty()));
     assert_eq!(waiting.summary, "Approve the plan?");
+}
+
+#[tokio::test]
+async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
+    // The engine validates what a surface returns against the menu it
+    // offered: a surface that answers with an option the gate never
+    // declared is a bug in the surface, reported as a broken run and
+    // never recorded as the gate's outcome.
+    let bench = Bench::new();
+    let workflow: Workflow = serde_norway::from_str(INTERNAL_GATE_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+    let interaction = ScriptedInteraction::choose("whatever");
+    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+
+    let error = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage.async_handle(),
+        clock: Arc::new(FixedClock),
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &interaction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+        ambient: None,
+    })
+    .await
+    .expect_err("an off-menu answer is not a decision");
+
+    let RunError::OffMenuAnswer {
+        answer, offered, ..
+    } = error
+    else {
+        panic!("expected the answer refused as off the menu, got {error:?}");
+    };
+    assert_eq!(answer, "whatever");
+    assert_eq!(offered, "aprobar, ajustar, abort");
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(yunta_core::events::EventPayload::GateResolved(_))
+        )),
+        "nothing is recorded as the gate's decision"
+    );
 }
 
 #[tokio::test]
@@ -477,10 +551,7 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
         })
         .expect("the authorization must be recorded");
     assert_eq!(resolved.0, None);
-    assert_eq!(
-        resolved.1.chosen_option.as_ref().map(|o| o.as_str()),
-        Some("continue")
-    );
+    assert_eq!(chosen_option(resolved.1), Some("continue"));
 }
 
 #[tokio::test]
@@ -500,7 +571,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_ref().map(|o| o.as_str()) == Some("abort")
+            Some(yunta_core::events::EventPayload::GateResolved(p)) if chosen_option(p) == Some("abort")
         )),
         "the abort decision must be auditable in the log"
     );

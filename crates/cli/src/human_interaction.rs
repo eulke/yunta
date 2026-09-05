@@ -10,7 +10,7 @@
 use std::io::{IsTerminal, Write};
 
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
 use yunta_core::{Answer, AnswerType, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
@@ -56,7 +56,7 @@ async fn prompt(message: &str) -> Option<String> {
 
 #[async_trait]
 impl HumanInteraction for ConsoleInteraction {
-    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<GateResolvedPayload> {
+    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         if !std::io::stdin().is_terminal() {
             return None;
         }
@@ -80,26 +80,17 @@ impl HumanInteraction for ConsoleInteraction {
             if let Some(option) = escalation.options.iter().find(|o| o.id.as_str() == line) {
                 break option.id.clone();
             }
-            println!(
-                "`{line}` isn't one of: {}",
-                escalation
-                    .options
-                    .iter()
-                    .map(|o| o.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            println!("`{line}` isn't one of: {}", escalation.menu());
         };
 
         let free_text = prompt("optional free-text feedback (enter to skip): ").await?;
 
-        Some(GateResolvedPayload {
-            chosen_option: Some(chosen_option),
+        Some(HumanChoice {
+            option: chosen_option,
             // No `--by` on the interactive surface: the decision carries
             // the shell's ambient identity, marked unverified.
-            resolved_by: Some(crate::identity::responder(None)),
+            by: crate::identity::responder(None),
             free_text: (!free_text.is_empty()).then_some(free_text),
-            approved_sha: None,
         })
     }
 

@@ -1051,10 +1051,11 @@
       ]
     },
     "GateResolvedPayload": {
+      "description": "How a gate's escalation was settled. On the wire this is one flat\nobject of four optional fields, and the fields present spell the\nshape: an option with its responder is a human's `Chosen`; a\nresponder with a commit id is the forge's `Approved`; a responder\nalone is `ChangesRequested`; nothing at all is `Closed`. Reading\ndecides the shape once, here, so every reader matches on it instead\nof inferring it from which field is set. A combination no shape\nnames reads as `Unrecognized` and writes back verbatim: a newer\nwriter may mean something by it, and the export loses nothing.",
       "type": "object",
       "properties": {
         "approved_sha": {
-          "description": "The commit SHA the forge's approval covered —\n`None` for the internal escalation case, which has no SHA to\nspeak of. What a later drift check compares against the PR's\ncurrent head to decide whether the approval still holds.",
+          "description": "The commit the forge's approval covers: what a later drift check\ncompares against the pull request's current head to decide\nwhether the approval still holds.",
           "anyOf": [
             {
               "$ref": "#/$defs/CommitSha"
@@ -1065,6 +1066,7 @@
           ]
         },
         "chosen_option": {
+          "description": "The option a human chose from the menu.",
           "anyOf": [
             {
               "$ref": "#/$defs/OptionId"
@@ -1075,12 +1077,14 @@
           ]
         },
         "free_text": {
+          "description": "Free-form context a human gave alongside the choice.",
           "type": [
             "string",
             "null"
           ]
         },
         "resolved_by": {
+          "description": "Who decided: the human who chose, or the reviewer or merger the\nforge reports.",
           "anyOf": [
             {
               "$ref": "#/$defs/Responder"

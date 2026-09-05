@@ -789,12 +789,11 @@ impl yunta_engine::HumanInteraction for AlwaysPromote {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        Some(yunta_core::events::GateResolvedPayload {
-            chosen_option: Some("promote".into()),
-            resolved_by: Some("test".into()),
+    ) -> Option<yunta_core::events::HumanChoice> {
+        Some(yunta_core::events::HumanChoice {
+            option: "promote".into(),
+            by: "test".into(),
             free_text: None,
-            approved_sha: None,
         })
     }
 }

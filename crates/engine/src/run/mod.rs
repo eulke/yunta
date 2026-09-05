@@ -105,6 +105,19 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
+    /// A `HumanInteraction` surface returned an option the escalation it
+    /// was shown never offered: a decision nobody was given, refused
+    /// rather than recorded as the gate's outcome.
+    #[error(
+        "the human surface answered `{answer}`, which is not one of the options it was offered \
+         ({offered}), for: {summary}"
+    )]
+    OffMenuAnswer {
+        answer: yunta_core::OptionId,
+        offered: String,
+        summary: String,
+    },
+
     /// `create_run`'s own guard — `check` validates every
     /// mode's *internal* coherence, but never sees which one a run
     /// actually asks for, so this is where an unknown `--mode` name is

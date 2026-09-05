@@ -1,18 +1,20 @@
 //! `HumanInteraction` — the trait a gate's escalation
 //! resolves through. The same object is rendered on every surface
 //! (console, the MCP `resolve_gate` tool) — never a per-surface
-//! reinterpretation. One trait, one method, one
-//! object (`yunta_core::events::{GateWaitingPayload, GateResolvedPayload}`
-//! — the same types the event log persists, not a parallel runtime
-//! shape) is what makes "no duplicated logic" true by construction:
-//! there is nowhere for a second interpretation of a gate to live.
+//! reinterpretation. One trait, one method, the log's own types in
+//! and out (`GateWaitingPayload` is the escalation as persisted;
+//! `HumanChoice` is the content of the `gate_resolved` the log records)
+//! is what makes "no duplicated logic" true by construction: there is
+//! nowhere for a second interpretation of a gate to live. A surface
+//! only ever chooses from the menu it was shown; the shapes a forge
+//! produces (an approval, a review) are not a surface's to return.
 //!
 //! The console implementation lives in `yunta-cli` (the engine has no
 //! concrete UI and never writes to the console itself); the MCP one is a
 //! `resolve_gate` tool, not built here.
 
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
 use yunta_core::{Answer, QuestionsFile, Responder};
 
 /// One surface's reply to a `kind: questions` artifact:
@@ -38,7 +40,10 @@ pub struct QuestionsReply {
 /// the engine never allows.
 #[async_trait]
 pub trait HumanInteraction: Send + Sync {
-    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<GateResolvedPayload>;
+    /// One option off `escalation`'s menu, with who chose it. The engine
+    /// checks the pick against the menu before recording it; a surface
+    /// that answers off the menu is a bug, not a decision.
+    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
 
     /// Puts a `kind: questions` artifact to the human,
     /// question by question. `None` = this surface can't ask (same
@@ -68,7 +73,7 @@ pub struct NoInteraction;
 
 #[async_trait]
 impl HumanInteraction for NoInteraction {
-    async fn resolve(&self, _escalation: &GateWaitingPayload) -> Option<GateResolvedPayload> {
+    async fn resolve(&self, _escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         None
     }
 }

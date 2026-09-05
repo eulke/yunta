@@ -152,11 +152,9 @@ fn all_kinds() -> Vec<EventPayload> {
             }],
             external_ref: Some("https://github.com/example/repo/pull/1".to_string()),
         }),
-        EventPayload::GateResolved(GateResolvedPayload {
-            chosen_option: Some("approve".into()),
-            resolved_by: Some("eulke".into()),
-            free_text: None,
-            approved_sha: Some("deadbeef".into()),
+        EventPayload::GateResolved(GateResolvedPayload::Approved {
+            by: "eulke".into(),
+            sha: "deadbeef".into(),
         }),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: yunta_core::sha256_hex(b"sha256:333"),
@@ -393,6 +391,73 @@ fn an_unknown_kind_reads_as_unknown_and_writes_back_verbatim() {
     assert_eq!(written["schema_version"], 1);
     let again: StoredEvent = serde_json::from_value(written).unwrap();
     assert_eq!(again, event);
+}
+
+#[test]
+fn a_gate_resolution_is_the_shape_its_fields_spell() {
+    // Four shapes, one flat wire object: the fields present say which.
+    let shapes: [(GateResolvedPayload, &[&str]); 4] = [
+        (
+            GateResolvedPayload::Chosen(HumanChoice {
+                option: "retry".into(),
+                by: "eulke".into(),
+                free_text: Some("one more lap".to_string()),
+            }),
+            &["chosen_option", "resolved_by", "free_text"],
+        ),
+        (
+            GateResolvedPayload::Approved {
+                by: "reviewer".into(),
+                sha: "deadbeef".into(),
+            },
+            &["resolved_by", "approved_sha"],
+        ),
+        (
+            GateResolvedPayload::ChangesRequested {
+                by: "reviewer".into(),
+            },
+            &["resolved_by"],
+        ),
+        (GateResolvedPayload::Closed, &[]),
+    ];
+    for (shape, fields) in shapes {
+        let json = serde_json::to_value(EventPayload::GateResolved(shape.clone())).unwrap();
+        let mut present: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .filter(|key| *key != "kind")
+            .collect();
+        present.sort_unstable();
+        let mut expected = fields.to_vec();
+        expected.sort_unstable();
+        assert_eq!(present, expected, "the wire for {shape:?}");
+        let parsed: EventPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, EventPayload::GateResolved(shape));
+    }
+}
+
+#[test]
+fn an_unnamed_gate_resolution_reads_as_unrecognized_and_writes_back_verbatim() {
+    // A choice and an approval SHA in the same record: no shape this
+    // binary names. It is neither refused nor reinterpreted — the export
+    // writes it back exactly as it came.
+    let json = serde_json::json!({
+        "kind": "gate_resolved",
+        "chosen_option": "approve",
+        "resolved_by": "eulke",
+        "approved_sha": "deadbeef"
+    });
+    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
+    assert!(
+        matches!(
+            parsed,
+            EventPayload::GateResolved(GateResolvedPayload::Unrecognized(_))
+        ),
+        "got {parsed:?}"
+    );
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), json);
 }
 
 #[test]

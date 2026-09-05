@@ -3,22 +3,22 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use yunta_core::events::{GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{OptionId, Responder};
 use yunta_engine::HumanInteraction;
 
-/// Resolves every gate with one fixed decision, recording the option ids it
+/// Resolves every gate with one fixed choice, recording the option ids it
 /// was shown on each call so a test can assert what the engine offered.
 pub struct ScriptedInteraction {
-    resolution: GateResolvedPayload,
+    choice: HumanChoice,
     seen_options: Mutex<Vec<Vec<OptionId>>>,
 }
 
 impl ScriptedInteraction {
-    /// Builds a double that answers every gate with `resolution`.
-    pub fn new(resolution: GateResolvedPayload) -> Self {
+    /// Builds a double that answers every gate with `choice`.
+    pub fn new(choice: HumanChoice) -> Self {
         Self {
-            resolution,
+            choice,
             seen_options: Mutex::new(Vec::new()),
         }
     }
@@ -26,11 +26,10 @@ impl ScriptedInteraction {
     /// Picks `option_id` with no free text — the common case of choosing a
     /// menu option and nothing else.
     pub fn choose(option_id: &str) -> Self {
-        Self::new(GateResolvedPayload {
-            chosen_option: Some(option_id.into()),
-            resolved_by: Some("test".into()),
+        Self::new(HumanChoice {
+            option: option_id.into(),
+            by: "test".into(),
             free_text: None,
-            approved_sha: None,
         })
     }
 
@@ -45,12 +44,12 @@ impl ScriptedInteraction {
 
 #[async_trait]
 impl HumanInteraction for ScriptedInteraction {
-    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<GateResolvedPayload> {
+    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         self.seen_options
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(escalation.options.iter().map(|o| o.id.clone()).collect());
-        Some(self.resolution.clone())
+        Some(self.choice.clone())
     }
 }
 
@@ -61,7 +60,7 @@ pub struct ApproveEverything {
 }
 
 impl ApproveEverything {
-    /// Approves as `by` (recorded in `gate_resolved.resolved_by`).
+    /// Approves as `by`, the responder every choice is attributed to.
     pub fn new(by: &str) -> Self {
         Self { by: by.into() }
     }
@@ -69,13 +68,11 @@ impl ApproveEverything {
 
 #[async_trait]
 impl HumanInteraction for ApproveEverything {
-    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<GateResolvedPayload> {
-        let chosen = escalation.options.first().map(|o| o.id.clone());
-        Some(GateResolvedPayload {
-            chosen_option: chosen,
-            resolved_by: Some(self.by.clone()),
+    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
+        escalation.options.first().map(|first| HumanChoice {
+            option: first.id.clone(),
+            by: self.by.clone(),
             free_text: None,
-            approved_sha: None,
         })
     }
 }

@@ -59,7 +59,7 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
+    ) -> Option<yunta_core::events::HumanChoice> {
         None
     }
     async fn ask(
@@ -502,21 +502,19 @@ sessions:
 /// the script runs out (so an unexpected extra ask degrades to pause
 /// instead of hanging a test).
 pub struct SequencedInteraction {
-    resolutions:
-        std::sync::Mutex<std::collections::VecDeque<yunta_core::events::GateResolvedPayload>>,
+    choices: std::sync::Mutex<std::collections::VecDeque<yunta_core::events::HumanChoice>>,
 }
 
 impl SequencedInteraction {
     pub fn choosing(options: &[&str]) -> Self {
         Self {
-            resolutions: std::sync::Mutex::new(
+            choices: std::sync::Mutex::new(
                 options
                     .iter()
-                    .map(|option| yunta_core::events::GateResolvedPayload {
-                        chosen_option: Some((*option).into()),
-                        resolved_by: Some("lead".into()),
+                    .map(|option| yunta_core::events::HumanChoice {
+                        option: (*option).into(),
+                        by: "lead".into(),
                         free_text: None,
-                        approved_sha: None,
                     })
                     .collect(),
             ),
@@ -529,8 +527,8 @@ impl yunta_engine::HumanInteraction for SequencedInteraction {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::GateResolvedPayload> {
-        self.resolutions.lock().unwrap().pop_front()
+    ) -> Option<yunta_core::events::HumanChoice> {
+        self.choices.lock().unwrap().pop_front()
     }
 }
 

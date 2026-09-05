@@ -3,7 +3,7 @@
 //! denied.
 
 use yunta_core::events::{
-    Decider, EventPayload, Finding, FindingPostedPayload, FindingSeverity,
+    Decider, EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateResolvedPayload,
     ProposedCriterionPrecheck, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
     ScopeExpansionRequestedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
@@ -40,7 +40,7 @@ pub(super) async fn resolve_escalations(
     for pending in pending_escalations {
         let escalation =
             expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run);
-        let Some(resolution) = ctx.human_interaction.resolve(&escalation).await else {
+        let Some(choice) = ctx.ask_human(&escalation).await? else {
             unresolved.push(pending.task_id);
             continue;
         };
@@ -52,26 +52,11 @@ pub(super) async fn resolve_escalations(
         let resolved_seq = ctx
             .emit(
                 Some(&node.id),
-                EventPayload::GateResolved(resolution.clone()),
+                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
             )
             .await?;
-        // A scope decision is a person's; a resolution that names nobody is
-        // a log this engine did not write.
-        let Some(by) = resolution.resolved_by.clone() else {
-            return Err(RunError::Broken {
-                diagnostic: format!(
-                    "task `{}`: a scope expansion decision names no responder",
-                    pending.task_id
-                ),
-            });
-        };
-        let decided_by = Decider::Person { id: by };
-        if resolution
-            .chosen_option
-            .as_ref()
-            .and_then(ReservedOption::of)
-            == Some(ReservedOption::Grant)
-        {
+        let decided_by = Decider::Person { id: choice.by };
+        if ReservedOption::of(&choice.option) == Some(ReservedOption::Grant) {
             *expansions_granted_this_run += 1;
             ctx.emit(
                 Some(&node.id),
@@ -88,9 +73,8 @@ pub(super) async fn resolve_escalations(
             // Anything that isn't an explicit grant denies — the conservative
             // reading of an ambiguous resolution, and every denial converts to
             // a finding, same as the rule-mode path.
-            let reason = resolution
+            let reason = choice
                 .free_text
-                .clone()
                 .unwrap_or_else(|| "denied by a human at the gate".to_string());
             ctx.emit(
                 Some(&node.id),

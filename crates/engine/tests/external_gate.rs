@@ -194,14 +194,10 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
         _ => None,
     });
-    assert_eq!(
-        resolved.and_then(|p| p.resolved_by.as_ref().map(|r| r.as_str())),
-        Some("person-b")
-    );
-    assert!(
-        resolved.and_then(|p| p.approved_sha.as_ref()).is_some(),
-        "gate_resolved must carry the approved SHA ('usuario+timestamp+SHA')"
-    );
+    let Some(yunta_core::events::GateResolvedPayload::Approved { by, .. }) = resolved else {
+        panic!("gate_resolved records the approval with the SHA it covers, got {resolved:?}");
+    };
+    assert_eq!(by.as_str(), "person-b");
 }
 
 #[tokio::test]
@@ -331,12 +327,11 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
         })
         .expect("the gate resolves");
     assert_eq!(
-        resolved.resolved_by.as_ref().map(|r| r.as_str()),
-        Some("person-b")
-    );
-    assert_eq!(
-        resolved.approved_sha.as_ref(),
-        Some(&merge_sha),
+        resolved,
+        &yunta_core::events::GateResolvedPayload::Approved {
+            by: "person-b".into(),
+            sha: merge_sha,
+        },
         "the evidence is the merge commit"
     );
 }

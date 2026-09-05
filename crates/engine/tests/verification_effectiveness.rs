@@ -271,11 +271,9 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
             vec![event(
                 i as u64,
                 Some("approve"),
-                EventPayload::GateResolved(GateResolvedPayload {
-                    chosen_option: None,
-                    resolved_by: Some("reviewer".into()),
-                    free_text: None,
-                    approved_sha: Some("deadbeef".into()),
+                EventPayload::GateResolved(GateResolvedPayload::Approved {
+                    by: "reviewer".into(),
+                    sha: "deadbeef".into(),
                 }),
             )]
         })
@@ -293,11 +291,9 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
             vec![event(
                 i as u64,
                 Some("approve"),
-                EventPayload::GateResolved(GateResolvedPayload {
-                    chosen_option: None,
-                    resolved_by: Some("reviewer".into()),
-                    free_text: None,
-                    approved_sha: Some("deadbeef".into()),
+                EventPayload::GateResolved(GateResolvedPayload::Approved {
+                    by: "reviewer".into(),
+                    sha: "deadbeef".into(),
                 }),
             )]
         })
@@ -305,11 +301,8 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
     history.push(vec![event(
         200,
         Some("approve"),
-        EventPayload::GateResolved(GateResolvedPayload {
-            chosen_option: None,
-            resolved_by: Some("reviewer".into()),
-            free_text: None,
-            approved_sha: None, // changes requested / closed / retry
+        EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
+            by: "reviewer".into(),
         }),
     )]);
     let findings = analyze(&wf, &history);

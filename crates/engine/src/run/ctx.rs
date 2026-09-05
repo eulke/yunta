@@ -10,7 +10,8 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
+    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload,
+    HumanChoice, StoredEvent,
 };
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
@@ -115,6 +116,28 @@ impl RunCtx<'_> {
 
     pub(crate) async fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
         Ok(self.storage.events_for_run(self.run_id.clone()).await?)
+    }
+
+    /// Puts `escalation` to the run's human surface and returns its
+    /// choice, verified against the menu the surface was shown. `None`
+    /// keeps its meaning: no surface can answer right now. An answer off
+    /// the menu is refused as [`RunError::OffMenuAnswer`] before anything
+    /// is recorded.
+    pub(crate) async fn ask_human(
+        &self,
+        escalation: &GateWaitingPayload,
+    ) -> Result<Option<HumanChoice>, RunError> {
+        let Some(choice) = self.human_interaction.resolve(escalation).await else {
+            return Ok(None);
+        };
+        if !escalation.offers(&choice.option) {
+            return Err(RunError::OffMenuAnswer {
+                answer: choice.option,
+                offered: escalation.menu(),
+                summary: escalation.summary.clone(),
+            });
+        }
+        Ok(Some(choice))
     }
 
     /// The run's log read and its state derived, together — the pairing

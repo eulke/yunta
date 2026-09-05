@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use yunta_core::events::{EventPayload, Phase, StoredEvent};
+use yunta_core::events::{EventPayload, GateResolvedPayload, Phase, StoredEvent};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 /// Below this many independent samples, a signal says nothing — a
@@ -222,10 +222,9 @@ fn never_triggered_reroutes(
     findings
 }
 
-/// A gate "needed adjustment" when its resolution reroutes (an
-/// internal `retry`, or an external changes-requested — both land
-/// as `gate_resolved.chosen_option: Some("retry")` or a `node_failed`
-/// right after it) rather than letting the node finish clean. One
+/// A gate "needed adjustment" whenever its resolution is anything but a
+/// forge approval: a human's choice (a `retry`, an author's option, an
+/// abort), a changes-requested review, a closed pull request. One
 /// sample per `gate_resolved` this node ever emitted, across history.
 fn always_approved_gates(
     workflow: &Workflow,
@@ -258,11 +257,10 @@ fn always_approved_gates(
                     continue;
                 }
                 total += 1;
-                // `approved_sha` is only ever set on
-                // a clean approval — an internal "retry"/"abort", or an
-                // external changes-requested/closed, all leave it
-                // `None`, and all of them are an adjustment.
-                if p.approved_sha.is_none() {
+                // Only a forge approval leaves a gate clean; every other
+                // shape, and any shape this binary does not name, counts
+                // as an adjustment — the conservative reading.
+                if !matches!(p, GateResolvedPayload::Approved { .. }) {
                     needed_adjustment += 1;
                 }
             }

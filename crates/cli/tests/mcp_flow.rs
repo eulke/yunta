@@ -248,11 +248,10 @@ nodes:
             _ => None,
         })
         .expect("resolve_gate records a gate_resolved");
-    let responder = resolved
-        .resolved_by
-        .as_ref()
-        .map(|by| by.as_str().to_string())
-        .expect("the decision names a responder");
+    let yunta_core::events::GateResolvedPayload::Chosen(choice) = resolved else {
+        panic!("resolve_gate records a human's choice, got {resolved:?}");
+    };
+    let responder = choice.by.as_str().to_string();
     assert!(
         responder.starts_with("unverified:"),
         "an MCP decision without `by` carries the ambient identity: {responder}"

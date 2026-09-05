@@ -307,11 +307,10 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
     );
 
-    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("grant".into()),
-        resolved_by: Some("eulke".into()),
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "grant".into(),
+        by: "eulke".into(),
         free_text: None,
-        approved_sha: None,
     });
     let (terminal, state) = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
@@ -357,7 +356,9 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateResolved(p)) if p.chosen_option.as_ref().map(|o| o.as_str()) == Some("grant")
+        Some(yunta_core::events::EventPayload::GateResolved(
+            yunta_core::events::GateResolvedPayload::Chosen(choice)
+        )) if choice.option == "grant"
     )));
 }
 
@@ -379,11 +380,10 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
     );
 
-    let interaction = ScriptedInteraction::new(yunta_core::events::GateResolvedPayload {
-        chosen_option: Some("deny".into()),
-        resolved_by: Some("eulke".into()),
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "deny".into(),
+        by: "eulke".into(),
         free_text: Some("out of this sprint".to_string()),
-        approved_sha: None,
     });
     let (terminal, state) = bench
         .run_with_interaction(&workflow, &fixture, &interaction)

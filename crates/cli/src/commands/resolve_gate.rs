@@ -10,6 +10,7 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
+use yunta_core::events::HumanChoice;
 use yunta_core::{Manifest, OptionId, Responder, RunId};
 
 use crate::context::Context;
@@ -38,9 +39,11 @@ pub async fn resolve_gate(
         &storage,
         run_id,
         &ctx.clock,
-        option.clone(),
-        crate::identity::responder(resolved_by),
-        free_text.map(str::to_string),
+        HumanChoice {
+            option: option.clone(),
+            by: crate::identity::responder(resolved_by),
+            free_text: free_text.map(str::to_string),
+        },
     )
     .await?;
 

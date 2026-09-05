@@ -338,11 +338,13 @@ async fn tool_resolve_gate(
         &storage,
         &run_id_typed,
         &yunta_core::SystemClock,
-        option
-            .parse::<yunta_core::OptionId>()
-            .map_err(|e| e.to_string())?,
-        crate::identity::responder(by.as_ref()),
-        text,
+        yunta_core::events::HumanChoice {
+            option: option
+                .parse::<yunta_core::OptionId>()
+                .map_err(|e| e.to_string())?,
+            by: crate::identity::responder(by.as_ref()),
+            free_text: text,
+        },
     )
     .await
     .map_err(|e| e.to_string())?;

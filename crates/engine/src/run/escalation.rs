@@ -7,8 +7,11 @@
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
-use yunta_core::events::{EventDraft, EventPayload, GateOption, GateWaitingPayload, StoredEvent};
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, Responder, RunId, Seq, Workflow};
+use yunta_core::events::{
+    EventDraft, EventPayload, GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice,
+    StoredEvent,
+};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 use crate::reserved::ReservedOption;
@@ -232,9 +235,7 @@ pub async fn resolve_gate(
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
-    option: OptionId,
-    resolved_by: Responder,
-    free_text: Option<String>,
+    choice: HumanChoice,
 ) -> Result<(), ResolveGateError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     if !events.last().is_some_and(is_run_paused) {
@@ -243,23 +244,13 @@ pub async fn resolve_gate(
     let Some((node, escalation)) = current_escalation(manifest, &events) else {
         return Err(ResolveGateError::NothingToResolve);
     };
-    if !escalation.options.iter().any(|o| o.id == option) {
+    if !escalation.offers(&choice.option) {
         return Err(ResolveGateError::UnknownOption {
-            chosen: option.clone(),
-            declared: escalation
-                .options
-                .iter()
-                .map(|o| o.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
+            chosen: choice.option,
+            declared: escalation.menu(),
         });
     }
-    let resolution = yunta_core::events::GateResolvedPayload {
-        chosen_option: Some(option),
-        resolved_by: Some(resolved_by),
-        free_text,
-        approved_sha: None,
-    };
+    let resolution = GateResolvedPayload::Chosen(choice);
     storage
         .append(
             EventDraft {
@@ -293,13 +284,16 @@ pub async fn resolve_gate(
 /// `run_paused` — always lands right after); never a consumed abort (a
 /// fresh `run_paused` follows it, so a later manual resume asks again,
 /// today's exact semantics); never a decision from before a newer
-/// failure. Callers still re-validate the chosen option against the
-/// re-derived menu — a mismatch means ask normally, never guess.
+/// failure. The decision also has to be a human's choice of an option
+/// `escalation`'s re-derived menu still offers; anything else (an
+/// option the menu dropped, a shape no surface produces) means ask
+/// normally, never guess.
 pub(crate) fn pre_seeded_resolution(
     events: &[StoredEvent],
     node: &NodeId,
-) -> Option<yunta_core::events::GateResolvedPayload> {
-    let mut latest: Option<(Seq, yunta_core::events::GateResolvedPayload)> = None;
+    escalation: &GateWaitingPayload,
+) -> Option<HumanChoice> {
+    let mut latest: Option<(Seq, GateResolvedPayload)> = None;
     let mut blocker: Option<Seq> = None;
     for event in events {
         match event.payload() {
@@ -319,7 +313,12 @@ pub(crate) fn pre_seeded_resolution(
     }
     latest
         .filter(|(seq, _)| Some(*seq) > blocker)
-        .map(|(_, resolution)| resolution)
+        .and_then(|(_, resolution)| match resolution {
+            GateResolvedPayload::Chosen(choice) if escalation.offers(&choice.option) => {
+                Some(choice)
+            }
+            _ => None,
+        })
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -3,8 +3,9 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, FindingSeverity, NodeReroutedPayload, PromotionSignaledPayload, RerouteOrigin,
-    RunFinishedPayload, RunMetrics, StoredEvent, TerminalState,
+    EventPayload, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
+    PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, RunMetrics, StoredEvent,
+    TerminalState,
 };
 use yunta_core::{ModeName, NodeId};
 
@@ -180,17 +181,13 @@ pub(super) async fn gate_exhausted(
     // re-asked, and its escalation pair is already recorded so it is never
     // re-emitted. The option is re-validated against the re-derived menu: a
     // mismatch means ask normally.
-    let pre_seeded = escalation::pre_seeded_resolution(events, &node).filter(|r| {
-        r.chosen_option
-            .as_ref()
-            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == *chosen))
-    });
+    let pre_seeded = escalation::pre_seeded_resolution(events, &node, &escalation);
     let already_recorded = pre_seeded.is_some();
-    let resolution = match pre_seeded {
-        Some(resolution) => Some(resolution),
-        None => ctx.human_interaction.resolve(&escalation).await,
+    let choice = match pre_seeded {
+        Some(choice) => Some(choice),
+        None => ctx.ask_human(&escalation).await?,
     };
-    let Some(resolution) = resolution else {
+    let Some(choice) = choice else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or a future MCP client) carry the
         // decision instead.
@@ -199,13 +196,13 @@ pub(super) async fn gate_exhausted(
     if !already_recorded {
         ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
             .await?;
-        ctx.emit(Some(&node), EventPayload::GateResolved(resolution.clone()))
-            .await?;
+        ctx.emit(
+            Some(&node),
+            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+        )
+        .await?;
     }
-    let chosen = resolution
-        .chosen_option
-        .as_ref()
-        .and_then(ReservedOption::of);
+    let chosen = ReservedOption::of(&choice.option);
     if chosen == Some(ReservedOption::Retry) {
         ctx.emit(
             Some(&node),
@@ -279,9 +276,10 @@ pub(super) async fn gate_exhausted(
             state: ctx.run_view().await?.state,
         }))
     } else {
+        // The menu offers nothing beyond retry, promote and abort.
         let reason = format!(
             "node `{node}`'s gate was resolved to abort{}",
-            resolution
+            choice
                 .free_text
                 .as_deref()
                 .map(|text| format!(": {text}"))
@@ -378,15 +376,7 @@ pub(super) async fn publish_gate(
             ),
         });
     };
-    let step = gate_exec::publish_gate(
-        ctx,
-        node,
-        assignee,
-        external,
-        ctx.forge,
-        ctx.human_interaction,
-    )
-    .await?;
+    let step = gate_exec::publish_gate(ctx, node, assignee, external, ctx.forge).await?;
     gate_still_waiting(ctx, step).await
 }
 
@@ -398,8 +388,7 @@ pub(super) async fn poll_gate(
     external_ref: String,
 ) -> Result<Option<RunReport>, RunError> {
     let node = find_node(&ctx.manifest.workflow, &node_id)?;
-    let step =
-        gate_exec::poll_gate(ctx, node, &external_ref, ctx.forge, ctx.human_interaction).await?;
+    let step = gate_exec::poll_gate(ctx, node, &external_ref, ctx.forge).await?;
     gate_still_waiting(ctx, step).await
 }
 

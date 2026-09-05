@@ -109,7 +109,7 @@ pub(crate) async fn drive_promotions(
 mod tests {
     use std::collections::HashMap;
 
-    use yunta_core::events::{EventPayload, GateResolvedPayload, GateWaitingPayload};
+    use yunta_core::events::{EventPayload, GateWaitingPayload, HumanChoice};
     use yunta_core::{ConfigLayer, RunId, SystemClock, Workflow};
     use yunta_engine::{
         build_manifest, create_run, execute_run, HumanInteraction, RunEnv, DEFAULT_MAX_RETRIES,
@@ -138,12 +138,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl HumanInteraction for AlwaysPromote {
-        async fn resolve(&self, _e: &GateWaitingPayload) -> Option<GateResolvedPayload> {
-            Some(GateResolvedPayload {
-                chosen_option: Some("promote".into()),
-                resolved_by: Some("eulke".into()),
+        async fn resolve(&self, _e: &GateWaitingPayload) -> Option<HumanChoice> {
+            Some(HumanChoice {
+                option: "promote".into(),
+                by: "eulke".into(),
                 free_text: None,
-                approved_sha: None,
             })
         }
     }

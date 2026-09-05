@@ -469,20 +469,153 @@ pub struct GateWaitingPayload {
     pub external_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GateResolvedPayload {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chosen_option: Option<OptionId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_by: Option<Responder>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+impl GateWaitingPayload {
+    /// Whether `option` is on this escalation's menu: the one test an
+    /// answer passes before it counts as a decision on it.
+    pub fn offers(&self, option: &OptionId) -> bool {
+        self.options.iter().any(|o| o.id == *option)
+    }
+
+    /// The menu's option ids as one comma-separated line, for a message
+    /// that names what was offered.
+    pub fn menu(&self) -> String {
+        self.options
+            .iter()
+            .map(|o| o.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// How a gate's escalation was settled. On the wire this is one flat
+/// object of four optional fields, and the fields present spell the
+/// shape: an option with its responder is a human's `Chosen`; a
+/// responder with a commit id is the forge's `Approved`; a responder
+/// alone is `ChangesRequested`; nothing at all is `Closed`. Reading
+/// decides the shape once, here, so every reader matches on it instead
+/// of inferring it from which field is set. A combination no shape
+/// names reads as `Unrecognized` and writes back verbatim: a newer
+/// writer may mean something by it, and the export loses nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(from = "GateResolvedWire", into = "GateResolvedWire")]
+pub enum GateResolvedPayload {
+    /// A human picked one of the escalation's options: an internal
+    /// gate, exhausted re-routes, a token budget, a scope expansion, or
+    /// an external gate degraded to the console.
+    Chosen(HumanChoice),
+    /// The forge reports an approving review, or a merge, covering
+    /// `sha`. A merge is an approval whose evidence is the merge commit.
+    Approved { by: Responder, sha: CommitSha },
+    /// The forge reports a changes-requested review by `by`.
+    ChangesRequested { by: Responder },
+    /// The pull request was closed without merging.
+    Closed,
+    /// A combination of fields no shape above names, kept as read. Only
+    /// reading produces it; nothing in this workspace writes one.
+    Unrecognized(UnrecognizedResolution),
+}
+
+/// One option picked from an escalation's menu, and who picked it: the
+/// content of [`GateResolvedPayload::Chosen`], and the only shape a
+/// human-facing surface produces. A console or an MCP tool chooses; it
+/// never reports an approval a forge did not give.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanChoice {
+    pub option: OptionId,
+    pub by: Responder,
     pub free_text: Option<String>,
-    /// The commit SHA the forge's approval covered —
-    /// `None` for the internal escalation case, which has no SHA to
-    /// speak of. What a later drift check compares against the PR's
-    /// current head to decide whether the approval still holds.
+}
+
+/// A `gate_resolved` whose fields spell no shape this binary names.
+/// Opaque: it exists to be written back unchanged, never to be read
+/// into a decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnrecognizedResolution(GateResolvedWire);
+
+/// The persisted object behind [`GateResolvedPayload`]: four optional
+/// fields, the same for every shape. Serialization, deserialization and
+/// the JSON Schema all go through it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+struct GateResolvedWire {
+    /// The option a human chose from the menu.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_sha: Option<CommitSha>,
+    chosen_option: Option<OptionId>,
+    /// Who decided: the human who chose, or the reviewer or merger the
+    /// forge reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolved_by: Option<Responder>,
+    /// Free-form context a human gave alongside the choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    free_text: Option<String>,
+    /// The commit the forge's approval covers: what a later drift check
+    /// compares against the pull request's current head to decide
+    /// whether the approval still holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approved_sha: Option<CommitSha>,
+}
+
+impl From<GateResolvedWire> for GateResolvedPayload {
+    fn from(wire: GateResolvedWire) -> Self {
+        match wire {
+            GateResolvedWire {
+                chosen_option: Some(option),
+                resolved_by: Some(by),
+                free_text,
+                approved_sha: None,
+            } => Self::Chosen(HumanChoice {
+                option,
+                by,
+                free_text,
+            }),
+            GateResolvedWire {
+                chosen_option: None,
+                resolved_by: Some(by),
+                free_text: None,
+                approved_sha: Some(sha),
+            } => Self::Approved { by, sha },
+            GateResolvedWire {
+                chosen_option: None,
+                resolved_by: Some(by),
+                free_text: None,
+                approved_sha: None,
+            } => Self::ChangesRequested { by },
+            GateResolvedWire {
+                chosen_option: None,
+                resolved_by: None,
+                free_text: None,
+                approved_sha: None,
+            } => Self::Closed,
+            other => Self::Unrecognized(UnrecognizedResolution(other)),
+        }
+    }
+}
+
+impl From<GateResolvedPayload> for GateResolvedWire {
+    fn from(payload: GateResolvedPayload) -> Self {
+        match payload {
+            GateResolvedPayload::Chosen(HumanChoice {
+                option,
+                by,
+                free_text,
+            }) => GateResolvedWire {
+                chosen_option: Some(option),
+                resolved_by: Some(by),
+                free_text,
+                approved_sha: None,
+            },
+            GateResolvedPayload::Approved { by, sha } => GateResolvedWire {
+                resolved_by: Some(by),
+                approved_sha: Some(sha),
+                ..GateResolvedWire::default()
+            },
+            GateResolvedPayload::ChangesRequested { by } => GateResolvedWire {
+                resolved_by: Some(by),
+                ..GateResolvedWire::default()
+            },
+            GateResolvedPayload::Closed => GateResolvedWire::default(),
+            GateResolvedPayload::Unrecognized(UnrecognizedResolution(wire)) => wire,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

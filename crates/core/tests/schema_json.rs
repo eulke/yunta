@@ -90,6 +90,34 @@ fn the_events_schema_is_one_stored_event_with_its_envelope_and_every_kind() {
 }
 
 #[test]
+fn a_gate_resolution_is_one_flat_object_of_four_optional_fields() {
+    // The wire shape is what the schema publishes: not the shapes the
+    // engine reads out of it.
+    let json = rendered(yunta_core::schema::events());
+    let resolved = &json["$defs"]["GateResolvedPayload"];
+    assert_eq!(resolved["type"], "object");
+    let mut fields: Vec<&str> = resolved["properties"]
+        .as_object()
+        .expect("an object with properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        ["approved_sha", "chosen_option", "free_text", "resolved_by"]
+    );
+    assert!(
+        resolved.get("required").is_none(),
+        "every field is optional"
+    );
+    assert!(
+        resolved.get("oneOf").is_none(),
+        "no variant branches on the wire"
+    );
+}
+
+#[test]
 fn a_run_id_is_described_as_a_string_and_a_seq_as_a_positive_integer() {
     let json = rendered(yunta_core::schema::events());
     assert_eq!(json["$defs"]["RunId"]["type"], "string");

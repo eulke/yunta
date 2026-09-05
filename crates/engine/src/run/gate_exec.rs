@@ -27,8 +27,6 @@ use yunta_core::events::{
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
 
-use crate::human_interaction::HumanInteraction;
-
 use super::node_close::write_progress;
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
@@ -48,7 +46,6 @@ pub(super) async fn publish_gate(
     assignee: &str,
     external: &ExternalGate,
     forge: Option<&dyn Forge>,
-    human_interaction: &dyn HumanInteraction,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
         return degrade_to_console(
@@ -60,7 +57,6 @@ pub(super) async fn publish_gate(
                  it here instead",
                 node.id
             ),
-            human_interaction,
         )
         .await;
     };
@@ -125,7 +121,6 @@ pub(super) async fn poll_gate(
     node: &Node,
     external_ref: &str,
     forge: Option<&dyn Forge>,
-    human_interaction: &dyn HumanInteraction,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
         return degrade_to_console(
@@ -136,7 +131,6 @@ pub(super) async fn poll_gate(
                  but no forge is reachable from this machine — resolve it here instead",
                 node.id
             ),
-            human_interaction,
         )
         .await;
     };
@@ -171,11 +165,9 @@ async fn resolve_approved(
     emit_started(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload {
-            chosen_option: None,
-            resolved_by: Some(by.clone()),
-            free_text: None,
-            approved_sha: Some(approved_sha.clone()),
+        EventPayload::GateResolved(GateResolvedPayload::Approved {
+            by: by.clone(),
+            sha: approved_sha.clone(),
         }),
     )
     .await?;
@@ -213,11 +205,8 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload {
-                    chosen_option: None,
-                    resolved_by: Some(by.clone()),
-                    free_text: None,
-                    approved_sha: None,
+                EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
+                    by: by.clone(),
                 }),
             )
             .await?;
@@ -258,12 +247,7 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload {
-                    chosen_option: None,
-                    resolved_by: None,
-                    free_text: None,
-                    approved_sha: None,
-                }),
+                EventPayload::GateResolved(GateResolvedPayload::Closed),
             )
             .await?;
             ctx.emit(
@@ -361,8 +345,10 @@ fn last_approved_sha(
     node_id: &yunta_core::NodeId,
 ) -> Option<CommitSha> {
     events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateResolved(p)) if e.node_id.as_ref() == Some(node_id) => {
-            p.approved_sha.clone()
+        Some(EventPayload::GateResolved(GateResolvedPayload::Approved { sha, .. }))
+            if e.node_id.as_ref() == Some(node_id) =>
+        {
+            Some(sha.clone())
         }
         _ => None,
     })
@@ -410,16 +396,12 @@ pub(super) async fn resolve_internal_gate(
     // recorded so it is never re-emitted. Re-validated against the
     // re-derived menu: a mismatch means ask normally.
     let events = ctx.load_events().await?;
-    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id).filter(|r| {
-        r.chosen_option
-            .as_ref()
-            .is_some_and(|chosen| escalation.options.iter().any(|o| o.id == *chosen))
-    });
+    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id, &escalation);
     let already_recorded = pre_seeded.is_some();
-    let resolution = match pre_seeded {
-        Some(resolution) => resolution,
-        None => match ctx.human_interaction.resolve(&escalation).await {
-            Some(resolution) => resolution,
+    let choice = match pre_seeded {
+        Some(choice) => choice,
+        None => match ctx.ask_human(&escalation).await? {
+            Some(choice) => choice,
             None => {
                 return Ok(GateStep::StillWaiting {
                     reason: format!(
@@ -431,23 +413,13 @@ pub(super) async fn resolve_internal_gate(
         },
     };
 
-    // A gate's resolution is a choice from its menu; one that names no
-    // option is a log this engine did not write.
-    let Some(chosen) = resolution.chosen_option.clone() else {
-        return Err(RunError::Broken {
-            diagnostic: format!(
-                "gate `{}` carries a resolution that names no option",
-                node.id
-            ),
-        });
-    };
     // Whether `abort` is the engine's own appended option (never the
     // author's) — same rule `build_internal_gate_escalation` used to
     // decide whether to append it in the first place.
     let engine_abort = !options
         .iter()
         .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
-    if engine_abort && ReservedOption::of(&chosen) == Some(ReservedOption::Abort) {
+    if engine_abort && ReservedOption::of(&choice.option) == Some(ReservedOption::Abort) {
         // The usual escalation convention exactly: record the
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
@@ -456,7 +428,7 @@ pub(super) async fn resolve_internal_gate(
                 .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(resolution.clone()),
+                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
             )
             .await?;
         }
@@ -464,7 +436,7 @@ pub(super) async fn resolve_internal_gate(
             reason: format!(
                 "gate `{}` was resolved to abort{}",
                 node.id,
-                resolution
+                choice
                     .free_text
                     .as_deref()
                     .map(|text| format!(": {text}"))
@@ -479,10 +451,11 @@ pub(super) async fn resolve_internal_gate(
             .await?;
         ctx.emit(
             Some(&node.id),
-            EventPayload::GateResolved(resolution.clone()),
+            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
         )
         .await?;
     }
+    let chosen = choice.option;
     match on.get(&chosen) {
         Some(target) => {
             // Same shape as any other reroute: the gate fails (retryable
@@ -569,7 +542,6 @@ async fn degrade_to_console(
     ctx: &RunCtx<'_>,
     node: &Node,
     summary: String,
-    human_interaction: &dyn HumanInteraction,
 ) -> Result<GateStep, RunError> {
     let escalation = GateWaitingPayload {
         summary: summary.clone(),
@@ -588,7 +560,7 @@ async fn degrade_to_console(
         ],
         external_ref: None,
     };
-    let Some(resolution) = human_interaction.resolve(&escalation).await else {
+    let Some(choice) = ctx.ask_human(&escalation).await? else {
         pause(ctx, summary.clone()).await?;
         return Ok(GateStep::StillWaiting { reason: summary });
     };
@@ -597,27 +569,15 @@ async fn degrade_to_console(
         .await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(resolution.clone()),
+        EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
     )
     .await?;
     emit_started(ctx, node).await?;
-    if resolution
-        .chosen_option
-        .as_ref()
-        .and_then(ReservedOption::of)
-        == Some(ReservedOption::Approve)
-    {
+    if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
         ctx.emit(
             Some(&node.id),
             EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: format!(
-                    "approved from the console{}",
-                    resolution
-                        .resolved_by
-                        .as_ref()
-                        .map(|by| format!(" by {by}"))
-                        .unwrap_or_default()
-                ),
+                outcome: format!("approved from the console by {}", choice.by),
                 tokens_used: TokenUsage::default(),
             }),
         )
