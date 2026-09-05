@@ -58,6 +58,23 @@ demostrada del segmento no técnico. Si llega: web, y con el YAML como fuente de
 verdad; cualquier estado que la interfaz guarde y el YAML no exprese rompe
 versionado, packs y portabilidad. `yunta graph` cubre la necesidad de *ver* un DAG.
 
+**A-11 · Captura de salida de nodos `executor` para `node-output:`.** Hoy solo
+`kind: bash` deja su salida donde `node-output:` la lee: `execute_bash` la captura al
+salir el proceso, éxito o fallo por igual. Un `kind: executor` corre por el mismo
+contrato stdin/stdout, pero el engine parsea su stdout como resultado (`ExecutorOutput`)
+y no lo materializa: un nodo correctivo que dependa de él no tiene qué leer. Forma
+propuesta: escribir el stdout capturado con el mismo `write_node_output` que usa bash,
+sin nueva superficie. Gatillo: el primer pack que encadene un executor con un nodo
+correctivo.
+
+**A-12 · Campos del contrato JSON de `kind: executor`.** El contrato fija la forma
+(JSON por stdin, JSON por stdout, exit code como veredicto) y no nombra los campos:
+`with` es entrada opaca definida por el executor, y la salida que el engine parsea
+(`ExecutorOutput`, un `summary` opcional) la define el módulo que la lee, no la spec.
+Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo, `with`,
+rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
+un `schema_version` propio, versionado como los eventos (spec-events §2).
+
 ## Riesgos conocidos
 
 - **Dependencia de flags headless de los CLIs.** Mitigada por diseño (todo flag

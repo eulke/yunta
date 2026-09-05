@@ -966,7 +966,7 @@
           ]
         },
         {
-          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The contract fixes the high-level shape (JSON in, JSON out,\nexit code is the verdict) but stops short of naming fields,\npending further design.",
+          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The contract fixes the high-level shape (JSON in, JSON out,\nexit code is the verdict); the field names are registered debt\nA-12 in `docs/design/deuda-consciente.md`.",
           "type": "object",
           "properties": {
             "executor": {

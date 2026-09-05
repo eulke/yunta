@@ -26,8 +26,8 @@
 //!   nodes (`execute_bash` is the only place this module captures output
 //!   from, right after the process exits, success or failure alike —
 //!   exactly the lint→fix-lint→lint case a corrective node needs to
-//!   read back). `executor` node output capture is real debt, not yet
-//!   wired.
+//!   read back). An `executor` node's output is not captured for it:
+//!   registered debt A-11 in `docs/design/deuda-consciente.md`.
 //! - Stable-first assembly: every source is classified
 //!   `stable | run-stable | volatile` (`stability_class`) and the final
 //!   text is always segment-ordered that way, regardless of `context:`'s

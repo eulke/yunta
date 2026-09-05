@@ -1,9 +1,10 @@
 //! `kind: executor` — the extension point when neither
 //! `bash` nor `check`'s closed builtin list is enough: external code, a
 //! JSON contract over stdio. The spec fixes the high-level shape (JSON
-//! in, JSON out, exit code is the verdict) but stops short of naming
-//! fields — this module's own doc comments carry the concrete contract
-//! it adds on top, pending a spec revision.
+//! in, JSON out, exit code is the verdict); this module's own doc
+//! comments carry the concrete contract it adds on top, and naming those
+//! fields in the spec is registered debt A-12 in
+//! `docs/design/deuda-consciente.md`.
 
 use std::path::Path;
 use std::time::Duration;

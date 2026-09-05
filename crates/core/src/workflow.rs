@@ -875,8 +875,8 @@ pub enum NodeKind {
     /// external code, a JSON contract over stdio. `executor` names an
     /// entry in `skills.executors:`; `with` is opaque, executor-defined
     /// input. The contract fixes the high-level shape (JSON in, JSON out,
-    /// exit code is the verdict) but stops short of naming fields,
-    /// pending further design.
+    /// exit code is the verdict); the field names are registered debt
+    /// A-12 in `docs/design/deuda-consciente.md`.
     Executor {
         executor: ExecutorName,
         #[serde(default)]

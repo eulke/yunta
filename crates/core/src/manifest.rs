@@ -148,8 +148,9 @@ pub struct Manifest {
 
 impl Manifest {
     /// Hash of the whole frozen manifest — the value `run_created`
-    /// records, and the genesis of the event hash chain (not yet
-    /// implemented).
+    /// records, and what the storage derives the event hash chain's
+    /// genesis from (`H0 = SHA-256(manifest_hash)`): one chain per run,
+    /// anchored in the run's own frozen inputs rather than a constant.
     pub fn manifest_hash(&self) -> String {
         content_hash(self)
     }
