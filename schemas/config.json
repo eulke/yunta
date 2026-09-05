@@ -401,7 +401,7 @@
       ]
     },
     "LimitsConfig": {
-      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`ConfigLayer::resolved_max_loop_iterations`],\n[`ConfigLayer::resolved_inline_context_bytes`]), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nCanonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves\n`2_000_000` as a *string*, which fails the parse loudly instead of\nsilently becoming an unlimited run.",
+      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),\n[`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nCanonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves\n`2_000_000` as a *string*, which fails the parse loudly instead of\nsilently becoming an unlimited run.",
       "type": "object",
       "properties": {
         "inline_context_bytes": {
