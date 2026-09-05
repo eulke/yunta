@@ -1955,19 +1955,16 @@ nodes:
     );
     assert!(stdout(&resolve).contains("resolved"));
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = yunta_in!(&repo, &home, &["status", &run_id]);
-        if stdout(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run never reached finished after resolve-gate: {}",
-            stdout(&status)
-        );
-        std::thread::yield_now();
-    }
+    let status = || stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    wait_until(
+        || status().contains("finished"),
+        || {
+            format!(
+                "the run never reached finished after resolve-gate: {}",
+                status()
+            )
+        },
+    );
     assert!(repo.join("fixed.txt").exists());
 }
 

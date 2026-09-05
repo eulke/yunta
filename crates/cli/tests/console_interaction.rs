@@ -10,29 +10,19 @@
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use nix::pty::openpty;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
-use yunta_testkit::{git, init_repo, write};
+use yunta_testkit::{git, init_repo, wait_until, write};
 
-/// Polls `seen` until it contains `needle`, failing with `context` (and
-/// everything seen so far) if `timeout` elapses first — the bounded wait
-/// for an external process to reach a state, never a bare timed wait.
-fn wait_for(seen: &Arc<Mutex<String>>, needle: &str, timeout: Duration, context: &str) {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if seen.lock().unwrap().contains(needle) {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "{context}\nsaw so far:\n{}",
-            seen.lock().unwrap()
-        );
-        std::thread::yield_now();
-    }
+/// Waits until the console output `seen` contains `needle`, failing with
+/// `context` and everything seen so far.
+fn wait_for_output(seen: &Arc<Mutex<String>>, needle: &str, context: &str) {
+    wait_until(
+        || seen.lock().unwrap().contains(needle),
+        || format!("{context}\nsaw so far:\n{}", seen.lock().unwrap()),
+    );
 }
 
 #[test]
@@ -95,10 +85,9 @@ fn console_prompt_does_not_stall_the_run_tools_listener() {
         }
     });
 
-    wait_for(
+    wait_for_output(
         &seen,
         "choose an option id:",
-        Duration::from_secs(10),
         "the gate never prompted on the console",
     );
 
@@ -107,10 +96,9 @@ fn console_prompt_does_not_stall_the_run_tools_listener() {
     // the run-tools listener). A read that blocked the runtime would starve
     // every one of them, and this note would never print.
     kill(Pid::from_raw(child.id() as i32), Signal::SIGINT).unwrap();
-    wait_for(
+    wait_for_output(
         &seen,
         "interrupt received",
-        Duration::from_secs(10),
         "SIGINT went unhandled while the console prompt waited — the read stalled the runtime",
     );
 

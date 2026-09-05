@@ -12,7 +12,7 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, write, yunta_in};
+use yunta_testkit::{git, init_repo, wait_until_async, write, yunta_in};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -102,25 +102,32 @@ nodes:
         .trim()
         .to_string();
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = client
-            .call_tool(
-                CallToolRequestParams::new("workflow_status")
-                    .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+    let last_status = std::cell::RefCell::new(String::new());
+    wait_until_async(
+        || {
+            let client = &client;
+            let last_status = &last_status;
+            let run_id = &run_id;
+            async move {
+                let status = client
+                    .call_tool(
+                        CallToolRequestParams::new("workflow_status")
+                            .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+                    )
+                    .await
+                    .unwrap();
+                *last_status.borrow_mut() = tool_text(&status);
+                last_status.borrow().contains("finished")
+            }
+        },
+        || {
+            format!(
+                "the run never reached finished via workflow_status: {}",
+                last_status.borrow()
             )
-            .await
-            .unwrap();
-        if tool_text(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run never reached finished via workflow_status: {}",
-            tool_text(&status)
-        );
-        tokio::task::yield_now().await;
-    }
+        },
+    )
+    .await;
     assert_eq!(
         std::fs::read_to_string(repo.join("greeting.txt"))
             .unwrap()
@@ -202,25 +209,32 @@ nodes:
         tool_text(&resolved)
     );
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = client
-            .call_tool(
-                CallToolRequestParams::new("workflow_status")
-                    .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+    let last_status = std::cell::RefCell::new(String::new());
+    wait_until_async(
+        || {
+            let client = &client;
+            let last_status = &last_status;
+            let run_id = &run_id;
+            async move {
+                let status = client
+                    .call_tool(
+                        CallToolRequestParams::new("workflow_status")
+                            .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+                    )
+                    .await
+                    .unwrap();
+                *last_status.borrow_mut() = tool_text(&status);
+                last_status.borrow().contains("finished")
+            }
+        },
+        || {
+            format!(
+                "the run never reached finished after resolve_gate: {}",
+                last_status.borrow()
             )
-            .await
-            .unwrap();
-        if tool_text(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run never reached finished after resolve_gate: {}",
-            tool_text(&status)
-        );
-        tokio::task::yield_now().await;
-    }
+        },
+    )
+    .await;
 
     client.cancel().await.unwrap();
 }
@@ -294,25 +308,32 @@ nodes:
     let transport = TokioChildProcess::new(command).unwrap();
     let fresh_client = ().serve(transport).await.unwrap();
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = fresh_client
-            .call_tool(
-                CallToolRequestParams::new("workflow_status")
-                    .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+    let last_status = std::cell::RefCell::new(String::new());
+    wait_until_async(
+        || {
+            let client = &fresh_client;
+            let last_status = &last_status;
+            let run_id = &run_id;
+            async move {
+                let status = client
+                    .call_tool(
+                        CallToolRequestParams::new("workflow_status")
+                            .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+                    )
+                    .await
+                    .unwrap();
+                *last_status.borrow_mut() = tool_text(&status);
+                last_status.borrow().contains("finished")
+            }
+        },
+        || {
+            format!(
+                "the run must survive the MCP session that created it being killed: {}",
+                last_status.borrow()
             )
-            .await
-            .unwrap();
-        if tool_text(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run must survive the MCP session that created it being killed: {}",
-            tool_text(&status)
-        );
-        tokio::task::yield_now().await;
-    }
+        },
+    )
+    .await;
     assert_eq!(
         std::fs::read_to_string(repo.join("done.txt"))
             .unwrap()
@@ -542,40 +563,40 @@ async fn finished_detached_runs_leave_no_zombie() {
         .to_string();
 
     // Drive the detached run to completion.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = client
-            .call_tool(
-                CallToolRequestParams::new("workflow_status")
-                    .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
-            )
-            .await
-            .unwrap();
-        if tool_text(&status).contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the detached run never finished: {}",
-            tool_text(&status)
-        );
-        tokio::task::yield_now().await;
-    }
+    let last_status = std::cell::RefCell::new(String::new());
+    wait_until_async(
+        || {
+            let client = &client;
+            let last_status = &last_status;
+            let run_id = &run_id;
+            async move {
+                let status = client
+                    .call_tool(
+                        CallToolRequestParams::new("workflow_status")
+                            .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+                    )
+                    .await
+                    .unwrap();
+                *last_status.borrow_mut() = tool_text(&status);
+                last_status.borrow().contains("finished")
+            }
+        },
+        || format!("the detached run never finished: {}", last_status.borrow()),
+    )
+    .await;
 
     // The finished detached child is a child of the long-lived server: it
     // must be reaped, never left defunct. Give the reaper a moment.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let zombies = zombie_children(mcp_pid);
-        if zombies.is_empty() {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "a finished detached run is a zombie under the server: {zombies:?}"
-        );
-        tokio::task::yield_now().await;
-    }
+    wait_until_async(
+        || async { zombie_children(mcp_pid).is_empty() },
+        || {
+            format!(
+                "a finished detached run is a zombie under the server: {:?}",
+                zombie_children(mcp_pid)
+            )
+        },
+    )
+    .await;
 
     client.cancel().await.unwrap();
 }

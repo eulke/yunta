@@ -5,7 +5,9 @@
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, run_id_from, stderr, stdout, yunta_in, INITIAL_BRANCH};
+use yunta_testkit::{
+    git, init_repo, run_id_from, stderr, stdout, wait_until, yunta_in, INITIAL_BRANCH,
+};
 
 /// `lint` fails until `fixed.txt` exists, exhausts its one re-route
 /// (`max_reroutes: 0`) and pauses the run — the same proven pattern
@@ -111,17 +113,14 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
     assert!(resolve.status.success(), "{}", stderr(&resolve));
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let status = yunta_in!(&repo, &home, &["status", &run_id]);
-        let text = stdout(&status);
-        if text.contains("finished") {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run never reached finished after resolve-gate: {text}"
-        );
-        std::thread::yield_now();
-    }
+    let status = || stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    wait_until(
+        || status().contains("finished"),
+        || {
+            format!(
+                "the run never reached finished after resolve-gate: {}",
+                status()
+            )
+        },
+    );
 }
