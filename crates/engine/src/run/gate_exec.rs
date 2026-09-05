@@ -29,7 +29,8 @@ use yunta_core::{ExternalGate, FindingId, Node};
 
 use crate::human_interaction::HumanInteraction;
 
-use super::node_exec::{template_vars, write_progress};
+use super::node_close::write_progress;
+use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
 use crate::reserved::ReservedOption;

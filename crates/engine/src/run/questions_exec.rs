@@ -9,7 +9,7 @@
 use yunta_core::events::EventPayload;
 use yunta_core::{ArtifactKind, ArtifactSpec, Node};
 
-use super::node_exec::write_progress;
+use super::node_close::write_progress;
 use super::{RunCtx, RunError};
 
 /// What the ask round produced: the node was fully answered (and closed

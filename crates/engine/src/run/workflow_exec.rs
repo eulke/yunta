@@ -43,7 +43,8 @@ use yunta_core::{
 use crate::replay::derive;
 use crate::template::render_template;
 
-use super::node_exec::{cancelled_end, close_node, fail, template_vars, NodeEnd};
+use super::node_close::{close_node, fail};
+use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{BirthArtifact, RunCtx, RunError, RunTerminal};
 

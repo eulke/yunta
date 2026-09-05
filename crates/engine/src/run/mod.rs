@@ -17,6 +17,7 @@
 //! `distill.rs`; the close sequence is distill → `run_finished` →
 //! export → cleanup.
 
+mod bash_exec;
 mod budget;
 mod check_exec;
 mod context_resolve;
@@ -27,10 +28,15 @@ mod escalation;
 mod exec;
 mod executor_exec;
 mod gate_exec;
+mod hooks_exec;
 mod loop_exec;
+mod node_close;
 mod node_exec;
+mod parallel_exec;
 mod promote;
+mod prompt_exec;
 mod questions_exec;
+mod runner_resolve;
 mod schedule;
 mod step;
 mod steps;

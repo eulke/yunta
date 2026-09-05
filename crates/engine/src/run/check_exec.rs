@@ -11,7 +11,8 @@ use yunta_core::events::{
 };
 use yunta_core::{CheckBuiltin, Node};
 
-use super::node_exec::{close_node, fail, NodeEnd};
+use super::node_close::{close_node, fail};
+use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 

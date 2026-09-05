@@ -66,7 +66,8 @@ use yunta_core::{sha256_hex, ContextSpec, Node, NodeId};
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::{render_template, TemplateError};
 
-use super::node_exec::{cancelled_end, fail, template_vars};
+use super::node_close::fail;
+use super::node_exec::{cancelled_end, template_vars};
 use super::step::Step;
 use super::{RunCtx, RunError};
 

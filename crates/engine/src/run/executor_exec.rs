@@ -13,7 +13,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
 use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
 
-use super::node_exec::{close_node, fail, NodeEnd};
+use super::node_close::{close_node, fail};
+use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 
