@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.98"
 license = "Apache-2.0"
@@ -22,14 +22,14 @@ repository = "https://github.com/eulke/yunta"
 # crates carry `version` because crates.io rejects a path dependency
 # without one.
 [workspace.dependencies]
-yunta-core = { path = "crates/core", version = "0.1.0" }
-yunta-storage = { path = "crates/storage", version = "0.1.0" }
-yunta-adapters = { path = "crates/adapters", version = "0.1.0" }
-yunta-engine = { path = "crates/engine", version = "0.1.0" }
+yunta-core = { path = "crates/core", version = "0.0.1" }
+yunta-storage = { path = "crates/storage", version = "0.0.1" }
+yunta-adapters = { path = "crates/adapters", version = "0.0.1" }
+yunta-engine = { path = "crates/engine", version = "0.0.1" }
 # Test-support crate: a dev-dependency only (never published), but it
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
-yunta-testkit = { path = "crates/testkit", version = "0.1.0" }
+yunta-testkit = { path = "crates/testkit", version = "0.0.1" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22"
