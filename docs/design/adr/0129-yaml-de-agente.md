@@ -40,21 +40,56 @@ persona.
 `findings`, `questions`). Rechaza claves desconocidas igual, y suma las dos
 obligaciones que la categoría trae consigo:
 
-1. **La forma se publica a quien la escribe.** Un nodo que declara
-   `artifacts.produces: [{kind: <k>}]` recibe la forma de `<k>` como fuente de
-   contexto derivada de esa declaración — no una clave nueva que el autor deba
-   recordar, sino la consecuencia directa de la que ya escribió. Se genera
-   desde los mismos tipos que después la parsean, como el JSON Schema de D70,
-   y entra en el segmento `stable` del contexto, con lo cual no toca el
-   prefijo byte-estable que §9 exige para el cache del proveedor.
+1. **La forma se publica donde sea que alguien escriba**, sin que un humano
+   tenga que transmitirla. Ver abajo.
 2. **Un archivo ilegible se corrige, no mata el nodo.** Ver D131.
 
 **YAML persistido** — eventos, manifest, lock de packs. Lector tolerante, sin
 cambios respecto de D70.
 
+### Dónde se publica la forma
+
+Un agente escribe un documento de Yunta en cuatro momentos, y ninguno puede
+depender de que una persona le haya explicado el formato antes.
+
+**Dentro de un run.** Un nodo que declara `artifacts.produces: [{kind: <k>}]`
+recibe la forma de `<k>` como fuente de contexto derivada de esa declaración:
+no una clave nueva que el autor deba recordar, sino la consecuencia directa de
+la que ya escribió. Entra en el segmento `stable`, con lo cual no toca el
+prefijo byte-estable que §9 exige para el cache del proveedor.
+
+**Fuera de un run, por MCP.** El plano de control gana la tool
+`document_shape`, cuyo enum de `kind` enumera todos los documentos que Yunta
+lee. Un cliente MCP ve esa tool y su enum al conectarse, sin llamar a nada y
+sin que nadie se lo cuente: la lista de tools es la superficie que se anuncia
+sola, y es por eso la puerta principal para un agente que trabaja en el repo
+sin entrar a ningún run.
+
+**Fuera de un run, por shell.** `yunta schema <kind>` imprime la forma;
+`yunta schema` sin argumentos lista los kinds; `--json` emite el JSON Schema
+para un editor. Es la misma puerta para una persona que quiere escribir el
+documento a mano, que hoy no tiene ninguna: los archivos de `schemas/` los
+genera `cargo xtask`, una herramienta de desarrollo del repo, no algo que
+alcance a quien instaló el binario.
+
+**Después de haber escrito mal.** El diagnóstico de D130 redactado para un
+agente incluye la forma. Así, quien no encontró ninguna de las puertas
+anteriores converge igual en el intento siguiente.
+
+Las cuatro rinden desde una única fuente: el esqueleto derivado de los tipos,
+más un ejemplo válido declarado al lado de cada tipo, con un test por kind que
+lee ese ejemplo y exige cero diagnósticos. Cuatro textos escritos por separado
+se desincronizan en el primer cambio de schema; uno con cuatro consumidores, no.
+
 El registro de schemas de `yunta-core` cubre las tres kinds interpretadas:
 `findings` y `questions` hoy no emiten schema y `ledger` sí, una asimetría sin
 razón.
+
+Lo que **no** se hace: escribir en `.claude/` ni en `CLAUDE.md` para que un
+agente cliente encuentre la forma. `init` ya trata ese archivo como ajeno,
+sugiere una línea y nunca la escribe, y la skill que instala vive en
+`.yunta/skills/`, que el engine monta para sus propias sesiones y ningún
+cliente externo lee. Por eso el peso de la puerta automática lo lleva MCP.
 
 ## Racional
 
@@ -89,3 +124,15 @@ en el primer cambio de schema.
 
 **Una clave nueva en el nodo** (`artifacts.publish_schema: true`). Es una
 segunda declaración del mismo hecho: el nodo ya dijo `kind: task-ledger`.
+
+**Publicar las formas como MCP resources en vez de una tool.** Semánticamente
+es lo correcto — son documentos, no acciones — pero el soporte de resources
+entre clientes es desparejo, y una forma que el cliente no lista es una puerta
+cerrada. La tool se ve en todos. Vuelve a discutirse cuando resources sea
+universal.
+
+**Publicar el JSON Schema en vez de un ejemplo comentado.** El schema ya
+existe y se le podría pasar tal cual a un agente. Un modelo copia una forma
+mucho mejor de lo que la deriva de una gramática, y el schema pesa varias
+veces más en tokens dentro de un bloque que viaja en cada sesión del nodo. El
+schema sigue siendo la salida de `--json`, para editores y herramientas.
