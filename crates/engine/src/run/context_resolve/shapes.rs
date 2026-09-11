@@ -93,13 +93,15 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
         .filter_map(|spec| match spec {
             yunta_core::ArtifactSpec::Typed { name, kind } => {
                 let path = ctx.run_dir.join("artifacts").join(name);
-                let shape = yunta_core::shape::published(*kind);
+                let shape = yunta_core::shape::contract(*kind);
                 Some((
                     format!("{SHAPE_KIND}:{name}"),
                     format!(
-                        "This node produces an artifact the engine reads and validates. Write \
-                         it at {}, in exactly this shape — any other key fails the \
-                         node.\n\n{shape}",
+                        "This node produces an artifact the engine reads and validates. \
+                         Write it at {}.\n\nWhat follows is the whole contract for that \
+                         file — the keys, their types, and the rules. Where any other \
+                         instruction describes this file differently, this is what the \
+                         engine enforces.\n\n{shape}",
                         path.display()
                     ),
                 ))

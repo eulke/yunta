@@ -97,4 +97,6 @@ impl crate::shape::Document for Ledger {
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::check(self)
     }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
 }

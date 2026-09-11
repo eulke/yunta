@@ -12,19 +12,25 @@ tasks:                                  # required, at least one
                                             #   before the work and pass after.
       - cmd: "cargo clippy -- -D warnings"
         type: guard                     # optional. A guard passes before AND
-                                        #   after. At least one criterion of a
-                                        #   task must not be a guard.
+                                        #   after the work, rather than failing
+                                        #   first.
 
   - id: document-dark-mode
     title: "Document the toggle in the README"
-    scope: ["README.md"]                # two tasks with no dependency between
-                                        #   them must not overlap in scope
+    scope: ["README.md"]
     depends_on: [add-dark-mode]         # optional, ids declared in this file
     notes: "Link the screenshot the first task adds."   # optional, one line of
                                         #   context for a runner with no history
     criteria:
       - cmd: "grep -q 'dark mode' README.md"
 
-# `manual_review: true` marks a task no command can verify, and then also
-# requires `justification:`. A criterion is always better: the engine can
-# run one, and nobody has to take anyone's word for it.
+  - id: review-contrast
+    title: "Check the dark palette reads at AA contrast"
+    scope: ["src/theme/tokens.css"]
+    depends_on: [add-dark-mode]
+    manual_review: true              # optional. An audit node judges whether
+                                     #   this task is complete.
+    justification: "Contrast against the new palette is a judgement no command makes."
+                                     #   say why a command cannot settle it
+    criteria:
+      - cmd: "test -f src/theme/tokens.css"

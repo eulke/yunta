@@ -56,7 +56,7 @@ pub use config::{
     PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 pub use diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
+    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,
 };
 pub use error::{describe, AdapterError, Result};

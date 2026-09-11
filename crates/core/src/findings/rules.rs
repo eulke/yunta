@@ -8,8 +8,29 @@
 
 use std::collections::HashSet;
 
-use crate::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{FindingId, FindingsFile};
+
+/// Every rule this document is held to — see `crate::ledger::rules` for what
+/// this list is for and what holds it true.
+pub(super) const RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::DuplicateId,
+        demand: "each `id` is declared once in the file",
+    },
+    Rule {
+        code: RuleCode::EmptyTitle,
+        demand: "`title` is a non-empty one-line summary",
+    },
+    Rule {
+        code: RuleCode::EmptyLocation,
+        demand: "`location` names a non-empty path, with its range when there is one",
+    },
+    Rule {
+        code: RuleCode::EmptyDetail,
+        demand: "`detail` is non-empty: what goes wrong, and when",
+    },
+];
 
 fn broke(index: usize, id: &FindingId, code: RuleCode, detail: &str) -> Diagnostic {
     Diagnostic::new(

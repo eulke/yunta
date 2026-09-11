@@ -261,7 +261,7 @@ mod tests {
     use yunta_core::diagnostic::{
         Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode, Subject,
     };
-    use yunta_core::shape::published;
+    use yunta_core::shape::contract;
     use yunta_core::{ArtifactKind, TaskId};
 
     use super::*;
@@ -312,7 +312,7 @@ mod tests {
         // session for the same text twice and hand its reader two copies
         // to reconcile.
         assert!(
-            !text.contains(published(ArtifactKind::TaskLedger)),
+            !text.contains(&contract(ArtifactKind::TaskLedger)),
             "{text}"
         );
     }

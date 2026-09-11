@@ -131,7 +131,7 @@ fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, 
         ));
     };
     let kind = name.parse::<ArtifactKind>().map_err(|e| e.to_string())?;
-    Ok(yunta_core::shape::published(kind).to_string())
+    Ok(yunta_core::shape::contract(kind))
 }
 
 fn tool_definitions() -> Vec<Tool> {
