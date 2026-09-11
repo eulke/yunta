@@ -1,23 +1,28 @@
 //! `yunta list`: the repo's own catalog of workflows — name,
 //! description, declared inputs — with `--runs` switching to local runs
-//! and their derived state instead. Both answer the same question
-//! without a server: "what's here, and where does it stand."
+//! instead. Both answer the same question without a server: "what's
+//! here, and where does it stand."
 //!
 //! The catalog is two layers: the repo's own `.yunta/workflows/`, then
 //! every installed pack's declared `contents.workflows`, addressed
 //! `publisher/name` — a bare repo name never collides with a pack entry
 //! since the two are printed and looked up under different keys.
+//!
+//! The runs view lives in [`runs`], which renders them as an inbox.
+
+mod runs;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use yunta_core::{InputSpec, Manifest, Workflow};
+use yunta_core::{InputSpec, Workflow};
 use yunta_storage::Storage;
 
-use super::status::progress_summary;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
+
+pub use runs::list_runs;
 
 /// One catalog entry ready to render — `display_name` already carries
 /// the `publisher/` prefix for a pack entry, nothing else needs to know
@@ -205,52 +210,4 @@ fn input_type_label(spec: &InputSpec) -> &'static str {
         InputSpec::Enum { .. } => "enum",
         InputSpec::Path { .. } => "path",
     }
-}
-
-pub fn list_runs() -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
-    let storage = ctx.storage()?;
-
-    let run_ids = storage
-        .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
-    if run_ids.is_empty() {
-        println!("no runs in {}", ctx.project.storage_path.display());
-        return Ok(Outcome::Success);
-    }
-
-    for run_id in run_ids {
-        let events = match storage.events_for_run(&run_id) {
-            Ok(events) => events,
-            Err(e) => {
-                println!("{run_id}: unreadable ({e})");
-                continue;
-            }
-        };
-        // The same frozen-path-aware search `status` uses, so a run
-        // created under a since-changed `paths.runs` still lists.
-        let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
-            println!(
-                "{run_id}: manifest missing or unreadable under {}",
-                ctx.project.runs_root.display()
-            );
-            continue;
-        };
-        let manifest_path = run_dir.join("manifest.yaml");
-        let manifest = match std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
-        {
-            Some(manifest) => manifest,
-            None => {
-                println!(
-                    "{run_id}: manifest missing or unreadable at {}",
-                    manifest_path.display()
-                );
-                continue;
-            }
-        };
-        println!("{run_id}: {}", progress_summary(&events, &manifest));
-    }
-    Ok(Outcome::Success)
 }

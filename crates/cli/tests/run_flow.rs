@@ -728,7 +728,7 @@ nodes:
 }
 
 #[test]
-fn list_runs_shows_local_runs_with_their_progress_summary() {
+fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -745,10 +745,22 @@ fn list_runs_shows_local_runs_with_their_progress_summary() {
 
     let list = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(list.status.success());
+    let text = stdout(&list);
+    let mut lines = text.lines();
     assert_eq!(
-        stdout(&list).trim_end(),
-        format!("{run_id}: 1/1 nodes · 0 reroutes · finished"),
-        "list --runs shows the run id with its derived progress summary"
+        lines.next(),
+        Some("closed (1)"),
+        "a finished run is listed under what can be done about it: {text}"
+    );
+    let row = lines.next().unwrap_or_default();
+    assert!(
+        row.starts_with(&format!("  {run_id}  only-node (default)")),
+        "the row names the workflow and the mode, not only the id: {text}"
+    );
+    assert_eq!(
+        lines.next(),
+        Some("    1/1 nodes · 0 reroutes · finished"),
+        "under it, the same summary `yunta status` prints: {text}"
     );
 }
 

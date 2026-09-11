@@ -141,7 +141,13 @@ each came from: the receipt counts a problem by its code together with the kind 
 document it was found in, and a failure of the file itself, which has no document,
 counts by code alone.
 
-`yunta list --runs` orders runs by the timestamp of their first event.
+`yunta list --runs` groups runs by what can be done about them — what needs a
+person, what is in flight, what has closed, and last the runs whose log or
+manifest does not read back. The first three groups are ordered by how long a
+run has been where it is, longest first; two runs that have been there equally
+long are ordered by run id, which for a minted one is the order they were
+created in. A run in the last group has no derived state to have been in, so
+that group is ordered by run id alone.
 
 ## The JSON surfaces
 
@@ -158,6 +164,17 @@ naming what went wrong with the file itself: never written, empty, past
 `limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
 recent failure is a plain message has no entry at all, so what the field shows is
 always the state the node is in now.
+
+In `status --json`, `decision` carries what a parked run is waiting on:
+`{node, summary, evidence, options: [{id, label, tradeoff}], external_ref?,
+resolve_with}` — the escalation under the same field names the `gate_waiting`
+event writes, plus the node it belongs to and the command that answers it with
+the option left as `<option>`. Two pauses reconstruct one: a node whose
+re-routes are exhausted, and an unresolved internal gate. Every other pause — a
+budget cap, a scope expansion, an unanswered questions artifact, an external
+gate with no reachable forge — carries no `decision` at all, and `summary` says
+what the run is waiting on instead. The field is additive, so the stamp stays
+`2`: a reader that predates it reads the document unchanged.
 
 ## Message wording
 

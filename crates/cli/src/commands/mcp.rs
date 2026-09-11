@@ -188,7 +188,9 @@ fn tool_definitions() -> Vec<Tool> {
             "workflow_status",
             "Reads a run's current derived state (nodes, tasks, tokens, waiting/paused \
              reason) straight from its event log — the only way to know whether a \
-             run_workflow/resume_run/resolve_gate call actually finished.",
+             run_workflow/resume_run/resolve_gate call actually finished. A run parked \
+             on a decision carries it under `decision`: the node, every option id with \
+             its tradeoff, and the command that answers it.",
             json!({
                 "type": "object",
                 "properties": {"run_id": {"type": "string"}},
