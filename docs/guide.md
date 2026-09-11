@@ -216,6 +216,11 @@ it's waiting on and the exact option ids available, `yunta resolve-gate <run_id>
 decision up on its own next resume. Nothing about answering a gate requires the
 process that hit it to still be alive.
 
+The live view `yunta run` draws changes nothing about that. It reads the run; it is
+never part of it. A gate waits on the event log, so one raised by a run whose view is
+gone — piped, detached, or in a terminal that closed — is answered exactly the
+same way, from anywhere.
+
 ## The Verified Work Receipt
 
 `yunta receipt <run_id>` closes a finished run out as a certificate: markdown for a

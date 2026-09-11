@@ -110,8 +110,14 @@ template variables — all statically, without opening a single agent session.
 **5. Run it.**
 
 ```bash
-yunta run .yunta/workflows/lint-fix.yaml --follow
+yunta run .yunta/workflows/lint-fix.yaml
 ```
+
+`run` shows the run live while it works: a pinned region at the bottom of the
+terminal, with each finished node scrolling above it into your own scrollback, where
+you can still scroll back through it and select text. Piped into a file or running in
+CI, the same content arrives as one line per event instead. `--quiet` cuts it down to
+the run id, keeping the budget warning that asks you to decide before the run spends.
 
 If `lint` passes clean — likely, for a freshly generated project — the run finishes
 having only ever run `lint` and `tests`; `fix-lint` stays untouched, no session opened,
@@ -152,7 +158,7 @@ a verified task ledger, lint→fix, a baseline check, multi-runner review, PR).
 | `yunta new <name> [--shape one-node\|lint-fix\|ledger]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and checks it. |
 | `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `task-ledger`, `findings`, `questions` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone writing one of these files, agent or person, learns the format instead of guessing it. |
 | `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
-| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--follow] [--detach]` | Creates a run from a workflow and executes it. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--follow` prints live progress; `--detach` returns the run id immediately and keeps running independent of the calling process. |
+| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--quiet] [--detach] [--json]` | Creates a run from a workflow and executes it, showing it live on a terminal: a pinned region of plain text, with finished work scrolling above it into your own scrollback. Without a terminal — a pipe, CI, `TERM=dumb`, `NO_COLOR` — the same content arrives as append-only lines, one per event, and the first line says why. `--quiet` cuts the output to the run id, keeping the budget warning that asks for a decision before the run spends. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--detach` returns the run id immediately and keeps running independent of the calling process; `--json` prints the outcome as one versioned JSON document instead of the live view. |
 | `yunta list [--runs]` | Without `--runs`: the workflow catalog (repo + packs) with descriptions, inputs and modes. With `--runs`: local runs and their derived state. |
 | `yunta status <run_id>` | A run's derived state: nodes, tasks, tokens — reconstructed from the event log. |
 | `yunta resume <run_id>` | Resumes a run from its event log, restarting orphaned nodes per `on_interrupt`. |

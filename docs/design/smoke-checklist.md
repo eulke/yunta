@@ -26,8 +26,8 @@ autenticada (`codex login status`).
    `runners: { executor: [{ adapter: codex, model: <modelo vigente> }] }`
    y un workflow mínimo plan→implement→verify (un `prompt` que escribe
    un archivo y un `bash` que lo verifica). Correr
-   `yunta run wf.yaml --follow`.
-   Verificar contra el log (`yunta status <run>`, `events.jsonl`):
+   `yunta run wf.yaml` (la vista viva es el default sobre una
+   terminal). Verificar contra el log (`yunta status <run>`, `events.jsonl`):
    - `agent_session_opened` con `session_id` = el `thread_id` real y
      `model` = el pedido (el stream de codex no lo reporta —
      `openai/codex#14736`; confirmar si sigue así).

@@ -46,8 +46,9 @@ and a later `yunta resume`, changes nothing about how that run's remaining
 nodes execute: `resume` replays the run's own event log against its own
 frozen manifest, never against whatever the newly-installed binary would
 generate today. The only thing a new binary version can change for an
-existing run is how `status`/`stats`/`graph` *render* information already in
-the log — never the log's content or the run's outcome.
+existing run is how `status`/`stats`/`graph` and the live view a `run` draws
+*render* information already in the log — never the log's content or the run's
+outcome.
 
 ## What every release verifies before it ships
 
@@ -168,6 +169,13 @@ interpreted artifact that could not be read, a workflow that fails `yunta check`
 `yunta run` and `yunta resume` refuse an unhealthy adapter with ``adapter health
 check failed (run `yunta doctor` for detail): 2 errors`` — the advice sits inside
 the parenthesis so the count lands directly after the heading.
+
+`yunta run`'s live view needs a terminal, and where there isn't one it says so on
+its first line and prints one line per event instead: `live view off (<reason>):
+one line per event`, the reason being `stderr is not a terminal`, `TERM=dumb` or
+`NO_COLOR is set`. The same shape as the line above — what is off, why in the
+parenthesis, what happens instead after the colon. `--quiet` announces nothing,
+because it has no view to stand down.
 
 The `document_shape` tool refuses an unknown kind with the same sentence
 `yunta schema` prints, byte for byte.
