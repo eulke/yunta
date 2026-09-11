@@ -8,7 +8,7 @@ use yunta_core::{Node, PromptSource};
 
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
-use super::node_close::{close_node_staged, fail, fail_with_tokens};
+use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{cancelled_end, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
@@ -37,24 +37,101 @@ pub(super) fn prompt_text<'a>(
     }
 }
 
-pub(super) async fn execute_prompt(
+/// The whole text one session receives: the node's context ahead of the
+/// author's prompt.
+async fn assemble_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
     cancel: &CancellationToken,
-) -> Result<NodeEnd, RunError> {
+) -> Result<Step<String>, RunError> {
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Step::Value(rendered) => rendered,
-        Step::Ended(end) => return Ok(end),
+        Step::Ended(end) => return Ok(Step::Ended(end)),
     };
     let context_block =
         match super::context_resolve::resolve_and_assemble(ctx, node, cancel).await? {
             Step::Value(block) => block,
-            Step::Ended(end) => return Ok(end),
+            Step::Ended(end) => return Ok(Step::Ended(end)),
         };
-    let rendered = match context_block {
+    Ok(Step::Value(match context_block {
         Some(block) => format!("{block}\n{rendered}"),
         None => rendered,
+    }))
+}
+
+/// The session an orphaned node picks back up under
+/// `on_interrupt: resume_session`, if any.
+///
+/// Anything less than a clean resume — no capability, no recorded
+/// session — degrades to a fresh session WITH an event, never silently.
+async fn resume_target(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    adapter: &dyn yunta_adapters::Adapter,
+    adapter_id: &yunta_core::AdapterId,
+) -> Result<Option<yunta_core::SessionId>, RunError> {
+    let policy = node
+        .on_interrupt
+        .unwrap_or(ctx.manifest.config.resolved_on_interrupt());
+    if policy != yunta_core::OnInterrupt::ResumeSession {
+        return Ok(None);
+    }
+    let degraded = |policy_applied: &str| {
+        EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
+            capability: yunta_core::Capability::ResumeSession,
+            adapter: adapter_id.clone(),
+            policy_applied: policy_applied.to_string(),
+        })
+    };
+    match orphaned_session(&ctx.load_events().await?, &node.id) {
+        OrphanedSession::Open(session_id) => {
+            if adapter
+                .capabilities()
+                .declares(yunta_core::Capability::ResumeSession)
+            {
+                return Ok(Some(session_id));
+            }
+            ctx.emit(
+                Some(&node.id),
+                degraded(
+                    "restart_node — the adapter declares no session resume; a fresh session \
+                     replaces the interrupted one",
+                ),
+            )
+            .await?;
+        }
+        OrphanedSession::NoneRecorded => {
+            ctx.emit(
+                Some(&node.id),
+                degraded(
+                    "restart_node — no session was recorded before the interruption; started \
+                     fresh",
+                ),
+            )
+            .await?;
+        }
+        OrphanedSession::NotAnOrphan => {}
+    }
+    Ok(None)
+}
+
+/// One `kind: prompt` node: its context, its prompt, one session, and
+/// the close that verifies what it declared.
+///
+/// Repairing an artifact the close cannot read is not this function's
+/// business any more than it is any other kind's — the close owns it and
+/// dispatches a session of its own for it (see [`super::repair`]).
+pub(super) async fn execute_prompt(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    prompt: &PromptSource,
+    attempt: u32,
+    cancel: &CancellationToken,
+) -> Result<NodeEnd, RunError> {
+    let rendered = match assemble_prompt(ctx, node, prompt, cancel).await? {
+        Step::Value(rendered) => rendered,
+        Step::Ended(end) => return Ok(end),
     };
     let chosen = match resolve_node_runner(ctx, node).await? {
         Step::Value(chosen) => chosen,
@@ -133,57 +210,7 @@ pub(super) async fn execute_prompt(
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
     };
 
-    // An orphaned node under `resume_session` picks its
-    // cut conversation back up instead of opening a new one. Anything
-    // less than a clean resume — no capability, no recorded session —
-    // degrades to a fresh session WITH an event, never silently.
-    let policy = node
-        .on_interrupt
-        .unwrap_or(ctx.manifest.config.resolved_on_interrupt());
-    let mut resume_session: Option<yunta_core::SessionId> = None;
-    if policy == yunta_core::OnInterrupt::ResumeSession {
-        match orphaned_session(&ctx.load_events().await?, &node.id) {
-            OrphanedSession::Open(session_id) => {
-                if adapter
-                    .capabilities()
-                    .declares(yunta_core::Capability::ResumeSession)
-                {
-                    resume_session = Some(session_id);
-                } else {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::CapabilityDegraded(
-                            yunta_core::events::CapabilityDegradedPayload {
-                                capability: yunta_core::Capability::ResumeSession,
-                                adapter: chosen.adapter.clone(),
-                                policy_applied: "restart_node — the adapter declares no session \
-                                                 resume; a fresh session replaces the interrupted \
-                                                 one"
-                                .to_string(),
-                            },
-                        ),
-                    )
-                    .await?;
-                }
-            }
-            OrphanedSession::NoneRecorded => {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload {
-                            capability: yunta_core::Capability::ResumeSession,
-                            adapter: chosen.adapter.clone(),
-                            policy_applied: "restart_node — no session was recorded before the \
-                                             interruption; started fresh"
-                                .to_string(),
-                        },
-                    ),
-                )
-                .await?;
-            }
-            OrphanedSession::NotAnOrphan => {}
-        }
-    }
+    let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
     let staged = adapter.staged_paths(&request);
     let (outcome, tokens) = dispatch_session(
@@ -204,7 +231,12 @@ pub(super) async fn execute_prompt(
 
     match outcome {
         DispatchOutcome::Completed { summary } => {
-            close_node_staged(ctx, node, summary, tokens, &staged).await
+            close_node(
+                ctx,
+                node,
+                Close::new(summary, tokens, attempt, cancel).staged(&staged),
+            )
+            .await
         }
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await

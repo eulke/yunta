@@ -276,16 +276,8 @@ fn render_run_stats(
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
 ) {
     println!("run {run_id} — mode {mode}");
-    if !stats.unknown_kinds.is_empty() {
-        let kinds: Vec<String> = stats
-            .unknown_kinds
-            .iter()
-            .map(|count| format!("{} ×{}", count.kind, count.events))
-            .collect();
-        println!(
-            "unknown event kind(s), interpreted partially: {}",
-            kinds.join(", ")
-        );
+    if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
+        println!("{note}");
     }
     match stats.cptv {
         Some(cptv) => println!(

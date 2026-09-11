@@ -1,7 +1,10 @@
-//! The task-ledger schema — parsed once at
-//! the frontier into these types; validation against the spec's seven
-//! registration rules lives in `yunta-engine` (mirrors `workflow.rs`
-//! types living here while `check()` lives in the engine).
+//! The task-ledger schema: the types a ledger parses into, the shape
+//! published to whoever writes one, and the rules that only hold across
+//! the whole document.
+//!
+//! All three live together because they are one schema. Split across
+//! crates, a caller could reach the types without the rules, and one
+//! did.
 
 use serde::{Deserialize, Serialize};
 
@@ -68,4 +71,30 @@ pub struct Task {
 
 fn is_false(b: &bool) -> bool {
     !b
+}
+
+mod rules;
+pub(crate) mod shape;
+
+/// The shape this document publishes, as the YAML it is.
+///
+/// It lives as a file rather than a string literal, so an editor reads
+/// it as YAML and a person reviewing a schema change sees the diff in
+/// the format the change is about. `include_str!` binds it at compile
+/// time, and the test that reads it back through
+/// [`read`](crate::shape::read) is what stops it drifting from the
+/// parser.
+const EXAMPLE: &str = include_str!("shape.yaml");
+
+impl crate::shape::Document for Ledger {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::TaskLedger;
+    const EXAMPLE: &'static str = EXAMPLE;
+
+    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
+        shape::diagnose(value, walk);
+    }
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check(self)
+    }
 }

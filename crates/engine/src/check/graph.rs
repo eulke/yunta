@@ -7,7 +7,7 @@ pub(crate) fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
         .iter()
         .map(|n| (n.id.clone(), n.depends_on.clone()))
         .collect();
-    crate::graph::find_cycle(&adjacency)
+    yunta_core::graph::find_cycle(&adjacency)
 }
 
 /// Per-file workflow-node rules: no runner bindings (a workflow

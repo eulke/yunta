@@ -12,7 +12,7 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, wait_until_async, write, yunta_in};
+use yunta_testkit::{git, init_repo, stderr, wait_until_async, write, yunta_in};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -65,6 +65,7 @@ nodes:
         "workflow_status",
         "resume_run",
         "resolve_gate",
+        "document_shape",
     ] {
         assert!(
             names.contains(&expected),
@@ -620,4 +621,120 @@ async fn finished_detached_runs_leave_no_zombie() {
     .await;
 
     client.cancel().await.unwrap();
+}
+
+/// The door an agent working in a repo finds on its own: a tool list is
+/// the surface a client reads at connection time, so the catalog of
+/// documents is visible before anything is called, and the shape comes
+/// back without a human having transmitted it.
+#[tokio::test]
+async fn document_shape_advertises_every_kind_and_returns_the_shape() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = ().serve(transport).await.unwrap();
+
+    // The enum is the catalog: a client sees every kind without asking.
+    let tools = client.list_tools(None).await.unwrap();
+    let shape_tool = tools
+        .tools
+        .iter()
+        .find(|t| t.name.as_ref() == "document_shape")
+        .expect("document_shape is advertised");
+    let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
+    for kind in ["task-ledger", "findings", "questions"] {
+        assert!(
+            advertised.contains(kind),
+            "{kind} missing from {advertised}"
+        );
+    }
+
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "task-ledger"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&result);
+    assert!(text.contains("tasks:"), "{text}");
+    assert!(text.contains("criteria:"), "{text}");
+
+    // A kind that does not exist names the ones that do.
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    assert!(tool_text(&result).contains("task-ledger"));
+
+    client.cancel().await.ok();
+}
+
+/// An unknown document kind is one mistake, so it gets one sentence
+/// whichever door it is made at. Both doors parse the name with
+/// `ArtifactKind`'s own `FromStr`; a second hand-written list is exactly
+/// what let two answers to the same question drift apart.
+#[tokio::test]
+async fn an_unknown_kind_reads_the_same_at_both_doors() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let from_control_plane = tool_text(&result).trim().to_string();
+    client.cancel().await.ok();
+
+    let output = yunta_in!(&repo, &home, &["schema", "ledger"]);
+    assert!(!output.status.success(), "an unknown kind has no shape");
+    let from_shell = stderr(&output);
+
+    assert_eq!(
+        from_shell.trim(),
+        format!("error: {from_control_plane}"),
+        "the same mistake gets the same sentence at either door"
+    );
+    assert!(
+        from_control_plane.contains("`ledger`"),
+        "the sentence names what was asked for: {from_control_plane}"
+    );
+    for kind in ["`task-ledger`", "`findings`", "`questions`"] {
+        assert!(
+            from_control_plane.contains(kind),
+            "the sentence names {kind}, which does exist: {from_control_plane}"
+        );
+    }
 }

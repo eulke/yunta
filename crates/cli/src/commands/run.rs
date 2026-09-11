@@ -517,6 +517,11 @@ struct RunJson {
     /// `detached`, or the run's terminal: `finished`, `paused`,
     /// `failed`, `promoted`.
     outcome: &'static str,
+    /// Why, when the run did not finish. Absent on a clean finish and on
+    /// `detached`, where there is nothing to say yet. A caller reading
+    /// JSON learns what went wrong here, not only that something did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 impl RunJson {
@@ -525,20 +530,22 @@ impl RunJson {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
             outcome: "detached",
+            reason: None,
         }
     }
 
     fn from_report(run_id: &RunId, report: &RunReport) -> Self {
-        let outcome = match &report.terminal {
-            RunTerminal::Finished => "finished",
-            RunTerminal::Paused { .. } => "paused",
-            RunTerminal::Failed { .. } => "failed",
-            RunTerminal::Promoted { .. } => "promoted",
+        let (outcome, reason) = match &report.terminal {
+            RunTerminal::Finished => ("finished", None),
+            RunTerminal::Paused { reason } => ("paused", Some(reason.clone())),
+            RunTerminal::Failed { reason } => ("failed", Some(reason.clone())),
+            RunTerminal::Promoted { .. } => ("promoted", None),
         };
         Self {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
             outcome,
+            reason,
         }
     }
 }

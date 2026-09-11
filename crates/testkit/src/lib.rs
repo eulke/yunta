@@ -1,12 +1,11 @@
 //! Shared test harness for the Yunta workspace.
 //!
-//! Every integration test used to carry its own copy of the same
-//! scaffolding — a git-repo fixture, a fixed clock, a binary runner, a run
-//! bench, gate doubles. This crate holds one canonical copy of each, so a
-//! change to the shape of a test run happens in one place, and so the
-//! fixtures are hermetic by construction (git isolated from the developer's
-//! global config, a fixed clock, an injected home) rather than by each test
-//! remembering to be.
+//! One canonical copy of every piece of scaffolding an integration test
+//! needs — a git-repo fixture, a fixed clock, a binary runner, a run
+//! bench, gate doubles — so a change to the shape of a test run happens
+//! in one place, and so the fixtures are hermetic by construction (git
+//! isolated from the developer's global config, a fixed clock, an
+//! injected home) rather than by each test remembering to be.
 //!
 //! It is a dev-dependency only: nothing here ships in a published crate.
 

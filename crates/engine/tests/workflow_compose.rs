@@ -769,7 +769,8 @@ nodes:
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("feat") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
+            let outcome = failure.to_string();
             assert!(
                 outcome.contains(".yunta/workflows/nope.yaml"),
                 "the diagnostic must name the resolved path: {outcome}"
@@ -1018,7 +1019,8 @@ nodes:
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("cons") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
+            let outcome = failure.to_string();
             assert!(
                 outcome.contains("plan.yaml") && outcome.contains("plan"),
                 "the diagnostic must name the artifact and its source node: {outcome}"

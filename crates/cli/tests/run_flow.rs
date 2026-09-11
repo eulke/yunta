@@ -195,7 +195,7 @@ expect:
     );
     assert_eq!(
         text.trim_end(),
-        "case happy-path ... ok\n1 case(s), 0 failed",
+        "case happy-path ... ok\n1 case, 0 failed",
         "the one case runs against the mock adapter and every expectation holds"
     );
 }
@@ -236,13 +236,22 @@ expect:
     assert!(!output.status.success());
     let text = stdout(&output);
     assert!(
-        text.lines().any(|l| l == "case wrong-expect ... FAILED"),
-        "got: {text}"
+        text.lines()
+            .any(|l| l == "case wrong-expect ... FAILED: 1 error"),
+        "the verdict counts the problems listed under it: {text}"
     );
+    // The words a case file is written with, not a Rust enum's `Debug`.
     assert!(
         text.lines()
-            .any(|l| l.starts_with("  final_state: expected Finished, got ")),
+            .any(|l| l == "  final_state: expected finished, got paused"),
         "the mismatch names the field, the expected state and the actual one: {text}"
+    );
+    // And the reason sits on its own line under it, unquoted and
+    // unescaped — it was written for a reader already.
+    assert!(
+        text.lines()
+            .any(|l| l.trim_start().starts_with("node `fails` failed:")),
+        "the reason reaches the reader intact: {text}"
     );
 }
 

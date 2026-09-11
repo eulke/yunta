@@ -54,6 +54,7 @@
 mod error;
 mod knowledge;
 mod mcp;
+mod shapes;
 mod sources;
 
 use std::path::Path;
@@ -70,6 +71,7 @@ use super::{RunCtx, RunError};
 use error::ContextResolveError;
 use knowledge::resolve_knowledge;
 use mcp::resolve_mcp;
+use shapes::{artifact_shapes, mount_artifact_shapes};
 use sources::{
     materialize, resolve_artifact, resolve_command, resolve_files, resolve_ledger,
     resolve_node_output, resolve_run_events,
@@ -137,7 +139,7 @@ async fn assemble(
     memo: Option<&StableContextMemo>,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    if node.context.is_empty() {
+    if node.context.is_empty() && artifact_shapes(ctx, node).is_empty() {
         return Ok(Step::Value(None));
     }
 
@@ -163,6 +165,8 @@ async fn resolve_all(
     let mut stable_blocks = Vec::new();
     let mut run_stable_blocks = Vec::new();
     let mut volatile_blocks = Vec::new();
+
+    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources)?;
 
     for spec in &node.context {
         let source_id = source_id_for(spec);
@@ -216,19 +220,42 @@ async fn resolve_all(
         });
     }
 
-    // Always assembled stable → run-stable → volatile,
-    // regardless of `context:`'s own declaration order — the ordering a
-    // provider's prompt cache needs a byte-stable prefix to actually
-    // help. Each non-empty class's own canonical text (same order,
-    // same separators, every time) gets its own `segment_hashes` entry
-    // — comparing that hash across sessions is the mechanical check
-    // that the prefix really held.
+    assembled(
+        ctx,
+        node,
+        task_id,
+        sources,
+        stable_blocks,
+        run_stable_blocks,
+        volatile_blocks,
+    )
+    .await
+}
+
+/// One session's context as text, plus the `context_assembled` that
+/// records exactly what it was given.
+///
+/// Always assembled stable → run-stable → volatile, regardless of
+/// `context:`'s own declaration order — the ordering a provider's prompt
+/// cache needs a byte-stable prefix to actually help. Each non-empty
+/// class's own canonical text (same order, same separators, every time)
+/// gets its own `segment_hashes` entry; comparing that hash across
+/// sessions is the mechanical check that the prefix really held.
+async fn assembled(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: Option<&yunta_core::TaskId>,
+    sources: Vec<ContextSourceRef>,
+    stable: Vec<String>,
+    run_stable: Vec<String>,
+    volatile: Vec<String>,
+) -> Result<String, ContextResolveError> {
     let mut segment_hashes = std::collections::BTreeMap::new();
     let mut assembled = Vec::new();
     for (key, class_blocks) in [
-        ("stable", &stable_blocks),
-        ("run-stable", &run_stable_blocks),
-        ("volatile", &volatile_blocks),
+        ("stable", &stable),
+        ("run-stable", &run_stable),
+        ("volatile", &volatile),
     ] {
         if class_blocks.is_empty() {
             continue;
@@ -255,6 +282,42 @@ async fn resolve_all(
     })?;
 
     Ok(assembled.join("\n"))
+}
+
+/// The whole context a repair session gets: the shape of every
+/// interpreted artifact the node declares, and nothing else.
+///
+/// A repair session rewrites a file it already has on disk. The author's
+/// `context:` bought the node its work; buying it again would pay a
+/// second time for the session the node already had, and none of it says
+/// anything about the shape the file was supposed to have. Recorded as
+/// its own `context_assembled` like every other session's, so replay can
+/// name what this one saw.
+///
+/// `None` when the node declares no interpreted artifact — which is also
+/// when no repair is possible, since only an interpreted artifact can
+/// fail on its content.
+pub(super) async fn assemble_shapes(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Result<Step<Option<String>>, RunError> {
+    let mut blocks = Vec::new();
+    let mut sources = Vec::new();
+    let assembly = mount_artifact_shapes(ctx, node, &mut blocks, &mut sources);
+    if blocks.is_empty() && assembly.is_ok() {
+        return Ok(Step::Value(None));
+    }
+    match assembly {
+        Ok(()) => match assembled(ctx, node, None, sources, blocks, Vec::new(), Vec::new()).await {
+            Ok(text) => Ok(Step::Value(Some(text))),
+            Err(error) => Ok(Step::Ended(
+                fail(ctx, node, error.to_string(), false).await?,
+            )),
+        },
+        Err(error) => Ok(Step::Ended(
+            fail(ctx, node, error.to_string(), false).await?,
+        )),
+    }
 }
 
 async fn resolve_one(

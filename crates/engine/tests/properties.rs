@@ -11,9 +11,9 @@
 
 use proptest::prelude::*;
 use yunta_core::events::{
-    EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
+    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent,
+    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_engine::derive;
 
@@ -66,11 +66,11 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             }
         )),
         ("[a-z]{0,6}", tokens(), any::<bool>()).prop_map(|(outcome, tokens_used, retryable)| {
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome,
-                tokens_used,
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message(outcome),
                 retryable,
-            })
+                tokens_used,
+            ))
         }),
         task_id().prop_map(|id| EventPayload::TaskRegistered(TaskRegisteredPayload {
             task_id: id.into(),

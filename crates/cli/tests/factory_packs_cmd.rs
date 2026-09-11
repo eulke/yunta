@@ -80,10 +80,7 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
     let add_text = stdout(&add_out);
-    assert!(
-        add_text.contains("tests: 2 case(s), 0 failed"),
-        "{add_text}"
-    );
+    assert!(add_text.contains("tests: 2 cases, 0 failed"), "{add_text}");
 
     let check_fix = yunta_in!(&repo, &home, &["check", "yunta/fix"]);
     assert!(check_fix.status.success(), "{}", stderr(&check_fix));
@@ -92,7 +89,7 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
 
     let audit = yunta_in!(&repo, &home, &["pack", "audit", "yunta/starter"]);
     assert!(audit.status.success(), "{}", stderr(&audit));
-    assert!(stdout(&audit).contains("tests: 2 case(s), 0 failed"));
+    assert!(stdout(&audit).contains("tests: 2 cases, 0 failed"));
 }
 
 #[test]
@@ -124,7 +121,7 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     // fragua ships one case per declared mode; `--run-tests` runs them
     // against the mock once the pack is installed.
     assert!(
-        stdout(&add_out).contains("tests: 3 case(s), 0 failed"),
+        stdout(&add_out).contains("tests: 3 cases, 0 failed"),
         "{}",
         stdout(&add_out)
     );
@@ -146,7 +143,7 @@ fn test_dir_runs_a_packs_own_cases_from_outside_its_root() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "2 case(s), 0 failed"),
+        text.lines().any(|l| l == "2 cases, 0 failed"),
         "the pack's own two cases run and pass: {text}"
     );
 }

@@ -1,7 +1,7 @@
 //! Repository tooling, run as `cargo xtask <command>`.
 //!
 //! `schema` writes the JSON Schema of every authored document and of
-//! one event of the log under `schemas/`, generated from the types that
+//! one event of the log under `crates/core/schemas/`, generated from the types that
 //! read them; `schema --check` verifies the committed files are exactly
 //! what the types emit, which is what CI runs. `smells` measures the
 //! rebuild's ratchet counts against `xtask/smells.baseline`; `smells
@@ -41,11 +41,17 @@ enum Mode {
     Check,
 }
 
-/// Where the schema files live: `schemas/` at the workspace root.
+/// Where the schema files live: `crates/core/schemas/`.
+///
+/// Inside the package that declares the types, so `yunta-core` embeds
+/// them with `include_str!` and every crate that ships a schema reads
+/// the same bytes CI checked. A directory at the workspace root would
+/// be outside every package, and a build that reached into it would
+/// stop working the day the workspace is published.
 fn schemas_dir() -> Result<PathBuf, String> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .map(|root| root.join("schemas"))
+        .map(|root| root.join("crates").join("core").join("schemas"))
         .ok_or_else(|| "the xtask crate sits directly under the workspace root".to_string())
 }
 

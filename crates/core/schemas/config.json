@@ -422,6 +422,15 @@
           "format": "uint64",
           "minimum": 0
         },
+        "max_artifact_repairs": {
+          "description": "How many times a node whose interpreted artifact could not be\nread is given the diagnostics and asked to write it again —\nabsent means the reference default. Correcting a transcription\nwith the problem in hand is cheaper and far more determinate than\ncorrecting work, which is why this is its own number and not the\ntask cycle's.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
         "max_concurrent_runs": {
           "description": "Best-effort cap on simultaneously non-terminal runs, checked at\nrun creation — a soft budget, not a safety limit (two concurrent\n`yunta run` invocations can both pass the check).",
           "type": [

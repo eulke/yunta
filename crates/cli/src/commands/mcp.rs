@@ -28,7 +28,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
-use yunta_core::{AdapterId, Manifest, ModeName, RunId};
+use yunta_core::{AdapterId, ArtifactKind, Manifest, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -86,6 +86,7 @@ impl ServerHandler for YuntaMcpServer {
             "run_workflow" => tool_run_workflow(&cwd, &args).await,
             "resume_run" => tool_resume_run(&cwd, &args).await,
             "resolve_gate" => tool_resolve_gate(&cwd, &args).await,
+            "document_shape" => tool_document_shape(&args),
             // An unknown tool is a protocol error, not a tool that ran
             // and failed — the client asked for something this server
             // never advertised.
@@ -110,8 +111,53 @@ fn empty_schema() -> serde_json::Map<String, Value> {
         .unwrap_or_default()
 }
 
+/// The shapes a client can ask for, as the tool's own enum — so the
+/// catalog is visible the moment a client connects, before it calls
+/// anything.
+fn document_kinds() -> Vec<&'static str> {
+    ArtifactKind::ALL.iter().map(|kind| kind.as_str()).collect()
+}
+
+/// The shape of one document, verbatim from the constant every other
+/// door publishes.
+///
+/// The kind is parsed by `ArtifactKind`'s own `FromStr`, so this tool
+/// and `yunta schema` answer an unknown kind with the same sentence.
+fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, String> {
+    let Some(name) = args.get("kind").and_then(Value::as_str) else {
+        return Err(format!(
+            "`kind` is required: one of {}",
+            ArtifactKind::listed()
+        ));
+    };
+    let kind = name.parse::<ArtifactKind>().map_err(|e| e.to_string())?;
+    Ok(yunta_core::shape::published(kind).to_string())
+}
+
 fn tool_definitions() -> Vec<Tool> {
     vec![
+        Tool::new(
+            "document_shape",
+            "The exact shape of a document Yunta reads and validates. Call this BEFORE \
+             writing a task ledger, a findings artifact or a questions artifact — they are \
+             validated strictly, a key that is not in the shape fails the node that produced \
+             it, and there is no other way to learn the format. Returns a complete, valid \
+             example with every field annotated.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": document_kinds(),
+                        "description": "Which document to describe.",
+                    }
+                },
+                "required": ["kind"],
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        ),
         Tool::new(
             "list_workflows",
             "Lists this repo's own catalog of workflows (name, description, declared \

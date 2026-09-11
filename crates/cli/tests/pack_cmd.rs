@@ -360,7 +360,7 @@ fn add_never_executes_before_confirmation() {
         stderr(&confirmed)
     );
     assert!(
-        stdout(&confirmed).contains("tests: 1 case(s), 0 failed"),
+        stdout(&confirmed).contains("tests: 1 case, 0 failed"),
         "{}",
         stdout(&confirmed)
     );
@@ -395,7 +395,7 @@ fn add_runs_the_packs_tests_only_when_asked() {
         "tests ran without `--run-tests`"
     );
     assert!(
-        stdout(&out).contains("tests: 1 case(s) shipped, not run (pass --run-tests)"),
+        stdout(&out).contains("tests: 1 case shipped, not run (pass --run-tests)"),
         "{}",
         stdout(&out)
     );

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta questions",
+  "description": "A `kind: questions` artifact's document — sole top-level key\n`questions:`, mirroring `Ledger`'s `tasks:`-only shape and\n`FindingsFile`'s `findings:`-only shape.",
+  "type": "object",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Question"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "questions"
+  ],
+  "$defs": {
+    "AnswerType": {
+      "description": "`text | choice | boolean`, verbatim.",
+      "type": "string",
+      "enum": [
+        "text",
+        "choice",
+        "boolean"
+      ]
+    },
+    "Question": {
+      "description": "One question: `id`, `text`, `answer_type`, `values` only when\n`answer_type` is `choice`, and `required`.",
+      "type": "object",
+      "properties": {
+        "answer_type": {
+          "$ref": "#/$defs/AnswerType"
+        },
+        "id": {
+          "$ref": "#/$defs/QuestionId"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "answer_type",
+        "required"
+      ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

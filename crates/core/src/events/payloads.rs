@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
+use crate::events::Failure;
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{
     AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, OptionId, Responder, RunId,
@@ -115,6 +116,13 @@ pub enum FindingSeverity {
     Major,
     Minor,
     Note,
+}
+
+impl FindingSeverity {
+    /// The ladder, as a document writes it. Tied to what serde derives
+    /// by a test, so a diagnostic listing the ladder cannot list a
+    /// different one from the parser accepting it.
+    pub const NAMES: [&'static str; 4] = ["blocking", "major", "minor", "note"];
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -409,9 +417,27 @@ pub struct NodeFinishedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFailedPayload {
-    pub outcome: String,
+    /// What went wrong, as data. The prose a reader sees is produced
+    /// from this on read, so no rendering can disagree with the facts
+    /// behind it — and a receipt counts what failed without parsing a
+    /// sentence.
+    #[serde(flatten)]
+    pub failure: Failure,
     pub tokens_used: TokenUsage,
+    /// Whether this node will be attempted again. Set by whoever owns
+    /// the budget, so a failure that nothing will retry is never
+    /// recorded as retryable.
     pub retryable: bool,
+}
+
+impl NodeFailedPayload {
+    pub fn new(failure: Failure, retryable: bool, tokens_used: TokenUsage) -> Self {
+        NodeFailedPayload {
+            failure,
+            tokens_used,
+            retryable,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

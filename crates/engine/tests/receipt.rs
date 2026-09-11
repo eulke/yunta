@@ -16,11 +16,11 @@ use std::sync::Arc;
 use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::{StoredEvent, TerminalState, TokenUsage};
 use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, NodeId, RunId, Workflow};
+use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
     render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry,
-    EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
+    DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
 };
 use yunta_storage::Storage;
 use yunta_testkit::{init_repo, FixedClock};
@@ -93,6 +93,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         },
         event_chain,
         unknown_kinds: Vec::new(),
+        diagnostics: Vec::new(),
     }
 }
 
@@ -490,4 +491,98 @@ nodes:
     .unwrap_err();
     assert!(matches!(err, ReceiptError::NotFinished(_)));
     assert!(err.to_string().contains("yunta status"));
+}
+
+/// A receipt that had to read prose could only reprint it. Counting is
+/// what a diagnostic being a value buys: "how often did a document come
+/// back unreadable" becomes a number on the receipt instead of a grep
+/// over free text.
+#[test]
+fn the_receipt_counts_document_problems_by_their_stable_code() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
+    receipt.diagnostics = vec![
+        DiagnosticCount {
+            kind: Some(ArtifactKind::TaskLedger),
+            code: "unknown-key".to_string(),
+            occurrences: 2,
+        },
+        DiagnosticCount {
+            kind: Some(ArtifactKind::TaskLedger),
+            code: "no-criteria".to_string(),
+            occurrences: 1,
+        },
+    ];
+    let markdown = render_receipt_markdown(&receipt);
+    assert!(
+        markdown.contains(
+            "document problem(s) reported during the run: `unknown-key` in the task ledger \u{d7}2, \
+             `no-criteria` in the task ledger \u{d7}1"
+        ),
+        "{markdown}"
+    );
+}
+
+/// `duplicate-id` is one rule asked of three documents. Counting it by
+/// code alone cannot say whether a run hit three broken ledgers or one
+/// of each, so the count carries the kind and the two never merge.
+#[test]
+fn the_same_rule_in_two_documents_counts_as_two_facts() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
+    receipt.diagnostics = vec![
+        DiagnosticCount {
+            kind: Some(ArtifactKind::TaskLedger),
+            code: "duplicate-id".to_string(),
+            occurrences: 3,
+        },
+        DiagnosticCount {
+            kind: Some(ArtifactKind::Findings),
+            code: "duplicate-id".to_string(),
+            occurrences: 1,
+        },
+        DiagnosticCount {
+            kind: None,
+            code: "artifact-missing".to_string(),
+            occurrences: 1,
+        },
+    ];
+    let markdown = render_receipt_markdown(&receipt);
+    assert!(
+        markdown.contains("`duplicate-id` in the task ledger \u{d7}3"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("`duplicate-id` in the findings artifact \u{d7}1"),
+        "{markdown}"
+    );
+    // A file that was never written has no content whose kind could be
+    // wrong, so its count carries the code alone.
+    assert!(
+        markdown.contains("`artifact-missing` \u{d7}1"),
+        "{markdown}"
+    );
+}
+
+/// The same counts as data, so a program reading the JSON receipt never
+/// has to parse the sentence above back apart.
+#[test]
+fn the_json_receipt_carries_the_counts_as_data() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
+    receipt.diagnostics = vec![DiagnosticCount {
+        kind: Some(ArtifactKind::TaskLedger),
+        code: "not-yaml".to_string(),
+        occurrences: 3,
+    }];
+    let rendered = render_receipt_json(&receipt).expect("the receipt renders");
+    let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
+    assert_eq!(json["diagnostics"][0]["kind"], "task-ledger");
+    assert_eq!(json["diagnostics"][0]["code"], "not-yaml");
+    assert_eq!(json["diagnostics"][0]["occurrences"], 3);
+}
+
+/// A clean run says nothing about problems, rather than a zero line —
+/// the same rule the baseline section already follows.
+#[test]
+fn a_run_with_no_document_problems_prints_no_line_about_them() {
+    let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
+    assert!(!render_receipt_markdown(&receipt).contains("document problem"));
 }

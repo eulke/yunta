@@ -43,7 +43,7 @@ use yunta_core::{
 use crate::replay::derive;
 use crate::template::render_template;
 
-use super::node_close::{close_node, fail};
+use super::node_close::{close_node, fail, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{BirthArtifact, RunCtx, RunError, RunTerminal};
@@ -160,15 +160,29 @@ fn resolve_mounts(
     Ok(resolved)
 }
 
+/// What a `kind: workflow` node declares: which workflow to run, what
+/// to hand it, and how much of the parent's tree it sees. One value
+/// because it is one clause of the node, read together and never apart.
+pub(super) struct WorkflowCall<'a> {
+    pub use_name: &'a str,
+    pub inputs: &'a BTreeMap<String, String>,
+    pub isolation: WorkflowIsolation,
+    pub mounts: &'a [MountSpec],
+}
+
 pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
-    use_name: &str,
-    inputs: &BTreeMap<String, String>,
-    isolation: WorkflowIsolation,
-    mounts: &[MountSpec],
+    call: WorkflowCall<'_>,
+    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
+    let WorkflowCall {
+        use_name,
+        inputs,
+        isolation,
+        mounts,
+    } = call;
     // The configurable max depth, enforced where the depth
     // actually grows — `check`'s static walk covers the files as they
     // are at check time; this guard covers what the run really loads.
@@ -217,7 +231,7 @@ pub(super) async fn execute_workflow(
             .await?
             .is_empty()
         {
-            return resume_child(ctx, node, open_child, cancel).await;
+            return resume_child(ctx, node, open_child, attempt, cancel).await;
         }
     }
 
@@ -452,10 +466,13 @@ pub(super) async fn execute_workflow(
     drive_child(
         ctx,
         node,
-        &child_id,
-        &child_manifest,
-        &child_run_dir,
-        &child_tree,
+        Child {
+            id: &child_id,
+            manifest: &child_manifest,
+            run_dir: &child_run_dir,
+            tree: &child_tree,
+        },
+        attempt,
         cancel,
     )
     .await
@@ -467,6 +484,7 @@ async fn resume_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child_id: &RunId,
+    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
@@ -514,10 +532,13 @@ async fn resume_child(
     drive_child(
         ctx,
         node,
-        child_id,
-        &child_manifest,
-        &child_run_dir,
-        &child_tree,
+        Child {
+            id: child_id,
+            manifest: &child_manifest,
+            run_dir: &child_run_dir,
+            tree: &child_tree,
+        },
+        attempt,
         cancel,
     )
     .await
@@ -533,15 +554,29 @@ async fn resume_child(
 /// aggregates it into the parent's total exactly once — the node's own
 /// close deliberately carries none); a paused child keeps the node open
 /// and pauses the parent.
+/// A child run as its parent holds it: the frozen truth it was created
+/// with, carried together because no caller ever has one of these
+/// without the other three.
+struct Child<'a> {
+    id: &'a RunId,
+    manifest: &'a Manifest,
+    run_dir: &'a Path,
+    tree: &'a Path,
+}
+
 async fn drive_child(
     ctx: &RunCtx<'_>,
     node: &Node,
-    child_id: &RunId,
-    child_manifest: &Manifest,
-    child_run_dir: &Path,
-    child_tree: &Path,
+    child: Child<'_>,
+    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
+    let Child {
+        id: child_id,
+        manifest: child_manifest,
+        run_dir: child_run_dir,
+        tree: child_tree,
+    } = child;
     let mut current_id = child_id.clone();
     let mut current_manifest = child_manifest.clone();
     let mut current_run_dir = child_run_dir.to_path_buf();
@@ -589,8 +624,12 @@ async fn drive_child(
                 return close_node(
                     ctx,
                     node,
-                    format!("child run `{current_id}` finished"),
-                    yunta_core::events::TokenUsage::default(),
+                    Close::new(
+                        format!("child run `{current_id}` finished"),
+                        yunta_core::events::TokenUsage::default(),
+                        attempt,
+                        cancel,
+                    ),
                 )
                 .await;
             }
@@ -669,10 +708,19 @@ async fn drive_child(
                     }),
                 )
                 .await?;
+                // The child's reason keeps its own lines under this
+                // one. Its diagnostics are not copied up: the child is a
+                // run of its own, and its log is where they are
+                // recorded. Flattening one run's evidence into another's
+                // outcome is what turns three levels of composition into
+                // a single unreadable line.
                 return fail(
                     ctx,
                     node,
-                    format!("child run `{current_id}` failed: {reason}"),
+                    format!(
+                        "child run `{current_id}` failed:\n  {}",
+                        yunta_core::text::hanging(&reason, "  ")
+                    ),
                     false,
                 )
                 .await;
@@ -686,8 +734,9 @@ async fn drive_child(
                 }
                 return Ok(NodeEnd::ChildPaused {
                     reason: format!(
-                        "child run `{current_id}` paused: {reason} — resuming this run \
-                         resumes it"
+                        "child run `{current_id}` paused, and resuming this run resumes \
+                         it:\n  {}",
+                        yunta_core::text::hanging(&reason, "  ")
                     ),
                 });
             }

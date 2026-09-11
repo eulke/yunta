@@ -11,7 +11,7 @@ use yunta_core::events::{
 };
 use yunta_core::{CheckBuiltin, Node};
 
-use super::node_close::{close_node, fail};
+use super::node_close::{close_node, fail, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
@@ -25,15 +25,17 @@ pub(super) async fn execute_check(
     ctx: &RunCtx<'_>,
     node: &Node,
     builtin: &CheckBuiltin,
+    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     match builtin {
-        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, cancel).await,
-        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, cancel).await,
-        // `findings_gate` reads artifacts, spawns nothing — there is no
-        // wait point for a token to interrupt.
+        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, attempt, cancel).await,
+        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, attempt, cancel).await,
+        // `findings_gate` reads the log, runs no command of its own —
+        // `cancel` reaches only the repair session its close may
+        // dispatch.
         CheckBuiltin::FindingsGate { max_severity } => {
-            execute_findings_gate(ctx, node, *max_severity).await
+            execute_findings_gate(ctx, node, *max_severity, attempt, cancel).await
         }
     }
 }
@@ -83,6 +85,7 @@ async fn run_command(
 async fn execute_baseline_compare(
     ctx: &RunCtx<'_>,
     node: &Node,
+    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(baseline) = &ctx.manifest.config.baseline else {
@@ -132,8 +135,12 @@ async fn execute_baseline_compare(
             close_node(
                 ctx,
                 node,
-                format!("baseline captured (exit {})", output.exit_code),
-                TokenUsage::default(),
+                Close::new(
+                    format!("baseline captured (exit {})", output.exit_code),
+                    TokenUsage::default(),
+                    attempt,
+                    cancel,
+                ),
             )
             .await
         }
@@ -153,8 +160,12 @@ async fn execute_baseline_compare(
                 close_node(
                     ctx,
                     node,
-                    format!("no regression vs baseline (exit {})", output.exit_code),
-                    TokenUsage::default(),
+                    Close::new(
+                        format!("no regression vs baseline (exit {})", output.exit_code),
+                        TokenUsage::default(),
+                        attempt,
+                        cancel,
+                    ),
                 )
                 .await
             }
@@ -169,6 +180,7 @@ async fn execute_baseline_compare(
 async fn execute_coverage_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
+    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(coverage) = &ctx.manifest.config.coverage else {
@@ -214,11 +226,15 @@ async fn execute_coverage_gate(
         close_node(
             ctx,
             node,
-            format!(
-                "coverage {measured}% meets the {}% threshold",
-                coverage.threshold
+            Close::new(
+                format!(
+                    "coverage {measured}% meets the {}% threshold",
+                    coverage.threshold
+                ),
+                TokenUsage::default(),
+                attempt,
+                cancel,
             ),
-            TokenUsage::default(),
         )
         .await
     }
@@ -266,6 +282,8 @@ async fn execute_findings_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
     max_severity: FindingSeverity,
+    attempt: u32,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let state = ctx.run_view().await?.state;
     let offending: Vec<&str> = state
@@ -279,8 +297,12 @@ async fn execute_findings_gate(
         close_node(
             ctx,
             node,
-            format!("no finding at or above {max_severity:?}"),
-            TokenUsage::default(),
+            Close::new(
+                format!("no finding at or above {max_severity:?}"),
+                TokenUsage::default(),
+                attempt,
+                cancel,
+            ),
         )
         .await
     } else {

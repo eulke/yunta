@@ -10,7 +10,11 @@ use crate::error::{CliError, Outcome};
 /// The version stamped on every machine-readable document this CLI emits.
 /// Bumped when a field's meaning changes, never for an additive one, so a
 /// reader can refuse a document from a schema it predates.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// One number covers every `--json` document together, so a bump earned
+/// by one of them re-stamps all of them: a document whose own shape did
+/// not change still carries the new number.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the

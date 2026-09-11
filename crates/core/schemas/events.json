@@ -118,7 +118,48 @@
         "capabilities"
       ]
     },
+    "ArtifactFailure": {
+      "description": "Why one declared artifact did not close.",
+      "oneOf": [
+        {
+          "description": "The file itself. No rewrite of its content reaches this.",
+          "type": "object",
+          "properties": {
+            "failure": {
+              "type": "string",
+              "const": "file"
+            },
+            "path": {
+              "type": "string"
+            },
+            "problem": {
+              "$ref": "#/$defs/FileProblem"
+            }
+          },
+          "required": [
+            "failure",
+            "path",
+            "problem"
+          ]
+        },
+        {
+          "description": "The file is there and its content is not what its kind declares.",
+          "type": "object",
+          "properties": {
+            "failure": {
+              "type": "string",
+              "const": "content"
+            }
+          },
+          "$ref": "#/$defs/Report",
+          "required": [
+            "failure"
+          ]
+        }
+      ]
+    },
     "ArtifactKind": {
+      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
       "enum": [
         "task-ledger",
@@ -503,6 +544,275 @@
         }
       ]
     },
+    "Diagnostic": {
+      "description": "One thing that is wrong with a document.",
+      "type": "object",
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "description": "The document as a whole, as opposed to an entry inside it.",
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "document"
+                }
+              },
+              "required": [
+                "of"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "task"
+                }
+              },
+              "$ref": "#/$defs/Named",
+              "required": [
+                "of"
+              ]
+            },
+            {
+              "description": "A criterion names the task it belongs to, so a reader always has\nsomewhere to look — including when that task's own id is what\ncould not be read.",
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                },
+                "of": {
+                  "type": "string",
+                  "const": "criterion"
+                },
+                "task": {
+                  "$ref": "#/$defs/Named"
+                }
+              },
+              "required": [
+                "of",
+                "task",
+                "index"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "finding"
+                }
+              },
+              "$ref": "#/$defs/Named2",
+              "required": [
+                "of"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "question"
+                }
+              },
+              "$ref": "#/$defs/Named3",
+              "required": [
+                "of"
+              ]
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "description": "The bytes are not a YAML document at all.",
+              "type": "object",
+              "properties": {
+                "detail": {
+                  "description": "What the parser said, kept for the log and never rendered to\na reader — a parser's account of its own scanner is not\nsomething anyone can act on.",
+                  "type": "string"
+                },
+                "looks_like": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Malformation"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "not-yaml"
+                }
+              },
+              "required": [
+                "problem"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "instead": {
+                  "description": "What to write instead, when the key is one a reader plausibly\nreaches for.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "unknown-key"
+                },
+                "valid": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "problem",
+                "key",
+                "valid"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "missing-key"
+                }
+              },
+              "required": [
+                "problem",
+                "key"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "example": {
+                  "description": "A line the reader can copy.",
+                  "type": "string"
+                },
+                "expected": {
+                  "type": "string"
+                },
+                "found": {
+                  "$ref": "#/$defs/ValueShape"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "wrong-shape"
+                }
+              },
+              "required": [
+                "problem",
+                "found",
+                "expected",
+                "example"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "problem": {
+                  "type": "string",
+                  "const": "invalid-id"
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "problem",
+                "value",
+                "rule"
+              ]
+            },
+            {
+              "description": "A value outside the closed set its key accepts: a severity that\nis not on the ladder, an answer type that does not exist.",
+              "type": "object",
+              "properties": {
+                "problem": {
+                  "type": "string",
+                  "const": "unknown-value"
+                },
+                "valid": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "problem",
+                "value",
+                "valid"
+              ]
+            },
+            {
+              "description": "A rule the document broke once it was readable — the ledger's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `detail` is the clause a reader acts on.",
+              "type": "object",
+              "properties": {
+                "code": {
+                  "$ref": "#/$defs/RuleCode"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "rule"
+                }
+              },
+              "required": [
+                "problem",
+                "code",
+                "detail"
+              ]
+            },
+            {
+              "description": "The document was refused and nothing in it could be named as the\ncause. That is a gap in the walk, reported as one rather than\nswallowed: `detail` carries what the parser said, for the log.",
+              "type": "object",
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "unreadable"
+                }
+              },
+              "required": [
+                "problem",
+                "detail"
+              ]
+            }
+          ]
+        }
+      ]
+    },
     "DiscardedCandidate": {
       "type": "object",
       "properties": {
@@ -516,6 +826,23 @@
       "required": [
         "candidate",
         "reason"
+      ]
+    },
+    "DocumentRef": {
+      "description": "Which document a report is about: the kind that fixes its shape, and\nwhere a reader opens it.\n\nA document always has a kind. An artifact the engine never\ninterprets has no shape to demand and therefore no content to report\non; what can go wrong with one is a [`FileProblem`] instead.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "path": {
+          "description": "As a reader would type it to open the file.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
       ]
     },
     "Envelope": {
@@ -966,6 +1293,83 @@
         }
       ]
     },
+    "FileProblem": {
+      "description": "What is wrong with the file, before anything inside it is read.\n\nEach renders as the rest of the sentence \"the document ...\", because\nthere is no entry inside to blame and pointing at one would be an\ninvention.",
+      "oneOf": [
+        {
+          "description": "Declared by a node and never produced.",
+          "type": "object",
+          "properties": {
+            "file-problem": {
+              "type": "string",
+              "const": "missing"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "file-problem",
+            "node"
+          ]
+        },
+        {
+          "description": "Produced with no content.",
+          "type": "object",
+          "properties": {
+            "file-problem": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "required": [
+            "file-problem"
+          ]
+        },
+        {
+          "description": "Past `limits.max_artifact_bytes`. Both numbers are on the table,\nbecause a runaway artifact is a fact about the run and a\ntruncation would hide it.",
+          "type": "object",
+          "properties": {
+            "bytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ceiling": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "file-problem": {
+              "type": "string",
+              "const": "oversized"
+            }
+          },
+          "required": [
+            "file-problem",
+            "bytes",
+            "ceiling"
+          ]
+        },
+        {
+          "description": "Exists, and the filesystem refused it.",
+          "type": "object",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "file-problem": {
+              "type": "string",
+              "const": "unreadable"
+            }
+          },
+          "required": [
+            "file-problem",
+            "detail"
+          ]
+        }
+      ]
+    },
     "Finding": {
       "type": "object",
       "properties": {
@@ -1169,6 +1573,26 @@
         "until_result"
       ]
     },
+    "Malformation": {
+      "description": "A shape a reader has met before, recognized so the diagnostic can\nname the cause instead of the symptom. A stray backtick is a\ncharacter; a Markdown fence is a mistake with a name.",
+      "oneOf": [
+        {
+          "description": "The document opens with ```` ``` ````.",
+          "type": "string",
+          "const": "markdown-fence"
+        },
+        {
+          "description": "The document is JSON, which YAML mostly accepts but this one did\nnot.",
+          "type": "string",
+          "const": "json-document"
+        },
+        {
+          "description": "Prose before the first key — an agent explaining what it wrote.",
+          "type": "string",
+          "const": "leading-prose"
+        }
+      ]
+    },
     "ModeName": {
       "description": "A mode name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -1179,21 +1603,120 @@
       "type": "string",
       "minLength": 1
     },
-    "NodeFailedPayload": {
+    "Named": {
+      "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
       "type": "object",
       "properties": {
-        "outcome": {
-          "type": "string"
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
+    "Named2": {
+      "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
+    "Named3": {
+      "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuestionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
+    "NodeFailedPayload": {
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "type": "object",
+      "properties": {
         "retryable": {
+          "description": "Whether this node will be attempted again. Set by whoever owns\nthe budget, so a failure that nothing will retry is never\nrecorded as retryable.",
           "type": "boolean"
         },
         "tokens_used": {
           "$ref": "#/$defs/TokenUsage"
         }
       },
+      "anyOf": [
+        {
+          "description": "Declared artifacts that did not close, each with its own\nproblems.",
+          "type": "object",
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArtifactFailure"
+              }
+            }
+          },
+          "required": [
+            "artifacts"
+          ]
+        },
+        {
+          "description": "A failure the engine states in one sentence.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ]
+        }
+      ],
       "required": [
-        "outcome",
         "tokens_used",
         "retryable"
       ]
@@ -1340,6 +1863,11 @@
         "exit_code"
       ]
     },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "QuestionsAnsweredPayload": {
       "type": "object",
       "properties": {
@@ -1363,6 +1891,25 @@
       "required": [
         "answers_hash",
         "channel"
+      ]
+    },
+    "Report": {
+      "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a repair cycle that\nworks that way exhausts its budget before the file is readable.",
+      "type": "object",
+      "properties": {
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        },
+        "document": {
+          "$ref": "#/$defs/DocumentRef"
+        }
+      },
+      "required": [
+        "document",
+        "diagnostics"
       ]
     },
     "RerouteOrigin": {
@@ -1391,6 +1938,49 @@
       "required": [
         "node",
         "on_interrupt"
+      ]
+    },
+    "RuleCode": {
+      "description": "The stable name of a rule that only holds across a whole document.\n\nExhaustive, so a rule cannot be minted by typing a new string, and\ncountable, so a receipt reports what a run keeps getting wrong\nwithout reading prose. A code says which rule broke and nothing\nabout which document it broke in: `DuplicateId` is one rule asked of\nledgers, findings and questions alike, and what separates the three\nis the [`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind and code\ndoes not.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "empty-title",
+            "empty-scope",
+            "no-criteria",
+            "dependency-cycle",
+            "manual-review-without-justification",
+            "empty-text",
+            "empty-location",
+            "empty-detail"
+          ]
+        },
+        {
+          "description": "A second entry already carries this id.",
+          "type": "string",
+          "const": "duplicate-id"
+        },
+        {
+          "description": "Every criterion is a guard, so nothing in the task proves work\nhappened.",
+          "type": "string",
+          "const": "all-criteria-are-guards"
+        },
+        {
+          "description": "`depends_on` names a task nobody declared.",
+          "type": "string",
+          "const": "unknown-dependency"
+        },
+        {
+          "description": "Two independent tasks reach for the same files.",
+          "type": "string",
+          "const": "overlapping-scope"
+        },
+        {
+          "description": "`answer_type` is `choice` and `values` is empty.",
+          "type": "string",
+          "const": "missing-values"
+        }
       ]
     },
     "RunCreatedPayload": {
@@ -1828,6 +2418,19 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ValueShape": {
+      "description": "What kind of YAML value was found where another was expected. Named\nas a person writing YAML names them, never as a deserializer names\nits own types.",
+      "type": "string",
+      "enum": [
+        "null",
+        "bool",
+        "number",
+        "string",
+        "sequence",
+        "mapping",
+        "tagged"
       ]
     }
   }

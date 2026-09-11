@@ -99,19 +99,19 @@ pub(super) async fn execute_node(
     }
 
     let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
+        NodeKind::Bash { run } => execute_bash(ctx, node, run, attempt, cancel).await?,
+        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, attempt, cancel).await?,
         NodeKind::Loop {
             until: yunta_core::LoopUntil::AllTasksComplete,
             prompt,
             ..
-        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
+        } => super::loop_exec::execute_loop(ctx, node, prompt, attempt, cancel).await?,
         NodeKind::Parallel {
             join,
             coordination,
             nodes,
         } => {
-            let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
+            let end = execute_parallel(ctx, node, *join, nodes, attempt, cancel).await?;
             // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
             // the posts are findings either way), as the group's
@@ -136,7 +136,7 @@ pub(super) async fn execute_node(
             end
         }
         NodeKind::Check(builtin) => {
-            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
+            super::check_exec::execute_check(ctx, node, builtin, attempt, cancel).await?
         }
         NodeKind::Executor {
             executor,
@@ -149,6 +149,7 @@ pub(super) async fn execute_node(
                 executor,
                 with,
                 *timeout_seconds,
+                attempt,
                 cancel,
             )
             .await?
@@ -160,7 +161,16 @@ pub(super) async fn execute_node(
             mounts,
         } => {
             super::workflow_exec::execute_workflow(
-                ctx, node, r#use, inputs, *isolation, mounts, cancel,
+                ctx,
+                node,
+                super::workflow_exec::WorkflowCall {
+                    use_name: r#use,
+                    inputs,
+                    isolation: *isolation,
+                    mounts,
+                },
+                attempt,
+                cancel,
             )
             .await?
         }

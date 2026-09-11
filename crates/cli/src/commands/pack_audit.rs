@@ -119,9 +119,7 @@ fn print_node(node: &NodeAudit) {
         None => {}
         Some(Ok(text)) => {
             println!("    prompt:");
-            for line in text.lines() {
-                println!("      {line}");
-            }
+            println!("{}", yunta_core::text::indent(text, "      "));
         }
         Some(Err(error)) => println!("    prompt: UNREADABLE — {}", yunta_core::describe(error)),
     }
@@ -205,16 +203,24 @@ pub fn print_test_summary(summary: &PackTestSummary) {
         println!("\ntests: none shipped");
     } else if !summary.ran {
         println!(
-            "\ntests: {} case(s) shipped, not run (pass --run-tests)",
-            summary.total
+            "\ntests: {} shipped, not run (pass --run-tests)",
+            super::counted(summary.total, "case")
         );
     } else {
+        // The heading counts cases and the lines under it count
+        // problems — one failing case contributes as many as it has —
+        // so each count stays with what it counts, and the block is
+        // indented rather than given a second, different total.
         println!(
-            "\ntests: {} case(s), {} failed",
-            summary.total, summary.failed
+            "\ntests: {}, {} failed",
+            super::counted(summary.total, "case"),
+            summary.failed
         );
-        for line in &summary.failures {
-            println!("  {line}");
+        if !summary.failures.is_empty() {
+            println!(
+                "{}",
+                yunta_core::text::indent(&summary.failures.join("\n"), "  ")
+            );
         }
     }
 }

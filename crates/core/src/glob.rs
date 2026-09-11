@@ -23,6 +23,31 @@ pub fn scope_globset(patterns: &[String]) -> Result<GlobSet, (String, globset::E
         .map_err(|error| (patterns.join(", "), error))
 }
 
+/// Whether two globs might select the same file.
+///
+/// A deliberately conservative approximation, not full glob algebra:
+/// two globs are related when one's literal prefix — everything before
+/// its first `*`, `?` or `[` — starts with the other's. It can relate a
+/// pair that would not actually collide (`src/*.rs` does not recurse
+/// into `src/sub/`) and never misses one that would. For a check whose
+/// job is to stop two tasks editing the same file, a false alarm an
+/// author adjusts is the right side to err on; a silent miss is not.
+///
+/// One heuristic with two callers — the ledger's own scope rule and the
+/// workflow's `parallel` scope-collision check — rather than two copies
+/// drifting apart.
+pub fn might_overlap(a: &str, b: &str) -> bool {
+    let (pa, pb) = (literal_prefix(a), literal_prefix(b));
+    pa.starts_with(pb) || pb.starts_with(pa)
+}
+
+/// Everything before the first wildcard: the part of a glob that is a
+/// plain path.
+fn literal_prefix(glob: &str) -> &str {
+    let end = glob.find(['*', '?', '[']).unwrap_or(glob.len());
+    glob.get(..end).unwrap_or(glob)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

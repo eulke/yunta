@@ -297,10 +297,11 @@ sessions:
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("plan") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                *outcome,
-                "node `plan` declared artifact `plan.yaml` but never produced it"
+                failure.to_string(),
+                "artifacts/plan.yaml: 1 error\n  \
+         the document was declared by node `plan` and never produced"
             );
         }
         other => panic!("expected Failed, got {other:?}"),

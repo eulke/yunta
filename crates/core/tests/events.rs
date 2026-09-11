@@ -125,11 +125,11 @@ fn all_kinds() -> Vec<EventPayload> {
                 cached: None,
             },
         }),
-        EventPayload::NodeFailed(NodeFailedPayload {
-            outcome: "criteria red".to_string(),
-            tokens_used: TokenUsage::default(),
-            retryable: true,
-        }),
+        EventPayload::NodeFailed(NodeFailedPayload::new(
+            Failure::message("criteria red"),
+            true,
+            TokenUsage::default(),
+        )),
         EventPayload::HookExecuted(HookExecutedPayload {
             phase: HookPhase::After,
             command: "cargo fmt".to_string(),

@@ -7,10 +7,11 @@
 
 use std::path::Path;
 
+use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
 
 use crate::context::Context;
-use crate::error::{error_block, note, warn, CliError, Outcome};
+use crate::error::{note, warn, CliError, Outcome};
 use crate::{load_yaml, project};
 
 pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
@@ -33,7 +34,7 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
                 layers.iter().map(|(name, layer)| (*name, layer)).collect();
             let conflicts = yunta_core::permission_layer_conflicts(&named);
             if !conflicts.is_empty() {
-                note(error_block(&workflow_path, &conflicts));
+                note(problems(workflow_path.display(), &conflicts));
                 return Ok(Outcome::Reported);
             }
             ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer))
@@ -73,7 +74,7 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
         println!("{}: OK", workflow_path.display());
         Ok(Outcome::Success)
     } else {
-        note(error_block(&workflow_path, &errors));
+        note(problems(workflow_path.display(), &errors));
         Ok(Outcome::Reported)
     }
 }

@@ -1,7 +1,8 @@
-//! The `kind: questions` artifact schema — parsed once at
-//! the frontier into these types; validation against the field rules
-//! lives in `yunta-engine` (mirrors `ledger.rs`'s own split: types here,
-//! `register()` in the engine).
+//! The `kind: questions` artifact schema: the types a questions file
+//! parses into, the shape published to whoever writes one, and the
+//! rules that only hold across the whole document.
+//!
+//! All three live together because they are one schema.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,12 @@ pub enum AnswerType {
     Text,
     Choice,
     Boolean,
+}
+
+impl AnswerType {
+    /// The answers a question can ask for, as a document writes them.
+    /// Tied to what serde derives by a test.
+    pub const NAMES: [&'static str; 3] = ["text", "choice", "boolean"];
 }
 
 /// One question: `id`, `text`, `answer_type`, `values` only when
@@ -97,4 +104,30 @@ pub fn validate_answers(file: &QuestionsFile, answers: &[Answer]) -> Vec<String>
         }
     }
     violations
+}
+
+mod rules;
+pub(crate) mod shape;
+
+/// The shape this document publishes, as the YAML it is.
+///
+/// It lives as a file rather than a string literal, so an editor reads
+/// it as YAML and a person reviewing a schema change sees the diff in
+/// the format the change is about. `include_str!` binds it at compile
+/// time, and the test that reads it back through
+/// [`read`](crate::shape::read) is what stops it drifting from the
+/// parser.
+const EXAMPLE: &str = include_str!("shape.yaml");
+
+impl crate::shape::Document for QuestionsFile {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Questions;
+    const EXAMPLE: &'static str = EXAMPLE;
+
+    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
+        shape::diagnose(value, walk);
+    }
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check(self)
+    }
 }

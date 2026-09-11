@@ -78,7 +78,7 @@ fn node_state_label(node: &NodeState) -> String {
     match node {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
         NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
-        NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+        NodeState::Failed { failure, .. } => format!("failed — {failure}"),
         // A run paused on a gate shows its waiting node distinctly —
         // with the forge handle when there is one.
         NodeState::Waiting { external_ref } => match external_ref {
@@ -157,11 +157,14 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
 
 /// Escapes a Mermaid node label. Labels sit inside `["..."]` and Mermaid
 /// renders them as HTML, so every character HTML or the quoting reads
-/// specially becomes an entity; a newline — an outcome message can carry
-/// one — collapses to a space so one label stays one line. `&` is handled
-/// in the same single pass as the rest, so an entity this inserts is never
-/// re-escaped.
+/// specially becomes an entity. `&` is handled in the same single pass as
+/// the rest, so an entity this inserts is never re-escaped.
+///
+/// A label is one line by construction: the collapse belongs to every
+/// surface with room for one line, so it lives in `yunta_core::text`
+/// rather than being re-derived here and in `escape_dot`.
 fn escape_mermaid(text: &str) -> String {
+    let text = yunta_core::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -169,7 +172,6 @@ fn escape_mermaid(text: &str) -> String {
             '"' => out.push_str("&quot;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
-            '\n' | '\r' => out.push(' '),
             other => out.push(other),
         }
     }
@@ -177,15 +179,14 @@ fn escape_mermaid(text: &str) -> String {
 }
 
 /// Escapes a DOT quoted-string label: backslash and double quote are the
-/// two characters DOT reads specially inside `"..."`; a newline collapses
-/// to a space so one label stays one line.
+/// two characters DOT reads specially inside `"..."`.
 fn escape_dot(text: &str) -> String {
+    let text = yunta_core::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
-            '\n' | '\r' => out.push(' '),
             other => out.push(other),
         }
     }

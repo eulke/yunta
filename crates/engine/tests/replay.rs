@@ -1,7 +1,7 @@
 use yunta_core::events::{
-    EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage, UnknownEvent,
+    EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
+    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus,
+    TaskStatusChangedPayload, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
 use yunta_core::Seq;
@@ -77,11 +77,11 @@ fn a_retryable_failure_can_restart_and_then_finish() {
         event(
             2,
             Some("lint"),
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: "criteria red".to_string(),
-                tokens_used: tokens(5, 2),
-                retryable: true,
-            }),
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message("criteria red".to_string()),
+                true,
+                tokens(5, 2),
+            )),
         ),
         event(
             3,
@@ -337,11 +337,11 @@ fn replay_is_deterministic_across_several_fixtures() {
             event(
                 2,
                 Some("a"),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: "bad".to_string(),
-                    tokens_used: tokens(2, 2),
-                    retryable: false,
-                }),
+                EventPayload::NodeFailed(NodeFailedPayload::new(
+                    Failure::message("bad".to_string()),
+                    false,
+                    tokens(2, 2),
+                )),
             ),
             event(
                 3,

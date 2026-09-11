@@ -177,6 +177,19 @@ impl ConfigLayer {
             .unwrap_or(DefaultOnFailure::Pause)
     }
 
+    /// `limits.max_artifact_repairs`, with the reference default (`1`)
+    /// applied. One, not the task cycle's two: with the shape published
+    /// to whoever writes the document, a rewrite that has the
+    /// diagnostics in hand either converges on the first attempt or
+    /// does not converge, and a third session buys a rare case at the
+    /// cost of every common one.
+    pub fn resolved_max_artifact_repairs(&self) -> u32 {
+        self.limits
+            .as_ref()
+            .and_then(|limits| limits.max_artifact_repairs)
+            .unwrap_or(1)
+    }
+
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
     /// hidden default: absent means unlimited, exactly as before.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {

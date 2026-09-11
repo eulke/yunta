@@ -55,6 +55,30 @@ session actually touches (tighten the prompt, or the `scope:` boundary was
 too aggressive for what the task legitimately needs) or widening `scope:` if
 the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissions).
 
+## A node failed on an artifact it declared
+
+```
+artifacts/plan.yaml: 2 errors
+  the document: unknown key `taks`; the only top-level key is `tasks`
+  task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+```
+
+A node that declares `artifacts.produces: [{ name: ..., kind: ... }]` has to leave
+behind a file the engine can read. The heading names the file and how many problems
+it has; each line below names one problem and the entry it belongs to, in the
+document's own words. The node then gets one repair session
+(`limits.max_artifact_repairs`, default 1): its own runner, the shape it already
+had, exactly those problems, and nothing to do but rewrite the file — and the node
+fails if that session does not land it. A node that resolves no runner (`bash`,
+`check`, `gate`) gets no repair session: there is nobody to instruct.
+`yunta schema <kind>` prints the shape the file is read against.
+
+A file that was never written, is empty, is past `limits.max_artifact_bytes`, or
+that the filesystem refuses is a different failure and gets no second attempt:
+nothing a rewrite of the content can do reaches it. Check that the node writes the
+path it declared; the session is given the absolute path the engine verifies,
+which is in the run's directory and not in the worktree it works in.
+
 ## A node's criteria never turn green
 
 `yunta status <run_id>` shows which criterion is failing and its exit code.

@@ -23,11 +23,11 @@
 use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
-    GateWaitingPayload, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+    GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
 
-use super::node_close::write_progress;
+use super::node_close::{fail, write_progress};
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
@@ -229,16 +229,14 @@ async fn resolve_from_poll(
                 )
                 .await?;
             }
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: format!(
-                        "changes requested by {by} at {reviewed_sha} ({} comment(s))",
-                        comments.len()
-                    ),
-                    tokens_used: TokenUsage::default(),
-                    retryable: true,
-                }),
+            fail(
+                ctx,
+                node,
+                format!(
+                    "changes requested by {by} at {reviewed_sha} ({} comment(s))",
+                    comments.len()
+                ),
+                true,
             )
             .await?;
             Ok(GateStep::Resolved)
@@ -250,13 +248,11 @@ async fn resolve_from_poll(
                 EventPayload::GateResolved(GateResolvedPayload::Closed),
             )
             .await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: "the pull request was closed without approval".to_string(),
-                    tokens_used: TokenUsage::default(),
-                    retryable: false,
-                }),
+            fail(
+                ctx,
+                node,
+                "the pull request was closed without approval".to_string(),
+                false,
             )
             .await?;
             Ok(GateStep::Resolved)
@@ -414,8 +410,8 @@ pub(super) async fn resolve_internal_gate(
     };
 
     // Whether `abort` is the engine's own appended option (never the
-    // author's) — same rule `build_internal_gate_escalation` used to
-    // decide whether to append it in the first place.
+    // author's) — the same rule `build_internal_gate_escalation`
+    // applies when it decides whether to append it at all.
     let engine_abort = !options
         .iter()
         .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
@@ -463,13 +459,11 @@ pub(super) async fn resolve_internal_gate(
             // control re-routes; the scheduler's ordinary reroute
             // machinery brings it back to ask again when `target`'s
             // subgraph completes.
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: format!("gate chose `{chosen}` — re-routing to `{target}`"),
-                    tokens_used: TokenUsage::default(),
-                    retryable: true,
-                }),
+            fail(
+                ctx,
+                node,
+                format!("gate chose `{chosen}` — re-routing to `{target}`"),
+                true,
             )
             .await?;
             ctx.emit(
@@ -584,15 +578,7 @@ async fn degrade_to_console(
         .await?;
         write_progress(ctx).await?;
     } else {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: "rejected from the console".to_string(),
-                tokens_used: TokenUsage::default(),
-                retryable: true,
-            }),
-        )
-        .await?;
+        fail(ctx, node, "rejected from the console".to_string(), true).await?;
     }
     Ok(GateStep::Resolved)
 }
@@ -609,15 +595,7 @@ async fn render_or_fail_here(
         Ok(rendered) => Ok(Step::Value(rendered)),
         Err(e) => {
             emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: e.to_string(),
-                    tokens_used: TokenUsage::default(),
-                    retryable: false,
-                }),
-            )
-            .await?;
+            fail(ctx, node, e.to_string(), false).await?;
             Ok(Step::Ended(GateStep::Resolved))
         }
     }

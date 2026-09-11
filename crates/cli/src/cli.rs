@@ -208,6 +208,16 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Prints the shape of a document Yunta reads and validates, so
+    /// nobody has to guess it. With no arguments, lists the kinds.
+    Schema {
+        /// Which document: `task-ledger`, `findings` or `questions`.
+        kind: Option<String>,
+        /// Emits the JSON Schema instead of the annotated example — what
+        /// an editor's language server validates against.
+        #[arg(long)]
+        json: bool,
+    },
     /// Writes `.yunta/workflows/<name>.yaml` from a commented schema
     /// skeleton and runs `check` on it.
     New {
@@ -366,6 +376,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             json,
         } => commands::stats::stats(run_id.as_ref(), workflow.as_deref(), json),
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
+        Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {
             name,
             shape,

@@ -15,6 +15,7 @@ Orden de autoridad:
 
 Complementos:
 
+- [`glosario.md`](glosario.md) — los términos del dominio, con la palabra que se usa y las que se evitan.
 - [`status.md`](status.md) — lo que sigue abierto y las posturas cerradas que no son deuda.
 - [`smoke-checklist.md`](smoke-checklist.md) — verificación en vivo de adapters, forja y MCP contra sistemas reales.
 

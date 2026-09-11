@@ -103,8 +103,8 @@ nodes:
 
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
-        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert_eq!(*outcome, "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -543,8 +543,8 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
 
     let (terminal, state) = bench.run(&workflow, fixture).await;
     match &state.nodes.get("ask") {
-        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert_eq!(*outcome, "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            assert_eq!(failure.to_string(), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }
@@ -654,6 +654,11 @@ nodes:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let assembled_tasks: Vec<String> = events
         .iter()
+        .filter(|e| {
+            e.node_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == "implement")
+        })
         .filter_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::ContextAssembled(p)) => Some(
                 p.task_id
@@ -670,5 +675,108 @@ nodes:
         sorted,
         vec!["task-1".to_string(), "task-2".to_string()],
         "one context_assembled per task, each carrying its task_id: {assembled_tasks:?}"
+    );
+}
+
+// --- the shape of a declared artifact reaches the session -----------------
+//
+// A node that declared `kind: task-ledger` has already said everything
+// needed to publish the shape. These prove it arrives without the author
+// asking, that it says where to write, and that an opaque artifact —
+// which has no shape to demand — mounts nothing.
+
+#[tokio::test]
+async fn a_node_that_declares_an_interpreted_artifact_is_told_its_shape() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: shape-published
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write a task ledger."
+    artifacts:
+      produces: [{ name: plan.yaml, kind: task-ledger }]
+"#;
+    // The script only matches a prompt carrying the published shape, so
+    // the run reaching a session at all is the assertion. `type: guard`
+    // appears only in the shape, never in the author's prompt.
+    let fixture = format!(
+        "sessions:\n  - match_prompt_contains: \"type: guard\"\n    effects:\n      - {{ path: \"{}/plan.yaml\", content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        bench.run_dir().join("artifacts").display()
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "plan");
+    assert_eq!(
+        sources.len(),
+        1,
+        "the shape is an audited source like any other"
+    );
+    assert_eq!(sources[0].kind, "artifact-shape");
+    assert_materialized(&bench.run_dir(), &sources[0]);
+}
+
+#[tokio::test]
+async fn the_shape_tells_the_session_the_path_the_engine_will_verify() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: shape-path
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write a task ledger."
+    artifacts:
+      produces: [{ name: plan.yaml, kind: task-ledger }]
+"#;
+    // A session's working directory is the worktree, not the run
+    // directory: without the absolute path there is nowhere to write.
+    let expected = bench.run_dir().join("artifacts").join("plan.yaml");
+    let fixture = format!(
+        "sessions:\n  - match_prompt_contains: {:?}\n    effects:\n      - {{ path: {:?}, content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
+        expected.display().to_string(),
+        expected.display().to_string(),
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn an_opaque_artifact_mounts_no_shape_because_it_has_none_to_demand() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: no-shape
+nodes:
+  - id: write
+    kind: prompt
+    runner: executor
+    prompt: "Write the report."
+    artifacts:
+      produces: [report.md]
+"#;
+    let fixture = format!(
+        "sessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
+        bench.run_dir().join("artifacts").display()
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let assembled_anything = events.iter().any(|e| {
+        e.node_id.as_ref().is_some_and(|id| id.as_str() == "write")
+            && matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::ContextAssembled(_))
+            )
+    });
+    assert!(
+        !assembled_anything,
+        "an opaque artifact has no shape, so nothing is mounted at all"
     );
 }

@@ -16,7 +16,7 @@ use yunta_core::{Ledger, Node, NodeKind, PromptSource, Task};
 
 use crate::replay::RunState;
 
-use super::node_close::{close_node, fail, fail_with_tokens};
+use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
@@ -30,6 +30,7 @@ pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
+    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let prep = match prepare_loop(ctx, node, prompt).await? {
@@ -66,8 +67,12 @@ pub(super) async fn execute_loop(
                 return close_node(
                     ctx,
                     node,
-                    format!("{} task(s) done", prep.ledger.tasks.len()),
-                    state.tokens,
+                    Close::new(
+                        format!("{} task(s) done", prep.ledger.tasks.len()),
+                        state.tokens,
+                        attempt,
+                        cancel,
+                    ),
                 )
                 .await;
             }
@@ -422,11 +427,11 @@ fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> 
                 context: format!("read task ledger `{}`", path.display()),
                 source,
             })?;
-            let ledger: Ledger =
-                yunta_core::yaml::parse_bytes(&bytes).map_err(|e| RunError::CorruptLedger {
-                    path: path.clone(),
-                    detail: e.to_string(),
-                })?;
+            // The same door `close_artifacts` reads a ledger through, so
+            // a file that stops being readable between the node that
+            // wrote it and the loop that consumes it is reported as the
+            // document it is, with every problem named.
+            let ledger = yunta_core::shape::read::<Ledger>(&bytes, path.display().to_string())?;
             return Ok(Some(ledger));
         }
     }

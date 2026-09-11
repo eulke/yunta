@@ -1,0 +1,30 @@
+# A task ledger: one task per independently-verifiable unit of work.
+# Written strictly — any key not listed here fails the node.
+
+tasks:                                  # required, at least one
+  - id: add-dark-mode                   # required, unique. A letter, then
+                                        #   letters, digits, `_` or `-`.
+    title: "Add the dark mode toggle"   # required, non-empty
+    scope: ["src/theme/**"]             # required, at least one glob: the
+                                        #   only paths this task may touch
+    criteria:                           # required, at least one
+      - cmd: "cargo test -p ui dark_mode"   # required, non-empty. Must FAIL
+                                            #   before the work and pass after.
+      - cmd: "cargo clippy -- -D warnings"
+        type: guard                     # optional. A guard passes before AND
+                                        #   after. At least one criterion of a
+                                        #   task must not be a guard.
+
+  - id: document-dark-mode
+    title: "Document the toggle in the README"
+    scope: ["README.md"]                # two tasks with no dependency between
+                                        #   them must not overlap in scope
+    depends_on: [add-dark-mode]         # optional, ids declared in this file
+    notes: "Link the screenshot the first task adds."   # optional, one line of
+                                        #   context for a runner with no history
+    criteria:
+      - cmd: "grep -q 'dark mode' README.md"
+
+# `manual_review: true` marks a task no command can verify, and then also
+# requires `justification:`. A criterion is always better: the engine can
+# run one, and nobody has to take anyone's word for it.

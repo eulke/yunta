@@ -1,0 +1,16 @@
+# What a review found, as data the engine counts and carries forward.
+# Written strictly — any key not listed here fails the node.
+
+findings:                               # required; an empty list is valid and
+                                        #   means the review found nothing
+  - id: null-deref-on-resize            # required, unique in this file
+    severity: blocking                  # required, one of:
+                                        #   blocking | major | minor | note
+    title: "Resize handler dereferences a null pointer"   # required, one line
+    location: "src/ui/resize.rs:142-150"                  # required: a path,
+                                        #   optionally with a line range
+    detail: >-                          # required: what goes wrong, and when
+      When the window is resized before the first paint, `surface` is still
+      null and the handler dereferences it.
+    proposed_criterion:                 # optional: a command that is red today
+      cmd: "cargo test -p ui resize_before_paint"

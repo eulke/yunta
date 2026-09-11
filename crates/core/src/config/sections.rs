@@ -227,6 +227,14 @@ pub struct LimitsConfig {
     /// prompt; larger ones are referenced by path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context_bytes: Option<u64>,
+    /// How many times a node whose interpreted artifact could not be
+    /// read is given the diagnostics and asked to write it again —
+    /// absent means the reference default. Correcting a transcription
+    /// with the problem in hand is cheaper and far more determinate than
+    /// correcting work, which is why this is its own number and not the
+    /// task cycle's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_artifact_repairs: Option<u32>,
 }
 
 /// `baseline:` — backs the `baseline_compare` check kind; the suite the engine

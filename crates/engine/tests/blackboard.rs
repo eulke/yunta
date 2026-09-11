@@ -262,7 +262,8 @@ sessions:
     let (terminal, state, _bench) = Bench::run(workflow, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("rev-a") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
+            let outcome = failure.to_string();
             assert!(outcome.contains("blackboard"), "got: {outcome}");
         }
         other => panic!("expected rev-a failed, got {other:?}"),
@@ -343,7 +344,8 @@ sessions:
     let (terminal, state, _bench) = Bench::run(BLACKBOARD_WORKFLOW, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("rev-a") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
+            let outcome = failure.to_string();
             assert!(
                 outcome.contains("run_tools") && outcome.contains("blackboard"),
                 "the diagnostic must name the capability and the coordination: {outcome}"

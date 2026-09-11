@@ -40,10 +40,8 @@ mod check;
 mod events_export;
 mod findings;
 pub mod git;
-mod graph;
 mod human_interaction;
 mod inputs;
-mod ledger;
 pub mod lock;
 mod manifest;
 mod modes;
@@ -53,7 +51,6 @@ mod permissions;
 pub mod process;
 mod process_registry;
 mod progress;
-mod questions;
 mod receipt;
 mod replay;
 mod reserved;
@@ -69,7 +66,7 @@ mod template;
 mod verification_effectiveness;
 mod worktree;
 
-pub use artifacts::{close_artifacts, ArtifactError, VerifiedArtifact};
+pub use artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
@@ -78,11 +75,10 @@ pub use check::{
     check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
-pub use findings::{inherited_findings, register as register_findings, FindingsError};
+pub use findings::inherited_findings;
 pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
-pub use ledger::{register, LedgerError};
 pub use manifest::{build_manifest, ManifestError};
 pub use modes::{dependencies_in_mode, mode_included_nodes};
 pub use pack_audit::{
@@ -92,11 +88,11 @@ pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{read_registry, registry_path, EngineProcessFile, ProcessRegistry};
 pub use progress::render_progress;
-pub use questions::{register as register_questions, QuestionsError};
 pub use receipt::{
     build_receipt, fan_out_groups, render_json as render_receipt_json,
     render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
-    CriterionEntry, EventChainStatus, Receipt, ReceiptError, RunnerUsage, ScopeSummary,
+    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunnerUsage,
+    ScopeSummary,
 };
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
