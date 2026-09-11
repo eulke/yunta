@@ -131,6 +131,40 @@ Every source materializes what it actually saw — not just a hash of it — so
 reconstructing a past session's context never needs to re-run the command, re-call
 the MCP server, or re-read a file outside what was captured at the time.
 
+### Artifacts the engine reads
+
+Most artifacts are opaque: the engine records that the file exists and what it
+hashes to, and its structure is whatever the session decided. `kind:` says the
+opposite — that the engine parses the file, validates it, and turns its contents
+into events. There are three: `task-ledger`, `findings` and `questions`.
+
+Declaring a `kind:` is all it takes to have its shape published to whoever must
+write the file. A node with `produces: [{ name: plan.yaml, kind: task-ledger }]`
+opens its session with the shape already in context, annotated field by field,
+and with the absolute path the engine will verify — the session's working
+directory is the worktree, not the run directory, so it has no way to guess
+that. Nothing else to declare, and an opaque artifact mounts nothing because it
+has no shape to demand.
+
+The same shape is available anywhere else you need it:
+
+```
+yunta schema                    # the kinds
+yunta schema task-ledger        # the shape to write
+yunta schema findings --json    # JSON Schema, for an editor to validate against
+```
+
+and through the `document_shape` tool on `yunta mcp`, so an agent connected to
+the control plane finds it without anyone passing the format along.
+
+When a file still comes back unreadable, the node fails with every problem in it
+named at once — by task and field, never by a parser's path into the document —
+and the engine reopens one session with those problems and the shape, against
+`limits.max_artifact_repairs` (default 1). Verification does not soften: the node
+still fails if the repair does not land. What a rewrite cannot fix — an artifact
+never produced, an empty one, one past `limits.max_artifact_bytes` — fails
+straight away.
+
 ### Knowledge layers
 
 `knowledge: { layers: [repo, user, org] }` resolves with local precedence: on a

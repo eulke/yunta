@@ -51,6 +51,24 @@ that's all Codex: the workflow author picks roles, the installing team picks
 adapters. See [adapters](adapters.md) for configuring this and for what
 `mock` is actually for.
 
+## The engine tells agents what it expects
+
+Three artifact kinds are parsed and validated rather than just stored:
+`task-ledger`, `findings` and `questions`. They are strict — a key that is not
+in the schema fails the node that produced it — which only works because the
+schema is published to whoever has to write one, never assumed.
+
+A node that declares one of those kinds gets its shape in context automatically.
+Outside a run, `yunta schema <kind>` prints it and the `document_shape` tool on
+`yunta mcp` returns it, so an agent working in your repo can look the format up
+the same way it looks up anything else. Nobody has to relay a format by hand.
+
+When a document still comes back wrong, the failure names every problem in it in
+the document's own terms — "task `t1`, criterion 1: expected a mapping" rather
+than a path into a parser — and the engine gives the session one chance to write
+it again with those problems in hand. That budget is
+`limits.max_artifact_repairs`, and the verification itself never relaxes.
+
 ## Packs: sharing workflows without extending the engine
 
 A **pack** is a distributable, versioned bundle of workflows, skills,
