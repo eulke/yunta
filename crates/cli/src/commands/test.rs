@@ -89,14 +89,12 @@ fn final_state_label(state: FinalState) -> &'static str {
 fn terminal_label(terminal: &RunTerminal) -> String {
     match terminal {
         RunTerminal::Finished => "finished".to_string(),
-        RunTerminal::Paused { reason } => format!(
-            "paused\n    {}",
-            yunta_core::diagnostic::block(reason, "    ")
-        ),
-        RunTerminal::Failed { reason } => format!(
-            "failed\n    {}",
-            yunta_core::diagnostic::block(reason, "    ")
-        ),
+        RunTerminal::Paused { reason } => {
+            format!("paused\n    {}", yunta_core::text::hanging(reason, "    "))
+        }
+        RunTerminal::Failed { reason } => {
+            format!("failed\n    {}", yunta_core::text::hanging(reason, "    "))
+        }
         RunTerminal::Promoted { .. } => "promoted".to_string(),
     }
 }
@@ -139,24 +137,28 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| case_path.display().to_string());
-        match run_case(&root, case_path).await {
-            Ok(problems) if problems.is_empty() => println!("case {name} ... ok"),
-            Ok(problems) => {
-                failures += 1;
-                println!("case {name} ... FAILED");
-                for problem in problems {
-                    println!("  {problem}");
-                }
+        // A case that could not run at all is one problem like any
+        // other: the verdict column says which kind of failure it was,
+        // and one block under it counts and lists what went wrong.
+        let (verdict, problems) = match run_case(&root, case_path).await {
+            Ok(problems) if problems.is_empty() => {
+                println!("case {name} ... ok");
+                continue;
             }
-            Err(error) => {
-                failures += 1;
-                println!("case {name} ... ERROR");
-                println!("  {error}");
-            }
-        }
+            Ok(problems) => ("FAILED", problems),
+            Err(error) => ("ERROR", vec![error]),
+        };
+        failures += 1;
+        println!(
+            "{}",
+            yunta_core::text::problems(format!("case {name} ... {verdict}"), &problems)
+        );
     }
 
-    println!("{} case(s), {} failed", case_paths.len(), failures);
+    println!(
+        "{}, {failures} failed",
+        super::counted(case_paths.len(), "case")
+    );
     if failures == 0 {
         Ok(Outcome::Success)
     } else {

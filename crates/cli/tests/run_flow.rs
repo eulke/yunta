@@ -195,7 +195,7 @@ expect:
     );
     assert_eq!(
         text.trim_end(),
-        "case happy-path ... ok\n1 case(s), 0 failed",
+        "case happy-path ... ok\n1 case, 0 failed",
         "the one case runs against the mock adapter and every expectation holds"
     );
 }
@@ -236,8 +236,9 @@ expect:
     assert!(!output.status.success());
     let text = stdout(&output);
     assert!(
-        text.lines().any(|l| l == "case wrong-expect ... FAILED"),
-        "got: {text}"
+        text.lines()
+            .any(|l| l == "case wrong-expect ... FAILED: 1 error"),
+        "the verdict counts the problems listed under it: {text}"
     );
     // The words a case file is written with, not a Rust enum's `Debug`.
     assert!(

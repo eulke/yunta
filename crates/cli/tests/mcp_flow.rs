@@ -12,7 +12,7 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, wait_until_async, write, yunta_in};
+use yunta_testkit::{git, init_repo, stderr, wait_until_async, write, yunta_in};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -684,4 +684,57 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     assert!(tool_text(&result).contains("task-ledger"));
 
     client.cancel().await.ok();
+}
+
+/// An unknown document kind is one mistake, so it gets one sentence
+/// whichever door it is made at. Both doors parse the name with
+/// `ArtifactKind`'s own `FromStr`; a second hand-written list is exactly
+/// what let two answers to the same question drift apart.
+#[tokio::test]
+async fn an_unknown_kind_reads_the_same_at_both_doors() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let from_control_plane = tool_text(&result).trim().to_string();
+    client.cancel().await.ok();
+
+    let output = yunta_in!(&repo, &home, &["schema", "ledger"]);
+    assert!(!output.status.success(), "an unknown kind has no shape");
+    let from_shell = stderr(&output);
+
+    assert_eq!(
+        from_shell.trim(),
+        format!("error: {from_control_plane}"),
+        "the same mistake gets the same sentence at either door"
+    );
+    assert!(
+        from_control_plane.contains("`ledger`"),
+        "the sentence names what was asked for: {from_control_plane}"
+    );
+    for kind in ["`task-ledger`", "`findings`", "`questions`"] {
+        assert!(
+            from_control_plane.contains(kind),
+            "the sentence names {kind}, which does exist: {from_control_plane}"
+        );
+    }
 }

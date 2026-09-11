@@ -5,7 +5,8 @@
 //! never a percentage: a percentage lies the moment a reroute grows
 //! the denominator.
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
+use yunta_core::events::{EventPayload, Failure, StoredEvent, TaskStatus};
+use yunta_core::{ArtifactFailure, ArtifactKind, Diagnostic, FileProblem};
 use yunta_core::{Manifest, ModeName, NodeId, RunId};
 use yunta_engine::NodeState;
 
@@ -58,7 +59,7 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
             // fact.
             Some(EventPayload::RunPaused(p)) => Some(format!(
                 "waiting — {}",
-                yunta_core::diagnostic::single_line(&p.reason)
+                yunta_core::text::one_line(&p.reason)
             )),
             Some(EventPayload::RunResumed(_) | EventPayload::NodeStarted(_)) => {
                 Some("running".to_string())
@@ -116,16 +117,8 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
         summary = format!("{tasks_done}/{} tasks · {summary}", state.tasks.len());
     }
     summary.push_str(&format!(" · {reroutes} reroutes · {phase}"));
-    let unknown = yunta_engine::unknown_kind_counts(&state);
-    if !unknown.is_empty() {
-        let kinds: Vec<String> = unknown
-            .iter()
-            .map(|count| format!("{} ×{}", count.kind, count.events))
-            .collect();
-        summary.push_str(&format!(
-            " · unknown event kind(s), interpreted partially: {}",
-            kinds.join(", ")
-        ));
+    if let Some(note) = super::unknown_kinds_note(&yunta_engine::unknown_kind_counts(&state)) {
+        summary.push_str(&format!(" · {note}"));
     }
     summary
 }
@@ -184,19 +177,26 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-/// Every failure that named more than one problem, with the problems
-/// back on their own lines.
+/// Every failure with more than one line of detail, laid out one block
+/// per failing document: the path a reader opens, then that document's
+/// own problems under it.
 ///
 /// The node list above stays scannable at one line each, which means
 /// collapsing them there. Doing only that would leave the one surface a
-/// person opens to find out what went wrong unable to say.
+/// person opens to find out what went wrong unable to say. A node that
+/// failed on two artifacts says which problem came from which, because
+/// the log records each document's problems with the document.
 fn print_failures(state: &yunta_engine::RunState) {
-    let mut failed: Vec<_> = state
+    let mut failed: Vec<(&NodeId, &Failure)> = state
         .nodes
         .iter()
         .filter_map(|(id, node)| match node {
-            NodeState::Failed { outcome, .. } if outcome.contains('\n') => Some((id, outcome)),
+            NodeState::Failed { failure, .. } => Some((id, failure)),
             _ => None,
+        })
+        .filter(|(_, failure)| match failure {
+            Failure::Artifacts { artifacts } => !artifacts.is_empty(),
+            Failure::Message { outcome } => outcome.contains('\n'),
         })
         .collect();
     if failed.is_empty() {
@@ -204,11 +204,21 @@ fn print_failures(state: &yunta_engine::RunState) {
     }
     failed.sort_by(|a, b| a.0.cmp(b.0));
     println!("failures:");
-    for (id, outcome) in failed {
-        println!(
-            "  {id}:\n    {}",
-            yunta_core::diagnostic::block(outcome, "    ")
-        );
+    for (id, failure) in failed {
+        println!("  {id}:");
+        match failure {
+            Failure::Artifacts { artifacts } => {
+                for artifact in artifacts {
+                    println!(
+                        "{}",
+                        yunta_core::text::indent(&artifact.to_string(), "    ")
+                    );
+                }
+            }
+            Failure::Message { outcome } => {
+                println!("{}", yunta_core::text::indent(outcome, "    "));
+            }
+        }
     }
 }
 
@@ -219,13 +229,13 @@ fn node_label(node: &NodeState) -> String {
     match node {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
         NodeState::Finished { outcome, .. } => {
-            format!(
-                "finished — {}",
-                yunta_core::diagnostic::single_line(outcome)
-            )
+            format!("finished — {}", yunta_core::text::one_line(outcome))
         }
-        NodeState::Failed { outcome, .. } => {
-            format!("failed — {}", yunta_core::diagnostic::single_line(outcome))
+        NodeState::Failed { failure, .. } => {
+            format!(
+                "failed — {}",
+                yunta_core::text::one_line(&failure.to_string())
+            )
         }
         NodeState::Waiting { external_ref } => match external_ref {
             Some(external_ref) => format!("waiting — {external_ref}"),
@@ -245,12 +255,54 @@ pub(crate) struct StatusJson {
     nodes: std::collections::BTreeMap<String, String>,
     tasks: std::collections::BTreeMap<String, &'static str>,
     /// Why each failed node failed, in the form a program can act on
-    /// rather than parse back out of a sentence: the node's diagnostics
-    /// as they were recorded. Empty for a run whose failures predate the
-    /// field, and absent altogether when nothing failed.
+    /// rather than parse back out of a sentence: one entry per document
+    /// the failure names, carrying that document's own problems. Absent
+    /// when no failing node named a document.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    diagnostics: std::collections::BTreeMap<String, Vec<yunta_core::Diagnostic>>,
+    diagnostics: std::collections::BTreeMap<String, Vec<DocumentProblems>>,
     tokens: TokensJson,
+}
+
+/// One document a node's failure names, with the problems that belong
+/// to it. A node that failed on two artifacts produces two of these, so
+/// a reader attributes a problem to the file it came from instead of
+/// splitting a sentence.
+#[derive(serde::Serialize)]
+pub(crate) struct DocumentProblems {
+    /// As a reader would type it to open the file.
+    path: String,
+    /// The kind whose shape the content had to meet. Absent when the
+    /// file itself is what failed, because nothing read its content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<ArtifactKind>,
+    /// What is wrong with the file itself — never written, empty, past
+    /// the ceiling, refused by the filesystem. Absent when the file is
+    /// there and its content is what failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<FileProblem>,
+    /// Every problem this document's content has, in document order.
+    /// Empty when the file itself is what failed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl From<&ArtifactFailure> for DocumentProblems {
+    fn from(failure: &ArtifactFailure) -> Self {
+        match failure {
+            ArtifactFailure::File { path, problem } => DocumentProblems {
+                path: path.clone(),
+                kind: None,
+                file: Some(problem.clone()),
+                diagnostics: Vec::new(),
+            },
+            ArtifactFailure::Content(report) => DocumentProblems {
+                path: report.document.path.clone(),
+                kind: Some(report.document.kind),
+                file: None,
+                diagnostics: report.diagnostics.clone(),
+            },
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -290,23 +342,36 @@ pub(crate) fn status_json(
     }
 }
 
-/// The diagnostics of each node's most recent failure, keyed by node.
+/// The documents each node's most recent failure names, with their
+/// problems, keyed by node.
 ///
-/// The most recent one and not every one: a node that failed, repaired
-/// and failed again describes its current state with its last failure,
-/// and a reader asking what is wrong now is not asking for a history.
+/// An entry describes the failure a node is in **now**, never every
+/// failure it has had: a node that failed, repaired and failed again is
+/// described by its last failure, and one that started again, or whose
+/// latest failure is a sentence naming no document, has no entry at
+/// all. A reader asking what is wrong now is not asking for a history.
 fn node_diagnostics(
     events: &[StoredEvent],
-) -> std::collections::BTreeMap<String, Vec<yunta_core::Diagnostic>> {
+) -> std::collections::BTreeMap<String, Vec<DocumentProblems>> {
     let mut latest = std::collections::BTreeMap::new();
     for event in events {
         let Some(node_id) = event.node_id.as_ref() else {
             continue;
         };
         match event.payload() {
-            Some(EventPayload::NodeFailed(p)) if !p.diagnostics.is_empty() => {
-                latest.insert(node_id.to_string(), p.diagnostics.clone());
-            }
+            Some(EventPayload::NodeFailed(p)) => match &p.failure {
+                Failure::Artifacts { artifacts } => {
+                    latest.insert(
+                        node_id.to_string(),
+                        artifacts.iter().map(DocumentProblems::from).collect(),
+                    );
+                }
+                // A failure stated in one sentence names no document;
+                // the node's own line carries it whole.
+                Failure::Message { .. } => {
+                    latest.remove(node_id.as_str());
+                }
+            },
             // A node that started again has left its last failure behind.
             Some(EventPayload::NodeStarted(_)) => {
                 latest.remove(node_id.as_str());

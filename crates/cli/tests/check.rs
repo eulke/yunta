@@ -207,3 +207,49 @@ fn a_workflow_command_denied_by_the_org_layer_fails_check() {
         "the refusal cites the node, its command and the rule it matched: {stderr}"
     );
 }
+
+/// The §4 block heads a file's problems with how many there are. It
+/// counts, and it says `error` or `errors` accordingly — one home for
+/// the block means every surface that lists a file's problems reads the
+/// same way.
+#[test]
+fn the_error_block_counts_what_it_lists_and_pluralises_it() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    // One node with a runner nothing defines: exactly one error.
+    write(
+        &repo,
+        "one.yaml",
+        "name: one\nnodes:\n  - id: plan\n    kind: prompt\n    runner: planner\n    prompt: hi\n",
+    );
+    let output = yunta_testkit::yunta_in!(&repo, &home, &["check", "one.yaml"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.lines().any(|l| l == "one.yaml: 1 error"),
+        "a single problem reads `1 error`: {stderr}"
+    );
+
+    // A second node with the same defect: two errors, plural.
+    write(
+        &repo,
+        "two.yaml",
+        "name: two\nnodes:\n  - id: plan\n    kind: prompt\n    runner: planner\n    prompt: hi\n  \
+         - id: build\n    kind: prompt\n    runner: builder\n    prompt: hi\n",
+    );
+    let output = yunta_testkit::yunta_in!(&repo, &home, &["check", "two.yaml"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.lines().any(|l| l == "two.yaml: 2 errors"),
+        "two problems read `2 errors`: {stderr}"
+    );
+    assert!(
+        !stderr.contains("error(s)"),
+        "the count is known, so the plural is not hedged: {stderr}"
+    );
+}

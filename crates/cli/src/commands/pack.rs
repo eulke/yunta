@@ -12,13 +12,14 @@
 //! the install, and every write goes through a staging directory or a
 //! temporary file so a failure leaves the repository as it was.
 
+use yunta_core::text::problems;
 use yunta_core::{
     ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher, Workflow,
 };
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
-use crate::error::{error_block, note, warn, CliError, Outcome};
+use crate::error::{note, warn, CliError, Outcome};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
@@ -537,8 +538,8 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
     );
     let errors = yunta_engine::check(&workflow, &config);
     if !errors.is_empty() {
-        note(error_block(
-            &dir.join(".yunta/workflows/example.yaml"),
+        note(problems(
+            dir.join(".yunta/workflows/example.yaml").display(),
             &errors,
         ));
         return Ok(Outcome::Reported);

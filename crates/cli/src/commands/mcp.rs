@@ -28,7 +28,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
-use yunta_core::{AdapterId, Manifest, ModeName, RunId};
+use yunta_core::{AdapterId, ArtifactKind, Manifest, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -115,31 +115,23 @@ fn empty_schema() -> serde_json::Map<String, Value> {
 /// catalog is visible the moment a client connects, before it calls
 /// anything.
 fn document_kinds() -> Vec<&'static str> {
-    yunta_core::shape::KINDS
-        .iter()
-        .map(|kind| kind.as_str())
-        .collect()
+    ArtifactKind::ALL.iter().map(|kind| kind.as_str()).collect()
 }
 
 /// The shape of one document, verbatim from the constant every other
 /// door publishes.
+///
+/// The kind is parsed by `ArtifactKind`'s own `FromStr`, so this tool
+/// and `yunta schema` answer an unknown kind with the same sentence.
 fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, String> {
     let Some(name) = args.get("kind").and_then(Value::as_str) else {
         return Err(format!(
             "`kind` is required: one of {}",
-            document_kinds().join(", ")
+            ArtifactKind::listed()
         ));
     };
-    yunta_core::shape::KINDS
-        .into_iter()
-        .find(|kind| kind.as_str() == name)
-        .map(|kind| yunta_core::shape::published(kind).to_string())
-        .ok_or_else(|| {
-            format!(
-                "`{name}` is not a document Yunta reads; one of {}",
-                document_kinds().join(", ")
-            )
-        })
+    let kind = name.parse::<ArtifactKind>().map_err(|e| e.to_string())?;
+    Ok(yunta_core::shape::published(kind).to_string())
 }
 
 fn tool_definitions() -> Vec<Tool> {

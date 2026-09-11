@@ -7,7 +7,6 @@
 //! belongs on top of it.
 
 use std::fmt::Display;
-use std::path::Path;
 
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,16 +105,4 @@ pub fn warn(message: impl Display) {
 /// error.
 pub fn note(message: impl Display) {
     eprintln!("{message}");
-}
-
-/// Renders a check verdict's error list the way a person reads it:
-/// `<path>: <n> error(s)`, then each on its own indented line. The one
-/// place `check`, `run` and `new` format the same block, so a reader
-/// sees one shape wherever a workflow's errors surface.
-pub fn error_block(path: &Path, items: &[impl Display]) -> String {
-    let mut block = format!("{}: {} error(s)", path.display(), items.len());
-    for item in items {
-        block.push_str(&format!("\n  {item}"));
-    }
-    block
 }

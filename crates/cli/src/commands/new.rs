@@ -9,9 +9,10 @@
 
 use std::io::IsTerminal;
 
+use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
 
-use crate::error::{error_block, note, warn, CliError, Outcome};
+use crate::error::{note, warn, CliError, Outcome};
 use crate::project;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,19 +23,29 @@ pub enum Shape {
 }
 
 impl Shape {
+    /// The shape `--shape` names, or a message listing the ones that
+    /// exist. Parsed by [`Shape::label`], the same string the chooser
+    /// prints and `new` reports, so a shape cannot be spelled one way
+    /// to a reader and another to the parser.
     pub fn parse(name: &str) -> Result<Self, String> {
-        match name {
-            "one-node" => Ok(Self::OneNode),
-            "lint-fix" => Ok(Self::LintFix),
-            "ledger" => Ok(Self::Ledger),
-            other => Err(format!(
-                "unknown shape `{other}` — choose one of: one-node, lint-fix, ledger"
-            )),
-        }
+        Self::all()
+            .into_iter()
+            .find(|shape| shape.label() == name)
+            .ok_or_else(|| format!("unknown shape `{name}` — choose one of: {}", Self::listed()))
     }
 
     fn all() -> [Self; 3] {
         [Self::OneNode, Self::LintFix, Self::Ledger]
+    }
+
+    /// The shapes as a sentence lists them — one home for "one of ...",
+    /// so it cannot fall behind [`Shape::all`].
+    fn listed() -> String {
+        Self::all()
+            .iter()
+            .map(|shape| shape.label())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     fn label(&self) -> &'static str {
@@ -210,7 +221,7 @@ pub fn new_workflow(
         println!("{}: OK", path.display());
         Ok(Outcome::Success)
     } else {
-        note(error_block(&path, &errors));
+        note(problems(path.display(), &errors));
         Ok(Outcome::Reported)
     }
 }

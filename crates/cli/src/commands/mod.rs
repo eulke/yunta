@@ -30,7 +30,7 @@ use yunta_adapters::{
     CODEX_ID,
 };
 use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
-use yunta_engine::{RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal, UnknownKindCount};
 
 use crate::error::{note, warn, CliError, Outcome};
 
@@ -107,14 +107,14 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
         RunTerminal::Paused { reason } => {
             println!(
                 "run {run_id}: paused — {}",
-                yunta_core::diagnostic::block(reason, "  ")
+                yunta_core::text::hanging(reason, "  ")
             );
             Outcome::Reported
         }
         RunTerminal::Failed { reason } => {
             println!(
                 "run {run_id}: failed — {}",
-                yunta_core::diagnostic::block(reason, "  ")
+                yunta_core::text::hanging(reason, "  ")
             );
             Outcome::Reported
         }
@@ -239,11 +239,51 @@ pub(crate) async fn probe_or_refuse(
     if unhealthy.is_empty() {
         return Ok(());
     }
-    let mut message = String::from("adapter health check failed — run `yunta doctor` for detail:");
-    for line in &unhealthy {
-        message.push_str(&format!("\n  {line}"));
+    Err(CliError::msg(yunta_core::text::problems(
+        "adapter health check failed (run `yunta doctor` for detail)",
+        &unhealthy,
+    )))
+}
+
+/// How a partially interpreted run says so: every event kind this
+/// binary does not know, with how many events carried it. `None` when
+/// the log is interpreted in full.
+///
+/// `yunta status` folds it into its summary line and `yunta stats`
+/// prints it on its own, so the framing is each caller's and the
+/// sentence is one — a reader meets the same fact worded the same way
+/// on either surface.
+pub(crate) fn unknown_kinds_note(counts: &[UnknownKindCount]) -> Option<String> {
+    if counts.is_empty() {
+        return None;
     }
-    Err(CliError::msg(message))
+    let kinds: Vec<String> = counts
+        .iter()
+        .map(|count| format!("{} ×{}", count.kind, count.events))
+        .collect();
+    Some(format!(
+        "{}, interpreted partially: {}",
+        counted(counts.len(), "unknown event kind"),
+        kinds.join(", ")
+    ))
+}
+
+/// `n` things, named: `1 case`, `2 cases`. The one place the CLI turns a
+/// count it is already holding into a phrase, so no message hedges with
+/// `(s)` while the number sits right there.
+///
+/// `noun` takes a plain `-s` plural, which is every noun the CLI counts.
+///
+/// The phrase is one string, so its width varies with the count. A
+/// column that right-aligns its number (`{:>3}`) has to keep the two
+/// apart — format the count itself and follow it with the noun — or the
+/// column goes ragged the first time a total reaches two digits.
+pub(crate) fn counted(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
 }
 
 /// Resolves a workflow reference to a file, the one rule `check`, `run`
@@ -290,12 +330,8 @@ pub(crate) fn check_or_refuse(
     if errors.is_empty() {
         return Ok(());
     }
-    let mut message = format!(
-        "the workflow fails `yunta check` with {} error(s):",
-        errors.len()
-    );
-    for error in &errors {
-        message.push_str(&format!("\n  {error}"));
-    }
-    Err(CliError::msg(message))
+    Err(CliError::msg(yunta_core::text::problems(
+        "the workflow fails `yunta check`",
+        &errors,
+    )))
 }

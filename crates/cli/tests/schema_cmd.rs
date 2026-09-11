@@ -2,13 +2,16 @@
 //! Yunta reads.
 //!
 //! The point of this door is that it needs nothing: no project, no run,
-//! no control plane. An agent working in a repo without MCP, and a
-//! person writing a ledger by hand, both had no way to learn the format
-//! before it — the files under `schemas/` are produced by this
-//! repository's own development tooling and never reach an installed
-//! binary.
+//! no control plane. It is how an agent working in a repo without MCP,
+//! and a person writing a ledger by hand, learn the format at all —
+//! [`COMMITTED_SCHEMAS`] is a development artifact of this repository,
+//! and whoever installed the binary has no repository to read it from.
 
 use yunta_testkit::{stderr, stdout, yunta_in};
+
+/// Where the repository keeps the JSON Schemas the binary embeds,
+/// relative to this crate. Named once so moving them is one edit.
+const COMMITTED_SCHEMAS: &str = "../core/schemas";
 
 #[test]
 fn with_no_arguments_it_lists_every_document_yunta_reads() {
@@ -84,7 +87,7 @@ fn the_json_schema_served_is_the_one_committed_in_the_repository() {
         assert!(output.status.success(), "{kind}: {}", stderr(&output));
         let committed = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../schemas")
+                .join(COMMITTED_SCHEMAS)
                 .join(file),
         )
         .unwrap();

@@ -519,8 +519,7 @@ struct RunJson {
     outcome: &'static str,
     /// Why, when the run did not finish. Absent on a clean finish and on
     /// `detached`, where there is nothing to say yet. A caller reading
-    /// JSON was the one surface that used to learn only that something
-    /// went wrong, never what.
+    /// JSON learns what went wrong here, not only that something did.
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
 }

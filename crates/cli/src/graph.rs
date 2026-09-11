@@ -78,7 +78,7 @@ fn node_state_label(node: &NodeState) -> String {
     match node {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
         NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
-        NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+        NodeState::Failed { failure, .. } => format!("failed — {failure}"),
         // A run paused on a gate shows its waiting node distinctly —
         // with the forge handle when there is one.
         NodeState::Waiting { external_ref } => match external_ref {
@@ -161,10 +161,10 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
 /// the rest, so an entity this inserts is never re-escaped.
 ///
 /// A label is one line by construction: the collapse belongs to every
-/// surface with room for one line, so it lives with the diagnostics
+/// surface with room for one line, so it lives in `yunta_core::text`
 /// rather than being re-derived here and in `escape_dot`.
 fn escape_mermaid(text: &str) -> String {
-    let text = yunta_core::diagnostic::single_line(text);
+    let text = yunta_core::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -181,7 +181,7 @@ fn escape_mermaid(text: &str) -> String {
 /// Escapes a DOT quoted-string label: backslash and double quote are the
 /// two characters DOT reads specially inside `"..."`.
 fn escape_dot(text: &str) -> String {
-    let text = yunta_core::diagnostic::single_line(text);
+    let text = yunta_core::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
