@@ -373,7 +373,7 @@ fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, String)> {
             yunta_core::ArtifactSpec::Typed { name, kind } => {
                 let path = ctx.run_dir.join("artifacts").join(name);
                 let shape =
-                    crate::artifacts::published_shape(yunta_core::DocumentKind::from(kind.clone()));
+                    yunta_core::shape::published(yunta_core::DocumentKind::from(kind.clone()));
                 Some((
                     format!("{SHAPE_KIND}:{name}"),
                     format!(

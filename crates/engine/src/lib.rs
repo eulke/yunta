@@ -70,8 +70,7 @@ mod verification_effectiveness;
 mod worktree;
 
 pub use artifacts::{
-    close_artifacts, diagnostics_of, published_shape, render_for_agent, render_for_person,
-    VerifiedArtifact,
+    close_artifacts, diagnostics_of, render_for_agent, render_for_person, VerifiedArtifact,
 };
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,

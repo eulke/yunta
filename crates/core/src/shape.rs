@@ -40,6 +40,24 @@ pub trait Shaped: DeserializeOwned {
     fn diagnose(value: &Value, into: &mut Vec<Diagnostic>);
 }
 
+/// The shape published for a kind: what every door hands to whoever has
+/// to write one. The single place a kind maps to its text, so no door
+/// can render a different one.
+pub fn published(kind: DocumentKind) -> &'static str {
+    match kind {
+        DocumentKind::TaskLedger => Ledger::EXAMPLE,
+        DocumentKind::Findings => FindingsFile::EXAMPLE,
+        DocumentKind::Questions => QuestionsFile::EXAMPLE,
+    }
+}
+
+/// Every kind a door can be asked about.
+pub const KINDS: [DocumentKind; 3] = [
+    DocumentKind::TaskLedger,
+    DocumentKind::Findings,
+    DocumentKind::Questions,
+];
+
 /// Reads `bytes` into `T`, or reports every problem the document has.
 pub fn read<T: Shaped>(bytes: &[u8], document: DocumentRef) -> Result<T, Report> {
     let one = |problem: Problem| {

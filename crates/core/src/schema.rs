@@ -61,6 +61,16 @@ pub fn all() -> [(&'static str, Schema); 7] {
     ]
 }
 
+/// The schema of one interpreted artifact kind — what `yunta schema
+/// --json` emits for an editor's language server to validate against.
+pub fn for_kind(kind: crate::DocumentKind) -> Schema {
+    match kind {
+        crate::DocumentKind::TaskLedger => ledger(),
+        crate::DocumentKind::Findings => findings(),
+        crate::DocumentKind::Questions => questions(),
+    }
+}
+
 fn titled(mut schema: Schema, title: &str) -> Schema {
     schema.insert("title".to_string(), title.into());
     schema

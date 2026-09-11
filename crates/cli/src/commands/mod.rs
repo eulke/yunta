@@ -15,6 +15,7 @@ pub mod receipt;
 pub mod resolve_gate;
 pub mod resume;
 pub mod run;
+pub mod schema;
 pub mod stats;
 pub mod status;
 pub mod test;

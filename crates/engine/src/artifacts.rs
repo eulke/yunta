@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{Diagnostic, DocumentKind, DocumentRef, Problem, Report, Subject};
 use yunta_core::events::Finding;
-use yunta_core::shape::{read, Shaped};
+use yunta_core::shape::{published, read, Shaped};
 use yunta_core::FindingsFile;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
@@ -54,17 +54,6 @@ fn about_the_file(document: DocumentRef, code: &'static str, detail: String) -> 
             Problem::file(code, detail),
         )],
     )
-}
-
-/// The shape a node's declared artifact should have, when the engine
-/// interprets it at all. The one place a kind maps to its published
-/// text, so no door can render a different one.
-pub fn published_shape(kind: DocumentKind) -> &'static str {
-    match kind {
-        DocumentKind::TaskLedger => Ledger::EXAMPLE,
-        DocumentKind::Findings => FindingsFile::EXAMPLE,
-        DocumentKind::Questions => QuestionsFile::EXAMPLE,
-    }
 }
 
 /// Verifies every artifact a node declared, collecting every violation
@@ -233,7 +222,7 @@ pub fn render_for_agent(reports: &[Report]) -> Option<String> {
     let instructions: Vec<String> = reports
         .iter()
         .map(|report| {
-            let shape = report.document.kind.map(published_shape);
+            let shape = report.document.kind.map(published);
             report.for_agent(shape)
         })
         .collect();

@@ -686,6 +686,27 @@
           ]
         },
         {
+          "description": "Something about the file rather than anything inside it: it was\nnever written, it is empty, it is past a declared limit. `detail`\ncompletes the sentence \"the document ...\", because there is no\nentry to blame and pointing at one would be an invention.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "problem": {
+              "type": "string",
+              "const": "file"
+            }
+          },
+          "required": [
+            "problem",
+            "code",
+            "detail"
+          ]
+        },
+        {
           "description": "The document was refused and nothing in it could be named as the\ncause. That is a gap in the walk, reported as one rather than\nswallowed: `detail` carries what the parser said, for the log.",
           "type": "object",
           "properties": {
