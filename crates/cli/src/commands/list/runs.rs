@@ -3,18 +3,20 @@
 //! moving, what has closed) and ordered inside each group by how long it
 //! has been there, so the run to answer first is the first one read.
 //!
-//! The grouping and the line under each run both come from
-//! [`Progress`], the derivation `yunta status` prints, so the listing
-//! and the run's own page can never disagree about where a run stands.
+//! The grouping and the line under each run are both read off the run's
+//! own [`RunFrame`], through the same projection `yunta status` prints,
+//! so the listing and the run's own page can never disagree about where
+//! a run stands.
 
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId};
+use yunta_engine::{RunFrame, RunPhase};
 use yunta_storage::Storage;
 
-use crate::commands::status::progress::{Progress, Standing};
+use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
@@ -38,8 +40,55 @@ const AGE_WIDTH: usize = 6;
 /// How far a run's summary sits under the line that identifies it.
 const SUMMARY_INDENT: &str = "    ";
 
-/// One run as the listing shows it, derived from its own log and the
-/// manifest it froze.
+/// The part of a listing a run belongs in — the inbox's own grouping,
+/// derived from the run's phase so a heading can never disagree with the
+/// summary printed under it.
+///
+/// The order of the variants is the order the groups print in: what
+/// stopped on a person comes before what is still moving, which comes
+/// before what is already closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Standing {
+    /// Stopped until a person acts: a decision to answer, or a log that
+    /// stopped making sense.
+    NeedsYou,
+    /// Moving on its own, or created and not yet started.
+    InFlight,
+    /// Closed, however it closed.
+    Closed,
+}
+
+impl Standing {
+    /// Every group, in printing order.
+    const ALL: [Standing; 3] = [Standing::NeedsYou, Standing::InFlight, Standing::Closed];
+
+    /// Which group `phase` puts a run in. A log that stopped making sense
+    /// needs a person as much as a decision does: nothing moves it on its
+    /// own again.
+    fn of(phase: &RunPhase) -> Self {
+        match phase {
+            RunPhase::Waiting { .. } | RunPhase::Broken { .. } => Standing::NeedsYou,
+            RunPhase::Created | RunPhase::Running => Standing::InFlight,
+            RunPhase::Finished
+            | RunPhase::Failed { .. }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { .. } => Standing::Closed,
+        }
+    }
+
+    /// The heading a group of runs prints under. It says what the reader
+    /// can do about the rows below it, which is what a listing is read
+    /// for.
+    fn heading(self) -> &'static str {
+        match self {
+            Self::NeedsYou => "needs you",
+            Self::InFlight => "in flight",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// One run as the listing shows it, read off that run's own frame.
 struct RunRow {
     run_id: RunId,
     standing: Standing,
@@ -127,6 +176,19 @@ fn push_heading(out: &mut String, heading: &str, runs: usize) {
 }
 
 impl RunRow {
+    /// One row from the run's own frame: which group it belongs in, what
+    /// the run is, and the line `yunta status` prints for it.
+    fn of(frame: &RunFrame, age: Duration) -> Self {
+        RunRow {
+            run_id: frame.run_id.clone(),
+            standing: Standing::of(&frame.phase),
+            workflow: frame.workflow.clone(),
+            mode: frame.mode.clone(),
+            age,
+            summary: progress::summary(frame),
+        }
+    }
+
     /// Two lines: what the run is, then where it stands. The identity
     /// line carries the id a reader copies, the workflow that names what
     /// the run is doing and the mode it does it in; the line under it is
@@ -186,15 +248,10 @@ fn run_row(
                 ),
             )
         })?;
-    let progress = Progress::of(&events, &manifest);
-    Ok(RunRow {
-        standing: progress.phase.standing(),
-        workflow: manifest.workflow.name.clone(),
-        mode: progress.mode.clone(),
-        age: time_in_state(&events, now),
-        summary: progress.summary(),
-        run_id,
-    })
+    Ok(RunRow::of(
+        &progress::frame(&run_id, &manifest, &events, now),
+        time_in_state(&events, now),
+    ))
 }
 
 impl Unreadable {
@@ -223,6 +280,8 @@ fn time_in_state(events: &[StoredEvent], now: DateTime<Utc>) -> Duration {
 mod tests {
     use super::*;
 
+    use yunta_engine::WaitingOn;
+
     fn row(id: &'static str, standing: Standing, age_secs: u64) -> RunRow {
         RunRow {
             run_id: RunId::from_static(id),
@@ -249,6 +308,35 @@ mod tests {
     const TIED_A: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P2";
     const TIED_B: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P3";
     const NEWEST: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P4";
+
+    #[test]
+    fn a_runs_phase_decides_the_group_it_is_listed_under() {
+        // A log that stopped making sense needs a person as much as a
+        // decision does: nothing moves it on its own again.
+        for phase in [
+            RunPhase::Waiting {
+                on: WaitingOn::Run {
+                    reason: "node `lint` failed".to_string(),
+                },
+            },
+            RunPhase::Broken {
+                diagnostic: "event 4 refers to a node the manifest does not declare".to_string(),
+            },
+        ] {
+            assert_eq!(Standing::of(&phase), Standing::NeedsYou, "{phase:?}");
+        }
+        for phase in [RunPhase::Created, RunPhase::Running] {
+            assert_eq!(Standing::of(&phase), Standing::InFlight, "{phase:?}");
+        }
+        for phase in [
+            RunPhase::Finished,
+            RunPhase::Failed { failure: None },
+            RunPhase::Cancelled,
+            RunPhase::Promoted { to: None },
+        ] {
+            assert_eq!(Standing::of(&phase), Standing::Closed, "{phase:?}");
+        }
+    }
 
     #[test]
     fn a_group_answers_the_run_that_has_waited_longest_first() {

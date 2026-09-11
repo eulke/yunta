@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, run_id_from, stdout, wait_for, wait_until, write, yunta_in};
+use yunta_testkit::{
+    git, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_in,
+};
 
 fn claude_code_stub() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
@@ -838,6 +840,54 @@ nodes:
 }
 
 #[test]
+fn a_mode_that_includes_a_parallel_group_counts_its_children_inside_it() {
+    // `modes:` names top-level nodes, and a group the mode schedules
+    // runs every child it declares. The denominator is therefore the
+    // group plus its children, and the only skipped node is the
+    // top-level one the mode leaves out.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: fan-out
+modes:
+  fan-only: { include: [fan] }
+  full: { include: all }
+nodes:
+  - id: fan
+    kind: parallel
+    join: all
+    nodes:
+      - { id: left, kind: bash, run: "true" }
+      - { id: right, kind: bash, run: "true" }
+  - { id: audit, kind: bash, run: "true" }
+"#,
+    );
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "fan-only"]);
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&run),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let run_id = run_id_from(&run);
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        state["summary"],
+        "3/3 nodes \u{b7} 1 skipped (mode: fan-only) \u{b7} 0 reroutes \u{b7} finished",
+        "the group and both its children are inside the denominator, and the \
+         only skipped node is the top-level one the mode leaves out"
+    );
+}
+
+#[test]
 fn a_gate_with_stdin_not_a_tty_pauses_instead_of_hanging() {
     // "sin TTY... nunca cuelga" — a `yunta run` whose stdin
     // isn't a terminal (exactly `cargo test`'s own usual case, made
@@ -880,37 +930,95 @@ nodes:
     let run_id = run_id_from(&output);
     assert!(
         text.lines()
-            .any(|l| l.starts_with(&format!("run {run_id}: paused — "))),
+            .any(|l| l.starts_with(&format!("run {run_id}: ")) && l.contains("paused")),
         "a gate with no TTY degrades to a paused run instead of hanging: {text}"
+    );
+    assert!(
+        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        "and says how to answer it from anywhere: {text}"
     );
 }
 
 #[test]
-fn run_follow_prints_progress_while_the_run_is_still_in_progress() {
+fn progress_reaches_the_reader_while_the_run_is_still_in_progress() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
     let home = root.path().join("state");
 
-    // Long enough that the 500ms poller in `spawn_follower` gets at
-    // least one tick in before the node (and so the run) finishes.
+    // The node blocks after announcing itself, so every assertion below
+    // is made while the run is genuinely mid-flight — no interval to
+    // outlast, because the engine hands each event to the surface as it
+    // writes it.
+    // `isolation: none` runs the node in this checkout, so the test reads
+    // the marker where the node writes it.
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
     write(
         &repo.join("wf.yaml"),
-        "name: slow\nnodes:\n  - id: only\n    kind: bash\n    run: \"sleep 1.2\"\n",
+        r#"
+name: paced
+nodes:
+  - id: first
+    kind: bash
+    run: "echo running > first.started; tail -f /dev/null"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    // Outside the repo: `isolation: none` demands a clean tree.
+    let progress_log = root.path().join("progress.log");
+    let mut run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::fs::File::create(&progress_log).unwrap())
+        .spawn()
+        .unwrap();
+
+    wait_until(
+        || marker_written(&repo.join("first.started")),
+        || "the bash node never started".into(),
     );
 
-    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--follow"]);
-    assert!(
-        run.status.success(),
-        "stdout: {}\nstderr: {}",
-        stdout(&run),
-        String::from_utf8_lossy(&run.stderr)
+    // Progress is on stderr while the node is still blocked: the run has
+    // not finished, and the reader already knows which node holds it.
+    let progress = wait_for(
+        || {
+            let text = std::fs::read_to_string(&progress_log).unwrap_or_default();
+            text.contains("first").then_some(text)
+        },
+        || {
+            format!(
+                "no progress named the running node, got: {}",
+                std::fs::read_to_string(&progress_log).unwrap_or_default()
+            )
+        },
     );
-    let text = stdout(&run);
     assert!(
-        text.contains("0/1 nodes") && text.contains("running"),
-        "expected at least one in-progress follow line, got: {text}"
+        run.try_wait().unwrap().is_none(),
+        "the run must still be in progress when its progress is read: {progress}"
+    );
+
+    // With stderr on a file rather than a terminal, line one says the
+    // live view stood down and names what was missing.
+    assert_eq!(
+        progress.lines().next(),
+        Some("live view off (stderr is not a terminal): one line per event"),
+        "got: {progress}"
+    );
+
+    signal_process(pid_of(&run), Signal::SIGINT).expect("the run is alive to be interrupted");
+    let output = run.wait_with_output().unwrap();
+    assert!(
+        stdout(&output).contains("cancelled"),
+        "the closing block names the outcome: {}",
+        stdout(&output)
     );
 }
 
@@ -1025,10 +1133,13 @@ fn a_live_run_registers_its_processes_in_engine_json_and_deletes_it_at_terminal(
     let home = root.path().join("state");
 
     // The bash node is itself a registered process group — it captures
-    // the registry mid-run from inside the run. It waits for the engine's
-    // registration (which happens right after spawn, while the command
-    // already runs) to land before copying, rather than pausing a fixed
-    // time.
+    // the registry mid-run from inside the run. The engine writes the
+    // registry before this node exists and adds this node's own group
+    // right after spawning it, so the node polls for the registration
+    // and not for the file: waiting on the file alone is satisfied the
+    // instant the node starts, and copies a registry that does not name
+    // it yet. The bound is what turns a registration that never lands
+    // into the failed assertion below rather than a hung test.
     write(
         &repo.join("wf.yaml"),
         r#"
@@ -1036,7 +1147,16 @@ name: registry
 nodes:
   - id: capture
     kind: bash
-    run: "until [ -f {{run.dir}}/scratch/engine.json ]; do :; done; cp {{run.dir}}/scratch/engine.json {{run.dir}}/scratch/captured.json"
+    run: |
+      registry={{run.dir}}/scratch/engine.json
+      attempts=0
+      while [ "$attempts" -lt 2000 ]; do
+        if [ -s "$registry" ] && ! grep -q '"process_groups": \[\]' "$registry"; then
+          break
+        fi
+        attempts=$((attempts + 1))
+      done
+      cp "$registry" {{run.dir}}/scratch/captured.json
 "#,
     );
 
@@ -1922,6 +2042,134 @@ fn parse_pid(text: &str) -> Pid {
         .ok()
         .and_then(|raw| Pid::try_from(raw).ok())
         .unwrap_or_else(|| panic!("`{text}` is not a pid"))
+}
+
+/// §8.6 of the run contract hands the prior distribution — and the budget
+/// warning derived from it — to the invocation that *creates* a run, and
+/// `yunta resume` picks a run up instead of creating one. `--detach`
+/// creates the run and gives it straight to such a child, so this is the
+/// only invocation either can reach a person in, and a warning that asks
+/// whether to spend is worth nothing once the child is already spending.
+#[test]
+fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_run_off() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let config = |limits: &str| {
+        format!(
+            "defaults:\n  isolation: none\n{limits}runners:\n  executor:\n    \
+             - {{ adapter: claude-code, model: some-model }}\nadapters:\n  claude-code:\n    \
+             binary: {binary}\n",
+            binary = claude_code_stub().display()
+        )
+    };
+    write(&repo.join(".yunta/config.yaml"), &config(""));
+    write(
+        &repo.join("wf.yaml"),
+        "name: budgeted\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    \
+         prompt: \"Do the thing.\"\n",
+    );
+    // 500 tokens a run, so the p90 this history earns is a number a cap
+    // can sit under.
+    write(
+        &repo.join(".claude-stub-lines.jsonl"),
+        &format!(
+            "{}\n{}\n",
+            r#"{"type":"system","subtype":"init","session_id":"sess-cli","model":"claude-sonnet-5"}"#,
+            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":400,"output_tokens":100}}"#,
+        ),
+    );
+    // Isolation `none` runs in this very checkout and refuses a dirty one.
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "workflow and stub fixture"]);
+
+    // The distribution stays silent below its own three-run floor, so
+    // three runs are what earn this workflow one at all.
+    for _ in 0..3 {
+        let past = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+        assert!(past.status.success(), "stderr: {}", stderr(&past));
+    }
+
+    // A cap under what this workflow has historically spent, which is what
+    // the warning is about. Each detached child then stops on that very
+    // cap, exactly as the warning says it may.
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &config("limits:\n  max_tokens_per_run: 400\n"),
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "budget"]);
+
+    // Every detached child is a process this test started: letting each
+    // one reach its own stop keeps the next invocation off a moving log
+    // and leaves nothing running once the temporary tree is gone.
+    let settled = |run_id: &str| {
+        let status = || stdout(&yunta_in!(&repo, &home, &["status", run_id]));
+        wait_until(
+            || {
+                let text = status();
+                ["finished", "failed", "waiting", "cancelled"]
+                    .iter()
+                    .any(|stop| text.contains(stop))
+            },
+            || format!("the detached run never reached a stop: {}", status()),
+        );
+    };
+
+    let loud = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
+    assert!(loud.status.success(), "stderr: {}", stderr(&loud));
+    let text = stdout(&loud);
+    let lines: Vec<&str> = text.lines().collect();
+    // Three past runs, not four: the history is folded before this
+    // invocation creates a run of its own, which is the only ordering in
+    // which the warning beside it still precedes every token spent.
+    let distribution = lines
+        .iter()
+        .position(|line| line.starts_with("3 past run(s) · "));
+    let handoff = lines.iter().position(|line| line.contains("detached"));
+    assert!(
+        matches!((distribution, handoff), (Some(shown), Some(gone)) if shown < gone),
+        "the distribution reaches the reader before the run is handed off: {text}"
+    );
+    assert!(
+        stderr(&loud).contains("max_tokens_per_run") && stderr(&loud).contains("p90"),
+        "the budget warning names the cap and what history says: {}",
+        stderr(&loud)
+    );
+    settled(&run_id_from(&loud));
+
+    let quiet = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach", "--quiet"]);
+    assert!(quiet.status.success(), "stderr: {}", stderr(&quiet));
+    assert_eq!(
+        stdout(&quiet).lines().count(),
+        1,
+        "the distribution is context nobody asked for: {}",
+        stdout(&quiet)
+    );
+    assert!(
+        stderr(&quiet).contains("max_tokens_per_run") && stderr(&quiet).contains("p90"),
+        "the warning asks for a decision before anything is spent, so it survives: {}",
+        stderr(&quiet)
+    );
+    settled(&run_id_from(&quiet));
+
+    let json = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach", "--json"]);
+    assert!(json.status.success(), "stderr: {}", stderr(&json));
+    let document: serde_json::Value = serde_json::from_slice(&json.stdout)
+        .unwrap_or_else(|e| panic!("`--json` prints one document and nothing else: {e}"));
+    assert_eq!(document["outcome"], "detached");
+    assert!(
+        stderr(&json).contains("max_tokens_per_run") && stderr(&json).contains("p90"),
+        "the warning is not part of the document, and still reaches the reader: {}",
+        stderr(&json)
+    );
+    let run_id = document["run_id"]
+        .as_str()
+        .expect("the document names the run");
+    settled(run_id);
 }
 
 // --- `yunta resolve-gate` -------------------------------------------------

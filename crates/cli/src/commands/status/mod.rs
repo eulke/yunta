@@ -1,7 +1,7 @@
 //! `yunta status <run_id>`: where a run stands, derived from the event
 //! log alone, never from an estimate or an agent's own report. Two
-//! levels — **flow** (nodes finished over the DAG frozen in the
-//! manifest) and **task** (ledger tasks done/total) — presented as
+//! levels — **flow** (the DAG's nodes, over the ones this run's mode
+//! schedules) and **task** (ledger tasks done/total) — presented as
 //! counters with context, never a percentage: a percentage lies the
 //! moment a reroute grows the denominator.
 //!
@@ -10,22 +10,21 @@
 //! with the command that answers it, so nobody has to read the exported
 //! JSONL to learn what the options are.
 
-mod decision;
+pub(crate) mod decision;
 pub(crate) mod progress;
 
-use yunta_core::events::{EventPayload, Failure, StoredEvent, TaskStatus};
-use yunta_core::{ArtifactFailure, ArtifactKind, Diagnostic, FileProblem};
-use yunta_core::{Manifest, NodeId, RunId};
-use yunta_engine::NodeState;
+use chrono::{DateTime, Utc};
 
+use yunta_core::events::{EventPayload, Failure, StoredEvent, TaskStatus};
+use yunta_core::{ArtifactFailure, ArtifactKind, Clock, Diagnostic, FileProblem};
+use yunta_core::{Manifest, NodeId, RunId};
+use yunta_engine::{NodeState, RunPhase};
+
+use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::render::NodeDisplay;
-
-use progress::{Phase, Progress};
-
-pub(crate) use progress::progress_summary;
 
 pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -47,14 +46,15 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         .join("manifest.yaml");
     let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 
+    let now = ctx.clock.now();
     if json {
-        return crate::json::print_json(&status_json(run_id, &events, &manifest));
+        return crate::json::print_json(&status_json(run_id, &events, &manifest, now));
     }
 
-    let progress = Progress::of(&events, &manifest);
-    println!("run {run_id}: {}", progress.summary());
+    let frame = progress::frame(run_id, &manifest, &events, now);
+    println!("run {run_id}: {}", progress::summary(&frame));
     print_derived(&yunta_engine::derive(&events));
-    print_decision(run_id, &manifest, &events, &progress.phase);
+    print_decision(run_id, &manifest, &events, &frame.phase);
     Ok(Outcome::Success)
 }
 
@@ -90,15 +90,21 @@ fn print_derived(state: &yunta_engine::RunState) {
 /// What a parked run is waiting on, printed last because it is what the
 /// reader acts on next: the decision the log reconstructs, with the
 /// command that answers it, or — for a pause that reconstructs none —
-/// the reason it stopped and the way back into the run. A run that is
-/// not parked prints nothing here.
-fn print_decision(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], phase: &Phase) {
-    let Phase::Waiting { reason } = phase else {
+/// the sentence the frame carries for it and the way back into the run.
+/// A run that is not parked prints nothing here.
+fn print_decision(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], phase: &RunPhase) {
+    let Some(waiting) = advice::parked(phase) else {
         return;
     };
     match yunta_engine::current_escalation(manifest, events) {
-        Some((node, escalation)) => print!("{}", decision::block(run_id, &node, &escalation)),
-        None => print!("{}", decision::without_menu(run_id, reason)),
+        Some((node, escalation)) => print!(
+            "{}",
+            decision::block(decision::Layout::Page, run_id, &node, &escalation)
+        ),
+        None => print!(
+            "{}",
+            decision::without_menu(run_id, &advice::parked_in_full(waiting))
+        ),
     }
 }
 
@@ -225,20 +231,23 @@ struct TokensJson {
     output: u64,
 }
 
-/// Derives a run's [`StatusJson`] from its event log and frozen manifest
-/// — the print-free core `status --json` and the control plane share, so
-/// a program reads the same document whichever surface it asks.
+/// Derives a run's [`StatusJson`] from its event log, its frozen manifest
+/// and the instant the caller reads it at — the print-free core
+/// `status --json` and the control plane share, so a program reads the
+/// same document whichever surface it asks. `now` comes from the caller's
+/// injected clock.
 pub(crate) fn status_json(
     run_id: &RunId,
     events: &[StoredEvent],
     manifest: &Manifest,
+    now: DateTime<Utc>,
 ) -> StatusJson {
     let state = yunta_engine::derive(events);
-    let progress = Progress::of(events, manifest);
+    let frame = progress::frame(run_id, manifest, events, now);
     StatusJson {
         schema_version: crate::json::SCHEMA_VERSION,
         run_id: run_id.to_string(),
-        summary: progress.summary(),
+        summary: progress::summary(&frame),
         nodes: state
             .nodes
             .iter()
@@ -250,7 +259,7 @@ pub(crate) fn status_json(
             .map(|(id, status)| (id.to_string(), task_status_label(status)))
             .collect(),
         diagnostics: node_diagnostics(events),
-        decision: parked_decision(run_id, manifest, events, &progress.phase),
+        decision: parked_decision(run_id, manifest, events, &frame.phase),
         tokens: TokensJson {
             input: state.total_tokens.input,
             output: state.total_tokens.output,
@@ -267,9 +276,9 @@ fn parked_decision(
     run_id: &RunId,
     manifest: &Manifest,
     events: &[StoredEvent],
-    phase: &Phase,
+    phase: &RunPhase,
 ) -> Option<decision::DecisionJson> {
-    if !matches!(phase, Phase::Waiting { .. }) {
+    if !matches!(phase, RunPhase::Waiting { .. }) {
         return None;
     }
     let (node, escalation) = yunta_engine::current_escalation(manifest, events)?;

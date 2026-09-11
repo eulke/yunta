@@ -43,6 +43,21 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # is the table that says which, so a label cut to fit stays exactly as
 # wide as the column it sits in and every column after it stays aligned.
 unicode-width.workspace = true
+# The live view's pinned region: a few lines of plain text held at the
+# bottom of the terminal while finished work scrolls above them into the
+# terminal's own history. It draws to stderr, leaving stdout for whatever
+# a caller pipes, and it goes silent by itself when that stream is not a
+# terminal. It takes no alternate screen, no raw mode and no mouse
+# capture, which is what leaves the operator's scrollback, text selection
+# and typed Ctrl-C exactly as they were.
+indicatif.workspace = true
+# The prompts a gate and a questions artifact need: a list whose options
+# each carry their tradeoff, answerable by arrow or by typing, and a
+# line of free text. `fuzzy-select` is the variant that accepts both at
+# once. It re-raises SIGINT on Ctrl-C, so the interrupt keeps arriving
+# through the one cancellation bridge instead of becoming a second
+# source of truth about whether a person stopped the run.
+dialoguer = { workspace = true, features = ["fuzzy-select"] }
 # `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
@@ -54,6 +69,10 @@ async-trait.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
+# The same region, drawn into a buffer instead of a terminal, so a test
+# asserts on what a reader would see with nothing to wait for and no
+# terminal to stand up.
+indicatif = { workspace = true, features = ["in_memory"] }
 yunta-core = { workspace = true, features = ["testkit"] }
 # `verify`'s broken-chain test corrupts a stored event behind the store's
 # back through the same fault injector storage's own tests use.

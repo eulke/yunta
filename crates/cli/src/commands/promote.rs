@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::{AdapterId, IdSource, Manifest, RunId, SystemClock};
-use yunta_engine::{RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use crate::project::Project;
@@ -32,6 +32,11 @@ pub(crate) struct PromotionEnv<'a> {
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
+    /// Where every successor puts its questions — the same console the
+    /// predecessor used, so a prompt takes its turn with the same
+    /// surface and a cancellation stops a chain waiting on a person
+    /// wherever in it the prompt is open.
+    pub human_interaction: &'a dyn HumanInteraction,
     /// The display surface every successor mirrors its events into —
     /// the same one the predecessor ran under, so a chain draws as one
     /// continuous invocation rather than restarting per member.
@@ -44,6 +49,13 @@ pub(crate) struct PromotionEnv<'a> {
 /// — `modes:` is a finite, strictly-forward-only ladder, so this can
 /// run at most `len(modes) - 1` times before landing on a mode with
 /// nowhere further to promote to.
+///
+/// Prints nothing of its own. A promotion is on both runs' logs —
+/// `promotion_signaled` and `run_finished: promoted` on the
+/// predecessor's, `run_created` with `promoted_from` on the
+/// successor's — so the surface watching the invocation already has it,
+/// and a line written around that surface would tear the region it is
+/// drawing.
 pub(crate) async fn drive_promotions(
     env: &PromotionEnv<'_>,
     mut run_id: RunId,
@@ -76,11 +88,6 @@ pub(crate) async fn drive_promotions(
         )
         .await
         .map_err(|e| e.to_string())?;
-        println!(
-            "run {run_id}: promoted to `{suggested_mode}` — starting {}",
-            successor.run_id
-        );
-
         let ambient = crate::project::process_env();
         let successor_report = yunta_engine::execute_run(yunta_engine::RunEnv {
             run_id: &successor.run_id,
@@ -92,7 +99,7 @@ pub(crate) async fn drive_promotions(
             clock: std::sync::Arc::new(SystemClock),
             ids: env.ids,
             max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &crate::human_interaction::ConsoleInteraction,
+            human_interaction: env.human_interaction,
             forge: env.forge,
             cancel: env.cancel,
             adapter_override: None,
@@ -258,6 +265,7 @@ nodes:
                 adapters: &adapters,
                 forge: None,
                 cancel: None,
+                human_interaction: &AlwaysPromote,
                 observer: Some(recorder.clone()),
             },
             run_id.clone(),

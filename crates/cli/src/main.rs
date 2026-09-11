@@ -17,6 +17,7 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+mod ask;
 mod cli;
 mod commands;
 mod context;
@@ -28,6 +29,7 @@ mod json;
 mod pack;
 mod project;
 mod render;
+mod surface;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -36,8 +38,7 @@ use clap::Parser;
 
 use crate::error::{CliError, Outcome};
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -45,7 +46,7 @@ async fn main() -> ExitCode {
     let cli = cli::Cli::parse();
     tracing::debug!("yunta starting");
 
-    match cli.run().await {
+    match drive(cli) {
         Ok(Outcome::Success) => ExitCode::SUCCESS,
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Err(error) => {
@@ -53,6 +54,31 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Runs `cli` on a runtime of this process's own, and leaves.
+///
+/// The runtime is built here rather than by `#[tokio::main]` for what
+/// happens after the command returns: dropping a runtime blocks until
+/// every blocking task has finished, and one of them is a terminal read
+/// waiting on a key. A run stopped from outside stops waiting on that
+/// key — the prompt hands the engine its answer, the engine kills the
+/// run's tree and writes the run's close, and the command returns — and
+/// the read is then a thread parked on a keystroke nobody is going to
+/// press. Waiting on it would keep a process alive that has nothing
+/// left to do, so this hands the runtime back without waiting and the
+/// process exits.
+///
+/// Everything the run owns is already released by then: what this
+/// leaves behind is one thread inside a `read`, and the exit takes it.
+fn drive(cli: cli::Cli) -> Result<Outcome, CliError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|source| CliError::io("build the runtime for", "this command", source))?;
+    let outcome = runtime.block_on(cli.run());
+    runtime.shutdown_background();
+    outcome
 }
 
 /// Reads and parses a YAML file into `T`, naming what it was reading and

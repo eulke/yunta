@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_testkit::{git, init_repo, run_id_from, stdout, wait_for, write, yunta_in};
+use yunta_testkit::{git, init_repo, run_id_from, stdout, wait_for, write, yunta_in, MOCK_CONFIG};
 
 /// A node that fails with its one re-route already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
@@ -33,6 +33,37 @@ nodes:
   - id: boom
     kind: bash
     run: "exit 3"
+"#;
+
+/// A node whose session writes a questions artifact and ends: nothing
+/// answers the questions with stdin closed, so the run parks with the
+/// node itself waiting on a person rather than on a failure.
+const ASKING: &str = r#"
+name: asking
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Ask what has to be known before going on."
+    artifacts:
+      produces:
+        - { name: questions.yaml, kind: questions }
+"#;
+
+/// The scripted session behind [`ASKING`]: it writes the artifact and
+/// closes, so the round with a person is reached with no agent
+/// installed.
+const ASKING_FIXTURE: &str = r#"
+sessions:
+  - effects:
+      - path: "{{run.dir}}/artifacts/questions.yaml"
+        content: |
+          questions:
+            - id: summary
+              text: "What changed?"
+              answer_type: text
+              required: true
+    outcome: { type: completed, summary: asked }
 "#;
 
 /// A node that holds the run open until the test hands it `go.txt`. It
@@ -69,6 +100,16 @@ fn repo_with(root: &Path, workflows: &[(&str, &str)]) -> PathBuf {
 fn decision_block(text: &str) -> Vec<&str> {
     text.lines()
         .skip_while(|line| !line.starts_with("decision needed"))
+        .collect()
+}
+
+/// The decision the closing block carries: its `waiting on node`
+/// heading and every line under it, stopping at the labelled rows that
+/// report where the run lived.
+fn closing_decision(text: &str) -> Vec<&str> {
+    text.lines()
+        .skip_while(|line| !line.trim_start().starts_with("waiting on node"))
+        .take_while(|line| !line.trim_start().starts_with("progress "))
         .collect()
 }
 
@@ -127,6 +168,82 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
             "line uses an ANSI escape code, not colorless: {line:?}"
         );
     }
+}
+
+#[test]
+fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_asked_about() {
+    // The block a run leaves on the terminal and the page `yunta status`
+    // prints carry the same escalation: neither drops a part the other
+    // keeps. What differs is the room each part is given and the
+    // headings a page has space for.
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(root.path(), &[("hopeless", EXHAUSTED_REROUTE)]);
+    let home = root.path().join("state");
+
+    let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
+    let run_id = run_id_from(&run);
+    let closing = stdout(&run);
+    let trailer = closing_decision(&closing);
+    let page_text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let page = decision_block(&page_text);
+
+    for block in [&trailer, &page] {
+        let text = block.join("\n");
+        assert!(text.contains("node `lint`"), "{text}");
+        assert!(
+            text.contains("retry — Re-route to `fix-lint` once more"),
+            "{text}"
+        );
+        assert!(text.contains("abort — Abort the run"), "{text}");
+        assert_eq!(
+            text.matches("tradeoff:").count(),
+            2,
+            "one tradeoff per option: {text}"
+        );
+        assert!(
+            text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+            "{text}"
+        );
+    }
+
+    // A trailer hangs under the outcome above it: each part keeps its
+    // label inline on the one line it gets, and the last word is that
+    // nothing has to stay open for the answer.
+    assert_eq!(
+        trailer.first().copied(),
+        Some("  waiting on node `lint`"),
+        "{trailer:?}"
+    );
+    assert!(
+        trailer
+            .iter()
+            .any(|line| line.trim_start().starts_with("evidence: ")),
+        "a trailer labels a part inline: {trailer:?}"
+    );
+    for heading in ["evidence:", "options:", "answer it with:"] {
+        assert!(
+            !trailer.iter().any(|line| line.trim() == heading),
+            "a trailer has no headings of its own: {trailer:?}"
+        );
+    }
+    assert!(
+        trailer
+            .last()
+            .is_some_and(|line| line.contains("close this terminal whenever you like")),
+        "{trailer:?}"
+    );
+
+    // A page opens on the decision and hangs every part under its own
+    // heading. It carries no aside: nobody is waiting in front of it.
+    assert_eq!(
+        page.first().copied(),
+        Some("decision needed on node `lint`:"),
+        "{page:?}"
+    );
+    for heading in ["  evidence:", "  options:", "  answer it with:"] {
+        assert!(page.contains(&heading), "{page:?}");
+    }
+    assert!(!page_text.contains("close this terminal"), "{page_text}");
 }
 
 #[test]
@@ -295,6 +412,58 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
     write(&worktree.join("go.txt"), "go");
     let finished = running.wait().expect("the running run exits");
     assert!(finished.success());
+}
+
+#[test]
+fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
+    // A node parked on a person is the phase every surface reports, so
+    // the one-line summary names the node. The page under it has room
+    // for the sentence the engine wrote when it stopped the run, and
+    // that sentence — not the node id — is what says which questions are
+    // still unanswered.
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(
+        root.path(),
+        &[("asking", ASKING), ("fixture", ASKING_FIXTURE)],
+    );
+    let home = root.path().join("state");
+    write(&repo.join(".yunta/config.yaml"), MOCK_CONFIG);
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "runners"]);
+
+    let run = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "asking.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml"
+        ]
+    );
+    let run_id = run_id_from(&run);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    assert!(
+        text.contains("1 waiting · 0 reroutes · waiting — node `ask`"),
+        "the summary counts the parked node and names it: {text}"
+    );
+    assert!(
+        text.contains("node `ask` asked 1 question(s) awaiting an answer: summary"),
+        "the page names the question still unanswered, not only the node: {text}"
+    );
+    assert!(
+        text.contains(&format!("yunta resume {run_id}")),
+        "the way back into the run is on the page: {text}"
+    );
+
+    let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
+    assert!(
+        list.contains("needs you (1)") && list.contains("waiting — node `ask`"),
+        "the listing groups it with what needs a person, under the same words: {list}"
+    );
 }
 
 /// Where `needle` starts in `text`, failing with the text itself when it

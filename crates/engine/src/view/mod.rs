@@ -17,6 +17,7 @@
 //! log and manifest.
 
 mod node;
+mod phase;
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -24,8 +25,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{
-    run_mode, ChildRunFinishedPayload, EventPayload, Failure, StoredEvent, TaskStatus,
-    TerminalState, TokenUsage,
+    run_mode, ChildRunFinishedPayload, EventPayload, StoredEvent, TaskStatus, TerminalState,
+    TokenUsage,
 };
 use yunta_core::{AdapterId, Capability, ModeName, NodeId, RunId, Workflow};
 
@@ -39,6 +40,7 @@ use crate::stats::compute_run_stats_at;
 use node::Reading;
 
 pub use node::{NodeFrame, NodeStanding, Reroute};
+pub use phase::{RunPhase, WaitingOn};
 
 /// Work split by where it stands, at one level: the DAG's nodes, or the
 /// ledger's tasks.
@@ -77,64 +79,6 @@ pub struct Counter {
     pub skipped: usize,
     /// The mode that skipped them; `None` when nothing is skipped.
     pub skipped_by: Option<ModeName>,
-}
-
-/// Where the run as a whole stands, derived from the log alone.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RunPhase {
-    /// The log carries no start yet.
-    Created,
-    Running,
-    /// Parked on a person: at least one node is on a published gate or
-    /// on unanswered questions, or the run itself paused for a decision.
-    /// A run whose other nodes keep moving reports this too — what is
-    /// running is in [`RunFrame::flow`] beside what is parked, so the
-    /// two are read together.
-    Waiting {
-        on: WaitingOn,
-    },
-    /// `run_finished: done`.
-    Finished,
-    /// `run_finished: failed`, carrying the failure of the last
-    /// `node_failed` on the log — `None` when the log closed the run as
-    /// failed with no node failure on it, since nothing here invents
-    /// one.
-    Failed {
-        failure: Option<Failure>,
-    },
-    /// `run_finished: cancelled` — a run a person stopped, which is
-    /// neither a failure nor a completion and is reported as itself.
-    Cancelled,
-    /// `run_finished: promoted` — this run closed for a successor in a
-    /// later mode. `to` is the mode the `promotion_signaled` behind it
-    /// suggested; `None` for a log that closed a run as promoted with no
-    /// such event, where only the successor's own `run_created` names
-    /// the mode.
-    Promoted {
-        to: Option<ModeName>,
-    },
-    /// The log stopped making sense at the event the diagnostic names;
-    /// the rest of the frame is what replay derived before it.
-    Broken {
-        diagnostic: String,
-    },
-}
-
-/// What a waiting run is waiting on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WaitingOn {
-    /// A node parked on a person: `external_ref` is the forge's handle
-    /// for a published gate, `None` for an internal gate and for
-    /// unanswered questions. With several nodes parked at once this
-    /// names the first in the workflow's declaration order; every one of
-    /// them is in [`RunFrame::nodes`] and counted in [`RunFrame::flow`].
-    Node {
-        node: NodeId,
-        external_ref: Option<String>,
-    },
-    /// The run itself paused, with the reason `run_paused` recorded — an
-    /// exhausted budget, a cancellation, a gate nobody has answered.
-    Run { reason: String },
 }
 
 /// A run as it stands at one instant: every field a pure function of
@@ -215,6 +159,15 @@ pub struct Degradation {
 /// Pure: same inputs, same frame, always. `now` is the caller's own
 /// clock, injected — nothing in this module reads one — so a frame
 /// rendered at a chosen instant is reproducible in a test.
+///
+/// **What it costs.** The run-wide derivations walk the log a fixed
+/// number of times; each declared node then walks it again for every
+/// liveness reading its own frame carries — when it last spoke, which
+/// sessions it has open, what it last reached for, the last two each
+/// scanning back first to where the node's current attempt begins. A
+/// workflow of `n` declared nodes over a log of `e` events costs
+/// `O(n · e)`. A caller framing one run pays that once; a caller
+/// framing every run of a project pays it per run.
 pub fn run_frame(
     run_id: &RunId,
     workflow: &Workflow,
@@ -247,7 +200,7 @@ pub fn run_frame(
         run_id: run_id.clone(),
         workflow: workflow.name.clone(),
         mode: mode.clone(),
-        phase: phase(workflow, &state, events),
+        phase: phase::phase(workflow, &state, events),
         elapsed: stats.wall_clock,
         flow: flow_counter(&nodes, &mode),
         tasks: task_counter(&state),
@@ -306,78 +259,6 @@ fn task_counter(state: &RunState) -> Option<Counter> {
         }
     }
     Some(counter)
-}
-
-/// The run's phase: a log that stopped making sense says so first, then
-/// the run's own close, then what it is parked on, then movement.
-fn phase(workflow: &Workflow, state: &RunState, events: &[StoredEvent]) -> RunPhase {
-    if let Some(diagnostic) = &state.broken {
-        return RunPhase::Broken {
-            diagnostic: diagnostic.clone(),
-        };
-    }
-    let last = events.iter().rev().find_map(|event| match event.payload() {
-        Some(
-            payload @ (EventPayload::RunFinished(_)
-            | EventPayload::RunPaused(_)
-            | EventPayload::RunResumed(_)
-            | EventPayload::NodeStarted(_)),
-        ) => Some(payload),
-        _ => None,
-    });
-    match last {
-        Some(EventPayload::RunFinished(p)) => closed(&p.terminal_state, events),
-        // A node parked on a person is the more precise answer than the
-        // pause reason that names the same wait in prose.
-        Some(EventPayload::RunPaused(p)) => RunPhase::Waiting {
-            on: waiting_node(workflow, state).unwrap_or_else(|| WaitingOn::Run {
-                reason: p.reason.clone(),
-            }),
-        },
-        Some(EventPayload::RunResumed(_) | EventPayload::NodeStarted(_)) => {
-            match waiting_node(workflow, state) {
-                Some(on) => RunPhase::Waiting { on },
-                None => RunPhase::Running,
-            }
-        }
-        _ => RunPhase::Created,
-    }
-}
-
-/// How a closed run closed, with the evidence its own log carries for
-/// it: the last `node_failed`'s failure, the last `promotion_signaled`'s
-/// suggested mode.
-fn closed(terminal: &TerminalState, events: &[StoredEvent]) -> RunPhase {
-    match terminal {
-        TerminalState::Done => RunPhase::Finished,
-        TerminalState::Cancelled => RunPhase::Cancelled,
-        TerminalState::Failed => RunPhase::Failed {
-            failure: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::NodeFailed(p)) => Some(p.failure.clone()),
-                _ => None,
-            }),
-        },
-        TerminalState::Promoted => RunPhase::Promoted {
-            to: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::PromotionSignaled(p)) => Some(p.suggested_mode.clone()),
-                _ => None,
-            }),
-        },
-    }
-}
-
-/// The first node parked on a person, in the workflow's own declaration
-/// order.
-fn waiting_node(workflow: &Workflow, state: &RunState) -> Option<WaitingOn> {
-    workflow
-        .iter_nodes()
-        .find_map(|node| match state.nodes.get(&node.id) {
-            Some(NodeState::Waiting { external_ref }) => Some(WaitingOn::Node {
-                node: node.id.clone(),
-                external_ref: external_ref.clone(),
-            }),
-            _ => None,
-        })
 }
 
 /// What one pass over the log collects that replay and stats do not: the

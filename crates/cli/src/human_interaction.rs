@@ -1,55 +1,94 @@
-//! `ConsoleInteraction` — the TTY implementation of
-//! `yunta_engine::HumanInteraction`. Renders the escalation object
-//! exactly as the engine built it (summary, mechanical evidence,
-//! options with their mandatory tradeoff) and reads a decision from
-//! stdin. Never auto-decides: on a non-interactive stdin (piped, no
-//! TTY, redirected from `/dev/null`) it reports "can't interact"
-//! (`None`) rather than guessing, and the caller degrades to pausing —
-//! the same rule `kind: questions` already applies.
-
-use std::io::{IsTerminal, Write};
+//! `ConsoleInteraction` — the terminal implementation of
+//! `yunta_engine::HumanInteraction`, and the border where a prompt that
+//! produced no answer becomes a line a person reads.
+//!
+//! It never auto-decides. Without a console to prompt on (piped,
+//! redirected, no terminal at either end) it reports "can't interact"
+//! rather than guessing, and the engine parks the run — the same answer
+//! a person gives by pressing Escape at the prompt itself.
+//!
+//! Every prompt runs on a blocking thread. A person taking their time
+//! would otherwise freeze the run's single-threaded runtime and every
+//! task sharing it: the per-node run-tools listener, the Ctrl-C handler
+//! that stops the run, the observer that draws it.
+//!
+//! Two things a prompt shares the terminal with are settled here, in
+//! the one place every prompt passes through. The run's live surface
+//! stands down for as long as a prompt is open, so no row of it lands
+//! on what a person is reading. And the read is raced against the run's
+//! own cancellation, so a run stopped from outside stops waiting on a
+//! person who is no longer being asked anything.
 
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
-use yunta_core::{Answer, AnswerType, QuestionsFile};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::QuestionsFile;
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
-use crate::error::warn;
+use crate::ask::{answer, decide, Answered, Console, NoAnswer};
+use crate::error::{note, warn};
+use crate::surface::Curtain;
 
-pub struct ConsoleInteraction;
+/// The console surface of one invocation, holding what a prompt has to
+/// take its turn with.
+pub struct ConsoleInteraction {
+    /// What tells the run's live surface to stand down while a prompt
+    /// has the terminal, and to come back when it ends.
+    curtain: Curtain,
+    /// The run's own cancellation. Stopping a run is not answering it:
+    /// a cancelled run stops waiting here, and the engine unwinds it the
+    /// way every other cancellation path unwinds it.
+    cancel: CancellationToken,
+}
 
-/// Prints `message`, flushes it, and reads one trimmed line from stdin —
-/// the single prompt the console surface uses. The read runs on a blocking
-/// thread (`spawn_blocking`), so a person taking their time answering never
-/// freezes the run's single-threaded runtime and the tasks that share it:
-/// the per-node run-tools listener, a `--follow` follower, the Ctrl-C
-/// handler.
-///
-/// `None` means no answer could be read, and the caller degrades to
-/// pausing. The two ways that happens are kept distinct: a clean EOF
-/// (stdin closed mid-prompt) is silent, the same "can't interact" case as
-/// having no TTY; a real read failure is surfaced with a `warning:` so it
-/// is never mistaken for one.
-async fn prompt(message: &str) -> Option<String> {
-    print!("{message}");
-    let _ = std::io::stdout().flush();
-    let read = tokio::task::spawn_blocking(|| {
-        let mut line = String::new();
-        std::io::stdin()
-            .read_line(&mut line)
-            .map(|read| (read, line))
-    })
-    .await;
-    match read {
-        Ok(Ok((0, _))) => None,
-        Ok(Ok((_, line))) => Some(line.trim().to_string()),
-        Ok(Err(e)) => {
-            warn(format!("could not read your answer from stdin: {e}"));
-            None
+impl ConsoleInteraction {
+    /// The surface for a run drawn under `curtain` and stopped by
+    /// `cancel`.
+    pub fn new(curtain: Curtain, cancel: CancellationToken) -> Self {
+        Self { curtain, cancel }
+    }
+
+    /// Runs one prompt to its end, off the runtime, and reports what it
+    /// produced.
+    ///
+    /// `None` is every way a prompt ends without an answer, said once
+    /// here so each reason reaches the person in its own words and the
+    /// engine in the one shape it acts on: park the run, record nothing.
+    async fn prompted<T, P>(&self, prompt: P) -> Option<T>
+    where
+        T: Send + 'static,
+        P: FnOnce(&Console) -> Answered<T> + Send + 'static,
+    {
+        let console = Console::open()?;
+        // A second handle on the same terminal, for the one ending the
+        // prompt itself cannot reach.
+        let opened = console.clone();
+        self.curtain.lower().await;
+        let _turn = Turn(&self.curtain);
+        let reading = tokio::task::spawn_blocking(move || prompt(&console));
+        match self.read(reading).await {
+            Some(read) => settled(read),
+            None => {
+                opened.restore();
+                None
+            }
         }
-        Err(e) => {
-            warn(format!("the stdin reader task failed: {e}"));
-            None
+    }
+
+    /// What `reading` answered, or `None` once the run is cancelled out
+    /// from under it.
+    ///
+    /// The abandoned read is the one task this process does not keep a
+    /// handle on, and it is deliberate: a thread parked in a terminal
+    /// read cannot be told to stop, and the key that would free it is
+    /// one nobody is going to press now that the run is stopping. So
+    /// the engine gets its answer, unwinds the run and kills the tree,
+    /// and `main` leaves without waiting on the read.
+    async fn read<T>(&self, reading: JoinHandle<Answered<T>>) -> Option<Answered<T>> {
+        tokio::select! {
+            read = reading => Some(read.unwrap_or_else(|failed| Err(NoAnswer::Failed(failed.to_string())))),
+            () = self.cancel.cancelled() => None,
         }
     }
 }
@@ -57,106 +96,60 @@ async fn prompt(message: &str) -> Option<String> {
 #[async_trait]
 impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
-        if !std::io::stdin().is_terminal() {
-            return None;
-        }
-
-        println!();
-        println!("=== gate: a decision is needed ===");
-        println!("{}", escalation.summary);
-        if !escalation.evidence.is_empty() {
-            println!();
-            println!("evidence: {}", escalation.evidence);
-        }
-        println!();
-        println!("options:");
-        for option in &escalation.options {
-            println!("  {} — {}", option.id, option.label);
-            println!("      tradeoff: {}", option.tradeoff);
-        }
-
-        let chosen_option = loop {
-            let line = prompt("choose an option id: ").await?;
-            if let Some(option) = escalation.options.iter().find(|o| o.id.as_str() == line) {
-                break option.id.clone();
-            }
-            println!("`{line}` isn't one of: {}", escalation.menu());
-        };
-
-        let free_text = prompt("optional free-text feedback (enter to skip): ").await?;
-
-        Some(HumanChoice {
-            option: chosen_option,
-            // No `--by` on the interactive surface: the decision carries
-            // the shell's ambient identity, marked unverified.
-            by: crate::identity::responder(None),
-            free_text: (!free_text.is_empty()).then_some(free_text),
-        })
+        let escalation = escalation.clone();
+        self.prompted(move |console| decide(console, &escalation))
+            .await
     }
 
-    /// Question by question over the TTY, honoring each `answer_type`
-    /// at input time (the engine re-validates the
-    /// whole reply anyway — the surface's checks are UX, the engine's
-    /// are the verdict). A non-required question accepts an empty line
-    /// as "no answer"; a required one re-asks.
+    /// Question by question, each answered the way its own
+    /// `answer_type` is answered. `interactive` goes unread: it asks a
+    /// surface that can hold a conversation to hold one, and this
+    /// surface reads a `kind: questions` artifact and nothing else.
     async fn ask(&self, questions: &QuestionsFile, _interactive: bool) -> Option<QuestionsReply> {
-        if !std::io::stdin().is_terminal() {
-            return None;
-        }
+        let questions = questions.clone();
+        self.prompted(move |console| answer(console, &questions))
+            .await
+    }
+}
 
-        println!();
-        println!(
-            "=== questions: {} answer(s) needed ===",
-            questions.questions.len()
-        );
-        let mut answers = Vec::new();
-        for question in &questions.questions {
-            let value = loop {
-                let mut message = match question.answer_type {
-                    AnswerType::Text => format!("{} ", question.text),
-                    AnswerType::Choice => {
-                        format!("{} [{}] ", question.text, question.values.join("/"))
-                    }
-                    AnswerType::Boolean => format!("{} [y/n] ", question.text),
-                };
-                if !question.required {
-                    message.push_str("(enter to skip) ");
-                }
-                let line = prompt(&message).await?;
-                if line.is_empty() {
-                    if question.required {
-                        println!("`{}` is required", question.id);
-                        continue;
-                    }
-                    break None;
-                }
-                match question.answer_type {
-                    AnswerType::Text => break Some(line),
-                    AnswerType::Choice => {
-                        if question.values.contains(&line) {
-                            break Some(line);
-                        }
-                        println!("`{line}` isn't one of: {}", question.values.join(", "));
-                    }
-                    AnswerType::Boolean => match line.as_str() {
-                        "y" | "yes" | "true" => break Some("true".to_string()),
-                        "n" | "no" | "false" => break Some("false".to_string()),
-                        _ => println!("answer y or n"),
-                    },
-                }
-            };
-            if let Some(value) = value {
-                answers.push(Answer {
-                    id: question.id.clone(),
-                    value,
-                });
-            }
+/// The terminal, held for as long as one prompt is open.
+///
+/// The surface gets it back when the prompt ends, whichever way it ends
+/// — answered, declined, interrupted, unreadable, or a caller that
+/// stopped awaiting the prompt altogether. A region that stayed down
+/// would leave the rest of the run undrawn.
+struct Turn<'a>(&'a Curtain);
+
+impl Drop for Turn<'_> {
+    fn drop(&mut self) {
+        self.0.raise();
+    }
+}
+
+/// What a finished prompt produced, with every ending that produced no
+/// answer put to the person in its own words.
+fn settled<T>(read: Answered<T>) -> Option<T> {
+    match read {
+        Ok(answered) => Some(answered),
+        Err(NoAnswer::Declined) => {
+            note("nothing recorded — the run parks here, with its state intact, until it resumes");
+            None
         }
-        Some(QuestionsReply {
-            answers,
-            channel: Channel::Tty,
-            // Same ambient, unverified identity as a console gate decision.
-            responder: Some(crate::identity::responder(None)),
-        })
+        // The interrupt is already on its way to the run's own
+        // cancellation; a second account of it here would be a second
+        // story about whether a person stopped the run.
+        Err(NoAnswer::Interrupted) => None,
+        Err(NoAnswer::OffMenu) => {
+            warn("the prompt answered with an option that was not on the menu — nothing recorded");
+            None
+        }
+        Err(NoAnswer::Unreadable(e)) => {
+            warn(format!("could not read your answer from the terminal: {e}"));
+            None
+        }
+        Err(NoAnswer::Failed(e)) => {
+            warn(format!("the thread holding the prompt failed: {e}"));
+            None
+        }
     }
 }

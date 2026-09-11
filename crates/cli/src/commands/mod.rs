@@ -1,8 +1,11 @@
-//! One module per subcommand; `main.rs` only parses and dispatches.
+//! One module per subcommand, beside the few things more than one of
+//! them shares; `main.rs` only parses and dispatches.
 
+pub(crate) mod advice;
 pub mod cancel;
 pub mod check;
 pub mod doctor;
+pub(crate) mod drive;
 pub mod gc;
 pub mod init;
 pub mod list;
@@ -30,9 +33,9 @@ use yunta_adapters::{
     CODEX_ID,
 };
 use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
-use yunta_engine::{RunReport, RunTerminal, UnknownKindCount};
+use yunta_engine::UnknownKindCount;
 
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::{note, warn, CliError};
 
 /// Ctrl-C → the run's root `CancellationToken`. The in-process
 /// interrupt→kill path does the actual exterminating; this only
@@ -93,40 +96,6 @@ pub(crate) async fn spawn_detached_resume(
         let _ = child.wait().await;
     });
     Ok(())
-}
-
-/// Prints a run's outcome and reports its verdict: success only when the
-/// run finished; a paused or unresolved-promoted run ran to a stop that
-/// needs a decision, reported as its own output rather than an error.
-pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
-    match &report.terminal {
-        RunTerminal::Finished => {
-            println!("run {run_id}: finished");
-            Outcome::Success
-        }
-        RunTerminal::Paused { reason } => {
-            println!(
-                "run {run_id}: paused — {}",
-                yunta_core::text::hanging(reason, "  ")
-            );
-            Outcome::Reported
-        }
-        RunTerminal::Failed { reason } => {
-            println!(
-                "run {run_id}: failed — {}",
-                yunta_core::text::hanging(reason, "  ")
-            );
-            Outcome::Reported
-        }
-        // `run`/`resume` always route a fresh `RunReport` through
-        // `promote::drive_promotions` first — by the time anything
-        // calls `report_outcome`, a `Promoted` terminal has already
-        // been chased to whatever it became next.
-        RunTerminal::Promoted { suggested_mode } => {
-            println!("run {run_id}: promoted to `{suggested_mode}` (unresolved)");
-            Outcome::Reported
-        }
-    }
 }
 
 /// The adapter registry a real invocation can offer: `claude-code` and

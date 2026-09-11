@@ -25,4 +25,4 @@ pub(crate) use bars::{bar, sparkline};
 pub(crate) use glyphs::Glyphs;
 pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
-pub(crate) use width::{cell_width, truncate, LABEL_WIDTH, LINE_WIDTH};
+pub(crate) use width::{cell_width, truncate, wrap, LABEL_WIDTH, LINE_WIDTH};

@@ -32,6 +32,62 @@ pub(crate) fn cell_width(text: &str) -> usize {
     text.width()
 }
 
+/// `text` as lines that each occupy `width` display cells or fewer.
+///
+/// For a caller that owns a column and places what goes in it — a block
+/// under an indent, an option read above a list — so the break falls
+/// where the caller chose rather than wherever the terminal ran out of
+/// row. The measure is display cells and not characters, because that
+/// is what a terminal lays a line out in: a CJK label takes two cells
+/// per character and a combining mark takes none.
+///
+/// Breaks fall between words where there is one to break at, and
+/// between clusters where a single word is wider than the column — the
+/// one case with nowhere else to go. Runs of whitespace collapse into
+/// the breaks, so the result is the text, not its layout. Text with no
+/// words in it is one empty line.
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        for piece in pieces(word, width) {
+            let spaced = usize::from(!line.is_empty());
+            if cell_width(&line) + spaced + cell_width(&piece) > width && !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(&piece);
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// `word` in the fewest pieces that each fit `width`: itself when it
+/// already does, and cuts between clusters when it does not.
+fn pieces(word: &str, width: usize) -> Vec<String> {
+    if cell_width(word) <= width {
+        return vec![word.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut piece = String::new();
+    for cluster in clusters(word) {
+        if cell_width(&piece) + cell_width(cluster) > width && !piece.is_empty() {
+            out.push(std::mem::take(&mut piece));
+        }
+        piece.push_str(cluster);
+    }
+    if !piece.is_empty() {
+        out.push(piece);
+    }
+    out
+}
+
 /// `text` in exactly `width` display cells: padded with spaces when it
 /// is narrower, cut and closed with `glyphs`' truncation mark when it is
 /// wider.
@@ -192,6 +248,52 @@ mod tests {
         let padded = truncate("plan", COLUMN, Glyphs::Unicode);
         assert_eq!(padded, "plan      ");
         assert_eq!(cell_width(&padded), COLUMN);
+    }
+
+    #[test]
+    fn a_wrapped_line_never_takes_more_cells_than_its_column() {
+        // Wide enough that every word fits in it, which is the case a
+        // break between words covers.
+        const PARAGRAPH: usize = 40;
+        let tradeoff = "Uses one extra correction attempt beyond the declared \
+                        max_reroutes (0); escalates again if `fix` doesn't fix it";
+        let lines = wrap(tradeoff, PARAGRAPH);
+        assert!(lines.len() > 1, "the line was too long to keep whole");
+        for line in &lines {
+            assert!(
+                cell_width(line) <= PARAGRAPH,
+                "{line:?} overflows the column"
+            );
+        }
+        assert_eq!(
+            lines.join(" "),
+            tradeoff,
+            "wrapping breaks the line and keeps the words"
+        );
+    }
+
+    #[test]
+    fn a_word_wider_than_the_column_breaks_inside_itself() {
+        // Nothing else can be done with it, and leaving it whole is
+        // leaving the terminal to wrap a line this surface then counts
+        // as one.
+        let lines = wrap("supercalifragilistic", 6);
+        assert_eq!(lines, vec!["superc", "alifra", "gilist", "ic"]);
+    }
+
+    #[test]
+    fn wrapping_measures_in_cells_and_breaks_between_clusters() {
+        // Eight ideographs, two cells each.
+        let lines = wrap("実装レビュー担当", COLUMN);
+        assert_eq!(lines, vec!["実装レビュ", "ー担当"]);
+        for line in &lines {
+            assert!(cell_width(line) <= COLUMN);
+        }
+    }
+
+    #[test]
+    fn text_with_nothing_in_it_wraps_to_one_empty_line() {
+        assert_eq!(wrap("", COLUMN), vec![String::new()]);
     }
 
     #[test]

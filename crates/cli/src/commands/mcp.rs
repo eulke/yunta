@@ -28,7 +28,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
-use yunta_core::{AdapterId, ArtifactKind, Manifest, ModeName, RunId};
+use yunta_core::{AdapterId, ArtifactKind, Clock, Manifest, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -280,8 +280,14 @@ async fn tool_workflow_status(
     let manifest: Manifest =
         crate::load_yaml(&manifest_path, "run manifest").map_err(|e| e.to_string())?;
     // The same versioned DTO `yunta status --json` prints, serialized to
-    // the tool result rather than to stdout.
-    crate::json::to_json_string(&super::status::status_json(&run_id, &events, &manifest))
+    // the tool result rather than to stdout, and read at this server's
+    // own injected clock.
+    crate::json::to_json_string(&super::status::status_json(
+        &run_id,
+        &events,
+        &manifest,
+        ctx.clock.now(),
+    ))
 }
 
 async fn tool_run_workflow(

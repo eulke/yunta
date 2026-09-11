@@ -37,7 +37,9 @@ chrono = "0.4"
 clap = "4"
 futures = "0.3"
 globset = "0.4"
+dialoguer = { version = "0.12", default-features = false }
 indexmap = "2"
+indicatif = "0.18"
 nix = { version = "0.31", features = ["signal", "process"] }
 proptest = "1"
 regex = "1"

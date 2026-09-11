@@ -15,7 +15,7 @@ use yunta_core::events::{
     DiscardedCandidate, EventBody, EventPayload, Failure, GateWaitingPayload, NodeFailedPayload,
     NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload, PromotionSignaledPayload,
     RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
-    RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
 use yunta_core::{
@@ -172,6 +172,16 @@ fn tool_use(tool: &str) -> EventPayload {
         output_tokens: None,
         cached_input_tokens: None,
         text: None,
+    })
+}
+
+/// A node parked on a person, as `gate_waiting` records it.
+fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
+    EventPayload::GateWaiting(GateWaitingPayload {
+        summary: "answer before going on".to_string(),
+        evidence: String::new(),
+        options: Vec::new(),
+        external_ref: external_ref.map(str::to_string),
     })
 }
 
@@ -901,10 +911,84 @@ nodes:
             on: WaitingOn::Node {
                 node: "approve".into(),
                 external_ref: Some("https://forge/pr/1".to_string()),
+                reason: Some("waiting on external gate: https://forge/pr/1".to_string()),
             }
         }
     );
     assert_eq!(buckets(&frame.flow), [0, 0, 0, 1, 0]);
+}
+
+#[test]
+fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
+    // A node id names *which* node stopped; only the sentence the engine
+    // wrote when it stopped the run names *what* that node asked for. A
+    // surface that had to read the log again for it could print a
+    // sentence the frame beside it does not agree with.
+    let workflow = chain();
+    let asked = "node `plan` asked 1 question(s) awaiting an answer: what changed?";
+    let events = log(vec![
+        (0, None, created("standard")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), gate_waiting(None)),
+        (
+            3,
+            None,
+            EventPayload::RunPaused(RunPausedPayload {
+                reason: asked.to_string(),
+            }),
+        ),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Waiting {
+            on: WaitingOn::Node {
+                node: "plan".into(),
+                external_ref: None,
+                reason: Some(asked.to_string()),
+            }
+        }
+    );
+}
+
+#[test]
+fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
+    // The run resumed after its last pause, so that sentence describes a
+    // stop the run has already left behind. The node is still parked and
+    // the frame says so, quoting nothing rather than the wrong thing.
+    let workflow = chain();
+    let events = log(vec![
+        (0, None, created("standard")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), gate_waiting(None)),
+        (
+            3,
+            None,
+            EventPayload::RunPaused(RunPausedPayload {
+                reason: "token budget exceeded".to_string(),
+            }),
+        ),
+        (
+            4,
+            None,
+            EventPayload::RunResumed(RunResumedPayload {
+                resume_policy_applied: None,
+                policies: Vec::new(),
+            }),
+        ),
+        (5, Some("build"), started(1)),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Waiting {
+            on: WaitingOn::Node {
+                node: "plan".into(),
+                external_ref: None,
+                reason: None,
+            }
+        }
+    );
 }
 
 #[test]

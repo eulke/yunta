@@ -1,8 +1,8 @@
 copied_test_helpers 0
 exit_failure_in_cli 2
 git_command_new_files 2
-let_underscore_in_prod 26
-prod_fns_over_50_lines 86
+let_underscore_in_prod 24
+prod_fns_over_50_lines 85
 space_runs_in_prod_strings 0
-src_files_over_500_lines 12
+src_files_over_500_lines 11
 utc_now_outside_clock 0

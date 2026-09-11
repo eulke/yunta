@@ -59,23 +59,23 @@ enum Command {
         /// `modes:` at all ignores this entirely.
         #[arg(long)]
         mode: Option<ModeName>,
-        /// Prints progress as the run advances, polling the event log
-        /// every 500ms instead of only at the end.
-        #[arg(long)]
-        follow: bool,
+        /// Prints the run id and nothing else: no progress, and no
+        /// closing block. The verdict travels in the exit code. A
+        /// diagnostic and the budget warning are printed either way —
+        /// quiet is about progress, not about problems.
+        #[arg(long, conflicts_with = "json")]
+        quiet: bool,
         /// Creates the run, then hands it off to a detached `yunta
         /// resume` child and returns immediately with the run id — the
         /// workflow keeps running independent of this invocation (the
         /// same thing `run_workflow` triggers internally so the MCP
-        /// control plane never blocks for a run's duration). Mutually
-        /// exclusive with `--follow` (there is nothing left in this
-        /// process to follow).
-        #[arg(long, conflicts_with = "follow")]
+        /// control plane never blocks for a run's duration).
+        #[arg(long)]
         detach: bool,
         /// Prints the run's outcome as one versioned JSON document
-        /// instead of the human progress lines — the same DTO the MCP
-        /// control plane returns. Suppresses `--follow`'s streaming.
-        #[arg(long, conflicts_with = "follow")]
+        /// instead of the human progress and closing block — the same
+        /// DTO the MCP control plane returns.
+        #[arg(long)]
         json: bool,
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
@@ -92,6 +92,14 @@ enum Command {
     Resume {
         /// The run id to resume.
         run_id: RunId,
+        /// Prints the run id and nothing else, the same way `run` does.
+        #[arg(long, conflicts_with = "json")]
+        quiet: bool,
+        /// Prints the run's outcome as one versioned JSON document —
+        /// the same document `run --json` prints, because the two
+        /// commands execute the same thing.
+        #[arg(long)]
+        json: bool,
     },
     /// Answers a paused run's gate decision from a separate process — no
     /// live surface attached to the run itself. Records the decision
@@ -305,7 +313,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             adapter,
             fixture,
             mode,
-            follow,
+            quiet,
             detach,
             json,
         } => {
@@ -315,14 +323,18 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 adapter.as_ref(),
                 fixture.as_deref(),
                 mode.as_ref(),
-                follow,
+                quiet,
                 detach,
                 json,
             )
             .await
         }
         Command::Status { run_id, json } => commands::status::status(&run_id, json),
-        Command::Resume { run_id } => commands::resume::resume(&run_id).await,
+        Command::Resume {
+            run_id,
+            quiet,
+            json,
+        } => commands::resume::resume(&run_id, quiet, json).await,
         Command::ResolveGate {
             run_id,
             option,
