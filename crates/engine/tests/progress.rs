@@ -137,6 +137,7 @@ fn a_failed_node_appears_under_failed_with_its_outcome() {
                 outcome: "clippy: 3 warnings".to_string(),
                 tokens_used: TokenUsage::default(),
                 retryable: false,
+                diagnostics: Vec::new(),
             }),
         ),
     ];

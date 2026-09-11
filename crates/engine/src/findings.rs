@@ -1,57 +1,57 @@
-//! `kind: findings` validation.
+//! The findings artifact's registration rules.
 //!
-//! Mirrors `ledger.rs`'s shape: collect every violation, never just the
-//! first. What's validated here is structural — the schema itself
-//! already forces every field but `proposed_criterion` to be present;
-//! this adds the one cross-entry rule (`id` uniqueness) and the
-//! non-empty checks a raw `String` type can't express on its own.
+//! Shape is `yunta-core`'s frontier: by the time a `FindingsFile`
+//! exists, every key is known and every field is present. What is left
+//! is the one rule that spans the whole document — an id used twice —
+//! and the emptiness a `String` cannot refuse on its own.
 
 use std::collections::HashSet;
 
-use thiserror::Error;
+use yunta_core::diagnostic::{Diagnostic, Problem, Subject};
 use yunta_core::{FindingId, FindingsFile};
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum FindingsError {
-    #[error("{id}: duplicate finding id")]
-    DuplicateId { id: FindingId },
-
-    #[error("{id}: `title` is empty")]
-    EmptyTitle { id: FindingId },
-
-    #[error("{id}: `location` is empty")]
-    EmptyLocation { id: FindingId },
-
-    #[error("{id}: `detail` is empty")]
-    EmptyDetail { id: FindingId },
+fn broke(index: usize, id: &FindingId, code: &'static str, detail: &str) -> Diagnostic {
+    Diagnostic::new(
+        Subject::Finding {
+            id: Some(id.clone()),
+            index,
+        },
+        Problem::rule(code, detail),
+    )
 }
 
 /// Validates a parsed findings file, collecting every violation rather
 /// than stopping at the first.
-pub fn register(file: &FindingsFile) -> Vec<FindingsError> {
+pub fn register(file: &FindingsFile) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
     let mut known_ids: HashSet<&FindingId> = HashSet::new();
 
-    for finding in &file.findings {
+    for (index, finding) in file.findings.iter().enumerate() {
         if !known_ids.insert(&finding.id) {
-            errors.push(FindingsError::DuplicateId {
-                id: finding.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &finding.id,
+                "duplicate-id",
+                "a second finding already carries this id; every id is declared once",
+            ));
         }
-        if finding.title.trim().is_empty() {
-            errors.push(FindingsError::EmptyTitle {
-                id: finding.id.clone(),
-            });
-        }
-        if finding.location.trim().is_empty() {
-            errors.push(FindingsError::EmptyLocation {
-                id: finding.id.clone(),
-            });
-        }
-        if finding.detail.trim().is_empty() {
-            errors.push(FindingsError::EmptyDetail {
-                id: finding.id.clone(),
-            });
+        for (value, key) in [
+            (&finding.title, "title"),
+            (&finding.location, "location"),
+            (&finding.detail, "detail"),
+        ] {
+            if value.trim().is_empty() {
+                errors.push(broke(
+                    index,
+                    &finding.id,
+                    match key {
+                        "title" => "empty-title",
+                        "location" => "empty-location",
+                        _ => "empty-detail",
+                    },
+                    &format!("`{key}` is empty"),
+                ));
+            }
         }
     }
 

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta findings",
+  "description": "The artifact's document — sole top-level key `findings:`, mirroring\na ledger's `tasks:`-only shape.",
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FindingEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "findings"
+  ],
+  "$defs": {
+    "FindingEntry": {
+      "description": "One finding as the artifact declares it.",
+      "type": "object",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "location": {
+          "type": "string"
+        },
+        "proposed_criterion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedCriterionEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "title",
+        "location",
+        "detail"
+      ]
+    },
+    "FindingId": {
+      "description": "A finding id: not empty and without control characters",
+      "type": "string",
+      "minLength": 1
+    },
+    "FindingSeverity": {
+      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
+      "type": "string",
+      "enum": [
+        "blocking",
+        "major",
+        "minor",
+        "note"
+      ]
+    },
+    "ProposedCriterionEntry": {
+      "description": "A criterion the author proposes to verify the finding's fix.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cmd"
+      ]
+    }
+  }
+}

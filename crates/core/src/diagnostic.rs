@@ -72,18 +72,32 @@ impl From<crate::ArtifactKind> for DocumentKind {
 
 /// Which document a report is about: its kind, and where a reader finds
 /// it.
+///
+/// `kind` is absent for an artifact the engine never interprets. That is
+/// not a gap: an opaque artifact has no shape to demand, so a problem
+/// with one can only ever be about the file itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DocumentRef {
-    pub kind: DocumentKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<DocumentKind>,
     /// As a reader would type it to open the file.
     pub path: String,
 }
 
 impl DocumentRef {
-    pub fn new(kind: DocumentKind, path: impl Into<String>) -> Self {
+    pub fn new(kind: impl Into<Option<DocumentKind>>, path: impl Into<String>) -> Self {
         DocumentRef {
-            kind,
+            kind: kind.into(),
             path: path.into(),
+        }
+    }
+
+    /// How the document names itself to a reader: its kind when it has
+    /// one, otherwise just an artifact.
+    pub fn label(&self) -> &'static str {
+        match self.kind {
+            Some(kind) => kind.label(),
+            None => "artifact",
         }
     }
 }
@@ -572,18 +586,22 @@ impl Report {
 
     /// The same facts as an instruction to whoever wrote the file, with
     /// the shape it should have had — so a writer that never saw the
-    /// shape still converges on the next attempt.
-    pub fn for_agent(&self, shape: &str) -> String {
+    /// shape still converges on the next attempt. `shape` is absent for
+    /// a document with no declared shape, and then the instruction
+    /// stands on the problems alone.
+    pub fn for_agent(&self, shape: Option<&str>) -> String {
         let mut text = format!(
             "The {} you wrote at {} could not be read. Fix these and write the file again:\n",
-            self.document.kind.label(),
+            self.document.label(),
             self.document.path
         );
         for (position, diagnostic) in self.diagnostics.iter().enumerate() {
             text.push_str(&format!("\n  {}. {diagnostic}", position + 1));
         }
-        text.push_str("\n\nThe shape it must have:\n\n");
-        text.push_str(shape);
+        if let Some(shape) = shape {
+            text.push_str("\n\nThe shape it must have:\n\n");
+            text.push_str(shape);
+        }
         text
     }
 }

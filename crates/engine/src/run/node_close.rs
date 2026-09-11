@@ -231,13 +231,19 @@ pub(super) async fn close_node_staged(
             write_progress(ctx).await?;
             Ok(NodeEnd::Finished)
         }
-        Err(errors) => {
-            let listed = errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("; ");
-            fail_with_tokens(ctx, node, listed, false, tokens).await
+        Err(reports) => {
+            // The node fails with the whole picture: the block a person
+            // reads, and the diagnostics behind it, which is what lets a
+            // repair attempt address the problems instead of the prompt.
+            fail_with_diagnostics(
+                ctx,
+                node,
+                crate::artifacts::render_for_person(&reports),
+                crate::artifacts::diagnostics_of(&reports),
+                false,
+                tokens,
+            )
+            .await
         }
     }
 }
@@ -270,12 +276,28 @@ pub(super) async fn fail_with_tokens(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
+    fail_with_diagnostics(ctx, node, outcome, Vec::new(), retryable, tokens).await
+}
+
+/// Fails a node with the diagnostics behind the failure alongside the
+/// sentence a person reads. Every other `fail*` is this one with no
+/// diagnostics — a failure that has none (a hook's exit code, a budget)
+/// is not missing them, it simply is not about a document.
+pub(super) async fn fail_with_diagnostics(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    outcome: String,
+    diagnostics: Vec<yunta_core::diagnostic::Diagnostic>,
+    retryable: bool,
+    tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::NodeFailed(NodeFailedPayload {
             outcome,
             tokens_used: tokens,
             retryable,
+            diagnostics,
         }),
     )
     .await?;

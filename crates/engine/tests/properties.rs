@@ -70,6 +70,7 @@ fn payload() -> impl Strategy<Value = EventPayload> {
                 outcome,
                 tokens_used,
                 retryable,
+                diagnostics: Vec::new(),
             })
         }),
         task_id().prop_map(|id| EventPayload::TaskRegistered(TaskRegisteredPayload {

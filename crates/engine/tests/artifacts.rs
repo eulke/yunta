@@ -1,7 +1,21 @@
 use std::path::Path;
 
+use yunta_core::diagnostic::Report;
 use yunta_core::{sha256_hex, Node};
-use yunta_engine::{close_artifacts, ArtifactError};
+use yunta_engine::{close_artifacts, render_for_person};
+
+/// Every rule broken across every failing artifact, by its stable code.
+fn codes(reports: &[Report]) -> Vec<&str> {
+    reports
+        .iter()
+        .flat_map(|report| report.diagnostics.iter().map(|d| d.code()))
+        .collect()
+}
+
+/// The failing artifacts as a person reads them.
+fn rendered(reports: &[Report]) -> String {
+    render_for_person(reports)
+}
 
 fn node(yaml: &str) -> Node {
     serde_norway::from_str(yaml).unwrap()
@@ -51,13 +65,10 @@ artifacts:
     );
 
     let errors = close_artifacts(&n, run_dir.path(), None).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::Missing { node, name }] => {
-            assert_eq!(node.as_str(), "report");
-            assert_eq!(name, "report.md");
-        }
-        other => panic!("expected one Missing error, got {other:?}"),
-    }
+    assert_eq!(codes(&errors), ["artifact-missing"]);
+    let text = rendered(&errors);
+    assert!(text.contains("artifacts/report.md"), "{text}");
+    assert!(text.contains("node `report`"), "{text}");
 }
 
 #[test]
@@ -75,7 +86,7 @@ artifacts:
     );
 
     let errors = close_artifacts(&n, run_dir.path(), None).unwrap_err();
-    assert!(matches!(&errors[..], [ArtifactError::Empty { .. }]));
+    assert_eq!(codes(&errors), ["artifact-empty"]);
 }
 
 #[test]
@@ -155,14 +166,13 @@ tasks:
     );
 
     let errors = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::InvalidLedger { node, name, errors }] => {
-            assert_eq!(node.as_str(), "plan");
-            assert_eq!(name, "plan.yaml");
-            assert_eq!(errors.len(), 2);
-        }
-        other => panic!("expected one InvalidLedger error, got {other:?}"),
-    }
+    // Every violation reaches the reader, not a count of them, and in
+    // document order: someone correcting a file works top to bottom.
+    assert_eq!(codes(&errors), ["no-criteria", "empty-scope"]);
+    let text = rendered(&errors);
+    assert!(text.contains("artifacts/plan.yaml: 2 errors"), "{text}");
+    assert!(text.contains("task `T001`: no criteria declared"), "{text}");
+    assert!(text.contains("task `T002`: `scope` is empty"), "{text}");
 }
 
 #[test]
@@ -171,10 +181,7 @@ fn a_malformed_ledger_yaml_is_a_typed_error_not_a_panic() {
     write_artifact(run_dir.path(), "plan.yaml", "tasks: [not, a, ledger");
 
     let errors = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
-    assert!(matches!(
-        &errors[..],
-        [ArtifactError::MalformedLedger { .. }]
-    ));
+    assert_eq!(codes(&errors), ["not-yaml"]);
 }
 
 const REVIEW_NODE: &str = r#"
@@ -233,14 +240,9 @@ findings:
     );
 
     let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::InvalidFindings { node, name, errors }] => {
-            assert_eq!(node.as_str(), "review");
-            assert_eq!(name, "findings.yaml");
-            assert_eq!(errors.len(), 2, "duplicate id + empty title");
-        }
-        other => panic!("expected one InvalidFindings error, got {other:?}"),
-    }
+    assert_eq!(codes(&errors), ["duplicate-id", "empty-title"]);
+    let text = rendered(&errors);
+    assert!(text.contains("artifacts/findings.yaml: 2 errors"), "{text}");
 }
 
 #[test]
@@ -249,10 +251,7 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     write_artifact(run_dir.path(), "findings.yaml", "findings: [not, valid");
 
     let errors = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
-    assert!(matches!(
-        &errors[..],
-        [ArtifactError::MalformedFindings { .. }]
-    ));
+    assert_eq!(codes(&errors), ["not-yaml"]);
 }
 
 const ASK_NODE: &str = r#"
@@ -304,14 +303,9 @@ questions:
     );
 
     let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::InvalidQuestions { node, name, errors }] => {
-            assert_eq!(node.as_str(), "ask");
-            assert_eq!(name, "questions.yaml");
-            assert_eq!(errors.len(), 1);
-        }
-        other => panic!("expected one InvalidQuestions error, got {other:?}"),
-    }
+    assert_eq!(codes(&errors).len(), 1);
+    let text = rendered(&errors);
+    assert!(text.contains("artifacts/questions.yaml"), "{text}");
 }
 
 #[test]
@@ -334,14 +328,12 @@ questions:
     );
 
     let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::InvalidQuestions { node, name, errors }] => {
-            assert_eq!(node.as_str(), "ask");
-            assert_eq!(name, "questions.yaml");
-            assert_eq!(errors.len(), 2, "duplicate id + empty text");
-        }
-        other => panic!("expected one InvalidQuestions error, got {other:?}"),
-    }
+    assert_eq!(codes(&errors), ["duplicate-id", "empty-text"]);
+    let text = rendered(&errors);
+    assert!(
+        text.contains("artifacts/questions.yaml: 2 errors"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -350,10 +342,7 @@ fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
     write_artifact(run_dir.path(), "questions.yaml", "questions: [not, valid");
 
     let errors = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
-    assert!(matches!(
-        &errors[..],
-        [ArtifactError::MalformedQuestions { .. }]
-    ));
+    assert_eq!(codes(&errors), ["not-yaml"]);
 }
 
 #[test]
@@ -388,24 +377,12 @@ artifacts:
     );
 
     let errors = close_artifacts(&n, run_dir.path(), Some(5)).unwrap_err();
-    match &errors[..] {
-        [ArtifactError::Oversized {
-            node,
-            name,
-            bytes,
-            max_bytes,
-        }] => {
-            assert_eq!(node.as_str(), "report");
-            assert_eq!(name, "report.md");
-            assert_eq!(*bytes, 10);
-            assert_eq!(*max_bytes, 5);
-        }
-        other => panic!("expected one Oversized error, got {other:?}"),
-    }
-    let rendered = errors[0].to_string();
+    assert_eq!(codes(&errors), ["artifact-oversized"]);
+    // Both numbers on the table, never a truncation.
     assert_eq!(
-        rendered,
-        "node `report` produced artifact `report.md` at 10 bytes — `limits.max_artifact_bytes` is 5"
+        rendered(&errors),
+        "artifacts/report.md: 1 error\n  \
+         the document: is 10 bytes; `limits.max_artifact_bytes` is 5"
     );
 }
 

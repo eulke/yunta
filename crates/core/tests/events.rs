@@ -129,6 +129,7 @@ fn all_kinds() -> Vec<EventPayload> {
             outcome: "criteria red".to_string(),
             tokens_used: TokenUsage::default(),
             retryable: true,
+            diagnostics: Vec::new(),
         }),
         EventPayload::HookExecuted(HookExecutedPayload {
             phase: HookPhase::After,

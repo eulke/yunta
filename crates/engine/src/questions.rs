@@ -1,49 +1,56 @@
-//! `kind: questions` validation.
+//! The questions artifact's registration rules.
 //!
-//! Mirrors `findings.rs`'s shape: collect every violation, never just the
-//! first. `id` uniqueness and non-empty `text` are cross-entry/basic
-//! checks a raw `String` type can't express on its own; `choice` needing
-//! non-empty `values` is the one additional rule beyond what the schema
-//! itself enforces.
+//! Shape is `yunta-core`'s frontier: by the time a `QuestionsFile`
+//! exists, every key is known and `answer_type` is one of the three.
+//! What is left is the rule that spans the document — an id used twice
+//! — and the two a type cannot express: text that is blank, and a
+//! `choice` with nothing to choose from.
 
 use std::collections::HashSet;
 
-use thiserror::Error;
+use yunta_core::diagnostic::{Diagnostic, Problem, Subject};
 use yunta_core::{AnswerType, QuestionId, QuestionsFile};
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum QuestionsError {
-    #[error("{id}: duplicate question id")]
-    DuplicateId { id: QuestionId },
-
-    #[error("{id}: `text` is empty")]
-    EmptyText { id: QuestionId },
-
-    #[error("{id}: answer_type is `choice` but `values` is empty")]
-    MissingValues { id: QuestionId },
+fn broke(index: usize, id: &QuestionId, code: &'static str, detail: &str) -> Diagnostic {
+    Diagnostic::new(
+        Subject::Question {
+            id: Some(id.clone()),
+            index,
+        },
+        Problem::rule(code, detail),
+    )
 }
 
 /// Validates a parsed questions file, collecting every violation rather
 /// than stopping at the first.
-pub fn register(file: &QuestionsFile) -> Vec<QuestionsError> {
+pub fn register(file: &QuestionsFile) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
     let mut known_ids: HashSet<&QuestionId> = HashSet::new();
 
-    for question in &file.questions {
+    for (index, question) in file.questions.iter().enumerate() {
         if !known_ids.insert(&question.id) {
-            errors.push(QuestionsError::DuplicateId {
-                id: question.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &question.id,
+                "duplicate-id",
+                "a second question already carries this id; every id is declared once",
+            ));
         }
         if question.text.trim().is_empty() {
-            errors.push(QuestionsError::EmptyText {
-                id: question.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &question.id,
+                "empty-text",
+                "`text` is empty; a person has to be able to read the question",
+            ));
         }
         if question.answer_type == AnswerType::Choice && question.values.is_empty() {
-            errors.push(QuestionsError::MissingValues {
-                id: question.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &question.id,
+                "missing-values",
+                "`answer_type` is `choice` but `values` is empty; list the answers allowed",
+            ));
         }
     }
 

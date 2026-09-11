@@ -1,7 +1,26 @@
+use yunta_core::diagnostic::Diagnostic;
 use yunta_core::events::CriterionType;
 use yunta_core::Criterion;
 use yunta_core::{Ledger, Task};
-use yunta_engine::{register, LedgerError};
+use yunta_engine::register;
+
+/// The stable name of every rule a ledger broke, in the order reported.
+/// Asserting on these rather than on a variant is deliberate: the code
+/// is what a receipt counts and a log is searched by, so it is the part
+/// that has to stay put while the wording is free to improve.
+fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
+    diagnostics.iter().map(Diagnostic::code).collect()
+}
+
+/// Every violation as a reader sees it, joined — what the assertions
+/// about naming and wording read.
+fn rendered(diagnostics: &[Diagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>, depends_on: &[&str]) -> Task {
     Task {
@@ -60,7 +79,8 @@ fn duplicate_id_is_reported() {
         ],
     };
     let errors = register(&ledger);
-    assert_eq!(errors, vec![LedgerError::DuplicateId { id: "a".into() }]);
+    assert_eq!(codes(&errors), ["duplicate-id"]);
+    assert!(rendered(&errors).contains("task `a`"));
 }
 
 #[test]
@@ -69,13 +89,8 @@ fn unknown_dependency_is_reported() {
         tasks: vec![task("a", &["src/**"], vec![cmd("true")], &["ghost"])],
     };
     let errors = register(&ledger);
-    assert_eq!(
-        errors,
-        vec![LedgerError::UnknownDependency {
-            task: "a".into(),
-            unknown: "ghost".into(),
-        }]
-    );
+    assert_eq!(codes(&errors), ["unknown-dependency"]);
+    assert!(rendered(&errors).contains("`ghost`"));
 }
 
 #[test]
@@ -87,9 +102,7 @@ fn dependency_cycle_is_reported() {
         ],
     };
     let errors = register(&ledger);
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, LedgerError::DependencyCycle { .. })));
+    assert!(codes(&errors).contains(&"dependency-cycle"));
 }
 
 #[test]
@@ -98,7 +111,7 @@ fn empty_scope_is_reported() {
         tasks: vec![task("a", &[], vec![cmd("true")], &[])],
     };
     let errors = register(&ledger);
-    assert_eq!(errors, vec![LedgerError::EmptyScope { task: "a".into() }]);
+    assert_eq!(codes(&errors), ["empty-scope"]);
 }
 
 #[test]
@@ -108,7 +121,7 @@ fn empty_title_is_reported() {
     };
     ledger.tasks[0].title = "   ".to_string();
     let errors = register(&ledger);
-    assert_eq!(errors, vec![LedgerError::EmptyTitle { task: "a".into() }]);
+    assert_eq!(codes(&errors), ["empty-title"]);
 }
 
 #[test]
@@ -117,7 +130,7 @@ fn no_criteria_is_reported() {
         tasks: vec![task("a", &["src/**"], vec![], &[])],
     };
     let errors = register(&ledger);
-    assert_eq!(errors, vec![LedgerError::NoCriteria { task: "a".into() }]);
+    assert_eq!(codes(&errors), ["no-criteria"]);
 }
 
 #[test]
@@ -131,10 +144,7 @@ fn all_criteria_being_guards_is_reported() {
         )],
     };
     let errors = register(&ledger);
-    assert_eq!(
-        errors,
-        vec![LedgerError::AllCriteriaAreGuards { task: "a".into() }]
-    );
+    assert_eq!(codes(&errors), ["all-criteria-are-guards"]);
 }
 
 #[test]
@@ -160,10 +170,7 @@ fn manual_review_without_justification_is_reported() {
     };
     ledger.tasks[0].manual_review = true;
     let errors = register(&ledger);
-    assert_eq!(
-        errors,
-        vec![LedgerError::ManualReviewWithoutJustification { task: "a".into() }]
-    );
+    assert_eq!(codes(&errors), ["manual-review-without-justification"]);
 }
 
 #[test]
@@ -185,9 +192,7 @@ fn overlapping_scopes_without_a_dependency_are_reported() {
         ],
     };
     let errors = register(&ledger);
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, LedgerError::OverlappingScope { .. })));
+    assert!(codes(&errors).contains(&"overlapping-scope"));
 }
 
 #[test]
@@ -213,28 +218,40 @@ fn disjoint_scopes_never_get_flagged() {
 }
 
 #[test]
-fn every_error_message_names_the_task_and_the_rule() {
-    assert_eq!(
-        LedgerError::EmptyScope {
-            task: "graph-cmd".into()
-        }
-        .to_string(),
-        "graph-cmd: `scope` is empty — every task must declare at least one glob"
+fn every_violation_names_the_task_the_field_and_what_to_do() {
+    let ledger = Ledger {
+        tasks: vec![
+            task("graph-cmd", &[], vec![cmd("true")], &[]),
+            task(
+                "parse-events",
+                &["src/**"],
+                vec![cmd("true")],
+                &["storage-init"],
+            ),
+            task(
+                "T004",
+                &["docs/**"],
+                vec![guard("cargo clippy --workspace -- -D warnings")],
+                &[],
+            ),
+        ],
+    };
+    let errors = register(&ledger);
+    let text = rendered(&errors);
+    assert!(
+        text.contains("task `graph-cmd`: `scope` is empty; every task declares at least one glob"),
+        "{text}"
     );
-    assert_eq!(
-        LedgerError::UnknownDependency {
-            task: "parse-events".into(),
-            unknown: "storage-init".into()
-        }
-        .to_string(),
-        "parse-events: `depends_on` references unknown task `storage-init`"
+    assert!(
+        text.contains(
+            "task `parse-events`: `depends_on` names `storage-init`, which no task in this \
+             file declares"
+        ),
+        "{text}"
     );
-    assert_eq!(
-        LedgerError::AllCriteriaAreGuards {
-            task: "T004".into()
-        }
-        .to_string(),
-        "T004: all criteria are `guard` — at least one must be able to fail before the work"
+    assert!(
+        text.contains("task `T004`: every criterion is a `guard`"),
+        "{text}"
     );
 }
 

@@ -409,9 +409,17 @@ pub struct NodeFinishedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFailedPayload {
+    /// How the failure reads to a person — derived from `diagnostics`
+    /// when there are any, so the two never disagree.
     pub outcome: String,
     pub tokens_used: TokenUsage,
     pub retryable: bool,
+    /// What went wrong, in the form a later reader renders its own way
+    /// and a receipt counts without reading prose. Additive (D70): a log
+    /// written before this field existed reads back with none, and every
+    /// such failure still carries its `outcome`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<crate::diagnostic::Diagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

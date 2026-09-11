@@ -1,102 +1,97 @@
-//! Ledger parsing and registration.
+//! The ledger's registration rules.
 //!
-//! `register` runs seven validation rules and returns every
-//! violation found, never just the first — whoever writes this by hand
-//! corrects once, not seven times. What it does **not** validate: whether
-//! the criteria commands themselves exist or are correct — that's the
-//! red pre-check's job, which is where a trivial or broken
-//! criterion actually gets caught by being run.
+//! Shape is `yunta-core`'s frontier: by the time a `Ledger` exists, every
+//! key is known and every value has its type. What is left are the rules
+//! that only hold across a whole document — an id used twice, a
+//! dependency on a task nobody declared, two independent tasks reaching
+//! for the same files.
+//!
+//! Every rule reports a [`Diagnostic`] with the task as its subject and
+//! a stable code, so the whole document's problems reach a reader as one
+//! list and a receipt can count them without reading prose. What is
+//! **not** validated here: whether a criterion's command exists or is
+//! correct. The red pre-check answers that by running it, which is where
+//! a trivial or broken criterion actually gives itself away.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use thiserror::Error;
+use yunta_core::diagnostic::{Diagnostic, Problem, Subject};
 use yunta_core::{Ledger, Task, TaskId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum LedgerError {
-    #[error("{id}: duplicate task id")]
-    DuplicateId { id: TaskId },
-
-    #[error("{task}: `depends_on` references unknown task `{unknown}`")]
-    UnknownDependency { task: TaskId, unknown: TaskId },
-
-    #[error("cycle in depends_on: {path}")]
-    DependencyCycle { path: String },
-
-    #[error(
-        "`{a}` and `{b}`: scopes overlap (`{glob_a}` / `{glob_b}`) without a dependency between them"
-    )]
-    OverlappingScope {
-        a: TaskId,
-        b: TaskId,
-        glob_a: String,
-        glob_b: String,
-    },
-
-    #[error("{task}: `scope` is empty — every task must declare at least one glob")]
-    EmptyScope { task: TaskId },
-
-    #[error("{task}: `title` is empty")]
-    EmptyTitle { task: TaskId },
-
-    #[error("{task}: no criteria declared — every task needs at least one")]
-    NoCriteria { task: TaskId },
-
-    #[error(
-        "{task}: all criteria are `guard` — at least one must be able to fail before the work"
-    )]
-    AllCriteriaAreGuards { task: TaskId },
-
-    #[error("{task}: `manual_review: true` without `justification`")]
-    ManualReviewWithoutJustification { task: TaskId },
+/// Names the task a rule blames, keeping its position for the rendering
+/// that needs it.
+fn task_subject(index: usize, id: &TaskId) -> Subject {
+    Subject::Task {
+        id: Some(id.clone()),
+        index,
+    }
 }
 
-/// Validates a parsed ledger against every rule, collecting
-/// every violation rather than stopping at the first.
-pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
+fn broke(index: usize, id: &TaskId, code: &'static str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::new(task_subject(index, id), Problem::rule(code, detail))
+}
+
+/// Validates a parsed ledger against every rule, collecting every
+/// violation rather than stopping at the first — whoever wrote this
+/// corrects once, not once per round.
+pub fn register(ledger: &Ledger) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
 
     let mut known_ids: HashSet<TaskId> = HashSet::new();
-    for task in &ledger.tasks {
+    for (index, task) in ledger.tasks.iter().enumerate() {
         if !known_ids.insert(task.id.clone()) {
-            errors.push(LedgerError::DuplicateId {
-                id: task.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &task.id,
+                "duplicate-id",
+                "a second task already carries this id; every id is declared once",
+            ));
         }
     }
 
-    for task in &ledger.tasks {
+    for (index, task) in ledger.tasks.iter().enumerate() {
         for dep in &task.depends_on {
             if !known_ids.contains(dep) {
-                errors.push(LedgerError::UnknownDependency {
-                    task: task.id.clone(),
-                    unknown: dep.clone(),
-                });
+                errors.push(broke(
+                    index,
+                    &task.id,
+                    "unknown-dependency",
+                    format!("`depends_on` names `{dep}`, which no task in this file declares"),
+                ));
             }
         }
 
         if task.title.trim().is_empty() {
-            errors.push(LedgerError::EmptyTitle {
-                task: task.id.clone(),
-            });
+            errors.push(broke(index, &task.id, "empty-title", "`title` is empty"));
         }
         if task.scope.is_empty() {
-            errors.push(LedgerError::EmptyScope {
-                task: task.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &task.id,
+                "empty-scope",
+                "`scope` is empty; every task declares at least one glob, the only paths it \
+                 may touch",
+            ));
         }
         if task.criteria.is_empty() {
-            errors.push(LedgerError::NoCriteria {
-                task: task.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &task.id,
+                "no-criteria",
+                "no criteria declared; every task needs at least one command that verifies it",
+            ));
         } else if task
             .criteria
             .iter()
             .all(|c| c.r#type == Some(yunta_core::events::CriterionType::Guard))
         {
-            errors.push(LedgerError::AllCriteriaAreGuards {
-                task: task.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &task.id,
+                "all-criteria-are-guards",
+                "every criterion is a `guard`; at least one must be able to fail before the \
+                 work, or there is nothing the work has to make pass",
+            ));
         }
         if task.manual_review
             && task
@@ -106,9 +101,13 @@ pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
                 .trim()
                 .is_empty()
         {
-            errors.push(LedgerError::ManualReviewWithoutJustification {
-                task: task.id.clone(),
-            });
+            errors.push(broke(
+                index,
+                &task.id,
+                "manual-review-without-justification",
+                "`manual_review: true` without `justification`; say why no command can verify \
+                 this task",
+            ));
         }
     }
 
@@ -118,7 +117,13 @@ pub fn register(ledger: &Ledger) -> Vec<LedgerError> {
             .map(TaskId::as_str)
             .collect::<Vec<_>>()
             .join(" -> ");
-        errors.push(LedgerError::DependencyCycle { path });
+        errors.push(Diagnostic::new(
+            Subject::Document,
+            Problem::rule(
+                "dependency-cycle",
+                format!("`depends_on` forms a cycle: {path}"),
+            ),
+        ));
     }
 
     errors.extend(overlapping_scopes(&ledger.tasks));
@@ -173,7 +178,7 @@ fn transitively_related(tasks: &[Task]) -> HashSet<(TaskId, TaskId)> {
 /// subdirectories) but never misses a real collision — for a safety
 /// check, a false alarm the author can adjust is the right side to err
 /// on, not a silent miss.
-fn overlapping_scopes(tasks: &[Task]) -> Vec<LedgerError> {
+fn overlapping_scopes(tasks: &[Task]) -> Vec<Diagnostic> {
     let related = transitively_related(tasks);
     let mut errors = Vec::new();
 
@@ -188,12 +193,17 @@ fn overlapping_scopes(tasks: &[Task]) -> Vec<LedgerError> {
             for glob_a in &a.scope {
                 for glob_b in &b.scope {
                     if globs_might_overlap(glob_a, glob_b) {
-                        errors.push(LedgerError::OverlappingScope {
-                            a: a.id.clone(),
-                            b: b.id.clone(),
-                            glob_a: glob_a.clone(),
-                            glob_b: glob_b.clone(),
-                        });
+                        errors.push(broke(
+                            i,
+                            &a.id,
+                            "overlapping-scope",
+                            format!(
+                                "`{glob_a}` overlaps task `{}`'s `{glob_b}`, and neither \
+                                 depends on the other; give them disjoint scopes or declare \
+                                 the dependency",
+                                b.id
+                            ),
+                        ));
                     }
                 }
             }

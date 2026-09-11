@@ -81,6 +81,7 @@ fn a_retryable_failure_can_restart_and_then_finish() {
                 outcome: "criteria red".to_string(),
                 tokens_used: tokens(5, 2),
                 retryable: true,
+                diagnostics: Vec::new(),
             }),
         ),
         event(
@@ -341,6 +342,7 @@ fn replay_is_deterministic_across_several_fixtures() {
                     outcome: "bad".to_string(),
                     tokens_used: tokens(2, 2),
                     retryable: false,
+                    diagnostics: Vec::new(),
                 }),
             ),
             event(

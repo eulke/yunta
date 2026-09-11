@@ -162,7 +162,7 @@ fn a_report_for_an_agent_is_an_instruction_to_rewrite_the_file() {
             ),
         )],
     );
-    let text = report.for_agent(LEDGER_SHAPE);
+    let text = report.for_agent(Some(LEDGER_SHAPE));
     assert!(text.contains("artifacts/plan.yaml"), "{text}");
     assert!(text.contains("could not be read"), "{text}");
     assert!(text.contains("write the file again"), "{text}");
@@ -178,7 +178,7 @@ fn a_report_for_an_agent_carries_the_shape_it_should_have_written() {
             Problem::rule("no-criteria", "no criteria declared"),
         )],
     );
-    let text = report.for_agent(LEDGER_SHAPE);
+    let text = report.for_agent(Some(LEDGER_SHAPE));
     assert!(
         text.contains("tasks:"),
         "the agent that never saw the shape gets it here: {text}"

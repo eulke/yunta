@@ -238,6 +238,7 @@ async fn resolve_from_poll(
                     ),
                     tokens_used: TokenUsage::default(),
                     retryable: true,
+                    diagnostics: Vec::new(),
                 }),
             )
             .await?;
@@ -256,6 +257,7 @@ async fn resolve_from_poll(
                     outcome: "the pull request was closed without approval".to_string(),
                     tokens_used: TokenUsage::default(),
                     retryable: false,
+                    diagnostics: Vec::new(),
                 }),
             )
             .await?;
@@ -469,6 +471,7 @@ pub(super) async fn resolve_internal_gate(
                     outcome: format!("gate chose `{chosen}` — re-routing to `{target}`"),
                     tokens_used: TokenUsage::default(),
                     retryable: true,
+                    diagnostics: Vec::new(),
                 }),
             )
             .await?;
@@ -590,6 +593,7 @@ async fn degrade_to_console(
                 outcome: "rejected from the console".to_string(),
                 tokens_used: TokenUsage::default(),
                 retryable: true,
+                diagnostics: Vec::new(),
             }),
         )
         .await?;
@@ -615,6 +619,7 @@ async fn render_or_fail_here(
                     outcome: e.to_string(),
                     tokens_used: TokenUsage::default(),
                     retryable: false,
+                    diagnostics: Vec::new(),
                 }),
             )
             .await?;

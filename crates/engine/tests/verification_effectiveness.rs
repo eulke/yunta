@@ -175,6 +175,7 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
                     outcome: "lint failed".to_string(),
                     tokens_used: Default::default(),
                     retryable: true,
+                    diagnostics: Vec::new(),
                 }),
             )]
             // no node_rerouted in any of these — the re-route this node
@@ -202,6 +203,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                     outcome: "lint failed".to_string(),
                     tokens_used: Default::default(),
                     retryable: true,
+                    diagnostics: Vec::new(),
                 }),
             )]
         })
@@ -215,6 +217,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                 outcome: "lint failed".to_string(),
                 tokens_used: Default::default(),
                 retryable: true,
+                diagnostics: Vec::new(),
             }),
         ),
         event(

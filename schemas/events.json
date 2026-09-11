@@ -503,6 +503,210 @@
         }
       ]
     },
+    "Diagnostic": {
+      "description": "One thing that is wrong with a document.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/Subject"
+        }
+      },
+      "oneOf": [
+        {
+          "description": "The bytes are not a YAML document at all.",
+          "type": "object",
+          "properties": {
+            "detail": {
+              "description": "What the parser said, kept for the log and never rendered to\na reader — a parser's account of its own scanner is not\nsomething anyone can act on.",
+              "type": "string"
+            },
+            "looks_like": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Malformation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "problem": {
+              "type": "string",
+              "const": "not-yaml"
+            }
+          },
+          "required": [
+            "problem"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "instead": {
+              "description": "What to write instead, when the key is one a reader plausibly\nreaches for.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": "string"
+            },
+            "problem": {
+              "type": "string",
+              "const": "unknown-key"
+            },
+            "valid": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "problem",
+            "key",
+            "valid"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "problem": {
+              "type": "string",
+              "const": "missing-key"
+            }
+          },
+          "required": [
+            "problem",
+            "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "example": {
+              "description": "A line the reader can copy.",
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "found": {
+              "$ref": "#/$defs/ValueShape"
+            },
+            "problem": {
+              "type": "string",
+              "const": "wrong-shape"
+            }
+          },
+          "required": [
+            "problem",
+            "found",
+            "expected",
+            "example"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "problem": {
+              "type": "string",
+              "const": "invalid-id"
+            },
+            "rule": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "problem",
+            "value",
+            "rule"
+          ]
+        },
+        {
+          "description": "A value outside the closed set its key accepts: a severity that\nis not on the ladder, an answer type that does not exist.",
+          "type": "object",
+          "properties": {
+            "problem": {
+              "type": "string",
+              "const": "unknown-value"
+            },
+            "valid": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "problem",
+            "value",
+            "valid"
+          ]
+        },
+        {
+          "description": "A rule the document broke once it was readable — the ledger's own\nregistration rules and their siblings. `code` is stable and\ncountable; `detail` is the clause a reader acts on.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "problem": {
+              "type": "string",
+              "const": "rule"
+            }
+          },
+          "required": [
+            "problem",
+            "code",
+            "detail"
+          ]
+        },
+        {
+          "description": "The document was refused and nothing in it could be named as the\ncause. That is a gap in the walk, reported as one rather than\nswallowed: `detail` carries what the parser said, for the log.",
+          "type": "object",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "problem": {
+              "type": "string",
+              "const": "unreadable"
+            }
+          },
+          "required": [
+            "problem",
+            "detail"
+          ]
+        }
+      ],
+      "required": [
+        "subject"
+      ]
+    },
     "DiscardedCandidate": {
       "type": "object",
       "properties": {
@@ -1169,6 +1373,26 @@
         "until_result"
       ]
     },
+    "Malformation": {
+      "description": "A shape a reader has met before, recognized so the diagnostic can\nname the cause instead of the symptom. A stray backtick is a\ncharacter; a Markdown fence is a mistake with a name.",
+      "oneOf": [
+        {
+          "description": "The document opens with ```` ``` ````.",
+          "type": "string",
+          "const": "markdown-fence"
+        },
+        {
+          "description": "The document is JSON, which YAML mostly accepts but this one did\nnot.",
+          "type": "string",
+          "const": "json-document"
+        },
+        {
+          "description": "Prose before the first key — an agent explaining what it wrote.",
+          "type": "string",
+          "const": "leading-prose"
+        }
+      ]
+    },
     "ModeName": {
       "description": "A mode name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -1182,7 +1406,15 @@
     "NodeFailedPayload": {
       "type": "object",
       "properties": {
+        "diagnostics": {
+          "description": "What went wrong, in the form a later reader renders its own way\nand a receipt counts without reading prose. Additive (D70): a log\nwritten before this field existed reads back with none, and every\nsuch failure still carries its `outcome`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        },
         "outcome": {
+          "description": "How the failure reads to a person — derived from `diagnostics`\nwhen there are any, so the two never disagree.",
           "type": "string"
         },
         "retryable": {
@@ -1339,6 +1571,11 @@
       "required": [
         "exit_code"
       ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "QuestionsAnsweredPayload": {
       "type": "object",
@@ -1717,6 +1954,156 @@
       "type": "string",
       "minLength": 1
     },
+    "Span": {
+      "description": "Where in the document the problem is, when the document is a file\nthe reader can open. One-based, as an editor counts.",
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "line": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "line",
+        "column"
+      ]
+    },
+    "Subject": {
+      "description": "Who is at fault, in the vocabulary of the document.\n\nEvery entry carries both its id and its position: the id is how a\nreader knows which one it is, and the position is the fallback for\nthe case that makes a serde path useless — the id itself is the\nthing that failed to parse.",
+      "oneOf": [
+        {
+          "description": "The file as a whole.",
+          "type": "object",
+          "properties": {
+            "of": {
+              "type": "string",
+              "const": "document"
+            }
+          },
+          "required": [
+            "of"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "index": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "of": {
+              "type": "string",
+              "const": "task"
+            }
+          },
+          "required": [
+            "of",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "of": {
+              "type": "string",
+              "const": "criterion"
+            },
+            "task": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "of",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FindingId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "index": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "of": {
+              "type": "string",
+              "const": "finding"
+            }
+          },
+          "required": [
+            "of",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/QuestionId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "index": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "of": {
+              "type": "string",
+              "const": "question"
+            }
+          },
+          "required": [
+            "of",
+            "index"
+          ]
+        }
+      ]
+    },
     "TaskId": {
       "description": "A task id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -1828,6 +2215,19 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ValueShape": {
+      "description": "What kind of YAML value was found where another was expected. Named\nas a person writing YAML names them, never as a deserializer names\nits own types.",
+      "type": "string",
+      "enum": [
+        "null",
+        "bool",
+        "number",
+        "string",
+        "sequence",
+        "mapping",
+        "tagged"
       ]
     }
   }

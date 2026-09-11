@@ -158,6 +158,7 @@ fn fixture_events() -> Vec<StoredEvent> {
                 outcome: "criteria still red".to_string(),
                 tokens_used: tokens(80, 40, None),
                 retryable: true,
+                diagnostics: Vec::new(),
             }),
         ),
         event(

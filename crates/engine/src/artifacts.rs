@@ -1,105 +1,30 @@
 //! Artifact verification at node close.
 //!
-//! When a node finishes, everything it declared under `artifacts.produces`
-//! must exist and be non-empty under the run's `artifacts/` directory —
-//! no matter what the agent reported. Opaque artifacts are verified
-//! by existence and content hash only, never by format. `task-ledger`,
-//! `findings` and `questions` are the interpreted
-//! kinds: each is parsed and validated with every violation reported
-//! together, and the parsed result handed back to the caller — `Ledger`
-//! for `task_registered`, `Finding`s for `finding_posted`, `Question`s so
+//! When a node finishes, everything it declared under
+//! `artifacts.produces` must exist and be non-empty under the run's
+//! `artifacts/` directory — no matter what the agent reported. Opaque
+//! artifacts are verified by existence and content hash only, never by
+//! format. `task-ledger`, `findings` and `questions` are the interpreted
+//! kinds: each is read through the frontier that names every problem at
+//! once, and the parsed result handed back to the caller — `Ledger` for
+//! `task_registered`, `Finding`s for `finding_posted`, `Question`s so
 //! `node_exec.rs` can pause the run instead of finishing the node.
+//!
+//! Every failure here is a [`Report`], whatever its cause. A missing
+//! file and a ledger with four broken rules are both "this document is
+//! not what the node declared", and giving them one shape is what lets
+//! the node's failure carry its diagnostics onto the log and render
+//! once, for whichever reader is about to see it.
 
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
+use yunta_core::diagnostic::{Diagnostic, DocumentKind, DocumentRef, Problem, Report, Subject};
 use yunta_core::events::Finding;
+use yunta_core::shape::{read, Shaped};
 use yunta_core::FindingsFile;
 use yunta_core::{
-    sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, NodeId, Question,
-    QuestionsFile,
+    sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
 };
-
-use crate::findings::FindingsError;
-use crate::ledger::LedgerError;
-use crate::questions::QuestionsError;
-
-#[derive(Debug, Error)]
-pub enum ArtifactError {
-    #[error("node `{node}` declared artifact `{name}` but never produced it")]
-    Missing { node: NodeId, name: String },
-
-    #[error(
-        "node `{node}` produced artifact `{name}` empty — a declared artifact must have content"
-    )]
-    Empty { node: NodeId, name: String },
-
-    /// Guard against accidents: a runaway artifact fails the node with
-    /// both numbers on the table, never a truncation.
-    #[error(
-        "node `{node}` produced artifact `{name}` at {bytes} bytes — \
-         `limits.max_artifact_bytes` is {max_bytes}"
-    )]
-    Oversized {
-        node: NodeId,
-        name: String,
-        bytes: u64,
-        max_bytes: u64,
-    },
-
-    #[error("node `{node}`: artifact `{path}` exists but cannot be read")]
-    Unreadable {
-        node: NodeId,
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("node `{node}`: task ledger `{name}` is not valid YAML: {source}")]
-    MalformedLedger {
-        node: NodeId,
-        name: String,
-        #[source]
-        source: yunta_core::yaml::YamlError,
-    },
-
-    #[error("node `{node}`: task ledger `{name}` failed validation with {} error(s)", errors.len())]
-    InvalidLedger {
-        node: NodeId,
-        name: String,
-        errors: Vec<LedgerError>,
-    },
-
-    #[error("node `{node}`: findings `{name}` is not valid YAML: {source}")]
-    MalformedFindings {
-        node: NodeId,
-        name: String,
-        #[source]
-        source: yunta_core::yaml::YamlError,
-    },
-
-    #[error("node `{node}`: findings `{name}` failed validation with {} error(s)", errors.len())]
-    InvalidFindings {
-        node: NodeId,
-        name: String,
-        errors: Vec<FindingsError>,
-    },
-
-    #[error("node `{node}`: questions `{name}` is not valid YAML: {source}")]
-    MalformedQuestions {
-        node: NodeId,
-        name: String,
-        #[source]
-        source: yunta_core::yaml::YamlError,
-    },
-
-    #[error("node `{node}`: questions `{name}` failed validation with {} error(s)", errors.len())]
-    InvalidQuestions {
-        node: NodeId,
-        name: String,
-        errors: Vec<QuestionsError>,
-    },
-}
 
 /// One declared artifact that passed verification — the data
 /// `artifact_written` needs (run-dir-relative path + content hash), plus
@@ -119,6 +44,28 @@ pub struct VerifiedArtifact {
     pub questions: Option<Vec<Question>>,
 }
 
+/// One problem with the file itself, before anything inside it is read.
+fn about_the_file(document: DocumentRef, code: &'static str, detail: String) -> Report {
+    Report::new(
+        document,
+        vec![Diagnostic::new(
+            Subject::Document,
+            Problem::rule(code, detail),
+        )],
+    )
+}
+
+/// The shape a node's declared artifact should have, when the engine
+/// interprets it at all. The one place a kind maps to its published
+/// text, so no door can render a different one.
+pub fn published_shape(kind: DocumentKind) -> &'static str {
+    match kind {
+        DocumentKind::TaskLedger => Ledger::EXAMPLE,
+        DocumentKind::Findings => FindingsFile::EXAMPLE,
+        DocumentKind::Questions => QuestionsFile::EXAMPLE,
+    }
+}
+
 /// Verifies every artifact a node declared, collecting every violation
 /// instead of stopping at the first — the node fails once with the whole
 /// picture, not once per missing file. `max_bytes` is
@@ -127,13 +74,13 @@ pub fn close_artifacts(
     node: &Node,
     run_dir: &Path,
     max_bytes: Option<u64>,
-) -> Result<Vec<VerifiedArtifact>, Vec<ArtifactError>> {
+) -> Result<Vec<VerifiedArtifact>, Vec<Report>> {
     let Some(artifacts) = &node.artifacts else {
         return Ok(Vec::new());
     };
 
     let mut verified = Vec::new();
-    let mut errors = Vec::new();
+    let mut reports = Vec::new();
 
     for spec in &artifacts.produces {
         let (name, kind) = match spec {
@@ -143,42 +90,55 @@ pub fn close_artifacts(
 
         let relative = Path::new("artifacts").join(name);
         let full_path = run_dir.join(&relative);
+        let document = DocumentRef::new(
+            kind.cloned().map(DocumentKind::from),
+            relative.display().to_string(),
+        );
 
         let bytes = match std::fs::read(&full_path) {
             Ok(bytes) => bytes,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                errors.push(ArtifactError::Missing {
-                    node: node.id.clone(),
-                    name: name.clone(),
-                });
+                reports.push(about_the_file(
+                    document,
+                    "artifact-missing",
+                    format!(
+                        "node `{}` declared this artifact and never produced it",
+                        node.id
+                    ),
+                ));
                 continue;
             }
             Err(source) => {
-                errors.push(ArtifactError::Unreadable {
-                    node: node.id.clone(),
-                    path: full_path,
-                    source,
-                });
+                reports.push(about_the_file(
+                    document,
+                    "artifact-unreadable",
+                    format!("exists but cannot be read: {source}"),
+                ));
                 continue;
             }
         };
 
         if bytes.is_empty() {
-            errors.push(ArtifactError::Empty {
-                node: node.id.clone(),
-                name: name.clone(),
-            });
+            reports.push(about_the_file(
+                document,
+                "artifact-empty",
+                "is empty; a declared artifact must have content".to_string(),
+            ));
             continue;
         }
 
+        // A runaway artifact fails the node with both numbers on the
+        // table, never a truncation.
         if let Some(max_bytes) = max_bytes {
             if bytes.len() as u64 > max_bytes {
-                errors.push(ArtifactError::Oversized {
-                    node: node.id.clone(),
-                    name: name.clone(),
-                    bytes: bytes.len() as u64,
-                    max_bytes,
-                });
+                reports.push(about_the_file(
+                    document,
+                    "artifact-oversized",
+                    format!(
+                        "is {} bytes; `limits.max_artifact_bytes` is {max_bytes}",
+                        bytes.len()
+                    ),
+                ));
                 continue;
             }
         }
@@ -186,30 +146,28 @@ pub fn close_artifacts(
         let mut ledger = None;
         let mut findings = None;
         let mut questions = None;
-        match kind {
-            Some(ArtifactKind::TaskLedger) => match parse_ledger(&node.id, name, &bytes) {
-                Ok(parsed) => ledger = Some(parsed),
-                Err(error) => {
-                    errors.push(error);
-                    continue;
-                }
-            },
-            Some(ArtifactKind::Findings) => match parse_findings(&node.id, name, &bytes) {
-                Ok(parsed) => findings = Some(parsed),
-                Err(error) => {
-                    errors.push(error);
-                    continue;
-                }
-            },
-            Some(ArtifactKind::Questions) => match parse_questions(&node.id, name, &bytes) {
-                Ok(parsed) => questions = Some(parsed),
-                Err(error) => {
-                    errors.push(error);
-                    continue;
-                }
-            },
-            None => {}
+        let interpreted = match kind {
+            Some(ArtifactKind::TaskLedger) => {
+                interpret::<Ledger>(&bytes, document, crate::ledger::register)
+                    .map(|parsed| ledger = Some(parsed))
+            }
+            Some(ArtifactKind::Findings) => {
+                interpret::<FindingsFile>(&bytes, document, crate::findings::register).map(
+                    |parsed| {
+                        findings = Some(parsed.findings.into_iter().map(Finding::from).collect())
+                    },
+                )
+            }
+            Some(ArtifactKind::Questions) => {
+                interpret::<QuestionsFile>(&bytes, document, crate::questions::register)
+                    .map(|parsed| questions = Some(parsed.questions))
+            }
+            None => Ok(()),
         };
+        if let Err(report) = interpreted {
+            reports.push(report);
+            continue;
+        }
 
         verified.push(VerifiedArtifact {
             name: name.clone(),
@@ -222,73 +180,64 @@ pub fn close_artifacts(
         });
     }
 
-    if errors.is_empty() {
+    if reports.is_empty() {
         Ok(verified)
     } else {
-        Err(errors)
+        Err(reports)
     }
 }
 
-fn parse_findings(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Vec<Finding>, ArtifactError> {
-    let file: FindingsFile =
-        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedFindings {
-            node: node.clone(),
-            name: name.to_string(),
-            source: e,
-        })?;
-
-    let violations = crate::findings::register(&file);
-    if violations.is_empty() {
-        Ok(file.findings.into_iter().map(Finding::from).collect())
-    } else {
-        Err(ArtifactError::InvalidFindings {
-            node: node.clone(),
-            name: name.to_string(),
-            errors: violations,
-        })
-    }
-}
-
-fn parse_questions(
-    node: &NodeId,
-    name: &str,
+/// Reads one interpreted artifact: its shape first, then the rules that
+/// only hold across the whole document. The two are sequential because
+/// no rule can run on a document that did not parse, and reporting
+/// shape problems together with rules that could not be evaluated would
+/// claim knowledge the engine does not have.
+fn interpret<T: Shaped>(
     bytes: &[u8],
-) -> Result<Vec<Question>, ArtifactError> {
-    let file: QuestionsFile =
-        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedQuestions {
-            node: node.clone(),
-            name: name.to_string(),
-            source: e,
-        })?;
-
-    let violations = crate::questions::register(&file);
-    if violations.is_empty() {
-        Ok(file.questions)
+    document: DocumentRef,
+    rules: fn(&T) -> Vec<Diagnostic>,
+) -> Result<T, Report> {
+    let parsed = read::<T>(bytes, document.clone())?;
+    let broken = rules(&parsed);
+    if broken.is_empty() {
+        Ok(parsed)
     } else {
-        Err(ArtifactError::InvalidQuestions {
-            node: node.clone(),
-            name: name.to_string(),
-            errors: violations,
-        })
+        Err(Report::new(document, broken))
     }
 }
 
-fn parse_ledger(node: &NodeId, name: &str, bytes: &[u8]) -> Result<Ledger, ArtifactError> {
-    let ledger: Ledger =
-        yunta_core::yaml::parse_bytes(bytes).map_err(|e| ArtifactError::MalformedLedger {
-            node: node.clone(),
-            name: name.to_string(),
-            source: e,
-        })?;
+/// How a node's failure reads to a person: every failing artifact's own
+/// block, in declaration order. The one place artifact verification
+/// turns into prose.
+pub fn render_for_person(reports: &[Report]) -> String {
+    reports
+        .iter()
+        .map(Report::for_person)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    let violations = crate::ledger::register(&ledger);
-    if violations.is_empty() {
-        Ok(ledger)
-    } else {
-        Err(ArtifactError::InvalidLedger {
-            node: node.clone(),
-            name: name.to_string(),
-            errors: violations,
+/// Every diagnostic behind a node's artifact failure, flattened for the
+/// `node_failed` event — the form a later reader can render its own way
+/// and a receipt can count without reading prose.
+pub fn diagnostics_of(reports: &[Report]) -> Vec<Diagnostic> {
+    reports
+        .iter()
+        .flat_map(|report| report.diagnostics.iter().cloned())
+        .collect()
+}
+
+/// What the writer of a failed artifact is told, so a repair attempt
+/// starts from the problems and the shape rather than from the same
+/// prompt that already produced the wrong file. `None` when nothing
+/// failed in a way a rewrite could fix.
+pub fn render_for_agent(reports: &[Report]) -> Option<String> {
+    let instructions: Vec<String> = reports
+        .iter()
+        .map(|report| {
+            let shape = report.document.kind.map(published_shape);
+            report.for_agent(shape)
         })
-    }
+        .collect();
+    (!instructions.is_empty()).then(|| instructions.join("\n\n"))
 }
