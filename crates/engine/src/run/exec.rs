@@ -304,6 +304,7 @@ fn build_ctx(
         cancel,
         adapter_override,
         ambient,
+        observer,
     } = env;
     let root_cancel = cancel.cloned().unwrap_or_default();
     let root_cancel_for_ctx = root_cancel.clone();
@@ -316,9 +317,11 @@ fn build_ctx(
         Err(e) => (None, Some(e)),
     };
     // The per-run MCP host outlives every borrow of this invocation, so
-    // it owns a clone of the run's clock rather than borrowing it — the
-    // one injected clock reaches the listener's own event appends.
+    // it owns a clone of the run's clock and of its observer rather than
+    // borrowing them — the one injected clock and the one display
+    // surface reach the listener's own event appends.
     let clock_for_host = clock.clone();
+    let observer_for_host = observer.clone();
     let ctx = RunCtx {
         run_id,
         manifest,
@@ -337,15 +340,17 @@ fn build_ctx(
         root_cancel: root_cancel_for_ctx,
         forge,
         depth,
+        ambient,
+        observer,
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.
-        ambient,
         run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
             storage.clone(),
             run_id.clone(),
             &manifest.workflow,
             clock_for_host,
+            observer_for_host,
         )),
     };
     (ctx, root_cancel, registry_error)

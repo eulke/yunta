@@ -162,6 +162,7 @@ async fn run_with_config(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();

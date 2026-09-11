@@ -756,6 +756,7 @@ pub async fn run_with_recording_mock(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -880,6 +881,7 @@ pub async fn resume_orphan_with_mock(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();

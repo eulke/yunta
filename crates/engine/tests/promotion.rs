@@ -152,6 +152,7 @@ async fn run_with_mode_and_findings(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();

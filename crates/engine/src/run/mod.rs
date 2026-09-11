@@ -54,6 +54,7 @@ use yunta_core::{AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, N
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
+use crate::observer::RunObserver;
 use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
@@ -262,6 +263,21 @@ pub struct RunEnv<'a> {
     /// variables layered onto every subprocess. `None` means no user layer
     /// and no injected variables — the shape most tests want.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// Where every event this invocation appends is mirrored as it is
+    /// written — this run's, its `kind: workflow` children's and its
+    /// promotion successors' alike. Display only: it derives nothing and
+    /// decides nothing.
+    ///
+    /// An owned [`Arc`] rather than a borrow, unlike `human_interaction`
+    /// and `forge` beside it, because [`RunToolsHost`] outlives every
+    /// borrow of the invocation and needs its own handle; `clock` in this
+    /// same struct is an `Arc<dyn Clock>` for exactly that reason. The
+    /// `Option` is load-bearing too, not nullability sugar: it is what
+    /// lets the append helper skip the payload clone entirely when
+    /// nobody is watching.
+    ///
+    /// [`RunToolsHost`]: crate::RunToolsHost
+    pub observer: Option<Arc<dyn RunObserver>>,
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and

@@ -2,7 +2,8 @@
 //!
 //! One canonical copy of every piece of scaffolding an integration test
 //! needs — a git-repo fixture, a fixed clock, a binary runner, a run
-//! bench, gate doubles — so a change to the shape of a test run happens
+//! bench, gate doubles, a recording run observer — so a change to the
+//! shape of a test run happens
 //! in one place, and so the fixtures are hermetic by construction (git
 //! isolated from the developer's global config, a fixed clock, an
 //! injected home) rather than by each test remembering to be.
@@ -13,6 +14,7 @@ mod bench;
 mod bin;
 mod clock;
 mod interaction;
+mod observer;
 mod repo;
 mod wait;
 
@@ -20,6 +22,7 @@ pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{run_id_from, run_yunta, stderr, stdout};
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
+pub use observer::{Frame, RecordingObserver};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 

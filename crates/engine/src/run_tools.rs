@@ -49,6 +49,8 @@ use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload
 use yunta_core::{Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
 use yunta_storage::AsyncStorage;
 
+use crate::observer::{append_observed, RunObserver};
+
 /// What every listener of one run shares: its own handle on the log
 /// (the listener outlives any borrow of the engine's), the run
 /// identity, and which nodes sit in a `coordination: blackboard`
@@ -62,6 +64,11 @@ pub struct RunToolsHost {
     /// appends with it, never a fresh `SystemClock`, so every emitter on
     /// the run shares one clock.
     clock: Arc<dyn yunta_core::Clock>,
+    /// The invocation's display surface, held by the same rule as the
+    /// clock and the log handle beside it: a listener outlives every
+    /// borrow of the engine's, so it owns its clone. A finding an agent
+    /// posts mid-session reaches a live view the moment it lands.
+    observer: Option<Arc<dyn RunObserver>>,
 }
 
 impl RunToolsHost {
@@ -70,6 +77,7 @@ impl RunToolsHost {
         run_id: RunId,
         workflow: &Workflow,
         clock: Arc<dyn yunta_core::Clock>,
+        observer: Option<Arc<dyn RunObserver>>,
     ) -> Self {
         let mut blackboard_members = HashMap::new();
         for node in &workflow.nodes {
@@ -90,6 +98,7 @@ impl RunToolsHost {
             run_id,
             blackboard_members,
             clock,
+            observer,
         }
     }
 
@@ -323,18 +332,19 @@ impl SessionTools {
         let finding: Finding = serde_json::from_value(Value::Object(args))
             .map_err(|source| RunToolError::InvalidFinding { source })?;
         let id = finding.id.clone();
-        self.host
-            .storage
-            .append(
-                EventDraft {
-                    run_id: self.host.run_id.clone(),
-                    node_id: Some(self.node.clone()),
-                    payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
-                },
-                self.host.clock.now(),
-            )
-            .await
-            .map_err(|source| RunToolError::Storage { source })?;
+        let draft = EventDraft {
+            run_id: self.host.run_id.clone(),
+            node_id: Some(self.node.clone()),
+            payload: EventPayload::FindingPosted(FindingPostedPayload { finding }),
+        };
+        append_observed(
+            &self.host.storage,
+            self.host.observer.as_deref(),
+            draft,
+            self.host.clock.now(),
+        )
+        .await
+        .map_err(|source| RunToolError::Storage { source })?;
         Ok(format!("finding `{id}` recorded"))
     }
 

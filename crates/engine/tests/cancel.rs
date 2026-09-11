@@ -117,6 +117,7 @@ async fn cancel_pauses_a_hanging_run_as_cancelled_by_user() {
         cancel: Some(&token),
         adapter_override: None,
         ambient: None,
+        observer: None,
     });
 
     let (report, ()) = tokio::join!(run, cancel_once_started(&bench, &token));
@@ -154,6 +155,7 @@ async fn cancel_then_resume_finishes_the_run() {
         cancel: Some(&token),
         adapter_override: None,
         ambient: None,
+        observer: None,
     });
     let (first, ()) = tokio::join!(run, cancel_once_started(&bench, &token));
     assert!(matches!(
@@ -180,6 +182,7 @@ async fn cancel_then_resume_finishes_the_run() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .expect("resume run");

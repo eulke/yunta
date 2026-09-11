@@ -13,7 +13,7 @@ use yunta_core::events::StoredEvent;
 use yunta_core::{AdapterId, ConfigLayer, RunId, SeqIdSource, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
+    RunEnv, RunObserver, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -43,6 +43,7 @@ pub struct Bench {
     pub run_id: RunId,
     ids: SeqIdSource,
     ambient: Option<yunta_core::Env>,
+    observer: Option<Arc<dyn RunObserver>>,
 }
 
 impl Default for Bench {
@@ -74,6 +75,7 @@ impl Bench {
             run_id: RunId::from(run_id),
             ids: SeqIdSource::new("minted"),
             ambient: None,
+            observer: None,
         }
     }
 
@@ -85,6 +87,32 @@ impl Bench {
             yunta_home: Some(root.into()),
             ..Default::default()
         });
+        self
+    }
+
+    /// Commits `yaml` as `.yunta/workflows/<name>.yaml` in the bench's
+    /// worktree, which is what a `kind: workflow` node's `use: <name>`
+    /// resolves against when it gives birth to its child run.
+    pub fn with_workflow(self, name: &str, yaml: &str) -> Self {
+        let catalog = self.worktree.join(".yunta").join("workflows");
+        std::fs::create_dir_all(&catalog).expect("create workflow catalog");
+        std::fs::write(catalog.join(format!("{name}.yaml")), yaml).expect("write child workflow");
+        crate::repo::git(&self.worktree, &["add", "."]);
+        crate::repo::git(&self.worktree, &["commit", "-q", "-m", "catalog"]);
+        self
+    }
+
+    /// Feeds every event this bench's run appends — the events of the
+    /// `kind: workflow` children it gives birth to included — to
+    /// `observer` as the engine writes it. Recording is complete when
+    /// the `run*` call returns, since the engine delivers each frame
+    /// inline.
+    ///
+    /// A bench drives one `execute_run` and stops there, so no promotion
+    /// successor reports here; the chain that produces those is the
+    /// CLI's `drive_promotions`.
+    pub fn with_observer(mut self, observer: Arc<dyn RunObserver>) -> Self {
+        self.observer = Some(observer);
         self
     }
 
@@ -186,6 +214,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: self.ambient.as_ref(),
+            observer: self.observer.clone(),
         })
         .await
         .expect("execute run");

@@ -40,11 +40,14 @@ mod check;
 mod events_export;
 mod findings;
 pub mod git;
+mod history;
 mod human_interaction;
 mod inputs;
+mod live;
 pub mod lock;
 mod manifest;
 mod modes;
+mod observer;
 mod pack_audit;
 mod pack_requires;
 mod permissions;
@@ -77,10 +80,19 @@ pub use check::{
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
+pub use history::{
+    budget_p90_warning, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
+    MIN_SAMPLES_FOR_ESTIMATION,
+};
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
+pub use live::{
+    last_event_age, live_total_tokens, open_sessions, recent_tool_calls, running_since,
+    OpenSession, ToolCall,
+};
 pub use manifest::{build_manifest, ManifestError};
 pub use modes::{dependencies_in_mode, mode_included_nodes};
+pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
 };
@@ -106,10 +118,7 @@ pub use run::{
 pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
-pub use stats::{
-    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, NodeStat,
-    Percentiles, PriorEstimation, RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
-};
+pub use stats::{compute_run_stats, compute_run_stats_at, median, NodeStat, RunStats};
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,
     Memo, PreCheckOutcome, ScopeGovernance, SessionObserver, SessionSetup, TaskCycleError,

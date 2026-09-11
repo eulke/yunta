@@ -5,7 +5,8 @@
 //! over an event slice, no IO, safe to call from a property test or from
 //! `yunta resume` alike. It tracks what the schema can actually produce
 //! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
-//! and task status (`task_registered`/`task_status_changed`) — plus the
+//! task status and the node each task belongs to
+//! (`task_registered`/`task_status_changed`) — plus the
 //! running token total `limits.max_tokens_per_run` is compared
 //! against. `waiting` is derived too: a published gate without its
 //! resolution (the state that outlives an invocation), and a node whose
@@ -60,6 +61,13 @@ pub enum NodeState {
 pub struct RunState {
     pub nodes: HashMap<NodeId, NodeState>,
     pub tasks: HashMap<TaskId, TaskStatus>,
+    /// The node each task belongs to: the one whose events registered it
+    /// or moved its status. Two `loop` nodes running at once each
+    /// register their own tasks, and this is what tells the two sets
+    /// apart — without it a task is a bare id with no node to show it
+    /// under. A task no event attributes to a node has no entry here at
+    /// all.
+    pub task_nodes: HashMap<TaskId, NodeId>,
     pub total_tokens: TokenUsage,
     /// Every `finding_posted` entry, in log order, never deduplicated
     /// here — the raw log keeps every contributing posting ("without
@@ -279,6 +287,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             Ok(())
         }
         EventPayload::TaskRegistered(p) => {
+            attribute_task(state, &p.task_id, event);
             state
                 .tasks
                 .entry(p.task_id.clone())
@@ -292,6 +301,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                     task: p.task_id.clone(),
                 });
             }
+            attribute_task(state, &p.task_id, event);
             state.tasks.insert(p.task_id.clone(), p.new_status);
             Ok(())
         }
@@ -355,6 +365,20 @@ pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
         }
     }
     deduped
+}
+
+/// Records the node `event` attributes a task to, keeping the first one
+/// the log names: a task belongs to the node that registered it, and a
+/// later status change never re-homes it. An event with no node
+/// attributes nothing — the task simply has no owner to show.
+fn attribute_task(state: &mut RunState, task_id: &TaskId, event: &StoredEvent) {
+    let Some(node_id) = &event.node_id else {
+        return;
+    };
+    state
+        .task_nodes
+        .entry(task_id.clone())
+        .or_insert_with(|| node_id.clone());
 }
 
 fn require_node_id(event: &StoredEvent) -> Result<NodeId, ReplayError> {

@@ -76,6 +76,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -142,6 +143,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -223,6 +225,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -315,6 +318,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -578,6 +582,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();
@@ -1011,6 +1016,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .unwrap();

@@ -277,6 +277,7 @@ pub async fn run(
         cancel: Some(&root_cancel),
         adapter_override: adapter_override.as_ref(),
         ambient: Some(&ambient),
+        observer: None,
     })
     .await;
 
@@ -300,6 +301,7 @@ pub async fn run(
                     adapters: &adapters,
                     forge: forge.as_deref(),
                     cancel: Some(&root_cancel),
+                    observer: None,
                 },
                 run_id,
                 manifest,

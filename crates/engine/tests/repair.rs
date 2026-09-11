@@ -512,6 +512,7 @@ async fn an_interpreted_artifact_the_loop_cannot_read_fails_with_a_diagnostic() 
         cancel: None,
         adapter_override: None,
         ambient: None,
+        observer: None,
     })
     .await
     .expect_err("the loop cannot read the ledger it was given");

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::{AdapterId, IdSource, Manifest, RunId, SystemClock};
-use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use crate::project::Project;
@@ -32,6 +32,10 @@ pub(crate) struct PromotionEnv<'a> {
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
+    /// The display surface every successor mirrors its events into —
+    /// the same one the predecessor ran under, so a chain draws as one
+    /// continuous invocation rather than restarting per member.
+    pub observer: Option<Arc<dyn RunObserver>>,
 }
 
 /// Runs the whole promotion chain to its end: while the latest
@@ -93,6 +97,7 @@ pub(crate) async fn drive_promotions(
             cancel: env.cancel,
             adapter_override: None,
             ambient: Some(&ambient),
+            observer: env.observer.clone(),
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -115,6 +120,7 @@ mod tests {
         build_manifest, create_run, execute_run, HumanInteraction, RunEnv, DEFAULT_MAX_RETRIES,
     };
     use yunta_storage::Storage;
+    use yunta_testkit::RecordingObserver;
 
     use super::*;
 
@@ -167,6 +173,7 @@ nodes:
 
     #[tokio::test]
     async fn drive_promotions_creates_and_runs_a_successor_with_the_chain_audited() {
+        let recorder = RecordingObserver::new();
         let root = tempfile::tempdir().unwrap();
         let cwd = root.path().join("repo");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -233,6 +240,7 @@ nodes:
             cancel: None,
             adapter_override: None,
             ambient: None,
+            observer: Some(recorder.clone()),
         })
         .await
         .unwrap();
@@ -250,6 +258,7 @@ nodes:
                 adapters: &adapters,
                 forge: None,
                 cancel: None,
+                observer: Some(recorder.clone()),
             },
             run_id.clone(),
             manifest,
@@ -286,5 +295,28 @@ nodes:
             .join("artifacts")
             .join("plan.yaml")
             .exists());
+
+        // One observer spans the chain: the successor is a separate run
+        // with its own `execute_run`, and its events reach the same
+        // display surface the predecessor fed, under its own run id — so
+        // a live view draws a promotion as one continuous invocation.
+        assert!(
+            !recorder.for_run(&run_id).is_empty(),
+            "the predecessor's own frames must be there, got kinds: {:?}",
+            recorder.kinds()
+        );
+        assert!(
+            recorder
+                .for_run(&final_id)
+                .iter()
+                .any(|frame| matches!(frame.payload, EventPayload::RunFinished(_))),
+            "the successor's frames must reach the same observer: `drive_promotions` hands \
+             `PromotionEnv.observer` to each `RunEnv` it builds. Got frames for: {:?}",
+            recorder
+                .frames()
+                .iter()
+                .map(|frame| frame.run_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        );
     }
 }

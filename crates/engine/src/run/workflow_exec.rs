@@ -603,6 +603,11 @@ async fn drive_child(
                     cancel: Some(cancel),
                     adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
+                    // One observer serves the whole invocation, this
+                    // child included: its frames name the child's own
+                    // run_id, because the child emits through its own
+                    // `RunCtx`.
+                    observer: ctx.observer.clone(),
                 },
                 ctx.depth + 1,
             ));

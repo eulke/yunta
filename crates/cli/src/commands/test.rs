@@ -289,6 +289,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         // developer's own `~/.yunta`, and its nodes inherit this process's
         // environment with nothing injected.
         ambient: None,
+        // A case's verdict is its report, compared against `expect:` —
+        // there is no live surface drawing it.
+        observer: None,
     })
     .await
     .map_err(|e| yunta_core::describe(&e))?;

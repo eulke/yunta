@@ -140,6 +140,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            observer: None,
         })
         .await
         .unwrap();

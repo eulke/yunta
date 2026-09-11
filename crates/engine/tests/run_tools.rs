@@ -93,6 +93,9 @@ impl Bench {
             run_id.clone(),
             &workflow,
             clock,
+            // These tests read what a tool call lands on the log; the
+            // mirror of it has its own test (`observer.rs`).
+            None,
         ));
         Bench {
             _root: root,

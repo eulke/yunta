@@ -64,6 +64,7 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
         cancel: Some(&root_cancel),
         adapter_override: None,
         ambient: Some(&ambient),
+        observer: None,
     })
     .await?;
 
@@ -76,6 +77,7 @@ pub async fn resume(run_id: &RunId) -> Result<Outcome, CliError> {
             adapters: &adapters,
             forge: forge.as_deref(),
             cancel: Some(&root_cancel),
+            observer: None,
         },
         run_id.clone(),
         manifest,

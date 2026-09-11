@@ -189,6 +189,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: Some(&ambient),
+        observer: None,
     })
     .await
     .unwrap();

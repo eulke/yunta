@@ -17,6 +17,7 @@ use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId,
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
+use crate::observer::{append_observed, RunObserver};
 use crate::replay::RunView;
 use crate::task_cycle::Memo;
 
@@ -78,6 +79,13 @@ pub(crate) struct RunCtx<'a> {
     /// caller: the user state root the user knowledge layer resolves
     /// against, and the variables layered onto every subprocess.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// The invocation's display surface, fed by every append this
+    /// context makes as the event lands — on the ctx so a `kind:
+    /// workflow` node hands the same one down to its child run, whose
+    /// frames then carry the child's own `run_id`. Owned rather than
+    /// borrowed: the run-tools host keeps a clone of it and outlives
+    /// every borrow of ours.
+    pub observer: Option<Arc<dyn RunObserver>>,
 }
 
 impl RunCtx<'_> {
@@ -99,7 +107,8 @@ impl RunCtx<'_> {
 
     /// Appends one event and returns the seq storage assigned to it. The
     /// timestamp is read from the run's clock here, before the hop to
-    /// the blocking thread that writes it.
+    /// the blocking thread that writes it. The event also reaches the
+    /// invocation's observer, once storage has accepted it.
     pub(crate) async fn emit(
         &self,
         node_id: Option<&NodeId>,
@@ -111,7 +120,7 @@ impl RunCtx<'_> {
             payload,
         };
         let at = self.clock.now();
-        Ok(self.storage.append(draft, at).await?)
+        Ok(append_observed(self.storage, self.observer.as_deref(), draft, at).await?)
     }
 
     pub(crate) async fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
@@ -272,9 +281,10 @@ impl RunCtx<'_> {
 
 /// `RunCtx` is the one real [`SessionObserver`] — audit events
 /// land in the run's own log as they arrive, so a concurrent `status`
-/// sees the live session. A failed append warns instead of aborting the
-/// stream: the run's next mandatory event hits the same storage and
-/// fails the run properly if it's really down.
+/// sees the live session, and they reach the invocation's display
+/// surface on the same path every other event of the run takes. An
+/// append that fails carries its storage cause back to the dispatch,
+/// which fails the node with it.
 #[async_trait::async_trait]
 impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     async fn emit_session_event(
@@ -294,7 +304,9 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
             payload,
         };
         let at = self.clock.now();
-        self.storage.append(draft, at).await.map(|_| ())
+        append_observed(self.storage, self.observer.as_deref(), draft, at)
+            .await
+            .map(|_| ())
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
