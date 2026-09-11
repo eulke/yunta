@@ -1,62 +1,11 @@
-//! The findings artifact's registration rules.
+//! What a run's findings mean to the run that inherits them.
 //!
-//! Shape is `yunta-core`'s frontier: by the time a `FindingsFile`
-//! exists, every key is known and every field is present. What is left
-//! is the one rule that spans the whole document — an id used twice —
-//! and the emptiness a `String` cannot refuse on its own.
+//! A findings file's own shape and rules are `yunta-core`'s — they are a
+//! total function from a document to its problems. What needs the engine
+//! is the reading that only a log can answer: which findings a
+//! successor starts from.
 
 use std::collections::HashSet;
-
-use yunta_core::diagnostic::{Diagnostic, Problem, Subject};
-use yunta_core::{FindingId, FindingsFile};
-
-fn broke(index: usize, id: &FindingId, code: &'static str, detail: &str) -> Diagnostic {
-    Diagnostic::new(
-        Subject::Finding {
-            id: Some(id.clone()),
-            index,
-        },
-        Problem::rule(code, detail),
-    )
-}
-
-/// Validates a parsed findings file, collecting every violation rather
-/// than stopping at the first.
-pub fn register(file: &FindingsFile) -> Vec<Diagnostic> {
-    let mut errors = Vec::new();
-    let mut known_ids: HashSet<&FindingId> = HashSet::new();
-
-    for (index, finding) in file.findings.iter().enumerate() {
-        if !known_ids.insert(&finding.id) {
-            errors.push(broke(
-                index,
-                &finding.id,
-                "duplicate-id",
-                "a second finding already carries this id; every id is declared once",
-            ));
-        }
-        for (value, key) in [
-            (&finding.title, "title"),
-            (&finding.location, "location"),
-            (&finding.detail, "detail"),
-        ] {
-            if value.trim().is_empty() {
-                errors.push(broke(
-                    index,
-                    &finding.id,
-                    match key {
-                        "title" => "empty-title",
-                        "location" => "empty-location",
-                        _ => "empty-detail",
-                    },
-                    &format!("`{key}` is empty"),
-                ));
-            }
-        }
-    }
-
-    errors
-}
 
 /// The findings a successor inherits, derived purely from
 /// the parent's own log — every `finding_posted`, deduplicated by

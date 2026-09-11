@@ -5,22 +5,24 @@
 //! `artifacts/` directory — no matter what the agent reported. Opaque
 //! artifacts are verified by existence and content hash only, never by
 //! format. `task-ledger`, `findings` and `questions` are the interpreted
-//! kinds: each is read through the frontier that names every problem at
-//! once, and the parsed result handed back to the caller — `Ledger` for
-//! `task_registered`, `Finding`s for `finding_posted`, `Question`s so
-//! `node_exec.rs` can pause the run instead of finishing the node.
+//! kinds: each is read through the one door that names every problem at
+//! once ([`yunta_core::shape::read`], which runs the document's own
+//! rules), and the parsed result handed back to the caller — `Ledger`
+//! for `task_registered`, `Finding`s for `finding_posted`, `Question`s
+//! so `node_exec.rs` can pause the run instead of finishing the node.
 //!
-//! Every failure here is a [`Report`], whatever its cause. A missing
-//! file and a ledger with four broken rules are both "this document is
-//! not what the node declared", and giving them one shape is what lets
-//! the node's failure carry its diagnostics onto the log and render
-//! once, for whichever reader is about to see it.
+//! Every failure here is an [`ArtifactFailure`], and its two variants
+//! are the distinction the repair cycle turns on: a problem with the
+//! file (never produced, empty, past the declared ceiling, refused by
+//! the filesystem) is not one a rewrite reaches, while a document whose
+//! content is not what its kind declares is exactly what writing the
+//! file again fixes.
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::diagnostic::{Diagnostic, DocumentKind, DocumentRef, Problem, Report, Subject};
+use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
 use yunta_core::events::Finding;
-use yunta_core::shape::{published, read, Shaped};
+use yunta_core::shape::read;
 use yunta_core::FindingsFile;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
@@ -28,32 +30,39 @@ use yunta_core::{
 
 /// One declared artifact that passed verification — the data
 /// `artifact_written` needs (run-dir-relative path + content hash), plus
-/// the parsed ledger or findings when the artifact carries one of those
-/// interpreted kinds.
+/// whatever its declared `kind:` turned the bytes into.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedArtifact {
     pub name: String,
     /// Relative to the run directory (`artifacts/<name>`).
     pub path: PathBuf,
     pub content_hash: ContentHash,
-    /// The declared `kind:`, if any — carried onto `artifact_written`
-    /// so replay can recognize interpreted artifacts by type.
-    pub kind: Option<ArtifactKind>,
-    pub ledger: Option<Ledger>,
-    pub findings: Option<Vec<Finding>>,
-    pub questions: Option<Vec<Question>>,
+    pub content: ArtifactContent,
 }
 
-/// One problem with the file itself, before anything inside it is read.
-/// `detail` completes the sentence "the document ...".
-fn about_the_file(document: DocumentRef, code: &'static str, detail: String) -> Report {
-    Report::new(
-        document,
-        vec![Diagnostic::new(
-            Subject::Document,
-            Problem::file(code, detail),
-        )],
-    )
+/// What a declared `kind:` turned the bytes into. `Opaque` is what "the
+/// engine assumes no format" looks like from here: there is no third
+/// state where a kind was declared and nothing was parsed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArtifactContent {
+    Opaque,
+    TaskLedger(Ledger),
+    Findings(Vec<Finding>),
+    Questions(Vec<Question>),
+}
+
+impl ArtifactContent {
+    /// The kind whose shape produced this content — `None` for an
+    /// opaque artifact, which is what `artifact_written` records for a
+    /// file the engine never interprets.
+    pub fn kind(&self) -> Option<ArtifactKind> {
+        match self {
+            ArtifactContent::Opaque => None,
+            ArtifactContent::TaskLedger(_) => Some(ArtifactKind::TaskLedger),
+            ArtifactContent::Findings(_) => Some(ArtifactKind::Findings),
+            ArtifactContent::Questions(_) => Some(ArtifactKind::Questions),
+        }
+    }
 }
 
 /// Verifies every artifact a node declared, collecting every violation
@@ -64,24 +73,24 @@ pub fn close_artifacts(
     node: &Node,
     run_dir: &Path,
     max_bytes: Option<u64>,
-) -> Result<Vec<VerifiedArtifact>, Vec<Report>> {
+) -> Result<Vec<VerifiedArtifact>, Vec<ArtifactFailure>> {
     let Some(artifacts) = &node.artifacts else {
         return Ok(Vec::new());
     };
 
     let mut verified = Vec::new();
-    let mut reports = Vec::new();
+    let mut failures = Vec::new();
     for spec in &artifacts.produces {
         match verify_one(node, spec, run_dir, max_bytes) {
             Ok(artifact) => verified.push(artifact),
-            Err(report) => reports.push(report),
+            Err(failure) => failures.push(failure),
         }
     }
 
-    if reports.is_empty() {
+    if failures.is_empty() {
         Ok(verified)
     } else {
-        Err(reports)
+        Err(failures)
     }
 }
 
@@ -92,186 +101,85 @@ fn verify_one(
     spec: &ArtifactSpec,
     run_dir: &Path,
     max_bytes: Option<u64>,
-) -> Result<VerifiedArtifact, Report> {
+) -> Result<VerifiedArtifact, ArtifactFailure> {
     let (name, kind) = match spec {
         ArtifactSpec::Plain(name) => (name, None),
-        ArtifactSpec::Typed { name, kind } => (name, Some(kind)),
+        ArtifactSpec::Typed { name, kind } => (name, Some(*kind)),
     };
 
     let relative = Path::new("artifacts").join(name);
-    let document = DocumentRef::new(
-        kind.cloned().map(DocumentKind::from),
-        relative.display().to_string(),
-    );
+    let path = relative.display().to_string();
 
-    let bytes = read_file(node, &run_dir.join(&relative), document.clone(), max_bytes)?;
-
-    let Interpreted {
-        ledger,
-        findings,
-        questions,
-    } = interpret_kind(kind, &bytes, document)?;
+    let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes)?;
+    let content = interpret(kind, &bytes, &path).map_err(ArtifactFailure::Content)?;
 
     Ok(VerifiedArtifact {
         name: name.clone(),
         path: relative,
         content_hash: sha256_hex(&bytes),
-        kind: kind.cloned(),
-        ledger,
-        findings,
-        questions,
+        content,
     })
 }
 
 /// The file itself, before anything inside it is read: it exists, it has
-/// content, and it is within the declared guard.
+/// content, and it is within the declared guard. Nothing a rewrite of
+/// the content reaches, which is why each answer here is a
+/// [`FileProblem`] rather than a diagnostic about a document.
 fn read_file(
     node: &Node,
     full_path: &Path,
-    document: DocumentRef,
+    path: &str,
     max_bytes: Option<u64>,
-) -> Result<Vec<u8>, Report> {
+) -> Result<Vec<u8>, ArtifactFailure> {
+    let about = |problem: FileProblem| ArtifactFailure::file(path, problem);
     let bytes = match std::fs::read(full_path) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            return Err(about_the_file(
-                document,
-                "artifact-missing",
-                format!("was declared by node `{}` and never produced", node.id),
-            ))
+            return Err(about(FileProblem::Missing {
+                node: node.id.clone(),
+            }))
         }
         Err(source) => {
-            return Err(about_the_file(
-                document,
-                "artifact-unreadable",
-                format!("exists but cannot be read: {source}"),
-            ))
+            return Err(about(FileProblem::Unreadable {
+                detail: source.to_string(),
+            }))
         }
     };
 
     if bytes.is_empty() {
-        return Err(about_the_file(
-            document,
-            "artifact-empty",
-            "is empty; a declared artifact must have content".to_string(),
-        ));
+        return Err(about(FileProblem::Empty));
     }
     // A runaway artifact fails the node with both numbers on the table,
     // never a truncation.
-    if let Some(max_bytes) = max_bytes {
-        if bytes.len() as u64 > max_bytes {
-            return Err(about_the_file(
-                document,
-                "artifact-oversized",
-                format!(
-                    "is {} bytes; `limits.max_artifact_bytes` is {max_bytes}",
-                    bytes.len()
-                ),
-            ));
+    if let Some(ceiling) = max_bytes {
+        if bytes.len() as u64 > ceiling {
+            return Err(about(FileProblem::Oversized {
+                bytes: bytes.len() as u64,
+                ceiling,
+            }));
         }
     }
     Ok(bytes)
 }
 
-/// What a declared `kind:` turned the bytes into. All three are `None`
-/// for an opaque artifact, which is what "the engine assumes no format"
-/// looks like from here.
-#[derive(Default)]
-struct Interpreted {
-    ledger: Option<Ledger>,
-    findings: Option<Vec<Finding>>,
-    questions: Option<Vec<Question>>,
-}
-
-fn interpret_kind(
-    kind: Option<&ArtifactKind>,
+/// Reads one artifact's bytes as whatever its declared kind says they
+/// are. An artifact with no declared kind is [`ArtifactContent::Opaque`]
+/// without touching the bytes at all.
+fn interpret(
+    kind: Option<ArtifactKind>,
     bytes: &[u8],
-    document: DocumentRef,
-) -> Result<Interpreted, Report> {
+    path: &str,
+) -> Result<ArtifactContent, Report> {
     Ok(match kind {
-        Some(ArtifactKind::TaskLedger) => Interpreted {
-            ledger: Some(interpret::<Ledger>(
-                bytes,
-                document,
-                crate::ledger::register,
-            )?),
-            ..Interpreted::default()
-        },
+        None => ArtifactContent::Opaque,
+        Some(ArtifactKind::TaskLedger) => ArtifactContent::TaskLedger(read::<Ledger>(bytes, path)?),
         Some(ArtifactKind::Findings) => {
-            let file = interpret::<FindingsFile>(bytes, document, crate::findings::register)?;
-            Interpreted {
-                findings: Some(file.findings.into_iter().map(Finding::from).collect()),
-                ..Interpreted::default()
-            }
+            let file = read::<FindingsFile>(bytes, path)?;
+            ArtifactContent::Findings(file.findings.into_iter().map(Finding::from).collect())
         }
         Some(ArtifactKind::Questions) => {
-            let file = interpret::<QuestionsFile>(bytes, document, crate::questions::register)?;
-            Interpreted {
-                questions: Some(file.questions),
-                ..Interpreted::default()
-            }
+            let file = read::<QuestionsFile>(bytes, path)?;
+            ArtifactContent::Questions(file.questions)
         }
-        None => Interpreted::default(),
     })
-}
-
-/// Reads one interpreted artifact: its shape first, then the rules that
-/// only hold across the whole document. The two are sequential because
-/// no rule can run on a document that did not parse, and reporting
-/// shape problems together with rules that could not be evaluated would
-/// claim knowledge the engine does not have.
-fn interpret<T: Shaped>(
-    bytes: &[u8],
-    document: DocumentRef,
-    rules: fn(&T) -> Vec<Diagnostic>,
-) -> Result<T, Report> {
-    let parsed = read::<T>(bytes, document.clone())?;
-    let broken = rules(&parsed);
-    if broken.is_empty() {
-        Ok(parsed)
-    } else {
-        Err(Report::new(document, broken))
-    }
-}
-
-/// How a node's failure reads to a person: every failing artifact's own
-/// block, in declaration order. The one place artifact verification
-/// turns into prose.
-pub fn render_for_person(reports: &[Report]) -> String {
-    reports
-        .iter()
-        .map(Report::for_person)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Every diagnostic behind a node's artifact failure, flattened for the
-/// `node_failed` event — the form a later reader can render its own way
-/// and a receipt can count without reading prose.
-pub fn diagnostics_of(reports: &[Report]) -> Vec<Diagnostic> {
-    reports
-        .iter()
-        .flat_map(|report| report.diagnostics.iter().cloned())
-        .collect()
-}
-
-/// What the writer of a failed artifact is told, so a repair attempt
-/// starts from the problems and the shape rather than from the same
-/// prompt that already produced the wrong file.
-///
-/// `None` unless EVERY failing artifact is one a rewrite could fix: a
-/// run that also lost a file it never wrote has nothing to gain from
-/// asking for the rest again, and half-repairing would leave the node
-/// failing on the same missing file a session later.
-pub fn render_for_agent(reports: &[Report]) -> Option<String> {
-    if reports.is_empty() || !reports.iter().all(Report::is_repairable) {
-        return None;
-    }
-    Some(
-        reports
-            .iter()
-            .map(|report| report.for_agent(report.document.kind.map(published)))
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    )
 }

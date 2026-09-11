@@ -6,6 +6,7 @@
 //! principle [`crate::replay::derive`] follows, so it never accumulates
 //! narrative drift.
 
+use yunta_core::events::Failure;
 use yunta_core::{Node, Workflow};
 
 use crate::replay::{derive, NodeState, RunState};
@@ -34,8 +35,8 @@ pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Stored
     out.push_str("\n## Failed\n\n");
     render_section(&mut out, &nodes, &state, "_none_", |node| {
         match state.nodes.get(&node.id) {
-            Some(NodeState::Failed { outcome, .. }) => {
-                Some(format!("- **{}** — {}\n", node.id, fenced(outcome)))
+            Some(NodeState::Failed { failure, .. }) => {
+                Some(format!("- **{}** — {}\n", node.id, fenced(failure)))
             }
             _ => None,
         }
@@ -88,18 +89,15 @@ fn render_section(
 /// reads it as context. A failure that names several problems keeps
 /// them, inside a fence, where neither reader has to guess where one
 /// ends and the next begins.
-fn fenced(outcome: &str) -> String {
-    if !outcome.contains('\n') && !outcome.contains('`') {
-        return format!("`{outcome}`");
+fn fenced(failure: &Failure) -> String {
+    let text = failure.to_string();
+    if !text.contains('\n') && !text.contains('`') {
+        return format!("`{text}`");
     }
-    format!("\n\n  ```\n{}\n  ```", indent_lines(outcome, "  "))
-}
-
-fn indent_lines(text: &str, indent: &str) -> String {
-    text.lines()
-        .map(|line| format!("{indent}{line}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    format!(
+        "\n\n  ```\n{}\n  ```",
+        yunta_core::text::indent(&text, "  ")
+    )
 }
 
 fn finished_entry(state: &RunState, node: &Node, outcome: &str) -> String {

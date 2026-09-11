@@ -40,11 +40,13 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                     context: format!("read questions artifact `{}`", relative.display()),
                     source,
                 })?;
-            let file: yunta_core::QuestionsFile =
-                yunta_core::yaml::parse_bytes(&bytes).map_err(|e| RunError::CorruptLedger {
-                    path: ctx.run_dir.join(&relative),
-                    detail: e.to_string(),
-                })?;
+            // The same door `close_artifacts` reads a questions file
+            // through: the ask round names what is wrong with the
+            // document, never what a deserializer made of it.
+            let file = yunta_core::shape::read::<yunta_core::QuestionsFile>(
+                &bytes,
+                relative.display().to_string(),
+            )?;
             question_files.push((relative, file));
         }
     }

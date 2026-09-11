@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use yunta_core::events::{EventPayload, Finding, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::{EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, Seq, TaskId};
 
 /// One node's derived lifecycle state. An enum, not booleans:
@@ -37,8 +37,13 @@ pub enum NodeState {
         tokens: TokenUsage,
     },
     Failed {
-        outcome: String,
+        /// Why the node failed, as the log recorded it. The prose a
+        /// reader sees is produced from this (it is `Display`), so no
+        /// surface can disagree with the facts behind it.
+        failure: Failure,
         tokens: TokenUsage,
+        /// Whether the caller that owned the budget expected another
+        /// attempt at this node.
         retryable: bool,
     },
     /// Waiting on a human — a published, unresolved gate
@@ -205,7 +210,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                         NodeState::Waiting { external_ref: None }
                     } else {
                         NodeState::Failed {
-                            outcome: p.outcome.clone(),
+                            failure: p.failure.clone(),
                             tokens: p.tokens_used,
                             retryable: p.retryable,
                         }

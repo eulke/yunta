@@ -3,8 +3,8 @@
 //! full run.
 
 use yunta_core::events::{
-    ArtifactWrittenPayload, EventBody, EventPayload, NodeFailedPayload, NodeFinishedPayload,
-    NodeStartedPayload, StoredEvent, TokenUsage,
+    ArtifactWrittenPayload, EventBody, EventPayload, Failure, NodeFailedPayload,
+    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TokenUsage,
 };
 use yunta_core::{Node, NodeKind, PromptSource, Workflow};
 use yunta_engine::render_progress;
@@ -133,12 +133,11 @@ fn a_failed_node_appears_under_failed_with_its_outcome() {
         event(
             2,
             "lint",
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: "clippy: 3 warnings".to_string(),
-                tokens_used: TokenUsage::default(),
-                retryable: false,
-                diagnostics: Vec::new(),
-            }),
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message("clippy: 3 warnings".to_string()),
+                false,
+                TokenUsage::default(),
+            )),
         ),
     ];
 
@@ -218,12 +217,11 @@ fn a_multi_problem_failure_is_fenced_so_neither_reader_has_to_guess() {
         event(
             2,
             "plan",
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: outcome.to_string(),
-                tokens_used: TokenUsage::default(),
-                retryable: false,
-                diagnostics: Vec::new(),
-            }),
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message(outcome.to_string()),
+                false,
+                TokenUsage::default(),
+            )),
         ),
     ];
     let markdown = render_progress(&wf, &events);

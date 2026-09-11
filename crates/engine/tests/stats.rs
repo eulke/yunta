@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    EventBody, EventPayload, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
+    EventBody, EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
     NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent,
     TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
@@ -154,12 +154,11 @@ fn fixture_events() -> Vec<StoredEvent> {
             6,
             25,
             Some("b"),
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: "criteria still red".to_string(),
-                tokens_used: tokens(80, 40, None),
-                retryable: true,
-                diagnostics: Vec::new(),
-            }),
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message("criteria still red".to_string()),
+                true,
+                tokens(80, 40, None),
+            )),
         ),
         event(
             7,

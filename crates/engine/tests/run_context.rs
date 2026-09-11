@@ -103,8 +103,8 @@ nodes:
 
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
-        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert_eq!(*outcome, "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -543,8 +543,8 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
 
     let (terminal, state) = bench.run(&workflow, fixture).await;
     match &state.nodes.get("ask") {
-        Some(yunta_engine::NodeState::Failed { outcome, .. }) => {
-            assert_eq!(*outcome, "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            assert_eq!(failure.to_string(), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }

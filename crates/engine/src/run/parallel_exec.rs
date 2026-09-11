@@ -7,7 +7,7 @@ use yunta_core::{JoinPolicy, Node};
 
 use crate::replay::NodeState;
 
-use super::node_close::{close_node, fail};
+use super::node_close::{close_node, fail, Close};
 use super::node_exec::{execute_node, NodeEnd};
 use super::{RunCtx, RunError};
 
@@ -22,6 +22,7 @@ pub(super) async fn execute_parallel(
     node: &Node,
     join: JoinPolicy,
     children: &[Node],
+    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let group_cancel = cancel.child_token();
@@ -105,8 +106,12 @@ pub(super) async fn execute_parallel(
             close_node(
                 ctx,
                 node,
-                format!("{} child(ren) finished", children.len()),
-                TokenUsage::default(),
+                Close::new(
+                    format!("{} child(ren) finished", children.len()),
+                    TokenUsage::default(),
+                    attempt,
+                    cancel,
+                ),
             )
             .await
         }
@@ -119,8 +124,12 @@ pub(super) async fn execute_parallel(
                 return close_node(
                     ctx,
                     node,
-                    format!("`{}` succeeded first", already_won.id),
-                    TokenUsage::default(),
+                    Close::new(
+                        format!("`{}` succeeded first", already_won.id),
+                        TokenUsage::default(),
+                        attempt,
+                        cancel,
+                    ),
                 )
                 .await;
             }
@@ -182,8 +191,12 @@ pub(super) async fn execute_parallel(
                     close_node(
                         ctx,
                         node,
-                        format!("`{id}` succeeded first"),
-                        TokenUsage::default(),
+                        Close::new(
+                            format!("`{id}` succeeded first"),
+                            TokenUsage::default(),
+                            attempt,
+                            cancel,
+                        ),
                     )
                     .await
                 }

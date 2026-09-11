@@ -116,7 +116,7 @@ pub(crate) fn check_fanout_scopes(
         }
         for glob_a in &a.scope {
             for glob_b in &b.scope {
-                if globs_might_overlap(glob_a, glob_b) {
+                if might_overlap(glob_a, glob_b) {
                     errors.push(CheckError::OverlappingFanOutScope {
                         a: a.id.clone(),
                         b: b.id.clone(),
@@ -208,7 +208,7 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
             };
             for glob_a in &a.scope {
                 for glob_b in &b.scope {
-                    if globs_might_overlap(glob_a, glob_b) {
+                    if might_overlap(glob_a, glob_b) {
                         overlaps.push((a, b, glob_a.as_str(), glob_b.as_str()));
                     }
                 }

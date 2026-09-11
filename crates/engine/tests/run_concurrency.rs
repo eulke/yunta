@@ -1089,9 +1089,9 @@ sessions:
         Some(NodeState::Finished { .. })
     ));
     match state.nodes.get("slow-loop") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                *outcome,
+                failure.to_string(),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }
@@ -1132,9 +1132,9 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.get("slow-check") {
-        Some(NodeState::Failed { outcome, .. }) => {
+        Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                *outcome,
+                failure.to_string(),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }

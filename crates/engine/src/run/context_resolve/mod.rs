@@ -54,6 +54,7 @@
 mod error;
 mod knowledge;
 mod mcp;
+mod shapes;
 mod sources;
 
 use std::path::Path;
@@ -70,6 +71,7 @@ use super::{RunCtx, RunError};
 use error::ContextResolveError;
 use knowledge::resolve_knowledge;
 use mcp::resolve_mcp;
+use shapes::{artifact_shapes, mount_artifact_shapes};
 use sources::{
     materialize, resolve_artifact, resolve_command, resolve_files, resolve_ledger,
     resolve_node_output, resolve_run_events,
@@ -218,19 +220,42 @@ async fn resolve_all(
         });
     }
 
-    // Always assembled stable → run-stable → volatile,
-    // regardless of `context:`'s own declaration order — the ordering a
-    // provider's prompt cache needs a byte-stable prefix to actually
-    // help. Each non-empty class's own canonical text (same order,
-    // same separators, every time) gets its own `segment_hashes` entry
-    // — comparing that hash across sessions is the mechanical check
-    // that the prefix really held.
+    assembled(
+        ctx,
+        node,
+        task_id,
+        sources,
+        stable_blocks,
+        run_stable_blocks,
+        volatile_blocks,
+    )
+    .await
+}
+
+/// One session's context as text, plus the `context_assembled` that
+/// records exactly what it was given.
+///
+/// Always assembled stable → run-stable → volatile, regardless of
+/// `context:`'s own declaration order — the ordering a provider's prompt
+/// cache needs a byte-stable prefix to actually help. Each non-empty
+/// class's own canonical text (same order, same separators, every time)
+/// gets its own `segment_hashes` entry; comparing that hash across
+/// sessions is the mechanical check that the prefix really held.
+async fn assembled(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task_id: Option<&yunta_core::TaskId>,
+    sources: Vec<ContextSourceRef>,
+    stable: Vec<String>,
+    run_stable: Vec<String>,
+    volatile: Vec<String>,
+) -> Result<String, ContextResolveError> {
     let mut segment_hashes = std::collections::BTreeMap::new();
     let mut assembled = Vec::new();
     for (key, class_blocks) in [
-        ("stable", &stable_blocks),
-        ("run-stable", &run_stable_blocks),
-        ("volatile", &volatile_blocks),
+        ("stable", &stable),
+        ("run-stable", &run_stable),
+        ("volatile", &volatile),
     ] {
         if class_blocks.is_empty() {
             continue;
@@ -257,6 +282,42 @@ async fn resolve_all(
     })?;
 
     Ok(assembled.join("\n"))
+}
+
+/// The whole context a repair session gets: the shape of every
+/// interpreted artifact the node declares, and nothing else.
+///
+/// A repair session rewrites a file it already has on disk. The author's
+/// `context:` bought the node its work; buying it again would pay a
+/// second time for the session the node already had, and none of it says
+/// anything about the shape the file was supposed to have. Recorded as
+/// its own `context_assembled` like every other session's, so replay can
+/// name what this one saw.
+///
+/// `None` when the node declares no interpreted artifact — which is also
+/// when no repair is possible, since only an interpreted artifact can
+/// fail on its content.
+pub(super) async fn assemble_shapes(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Result<Step<Option<String>>, RunError> {
+    let mut blocks = Vec::new();
+    let mut sources = Vec::new();
+    let assembly = mount_artifact_shapes(ctx, node, &mut blocks, &mut sources);
+    if blocks.is_empty() && assembly.is_ok() {
+        return Ok(Step::Value(None));
+    }
+    match assembly {
+        Ok(()) => match assembled(ctx, node, None, sources, blocks, Vec::new(), Vec::new()).await {
+            Ok(text) => Ok(Step::Value(Some(text))),
+            Err(error) => Ok(Step::Ended(
+                fail(ctx, node, error.to_string(), false).await?,
+            )),
+        },
+        Err(error) => Ok(Step::Ended(
+            fail(ctx, node, error.to_string(), false).await?,
+        )),
+    }
 }
 
 async fn resolve_one(
@@ -310,95 +371,6 @@ fn render_block(
             materialized_path.display()
         )
     }
-}
-
-/// Mounts the shape of every interpreted artifact this node declares,
-/// ahead of everything the author asked for.
-///
-/// `stable` by construction rather than by choice: the text derives from
-/// the node's own declaration and the types that parse it, so it is
-/// identical in every session of this node and sits inside the
-/// byte-stable prefix a provider's cache reuses rather than disturbing
-/// it.
-fn mount_artifact_shapes(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    blocks: &mut Vec<String>,
-    sources: &mut Vec<ContextSourceRef>,
-) -> Result<(), ContextResolveError> {
-    let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
-    for (source_id, content) in artifact_shapes(ctx, node) {
-        let bytes = content.into_bytes();
-        let (path, content_hash) =
-            materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize an artifact shape".to_string(),
-                source,
-            })?;
-        blocks.push(render_block(
-            &source_id,
-            SHAPE_KIND,
-            &bytes,
-            &path,
-            inline_threshold,
-        ));
-        sources.push(ContextSourceRef {
-            source_id,
-            kind: SHAPE_KIND.to_string(),
-            content_hash,
-        });
-    }
-    Ok(())
-}
-
-/// What a shape block is called wherever context sources are named:
-/// in the prompt's own header and in `context_assembled`.
-const SHAPE_KIND: &str = "artifact-shape";
-
-/// The shape of every interpreted artifact a node declares, as blocks to
-/// mount ahead of the author's own context.
-///
-/// A node that declared `kind: task-ledger` has already said everything
-/// needed to know this: publishing the shape is the consequence of that
-/// declaration, not a second key an author has to remember. An opaque
-/// artifact yields nothing — it has no shape to demand.
-///
-/// The path is spelled out because the engine knows it and the session
-/// does not: its working directory is the worktree, not the run
-/// directory, so an agent told only to "write an artifact" has nowhere
-/// to put it.
-fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, String)> {
-    // Names carry templates (`findings-{{runner.role}}`); the session is
-    // told the name it will actually be verified against. A name that
-    // cannot render is the node's own failure at close, reported there
-    // with its own diagnostic — here it simply stays as written.
-    let rendered = super::node_exec::render_artifact_names(ctx, node);
-    let node = rendered.as_ref().unwrap_or(node);
-    let Some(artifacts) = &node.artifacts else {
-        return Vec::new();
-    };
-    artifacts
-        .produces
-        .iter()
-        .filter_map(|spec| match spec {
-            yunta_core::ArtifactSpec::Typed { name, kind } => {
-                let path = ctx.run_dir.join("artifacts").join(name);
-                let shape =
-                    yunta_core::shape::published(yunta_core::DocumentKind::from(kind.clone()));
-                Some((
-                    format!("{SHAPE_KIND}:{name}"),
-                    format!(
-                        "This node produces an artifact the engine reads and validates. Write \
-                         it at {}, in exactly this shape — any other key fails the \
-                         node.\n\n{shape}",
-                        path.display()
-                    ),
-                ))
-            }
-            yunta_core::ArtifactSpec::Plain(_) => None,
-        })
-        .collect()
 }
 
 /// The three fixed classes, in assembly order.

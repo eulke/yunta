@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, GateResolvedPayload,
+    CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Failure, GateResolvedPayload,
     NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
@@ -171,12 +171,11 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: "lint failed".to_string(),
-                    tokens_used: Default::default(),
-                    retryable: true,
-                    diagnostics: Vec::new(),
-                }),
+                EventPayload::NodeFailed(NodeFailedPayload::new(
+                    Failure::message("lint failed".to_string()),
+                    true,
+                    Default::default(),
+                )),
             )]
             // no node_rerouted in any of these — the re-route this node
             // declares was never observed firing.
@@ -199,12 +198,11 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFailed(NodeFailedPayload {
-                    outcome: "lint failed".to_string(),
-                    tokens_used: Default::default(),
-                    retryable: true,
-                    diagnostics: Vec::new(),
-                }),
+                EventPayload::NodeFailed(NodeFailedPayload::new(
+                    Failure::message("lint failed".to_string()),
+                    true,
+                    Default::default(),
+                )),
             )]
         })
         .collect();
@@ -213,12 +211,11 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
         event(
             100,
             Some("lint"),
-            EventPayload::NodeFailed(NodeFailedPayload {
-                outcome: "lint failed".to_string(),
-                tokens_used: Default::default(),
-                retryable: true,
-                diagnostics: Vec::new(),
-            }),
+            EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::message("lint failed".to_string()),
+                true,
+                Default::default(),
+            )),
         ),
         event(
             101,

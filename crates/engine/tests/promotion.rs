@@ -265,11 +265,13 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 
     let path = run_dir.join("artifacts/findings-inherited.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
-    let file: yunta_core::FindingsFile = serde_norway::from_slice(&bytes).unwrap();
-    assert!(
-        yunta_engine::register_findings(&file).is_empty(),
-        "the derived file must satisfy the findings-file parser"
-    );
+    // Through the same door every findings artifact is read by, so the
+    // derived file satisfies the shape and the rules, not just serde.
+    let file = yunta_core::shape::read::<yunta_core::FindingsFile>(
+        &bytes,
+        "artifacts/findings-inherited.yaml",
+    )
+    .expect("the derived file must satisfy the findings door");
     assert_eq!(file.findings.len(), 2, "duplicates collapse: {file:?}");
     assert_eq!(file.findings[0].id, "scope-expansion-T001-1");
     assert_eq!(file.findings[1].id, "scope-expansion-T002-1");

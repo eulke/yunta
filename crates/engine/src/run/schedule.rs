@@ -416,7 +416,7 @@ pub fn next_step(
     //    again on the next (the reroute/restart it emits changes the log,
     //    so the next call sees a different answer for it).
     for node in nodes.iter().copied() {
-        let Some(NodeState::Failed { outcome, .. }) = state.nodes.get(&node.id) else {
+        let Some(NodeState::Failed { failure, .. }) = state.nodes.get(&node.id) else {
             continue;
         };
         let h = hist(&node.id);
@@ -437,14 +437,14 @@ pub fn next_step(
                             to: on_failure.goto.clone(),
                             attempt: h.reroutes + 1,
                             max_reroutes: on_failure.max_reroutes,
-                            cause: outcome.clone(),
+                            cause: failure.to_string(),
                         };
                     }
                     return ScheduleStep::GateExhaustedReroutes {
                         node: node.id.clone(),
                         goto: on_failure.goto.clone(),
                         max_reroutes: on_failure.max_reroutes,
-                        cause: outcome.clone(),
+                        cause: failure.to_string(),
                     };
                 }
                 // No re-route of its own: `defaults.on_failure` decides.
@@ -453,7 +453,7 @@ pub fn next_step(
                 // failed and falls through, so its dependents stay
                 // unscheduled (their dependency is not `Finished`) while
                 // the rest of the graph keeps running.
-                let reason = format!("node `{}` failed: {outcome}", node.id);
+                let reason = format!("node `{}` failed: {failure}", node.id);
                 match default_on_failure {
                     DefaultOnFailure::Pause => return ScheduleStep::Pause { reason },
                     DefaultOnFailure::Abort => return ScheduleStep::Fail { reason },
@@ -575,8 +575,8 @@ pub fn next_step(
         if let Some(reason) = nodes
             .iter()
             .find_map(|node| match state.nodes.get(&node.id) {
-                Some(NodeState::Failed { outcome, .. }) => {
-                    Some(format!("node `{}` failed: {outcome}", node.id))
+                Some(NodeState::Failed { failure, .. }) => {
+                    Some(format!("node `{}` failed: {failure}", node.id))
                 }
                 _ => None,
             })

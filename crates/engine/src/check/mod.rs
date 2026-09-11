@@ -37,11 +37,11 @@ mod scopes;
 pub use error::{CheckError, CheckWarning, SchemaRangeError};
 pub use refs::check_workflow_refs;
 
-// One home for what every family reads: the workspace types, the two
-// cross-crate helpers, and each family's own rule functions, so a family
-// file's `use super::*` sees them all and the two entries below call any
-// rule unqualified.
-pub(crate) use crate::ledger::globs_might_overlap;
+// One home for what every family reads: the workspace types, the
+// shared helpers (the glob heuristic the ledger's own scope rule uses,
+// and the template scanner), and each family's own rule functions, so a
+// family file's `use super::*` sees them all and the two entries below
+// call any rule unqualified.
 pub(crate) use crate::template::template_variables;
 pub(crate) use declarations::*;
 pub(crate) use gates::*;
@@ -53,7 +53,7 @@ pub(crate) use runners::*;
 pub(crate) use scopes::*;
 pub(crate) use std::collections::{HashMap, HashSet};
 pub(crate) use yunta_core::{
-    ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind, RunnerName, Workflow,
+    might_overlap, ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind, RunnerName, Workflow,
 };
 
 /// The pseudo-node a finding about `node_defaults:` is attributed to.

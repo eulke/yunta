@@ -36,6 +36,7 @@ mod parallel_exec;
 mod promote;
 mod prompt_exec;
 mod questions_exec;
+mod repair;
 mod runner_resolve;
 mod schedule;
 mod step;
@@ -166,8 +167,12 @@ pub enum RunError {
     #[error("failed to serialize the manifest for `{path}`: {detail}")]
     ManifestWrite { path: PathBuf, detail: String },
 
-    #[error("task ledger `{path}` no longer parses: {detail}")]
-    CorruptLedger { path: PathBuf, detail: String },
+    /// An interpreted artifact the run needs and cannot read. The
+    /// report names the file and every problem it has, so the run states
+    /// what is wrong with the document rather than what a deserializer
+    /// made of it.
+    #[error("{0}")]
+    UnreadableArtifact(#[from] yunta_core::diagnostic::Report),
 
     #[error("adapter failed to spawn a session for node `{node}`")]
     Spawn {
