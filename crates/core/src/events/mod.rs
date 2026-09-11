@@ -11,8 +11,10 @@
 //! The hash chain over persisted rows lives in `yunta-storage`; nothing
 //! here carries a hash.
 
+mod failure;
 mod payloads;
 
+pub use failure::Failure;
 pub use payloads::*;
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this

@@ -12,57 +12,82 @@ use serde::{Deserialize, Serialize};
 use crate::ids::TaskId;
 use crate::{FindingId, QuestionId};
 
-/// Who is at fault, in the vocabulary of the document.
+/// One entry of a document: by name when its id parsed, by position
+/// when the id is the thing that could not be read.
 ///
-/// Every entry carries both its id and its position: the id is how a
-/// reader knows which one it is, and the position is the fallback for
-/// the case that makes a serde path useless — the id itself is the
-/// thing that failed to parse.
+/// The pair is one concept, so it is one type. Spelled as two loose
+/// fields, the half that is easiest to forget is the position, and a
+/// position that goes missing does not read as absent — it reads as
+/// zero, and names the first entry with confidence.
+// The bound is spelled out because `#[serde(default)]` on a generic
+// field otherwise asks for `Id: Default`, and an identifier has no
+// default — it is parsed or it is absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(bound(serialize = "Id: Serialize", deserialize = "Id: Deserialize<'de>"))]
+pub struct Named<Id> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Id>,
+    pub index: usize,
+}
+
+impl<Id> Named<Id> {
+    pub fn new(id: impl Into<Option<Id>>, index: usize) -> Self {
+        Named {
+            id: id.into(),
+            index,
+        }
+    }
+
+    /// How this entry names itself, given the noun for its kind.
+    fn render(&self, noun: &str) -> String
+    where
+        Id: fmt::Display,
+    {
+        match &self.id {
+            Some(id) => format!("{noun} `{id}`"),
+            None => ordinal(noun, self.index),
+        }
+    }
+}
+
+/// Who is at fault, in the vocabulary of the document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "of", rename_all = "kebab-case")]
 pub enum Subject {
-    /// The file as a whole.
+    /// The document as a whole, as opposed to an entry inside it.
     Document,
-    Task {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<TaskId>,
-        index: usize,
-    },
+    Task(Named<TaskId>),
+    /// A criterion names the task it belongs to, so a reader always has
+    /// somewhere to look — including when that task's own id is what
+    /// could not be read.
     Criterion {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        task: Option<TaskId>,
-        /// The task's own position, so a criterion still says which task
-        /// it belongs to when that task's id is the thing that could not
-        /// be read — the case where naming it by id is impossible and
-        /// naming it not at all leaves a reader with nowhere to look.
-        #[serde(default)]
-        task_index: usize,
+        task: Named<TaskId>,
         index: usize,
     },
-    Finding {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<FindingId>,
-        index: usize,
-    },
-    Question {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        id: Option<QuestionId>,
-        index: usize,
-    },
+    Finding(Named<FindingId>),
+    Question(Named<QuestionId>),
 }
 
 impl Subject {
     /// The noun an error uses for this kind of entry, so a message can
     /// say "a task declares ..." without the caller knowing which
     /// subject it holds.
-    pub fn noun(&self) -> &'static str {
+    pub(super) fn noun(&self) -> &'static str {
         match self {
             Subject::Document => "document",
-            Subject::Task { .. } => "task",
+            Subject::Task(_) => "task",
             Subject::Criterion { .. } => "criterion",
-            Subject::Finding { .. } => "finding",
-            Subject::Question { .. } => "question",
+            Subject::Finding(_) => "finding",
+            Subject::Question(_) => "question",
         }
+    }
+
+    /// Whether the subject is the document itself. The sentence a
+    /// top-level key gets is a different sentence from the one an entry
+    /// gets — "a task declares ..." is right for a task and wrong for a
+    /// file, whose keys are top-level ones.
+    pub(super) fn is_document(&self) -> bool {
+        matches!(self, Subject::Document)
     }
 }
 
@@ -93,27 +118,12 @@ impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Subject::Document => f.write_str("the document"),
-            Subject::Task { id: Some(id), .. } => write!(f, "task `{id}`"),
-            Subject::Task { id: None, index } => f.write_str(&ordinal("task", *index)),
-            Subject::Criterion {
-                task: Some(task),
-                index,
-                ..
-            } => write!(f, "task `{task}`, criterion {}", index + 1),
-            Subject::Criterion {
-                task: None,
-                task_index,
-                index,
-            } => write!(
-                f,
-                "{}, criterion {}",
-                ordinal("task", *task_index),
-                index + 1
-            ),
-            Subject::Finding { id: Some(id), .. } => write!(f, "finding `{id}`"),
-            Subject::Finding { id: None, index } => f.write_str(&ordinal("finding", *index)),
-            Subject::Question { id: Some(id), .. } => write!(f, "question `{id}`"),
-            Subject::Question { id: None, index } => f.write_str(&ordinal("question", *index)),
+            Subject::Task(task) => f.write_str(&task.render("task")),
+            Subject::Criterion { task, index } => {
+                write!(f, "{}, criterion {}", task.render("task"), index + 1)
+            }
+            Subject::Finding(finding) => f.write_str(&finding.render("finding")),
+            Subject::Question(question) => f.write_str(&question.render("question")),
         }
     }
 }

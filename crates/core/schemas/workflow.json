@@ -97,6 +97,7 @@
       ]
     },
     "ArtifactKind": {
+      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
       "enum": [
         "task-ledger",

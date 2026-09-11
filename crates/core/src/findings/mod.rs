@@ -2,6 +2,10 @@
 //! the engine reads at node close. An agent wrote it, so every type
 //! here refuses a key it does not know; the log records each entry as
 //! [`events::Finding`], which reads what a later writer adds.
+//!
+//! The shape published to whoever writes one, and the rules that hold
+//! across the whole document, live alongside the types: they are one
+//! schema.
 
 use serde::{Deserialize, Serialize};
 
@@ -81,5 +85,31 @@ impl From<ProposedCriterionEntry> for events::ProposedCriterion {
 impl From<events::ProposedCriterion> for ProposedCriterionEntry {
     fn from(criterion: events::ProposedCriterion) -> Self {
         ProposedCriterionEntry { cmd: criterion.cmd }
+    }
+}
+
+mod rules;
+pub(crate) mod shape;
+
+/// The shape this document publishes, as the YAML it is.
+///
+/// It lives as a file rather than a string literal, so an editor reads
+/// it as YAML and a person reviewing a schema change sees the diff in
+/// the format the change is about. `include_str!` binds it at compile
+/// time, and the test that reads it back through
+/// [`read`](crate::shape::read) is what stops it drifting from the
+/// parser.
+const EXAMPLE: &str = include_str!("shape.yaml");
+
+impl crate::shape::Document for FindingsFile {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
+    const EXAMPLE: &'static str = EXAMPLE;
+
+    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
+        shape::diagnose(value, walk);
+    }
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check(self)
     }
 }

@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::Subject;
+
 /// What kind of YAML value was found where another was expected. Named
 /// as a person writing YAML names them, never as a deserializer names
 /// its own types.
@@ -67,6 +69,78 @@ impl Malformation {
     }
 }
 
+/// The stable name of a rule that only holds across a whole document.
+///
+/// Exhaustive, so a rule cannot be minted by typing a new string, and
+/// countable, so a receipt reports what a run keeps getting wrong
+/// without reading prose. A code says which rule broke and nothing
+/// about which document it broke in: `DuplicateId` is one rule asked of
+/// ledgers, findings and questions alike, and what separates the three
+/// is the [`ArtifactKind`](crate::ArtifactKind) on the report carrying
+/// it. Counting by code alone conflates them; counting by kind and code
+/// does not.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuleCode {
+    /// A second entry already carries this id.
+    DuplicateId,
+    EmptyTitle,
+    EmptyScope,
+    NoCriteria,
+    /// Every criterion is a guard, so nothing in the task proves work
+    /// happened.
+    AllCriteriaAreGuards,
+    /// `depends_on` names a task nobody declared.
+    UnknownDependency,
+    DependencyCycle,
+    /// Two independent tasks reach for the same files.
+    OverlappingScope,
+    ManualReviewWithoutJustification,
+    EmptyText,
+    EmptyLocation,
+    EmptyDetail,
+    /// `answer_type` is `choice` and `values` is empty.
+    MissingValues,
+}
+
+impl RuleCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RuleCode::DuplicateId => "duplicate-id",
+            RuleCode::EmptyTitle => "empty-title",
+            RuleCode::EmptyScope => "empty-scope",
+            RuleCode::NoCriteria => "no-criteria",
+            RuleCode::AllCriteriaAreGuards => "all-criteria-are-guards",
+            RuleCode::UnknownDependency => "unknown-dependency",
+            RuleCode::DependencyCycle => "dependency-cycle",
+            RuleCode::OverlappingScope => "overlapping-scope",
+            RuleCode::ManualReviewWithoutJustification => "manual-review-without-justification",
+            RuleCode::EmptyText => "empty-text",
+            RuleCode::EmptyLocation => "empty-location",
+            RuleCode::EmptyDetail => "empty-detail",
+            RuleCode::MissingValues => "missing-values",
+        }
+    }
+}
+
+impl std::fmt::Display for RuleCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// What is wrong. Every variant carries what a correction needs, so
 /// neither rendering has to guess.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -110,18 +184,10 @@ pub enum Problem {
         valid: Vec<String>,
     },
     /// A rule the document broke once it was readable — the ledger's own
-    /// registration rules and their siblings. `code` is stable and
-    /// countable; `detail` is the clause a reader acts on.
+    /// registration rules and their siblings. `code` is what a receipt
+    /// counts; `detail` is the clause a reader acts on.
     Rule {
-        code: String,
-        detail: String,
-    },
-    /// Something about the file rather than anything inside it: it was
-    /// never written, it is empty, it is past a declared limit. `detail`
-    /// completes the sentence "the document ...", because there is no
-    /// entry to blame and pointing at one would be an invention.
-    File {
-        code: String,
+        code: RuleCode,
         detail: String,
     },
     /// The document was refused and nothing in it could be named as the
@@ -211,17 +277,9 @@ impl Problem {
         }
     }
 
-    pub fn rule(code: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn rule(code: RuleCode, detail: impl Into<String>) -> Self {
         Problem::Rule {
-            code: code.into(),
-            detail: detail.into(),
-        }
-    }
-
-    /// `detail` completes the sentence "the document ...".
-    pub fn file(code: impl Into<String>, detail: impl Into<String>) -> Self {
-        Problem::File {
-            code: code.into(),
+            code,
             detail: detail.into(),
         }
     }
@@ -230,15 +288,12 @@ impl Problem {
     /// rendering already reads as a sentence about the document and
     /// must not be prefixed with a subject and a colon.
     pub(super) fn about_document(&self) -> bool {
-        matches!(
-            self,
-            Problem::NotYaml { .. } | Problem::Unreadable { .. } | Problem::File { .. }
-        )
+        matches!(self, Problem::NotYaml { .. } | Problem::Unreadable { .. })
     }
 
     /// The stable name of this kind of problem: what a receipt counts
     /// and a log is grepped by, unaffected by any rewording.
-    pub fn code(&self) -> &str {
+    pub fn code(&self) -> &'static str {
         match self {
             Problem::NotYaml { .. } => "not-yaml",
             Problem::UnknownKey { .. } => "unknown-key",
@@ -246,16 +301,19 @@ impl Problem {
             Problem::WrongShape { .. } => "wrong-shape",
             Problem::InvalidId { .. } => "invalid-id",
             Problem::UnknownValue { .. } => "unknown-value",
-            Problem::Rule { code, .. } => code,
-            Problem::File { code, .. } => code,
+            Problem::Rule { code, .. } => code.as_str(),
             Problem::Unreadable { .. } => "unreadable",
         }
     }
 
-    /// The sentence a reader acts on. `noun` is the subject's own noun,
-    /// so a message can say "a task declares ..." without this type
-    /// knowing which subject carries it.
-    pub(super) fn render(&self, noun: &str) -> String {
+    /// The sentence a reader acts on.
+    ///
+    /// Takes the subject rather than a noun: two of the sentences below
+    /// differ for the document itself, and deciding that by comparing a
+    /// noun against `"document"` makes rewording the noun silently
+    /// switch them off.
+    pub(super) fn render(&self, subject: &Subject) -> String {
+        let noun = subject.noun();
         match self {
             Problem::NotYaml { looks_like, .. } => match looks_like {
                 Some(shape) => format!("is not YAML: {}", shape.advice()),
@@ -265,7 +323,7 @@ impl Problem {
                 key,
                 valid,
                 instead,
-            } => unknown_key(noun, key, valid, instead.as_deref()),
+            } => unknown_key(subject, key, valid, instead.as_deref()),
             Problem::MissingKey { key } => {
                 format!("`{key}` is missing; every {noun} declares one")
             }
@@ -283,7 +341,7 @@ impl Problem {
             Problem::UnknownValue { value, valid } => {
                 format!("`{value}` is not one of {}", backticked(valid))
             }
-            Problem::Rule { detail, .. } | Problem::File { detail, .. } => detail.clone(),
+            Problem::Rule { detail, .. } => detail.clone(),
             Problem::Unreadable { .. } => {
                 "could not be read, and the reason could not be narrowed to any entry. \
                  Compare it against the shape above"
@@ -299,18 +357,20 @@ impl Problem {
 /// The document itself is a different sentence from an entry inside it:
 /// "a task declares ..." is right for a task and wrong for a file, whose
 /// keys are top-level ones.
-fn unknown_key(noun: &str, key: &str, valid: &[String], instead: Option<&str>) -> String {
+fn unknown_key(subject: &Subject, key: &str, valid: &[String], instead: Option<&str>) -> String {
     let mut text = format!("unknown key `{key}`");
-    match (noun, valid.len()) {
+    match (subject.is_document(), valid.len()) {
         (_, 0) => {}
-        ("document", 1) => text.push_str(&format!(
+        (true, 1) => text.push_str(&format!(
             "; the only top-level key is {}",
             backticked(valid)
         )),
-        ("document", _) => {
-            text.push_str(&format!("; the top-level keys are {}", backticked(valid)))
-        }
-        _ => text.push_str(&format!("; a {noun} declares {}", backticked(valid))),
+        (true, _) => text.push_str(&format!("; the top-level keys are {}", backticked(valid))),
+        (false, _) => text.push_str(&format!(
+            "; a {} declares {}",
+            subject.noun(),
+            backticked(valid)
+        )),
     }
     if let Some(instead) = instead {
         text.push_str(&format!("; {instead}"));
