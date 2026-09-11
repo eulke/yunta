@@ -423,6 +423,11 @@ nodes:
             let text = yaml::to_string(node).unwrap();
             let mapping: Mapping = yaml::parse(&text).unwrap();
             let kind = mapping["kind"].as_str().unwrap().to_string();
+            assert_eq!(
+                node.kind.kind_name(),
+                kind,
+                "`kind_name` and the serialized `kind:` tag name the same kind"
+            );
             let listed =
                 NodeKind::keys(&kind).unwrap_or_else(|| panic!("`{kind}` has no key list"));
             let mut serialized: Vec<String> = mapping

@@ -160,30 +160,24 @@ fn effective_hooks<'a>(
 fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hooks>) -> NodeAudit {
     let (before, after) = effective_hooks(node, node_defaults_hooks);
 
-    let (kind, command, prompt, executor) = match &node.kind {
-        NodeKind::Prompt { prompt } => (
-            "prompt",
-            None,
-            Some(resolve_prompt(prompt, workflow_dir)),
-            None,
-        ),
-        NodeKind::Bash { run } => ("bash", Some(run.clone()), None, None),
+    let (command, prompt, executor) = match &node.kind {
+        NodeKind::Prompt { prompt } => (None, Some(resolve_prompt(prompt, workflow_dir)), None),
+        NodeKind::Bash { run } => (Some(run.clone()), None, None),
         NodeKind::Loop { until, prompt, .. } => (
-            "loop",
             Some(until.as_str().to_string()),
             Some(resolve_prompt(prompt, workflow_dir)),
             None,
         ),
-        NodeKind::Parallel { .. } => ("parallel", None, None, None),
-        NodeKind::Check(_) => ("check", None, None, None),
-        NodeKind::Executor { executor, .. } => ("executor", None, None, Some(executor.clone())),
-        NodeKind::Gate { .. } => ("gate", None, None, None),
-        NodeKind::Workflow { .. } => ("workflow", None, None, None),
+        NodeKind::Executor { executor, .. } => (None, None, Some(executor.clone())),
+        NodeKind::Parallel { .. }
+        | NodeKind::Check(_)
+        | NodeKind::Gate { .. }
+        | NodeKind::Workflow { .. } => (None, None, None),
     };
 
     NodeAudit {
         id: node.id.as_str().to_string(),
-        kind,
+        kind: node.kind.kind_name(),
         command,
         hooks_before: before.iter().map(|step| step.run.clone()).collect(),
         hooks_after: after.iter().map(|step| step.run.clone()).collect(),

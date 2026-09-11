@@ -67,6 +67,7 @@ mod stats;
 mod task_cycle;
 mod template;
 mod verification_effectiveness;
+mod view;
 mod worktree;
 
 pub use artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
@@ -129,6 +130,10 @@ pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
+};
+pub use view::{
+    run_frame, ChildLink, Counter, Degradation, NodeFrame, NodeStanding, Reroute, RunFrame,
+    RunPhase, WaitingOn,
 };
 pub use worktree::{
     cleanup_worktree, prepare_worktree, release_worktree, WorktreeCleanup, WorktreeError,

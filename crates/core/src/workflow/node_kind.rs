@@ -173,6 +173,23 @@ impl NodeKind {
         "prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow",
     ];
 
+    /// The `kind:` this node declares, spelled as YAML spells it — the
+    /// name in [`KINDS`](Self::KINDS) that the serialized `kind` tag
+    /// carries. Exhaustive: a new variant does not compile until it
+    /// names itself here.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            NodeKind::Prompt { .. } => "prompt",
+            NodeKind::Bash { .. } => "bash",
+            NodeKind::Loop { .. } => "loop",
+            NodeKind::Parallel { .. } => "parallel",
+            NodeKind::Check(_) => "check",
+            NodeKind::Executor { .. } => "executor",
+            NodeKind::Gate { .. } => "gate",
+            NodeKind::Workflow { .. } => "workflow",
+        }
+    }
+
     /// The keys a node of `kind` accepts besides the node-level ones,
     /// or `None` for a kind that does not exist. The lists mirror the
     /// variants above; a test serializes each kind with every field set
