@@ -263,9 +263,20 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | sí | el outcome del agente es telemetría, esto es el veredicto |
+| `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
+| `failure` | `{outcome}` \| `{artifacts}` | solo en `node_failed` | por qué falló, como dato; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
-| `retryable` | `bool` | solo en `node_failed` | guía la política de reintento |
+| `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
+
+**La falla es dato, no prosa.** `failure` toma una de dos formas, planas sobre el
+payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
+`artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
+es o el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
+`artifact-oversized` (con bytes y techo) o `artifact-unreadable` — o el contenido:
+el path del documento, la `kind` que fija su forma y todos sus diagnósticos. El
+texto que ve una persona se produce al leer el evento, nunca al escribirlo (D133).
+Un payload que lleva `outcome:` solo se lee como la falla de una frase, sin
+migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este campo.
 
 ### 5.16 `hook_executed` — engine
 **Fuente:** node_id, fase before/after, comando, exit code

@@ -21,7 +21,7 @@ cargo test --workspace                 # the whole suite runs against the mock a
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
-cargo xtask schema                     # regenerates schemas/ after a change to a document type
+cargo xtask schema                     # regenerates crates/core/schemas/ after a change to a document type
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`; rustup installs it on the

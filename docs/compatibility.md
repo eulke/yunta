@@ -116,21 +116,97 @@ verbatim (with its `schema_version` beside the envelope fields). An event
 under a known kind whose payload is not that kind's shape is corrupt, and
 reading the run fails naming its position.
 
+`node_failed` records what failed, not a sentence about it. Its `failure` is
+either `outcome:` — one sentence the engine states, for a failure with no
+document behind it — or `artifacts:`, one entry per declared artifact that did
+not close. An entry is either the file itself (`artifact-missing`,
+`artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`)
+or its content: the path, the kind whose shape it was read against, and every
+problem that document has. Each problem names its subject in the document's own
+words — ``task `t1`, criterion 1`` — which is the whole of where it is: a
+diagnostic carries no line and column, and `events.json` publishes none. Every
+surface renders from that value — `status`, the receipt, and the instruction a
+repair attempt gets — so none of them can disagree about the facts, and nothing
+has to take a sentence apart to recover them.
+
+A log whose `node_failed` events carry `outcome:` on its own — every log written
+before `artifacts:` existed — reads back as exactly that one-sentence failure:
+no migration, nothing inferred. That tolerance is the rule for everything the
+engine persists and reads again. The other direction is the general rule above:
+a payload a binary does not recognize as that kind's shape is corrupt to it.
+
+Because each document travels with its own problems, a count says which document
+each came from: the receipt counts a problem by its code together with the kind of
+document it was found in, and a failure of the file itself, which has no document,
+counts by code alone.
+
 `yunta list --runs` orders runs by the timestamp of their first event.
+
+## The JSON surfaces
+
+`stats --json`, `status --json` and `run --json` carry `schema_version: 2`. The
+three share one stamp, so all of them carry the new number even though only
+`status --json` changed shape.
+
+In `status --json`, `diagnostics` maps a failed node to the documents its failure
+names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
+file. `path` is always there. A content failure carries `kind`, the artifact kind
+whose shape the file was read against, and `diagnostics`, every problem that
+document has in document order. A file-level failure carries `file` instead,
+naming what went wrong with the file itself: never written, empty, past
+`limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
+recent failure is a plain message has no entry at all, so what the field shows is
+always the state the node is in now.
+
+## Message wording
+
+The block that reports what is wrong with a document counts in whole words —
+`1 error`, `2 errors`. Every surface that prints it says it the same way: an
+interpreted artifact that could not be read, a workflow that fails `yunta check`
+(``the workflow fails `yunta check`: 2 errors``), `yunta new`, `yunta pack new`.
+
+`yunta run` and `yunta resume` refuse an unhealthy adapter with ``adapter health
+check failed (run `yunta doctor` for detail): 2 errors`` — the advice sits inside
+the parenthesis so the count lands directly after the heading.
+
+The `document_shape` tool refuses an unknown kind with the same sentence
+`yunta schema` prints, byte for byte.
+
+A run the binary could only interpret in part counts the same way on both surfaces
+that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>, …`,
+and `1 unknown event kind` for one. `yunta status` folds that into its
+`·`-separated summary; `yunta stats` gives it a line of its own.
+
+`yunta test` closes a case with what it found: `case <name> ... FAILED: 2 errors`,
+`case <name> ... ERROR: 1 error`, and `case <name> ... ok` on its own. The tally
+under them counts cases — `4 cases, 1 failed`, `1 case, 1 failed` — and carries no
+error count, unlike every other heading that introduces problems: `failed` counts
+cases while the lines beneath it count problems, and one failing case contributes
+several, so a count there would put two different totals on one line. Each count
+stays with what it counts.
+
+`yunta pack add --run-tests` and `yunta pack audit` report that same tally in their
+tests section — `tests: 4 cases, 1 failed`, or `tests: 4 cases shipped, not run
+(pass --run-tests)` when nothing ran, or `tests: none shipped` when the pack ships
+no cases. Failure lines sit two spaces in under it.
+
+`yunta pack audit` prints a node's `prompt:` block even when the prompt file is
+empty: a blank line under the heading, an empty block that shows it is empty.
 
 ## The schemas as files
 
-`schemas/workflow.json`, `schemas/config.json`, `schemas/pack.json`,
-`schemas/ledger.json`, `schemas/findings.json`, `schemas/questions.json` and
-`schemas/events.json` are the JSON Schema (draft 2020-12) of a workflow file,
-a config layer, a pack manifest, the three artifacts the engine interprets,
-and one event of the log — the shape of a line of `events.jsonl`. They are
-generated from the types that read those documents: `cargo xtask schema`
-writes them and CI fails when a committed file differs from what the types
-emit, so any change to a format is a visible diff in the pull request that
-makes it. An editor or a validator can use the files as they are, and
-`yunta schema <kind> --json` prints the same file for the three artifact
-kinds without needing a checkout.
+`crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
+`ledger.json`, `findings.json`, `questions.json` and `events.json`: the JSON
+Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
+three artifacts the engine interprets, and one event of the log — the shape of a
+line of `events.jsonl`. They are generated from the types that read those
+documents: `cargo xtask schema` writes them and CI fails when a committed file
+differs from what the types emit, so any change to a format is a visible diff in
+the pull request that makes it. They live inside the crate whose types produce
+them, which is also the crate that ships them: the binary embeds those exact
+files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
+deriving a schema of its own at run time. An editor or a validator can use the
+files as they are, with or without a checkout.
 
 ## Platforms
 

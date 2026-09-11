@@ -294,6 +294,14 @@ que siempre está al día.
 
 ## Notas de schema
 
+- **`kind:` de un artifact**: el conjunto es cerrado — `task-ledger`, `findings` y
+  `questions` — y lo nombra un único tipo, del que salen el valor que se escribe acá,
+  el argumento de `yunta schema <kind>`, el catálogo de la tool `document_shape` y el
+  documento del que habla un reporte de lectura (D132). Declarar el `kind` alcanza
+  para que el nodo reciba la forma de ese documento en su contexto: no hay una
+  segunda clave que la pida. Qué implica declararlo — parser, reglas, corrección de
+  un archivo ilegible — está en el Contrato §4.1; la forma de cada kind se lee con
+  `yunta schema <kind>`, y su JSON Schema con `--json`.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis

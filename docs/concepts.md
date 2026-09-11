@@ -65,9 +65,11 @@ the same way it looks up anything else. Nobody has to relay a format by hand.
 
 When a document still comes back wrong, the failure names every problem in it in
 the document's own terms — "task `t1`, criterion 1: expected a mapping" rather
-than a path into a parser — and the engine gives the session one chance to write
-it again with those problems in hand. That budget is
-`limits.max_artifact_repairs`, and the verification itself never relaxes.
+than a path into a parser — and says which file each problem came from. The engine
+then opens one session on the node's own runner whose only job is to write those
+files again, with the problems and the shape in hand. That budget is
+`limits.max_artifact_repairs`; a node with no runner behind it, like a shell
+command or a check, has no such cycle, and the verification itself never relaxes.
 
 ## Packs: sharing workflows without extending the engine
 

@@ -56,12 +56,17 @@ El engine rechaza el ledger completo — y falla el nodo que lo produjo — si:
 
 1. Un `id` se repite, o no cumple el patrón.
 2. Un `depends_on` referencia un id inexistente.
-3. El grafo de `depends_on` tiene ciclos.
+3. El grafo de `depends_on` tiene ciclos — detectados por el mismo recorrido que
+   `check` corre sobre el grafo de nodos del workflow: un solo detector para los dos
+   grafos, que reporta el ciclo como el camino que lo cierra.
 4. Dos tareas sin dependencia entre sí declaran scopes que se solapan (impediría
    correr esas tareas en paralelo y hace ambiguo el diff).
 5. Una tarea no tiene criterios, o todos son `guard`.
 6. `manual_review: true` sin `justification`.
 7. Un campo obligatorio falta o está vacío.
+
+Estas reglas corren como parte de la lectura del documento, no como un paso aparte
+que un llamador pueda saltear: quien obtiene un ledger obtiene uno que las cumple.
 
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
 lo dice el pre-check en rojo al ejecutarlos, que es donde un criterio trivial o
@@ -69,16 +74,24 @@ roto se delata.
 
 ## 4. Errores
 
-Como estos archivos se escriben a mano, cada rechazo nombra tarea, campo y expectativa:
+Cada rechazo nombra la tarea, el campo y la expectativa, en el vocabulario del
+documento y nunca en el del parser:
 
 ```
-ledger: 3 errors
-  graph-cmd: `scope` is empty — every task must declare at least one glob
-  parse-events: `depends_on` references unknown task `storage-init`
-  T004: all criteria are `guard` — at least one must be able to fail before the work
+artifacts/plan.yaml: 3 errors
+  task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+  task `parse-events`: `depends_on` names `storage-init`, which no task in this file declares
+  task `T004`: every criterion is a `guard`; at least one must be able to fail before the work, or there is nothing the work has to make pass
 ```
 
-Todos los errores del ledger se reportan juntos, no de a uno: quien escribe a mano
+El encabezado nombra el archivo que se leyó y cuántos problemas tiene; debajo va una
+línea por problema, con su sujeto adelante. Una tarea cuyo `id` es justamente lo que
+no se pudo leer se nombra por su posición (`the first task`), nunca por un índice del
+parser. Este bloque es el formato único con el que toda superficie muestra los
+problemas de un documento —un ledger, un artifact de findings, un workflow— y vive
+en un solo lugar (D133).
+
+Todos los problemas del documento se reportan juntos, no de a uno: quien lo escribió
 corrige una vez, no siete veces.
 
 ## 5. Ejemplo: una tarea del propio plan de Yunta

@@ -159,11 +159,18 @@ the control plane finds it without anyone passing the format along.
 
 When a file still comes back unreadable, the node fails with every problem in it
 named at once — by task and field, never by a parser's path into the document —
-and the engine reopens one session with those problems and the shape, against
-`limits.max_artifact_repairs` (default 1). Verification does not soften: the node
-still fails if the repair does not land. What a rewrite cannot fix — an artifact
-never produced, an empty one, one past `limits.max_artifact_bytes` — fails
-straight away.
+and a node that declares several interpreted artifacts gets each file reported
+under its own path. The node then gets one repair session against
+`limits.max_artifact_repairs` (default 1): the node's own runner, the shape it
+already mounts, those problems, and nothing to do but rewrite the declared files —
+the malformed file is still on disk for the session to read and correct. Every node
+that resolves a runner has this, whatever its kind, so a `loop` node's ledger is
+repaired like a `prompt` node's plan. A node with no runner behind it — `bash`,
+`check`, `gate` — has no repair cycle: there is no agent to instruct, and running
+a command again is a retry, not a repair. Verification does not soften either way:
+the node still fails if the repair does not land. What a rewrite cannot fix — an
+artifact never produced, an empty one, one past `limits.max_artifact_bytes`, one
+the filesystem refuses — fails straight away.
 
 ### Knowledge layers
 
