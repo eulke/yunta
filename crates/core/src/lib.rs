@@ -23,6 +23,7 @@
 mod capabilities;
 mod clock;
 mod config;
+pub mod diagnostic;
 mod error;
 pub mod events;
 mod findings;
@@ -51,6 +52,7 @@ pub use config::{
     PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProjectConfig,
     PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
 };
+pub use diagnostic::{Diagnostic, DocumentKind, DocumentRef, Problem, Report, Subject};
 pub use error::{describe, AdapterError, Result};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
 pub use glob::{scope_glob, scope_globset};
