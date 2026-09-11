@@ -103,7 +103,9 @@ pub use run::{
     ManifestReadError, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError,
     RunReport, RunRoots, RunTerminal,
 };
-pub use run_tools::{consolidate_blackboard, open_session_listener, RunToolsHost, RunToolsSession};
+pub use run_tools::{
+    consolidate_blackboard, open_session_listener, RunToolsAccess, RunToolsHost, RunToolsSession,
+};
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{

@@ -101,7 +101,9 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
                          Write it at {}.\n\nWhat follows is the whole contract for that \
                          file — the keys, their types, and the rules. Where any other \
                          instruction describes this file differently, this is what the \
-                         engine enforces.\n\n{shape}",
+                         engine enforces.\n\nWhen you have written it, call \
+                         `yunta_check_artifact` — it runs this node's own verification \
+                         and answers while you can still fix what it names.\n\n{shape}",
                         path.display()
                     ),
                 ))

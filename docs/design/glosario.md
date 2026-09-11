@@ -149,3 +149,8 @@ en el recorrido (D144).
 
 _Evitar_: «el esquema» para el contrato — el JSON Schema es otra cosa, y dice menos.
 
+**Verificación en sesión** — el veredicto que una sesión pide con
+`yunta_check_artifact` antes de terminar. Corre la misma verificación que el cierre,
+así que su respuesta y la del nodo no pueden diferir (D146). Es consultiva: el cierre
+sigue siendo el único juez.
+

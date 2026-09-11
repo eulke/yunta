@@ -346,6 +346,12 @@ fn build_ctx(
             run_id.clone(),
             &manifest.workflow,
             clock_for_host,
+            run_dir.to_path_buf(),
+            manifest
+                .config
+                .limits
+                .as_ref()
+                .and_then(|limits| limits.max_artifact_bytes),
         )),
     };
     (ctx, root_cancel, registry_error)

@@ -267,7 +267,21 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
 /// template vars (`{{runner.role}}` above all), so each fan-out sibling
 /// declares — and verifies — its own file. Nodes without templates in
 /// their names come back unchanged.
-pub(super) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
+/// The artifacts a node declares, with every templated name rendered.
+///
+/// These are the specs the node's close will verify, so they are also the
+/// ones a session is allowed to check against: a check that looked at a
+/// different file than the close would be worse than no check at all. A
+/// name that does not render yields nothing rather than a template — the
+/// node fails at close with the template error naming the variable.
+pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_core::ArtifactSpec> {
+    render_artifact_names(ctx, node)
+        .ok()
+        .and_then(|rendered| rendered.artifacts.map(|artifacts| artifacts.produces))
+        .unwrap_or_default()
+}
+
+pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
     }

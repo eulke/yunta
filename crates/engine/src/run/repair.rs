@@ -227,7 +227,7 @@ async fn session(
 /// repair session is given it as its own `artifact-shape` context, the
 /// same block `context_resolve` publishes for every typed artifact, so
 /// the session is billed for it once and has one copy to work from.
-fn instruction(failures: &[ArtifactFailure]) -> Option<String> {
+pub(crate) fn instruction(failures: &[ArtifactFailure]) -> Option<String> {
     if failures.is_empty() || !failures.iter().all(ArtifactFailure::is_repairable) {
         return None;
     }

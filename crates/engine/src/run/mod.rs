@@ -37,6 +37,7 @@ mod promote;
 mod prompt_exec;
 mod questions_exec;
 mod repair;
+pub(crate) use repair::instruction as repair_instruction;
 mod runner_resolve;
 mod schedule;
 mod step;

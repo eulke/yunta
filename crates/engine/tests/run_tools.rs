@@ -41,6 +41,7 @@ nodes:
 
 struct Bench {
     _root: tempfile::TempDir,
+    run_dir: std::path::PathBuf,
     storage: Storage,
     run_id: RunId,
     host: Arc<RunToolsHost>,
@@ -88,14 +89,19 @@ impl Bench {
                 &yunta_core::SystemClock,
             )
             .unwrap();
+        let run_dir = root.path().join("run");
+        std::fs::create_dir_all(run_dir.join("artifacts")).unwrap();
         let host = Arc::new(RunToolsHost::new(
             storage.async_handle(),
             run_id.clone(),
             &workflow,
             clock,
+            run_dir.clone(),
+            None,
         ));
         Bench {
             _root: root,
+            run_dir,
             storage,
             run_id,
             host,
@@ -103,9 +109,21 @@ impl Bench {
     }
 
     async fn listener(&self, node: &str, task: Option<&str>) -> RunToolsSession {
+        self.listener_for(node, task, Vec::new()).await
+    }
+
+    async fn listener_for(
+        &self,
+        node: &str,
+        task: Option<&str>,
+        declared: Vec<yunta_core::ArtifactSpec>,
+    ) -> RunToolsSession {
         open_session_listener(
-            self.host.clone(),
-            NodeId::from(node),
+            yunta_engine::RunToolsAccess {
+                host: self.host.clone(),
+                node: NodeId::from(node),
+                declared,
+            },
             task.map(TaskId::from),
             self._root.path().to_path_buf(),
         )
@@ -518,4 +536,93 @@ async fn dropping_the_session_closes_the_endpoint() {
         "a dropped session's endpoint must be unreachable — credentials never outlive \
          their session"
     );
+}
+
+// --- the verdict a session can ask for, before it ends -------------------
+//
+// The point of the tool is that its answer and the node's close are the
+// same code. These name the two halves of that: what it says when the file
+// is right, and that it names the same problems a failed close would.
+
+fn ledger_spec() -> yunta_core::ArtifactSpec {
+    yunta_core::ArtifactSpec::Typed {
+        name: "plan.yaml".to_string(),
+        kind: yunta_core::ArtifactKind::TaskLedger,
+    }
+}
+
+#[tokio::test]
+async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
+    let bench = Bench::new();
+    std::fs::write(
+        bench.run_dir.join("artifacts").join("plan.yaml"),
+        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+    )
+    .unwrap();
+    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(
+        text.contains("1 task(s) registered: `t1`"),
+        "the session sees its meaning survived, not only its syntax: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_names_the_same_problems_the_close_would() {
+    let bench = Bench::new();
+    // The failure that motivated the tool: a quoted boolean, and the rule
+    // that a repair round would have discovered next.
+    std::fs::write(
+        bench.run_dir.join("artifacts").join("plan.yaml"),
+        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
+    )
+    .unwrap();
+    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (_, text) = call(
+        &client,
+        "yunta_check_artifact",
+        json!({"name": "plan.yaml"}),
+    )
+    .await;
+
+    assert!(text.contains("could not be read"), "{text}");
+    assert!(text.contains("task `t1`"), "{text}");
+    assert!(
+        text.contains("expected true or false"),
+        "the same diagnostic the close produces: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(
+        &client,
+        "yunta_check_artifact",
+        json!({"name": "findings.yaml"}),
+    )
+    .await;
+    assert!(is_error, "{text}");
+    assert!(
+        text.contains("`findings.yaml` is not an artifact"),
+        "{text}"
+    );
+    assert!(text.contains("`plan.yaml`"), "{text}");
+}
+
+#[tokio::test]
+async fn a_node_with_nothing_to_check_says_so_rather_than_reporting_success() {
+    let bench = Bench::new();
+    let session = bench.listener("plan", None).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    assert!(is_error, "{text}");
+    assert!(text.contains("declares no artifacts"), "{text}");
 }
