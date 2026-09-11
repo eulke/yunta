@@ -118,64 +118,6 @@
         "capabilities"
       ]
     },
-    "ArtifactCheckedPayload": {
-      "description": "A session asked for its node's own verdict on an artifact it declared,\nbefore the node closed.\n\nWhat it records is the layer a problem was caught in. A node that\nchecked and converged never reaches the log any other way — the\nfailures it corrected inside its own session leave no `node_failed`\nbehind — so without this the one question worth asking after a run\n(\"was the writer told enough, or did it find out by failing?\") has no\nevidence to answer it.",
-      "type": "object",
-      "properties": {
-        "artifact_kind": {
-          "description": "Absent for an artifact the engine does not interpret. Named for\nthe artifact, like `artifact_written`'s own: the envelope already\nspends `kind` on the event's own name.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ArtifactKind"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "name": {
-          "description": "The artifact's name, as the node declares it.",
-          "type": "string"
-        }
-      },
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "verdict": {
-              "type": "string",
-              "const": "ok"
-            }
-          },
-          "required": [
-            "verdict"
-          ]
-        },
-        {
-          "description": "The codes the check named, so a receipt can report what sessions\ncorrect in place. These are the problems a run survives without\never spending a repair on them.",
-          "type": "object",
-          "properties": {
-            "codes": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "verdict": {
-              "type": "string",
-              "const": "problems"
-            }
-          },
-          "required": [
-            "verdict",
-            "codes"
-          ]
-        }
-      ],
-      "required": [
-        "name"
-      ]
-    },
     "ArtifactFailure": {
       "description": "Why one declared artifact did not close.",
       "oneOf": [
@@ -1033,19 +975,6 @@
             }
           },
           "$ref": "#/$defs/ArtifactWrittenPayload",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "artifact_checked"
-            }
-          },
-          "$ref": "#/$defs/ArtifactCheckedPayload",
           "required": [
             "kind"
           ]

@@ -440,41 +440,6 @@ impl NodeFailedPayload {
     }
 }
 
-/// A session asked for its node's own verdict on an artifact it declared,
-/// before the node closed.
-///
-/// What it records is the layer a problem was caught in. A node that
-/// checked and converged never reaches the log any other way — the
-/// failures it corrected inside its own session leave no `node_failed`
-/// behind — so without this the one question worth asking after a run
-/// ("was the writer told enough, or did it find out by failing?") has no
-/// evidence to answer it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactCheckedPayload {
-    /// The artifact's name, as the node declares it.
-    pub name: String,
-    /// Absent for an artifact the engine does not interpret. Named for
-    /// the artifact, like `artifact_written`'s own: the envelope already
-    /// spends `kind` on the event's own name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_kind: Option<crate::ArtifactKind>,
-    #[serde(flatten)]
-    pub verdict: CheckVerdict,
-}
-
-/// What the check answered — the same verdict the node's close reaches.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "verdict", rename_all = "kebab-case")]
-pub enum CheckVerdict {
-    Ok,
-    /// The codes the check named, so a receipt can report what sessions
-    /// correct in place. These are the problems a run survives without
-    /// ever spending a repair on them.
-    Problems {
-        codes: Vec<String>,
-    },
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HookExecutedPayload {
     pub phase: HookPhase,

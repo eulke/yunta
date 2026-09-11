@@ -6,15 +6,13 @@
 //! module only reads what the engine already recorded. Turning it
 //! into something a person or a program reads is [`render`]'s job.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use serde::Serialize;
 
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{
-    CheckVerdict, EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage,
-};
+use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage};
 use yunta_core::ContentHash;
 use yunta_core::{
     AdapterId, ArtifactKind, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId,
@@ -130,33 +128,10 @@ pub struct Receipt {
     /// is one rule asked of three documents, so three broken ledgers and
     /// one of each are different facts and count separately.
     pub diagnostics: Vec<DiagnosticCount>,
-    /// Which layer the run's document problems were caught in.
-    ///
-    /// The counts above only ever see what reached a node's close. A
-    /// session that checked its own artifact and fixed it leaves no
-    /// failure behind, so without this the run reads as if nothing had
-    /// gone wrong — and "was the writer told enough, or did it find out
-    /// by failing?" stays unanswerable.
-    pub self_checks: SelfCheckSummary,
 }
 
-/// What the run's sessions asked of `yunta_check_artifact`, and what it
-/// answered.
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
-pub struct SelfCheckSummary {
-    /// Checks the sessions ran.
-    pub checks: usize,
-    /// Of those, how many answered clean.
-    pub clean: usize,
-    /// Nodes that declared an interpreted artifact and never checked one.
-    /// A failure from one of these is a failure nothing tried to prevent.
-    pub nodes_that_never_checked: Vec<NodeId>,
-    /// What the sessions corrected in place, by code — the problems this
-    /// run survived without spending a repair on them.
-    pub corrected: Vec<DiagnosticCount>,
-}
-
-/// How many times a run hit one kind of problem in one kind of document.
+/// One kind of problem in one kind of document, and how many times the
+/// run hit it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiagnosticCount {
     /// The document whose rules were asked. `None` for a problem with
@@ -187,53 +162,6 @@ impl std::fmt::Display for DiagnosticCount {
 /// Every problem the log recorded, counted by `(document kind, code)`,
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
-/// Which layer caught what: every check a session ran, and every node
-/// that could have run one and did not.
-fn self_checks(events: &[StoredEvent], manifest: &Manifest) -> SelfCheckSummary {
-    let mut summary = SelfCheckSummary::default();
-    let mut corrected: HashMap<(Option<ArtifactKind>, String), usize> = HashMap::new();
-    let mut checked: HashSet<&NodeId> = HashSet::new();
-
-    for event in events {
-        let Some(EventPayload::ArtifactChecked(p)) = event.payload() else {
-            continue;
-        };
-        summary.checks += 1;
-        if let Some(node) = &event.node_id {
-            checked.insert(node);
-        }
-        match &p.verdict {
-            CheckVerdict::Ok => summary.clean += 1,
-            CheckVerdict::Problems { codes } => {
-                for code in codes {
-                    *corrected
-                        .entry((p.artifact_kind, code.clone()))
-                        .or_default() += 1;
-                }
-            }
-        }
-    }
-
-    // A node with nothing interpreted to check is not a node that skipped
-    // one: the tool has nothing to offer it.
-    summary.nodes_that_never_checked = manifest
-        .workflow
-        .nodes
-        .iter()
-        .filter(|node| {
-            node.artifacts
-                .as_ref()
-                .is_some_and(|a| a.produces.iter().any(|spec| spec.kind().is_some()))
-        })
-        .map(|node| &node.id)
-        .filter(|id| !checked.contains(id))
-        .cloned()
-        .collect();
-
-    summary.corrected = sorted_counts(corrected);
-    summary
-}
-
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
     let mut counts: HashMap<(Option<ArtifactKind>, &'static str), usize> = HashMap::new();
     for event in events {
@@ -261,19 +189,11 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
             }
         }
     }
-    sorted_counts(counts)
-}
-
-/// Counts in the order a reader wants them: what happened most, then by
-/// name so a receipt of the same run is byte-identical twice.
-fn sorted_counts<C: Into<String>>(
-    counts: HashMap<(Option<ArtifactKind>, C), usize>,
-) -> Vec<DiagnosticCount> {
     let mut counts: Vec<DiagnosticCount> = counts
         .into_iter()
         .map(|((kind, code), occurrences)| DiagnosticCount {
             kind,
-            code: code.into(),
+            code: code.to_string(),
             occurrences,
         })
         .collect();
@@ -333,7 +253,6 @@ pub fn build_receipt(
         event_chain,
         unknown_kinds,
         diagnostics: diagnostic_counts(events),
-        self_checks: self_checks(events, manifest),
     })
 }
 

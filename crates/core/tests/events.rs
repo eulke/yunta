@@ -54,13 +54,6 @@ fn all_kinds() -> Vec<EventPayload> {
             content_hash: yunta_core::sha256_hex(b"sha256:111"),
             artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
         }),
-        EventPayload::ArtifactChecked(ArtifactCheckedPayload {
-            name: "ledger.yaml".to_string(),
-            artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
-            verdict: CheckVerdict::Problems {
-                codes: vec!["no-criteria".to_string()],
-            },
-        }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
             task_id: None,
             sources: vec![ContextSourceRef {
@@ -238,7 +231,6 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::AgentSessionOpened(_)
         | EventPayload::AgentMessage(_)
         | EventPayload::ArtifactWritten(_)
-        | EventPayload::ArtifactChecked(_)
         | EventPayload::ContextAssembled(_)
         | EventPayload::TaskRegistered(_)
         | EventPayload::CriteriaChecked(_)
@@ -267,12 +259,12 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
 }
 
 #[test]
-fn there_are_exactly_32_kinds_with_distinct_names() {
+fn there_are_exactly_31_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 32);
+    assert_eq!(kinds.len(), 31);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 32, "expected 32 distinct kind names");
+    assert_eq!(names.len(), 31, "expected 31 distinct kind names");
 }
 
 #[test]
@@ -301,7 +293,6 @@ fn kind_names_match_the_spec_exactly() {
         "agent_session_opened",
         "agent_message",
         "artifact_written",
-        "artifact_checked",
         "context_assembled",
         "task_registered",
         "criteria_checked",

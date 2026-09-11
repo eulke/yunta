@@ -158,20 +158,6 @@ naming what went wrong with the file itself: never written, empty, past
 recent failure is a plain message has no entry at all, so what the field shows is
 always the state the node is in now.
 
-`artifact_checked` is a new event kind, written by a session through
-`yunta_check_artifact` rather than by the engine. It carries `name`, the
-`artifact_kind` when the artifact is interpreted, and a `verdict` of `ok` or
-`problems` with the `codes` the check named. Adding a kind is the compatible
-kind of change: a reader that does not know it derives what it can and marks the
-run partially interpreted, and a log written before it simply has none.
-
-The receipt gains `self_checks`: how many checks a run ran, how many answered
-clean, what the sessions corrected in place, and which nodes produced an
-interpreted artifact without ever checking one. Those corrections appear nowhere
-else — a session that fixes its own file before closing leaves no failure behind
-— so a receipt from an older version under-reports what a run got wrong, rather
-than disagreeing with a newer one.
-
 ## Message wording
 
 The block that reports what is wrong with a document counts in whole words —
