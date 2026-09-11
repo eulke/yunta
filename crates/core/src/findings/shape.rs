@@ -74,7 +74,8 @@ fn finding(walk: &mut Walk, index: usize, item: &Value) {
             "a mapping",
             "proposed_criterion: { cmd: \"cargo test resize\" }",
         ) {
-            walk.keys(inner, PROPOSED_CRITERION_REQUIRED, &[], &[]);
+            walk.keys(inner, PROPOSED_CRITERION_REQUIRED, &[], &[])
+                .string(inner, "cmd", "cmd: \"cargo test resize\"");
         }
     }
 }

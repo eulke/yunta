@@ -160,8 +160,11 @@ pub(super) async fn open_run_tools(
         });
     }
     match crate::run_tools::open_session_listener(
-        host.clone(),
-        node.id.clone(),
+        crate::run_tools::RunToolsAccess {
+            host: host.clone(),
+            node: node.id.clone(),
+            declared: crate::run::node_exec::declared_artifacts(ctx, node),
+        },
         task.cloned(),
         ctx.worktree.to_path_buf(),
     )

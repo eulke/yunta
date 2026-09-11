@@ -93,7 +93,7 @@ fn the_schema_a_door_publishes_is_the_one_the_repository_checked() {
 #[test]
 fn every_kind_publishes_a_shape_and_a_schema() {
     for kind in ArtifactKind::ALL {
-        assert!(!yunta_core::shape::published(kind).is_empty(), "{kind}");
+        assert!(!yunta_core::shape::contract(kind).is_empty(), "{kind}");
         assert!(!yunta_core::schema::json(kind).is_empty(), "{kind}");
     }
 }
@@ -103,4 +103,89 @@ fn a_documents_kind_is_the_one_its_own_type_declares() {
     assert_eq!(<Ledger as Document>::KIND, ArtifactKind::TaskLedger);
     assert_eq!(<FindingsFile as Document>::KIND, ArtifactKind::Findings);
     assert_eq!(<QuestionsFile as Document>::KIND, ArtifactKind::Questions);
+}
+
+// --- every rule reaches the writer who has to satisfy it ------------------
+//
+// Three assertions form one chain, and the chain is what makes "no rule
+// surprises a writer" a property of the build rather than of review:
+//
+//   1. a rule cannot exist without a `RuleCode` — `Problem::rule` takes one
+//   2. every `RuleCode` belongs to some document's `RULES` (below)
+//   3. every `RULES` entry is reachable by a document that breaks it (below)
+//
+// Break any link and a rule can be enforced that nobody was told about,
+// which is a whole repair attempt spent on something the system knew.
+
+use std::collections::BTreeSet;
+
+use yunta_core::diagnostic::{Rule, RuleCode};
+
+fn all_rules() -> Vec<(ArtifactKind, &'static Rule)> {
+    ArtifactKind::ALL
+        .into_iter()
+        .flat_map(|kind| {
+            yunta_core::shape::rules(kind)
+                .iter()
+                .map(move |rule| (kind, rule))
+        })
+        .collect()
+}
+
+#[test]
+fn every_rule_code_belongs_to_a_document_that_publishes_it() {
+    let published: BTreeSet<RuleCode> = all_rules().iter().map(|(_, r)| r.code).collect();
+    let missing: Vec<RuleCode> = RuleCode::ALL
+        .iter()
+        .copied()
+        .filter(|code| !published.contains(code))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no document's `RULES` publishes {missing:?} — a rule a writer is never told about"
+    );
+}
+
+#[test]
+fn a_rule_is_demanded_once_per_document_and_says_something() {
+    for (kind, rule) in all_rules() {
+        assert!(
+            !rule.demand.trim().is_empty(),
+            "{kind}: `{}` demands nothing",
+            rule.code
+        );
+        assert!(
+            !rule.demand.trim_end().ends_with('.'),
+            "{kind}: `{}`'s demand is a clause, not a sentence: {:?}",
+            rule.code,
+            rule.demand
+        );
+    }
+    for kind in ArtifactKind::ALL {
+        let codes: Vec<RuleCode> = yunta_core::shape::rules(kind)
+            .iter()
+            .map(|r| r.code)
+            .collect();
+        let unique: BTreeSet<RuleCode> = codes.iter().copied().collect();
+        assert_eq!(codes.len(), unique.len(), "{kind} lists a rule twice");
+    }
+}
+
+#[test]
+fn the_contract_a_door_hands_out_carries_the_shape_and_every_rule() {
+    for kind in ArtifactKind::ALL {
+        let contract = yunta_core::shape::contract(kind);
+        assert!(
+            contract.contains(yunta_core::shape::contract(kind).lines().next().unwrap()),
+            "{kind}"
+        );
+        for rule in yunta_core::shape::rules(kind) {
+            let demand = yunta_core::text::one_line(rule.demand);
+            assert!(
+                contract.contains(&demand),
+                "{kind}'s contract never states `{}`:\n{contract}",
+                rule.code
+            );
+        }
+    }
 }

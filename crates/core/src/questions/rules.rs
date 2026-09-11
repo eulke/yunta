@@ -8,8 +8,26 @@
 
 use std::collections::HashSet;
 
-use crate::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{AnswerType, QuestionId, QuestionsFile};
+
+/// Every rule this document is held to — see `crate::ledger::rules` for what
+/// this list is for and what holds it true.
+pub(super) const RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::DuplicateId,
+        demand: "each `id` is declared once in the file",
+    },
+    Rule {
+        code: RuleCode::EmptyText,
+        demand: "`text` is non-empty: a person has to be able to read the question",
+    },
+    Rule {
+        code: RuleCode::MissingValues,
+        demand: "a question whose `answer_type` is `choice` lists the answers it allows in \
+                 `values`",
+    },
+];
 
 fn broke(index: usize, id: &QuestionId, code: RuleCode, detail: &str) -> Diagnostic {
     Diagnostic::new(

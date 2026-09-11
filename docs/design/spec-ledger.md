@@ -67,6 +67,9 @@ El engine rechaza el ledger completo — y falla el nodo que lo produjo — si:
 
 Estas reglas corren como parte de la lectura del documento, no como un paso aparte
 que un llamador pueda saltear: quien obtiene un ledger obtiene uno que las cumple.
+Y se publican antes de que el documento se escriba: la lista que las aplica es la
+misma que el contrato le entrega a la sesión, así que ninguna de estas siete llega
+por primera vez como un fallo (D143).
 
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
 lo dice el pre-check en rojo al ejecutarlos, que es donde un criterio trivial o

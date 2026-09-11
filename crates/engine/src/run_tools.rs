@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::RunToolsEndpoint;
 use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload, StoredEvent};
-use yunta_core::{Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
+use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
 use yunta_storage::AsyncStorage;
 
 /// What every listener of one run shares: its own handle on the log
@@ -58,6 +58,13 @@ pub struct RunToolsHost {
     storage: AsyncStorage,
     run_id: RunId,
     blackboard_members: HashMap<NodeId, Vec<NodeId>>,
+    /// Where the run keeps its artifacts. A session's working directory is
+    /// the worktree, not this, so a tool that reads what the node declared
+    /// has to be told.
+    run_dir: PathBuf,
+    /// `limits.max_artifact_bytes`, so a check and the close answer the
+    /// same about a runaway file.
+    max_artifact_bytes: Option<u64>,
     /// The run's injected clock — the listener stamps its own event
     /// appends with it, never a fresh `SystemClock`, so every emitter on
     /// the run shares one clock.
@@ -70,6 +77,8 @@ impl RunToolsHost {
         run_id: RunId,
         workflow: &Workflow,
         clock: Arc<dyn yunta_core::Clock>,
+        run_dir: PathBuf,
+        max_artifact_bytes: Option<u64>,
     ) -> Self {
         let mut blackboard_members = HashMap::new();
         for node in &workflow.nodes {
@@ -90,6 +99,8 @@ impl RunToolsHost {
             run_id,
             blackboard_members,
             clock,
+            run_dir,
+            max_artifact_bytes,
         }
     }
 
@@ -162,12 +173,31 @@ impl Drop for RunToolsSession {
 /// only ones `yunta_request_scope_expansion` exists for (scope expansion
 /// is task-keyed machinery); `cwd` is where that request file lands (the
 /// same worktree `scope_expansion::load_request` consumes it from).
+/// What a session needs to reach the run's own tools: the host, the node
+/// the listener speaks for, and the artifacts that node's close will
+/// verify.
+///
+/// The names are already rendered, so a check inside the session and the
+/// verdict at close look at the same files. A node that declares none just
+/// carries an empty list — the check tool then has nothing to offer and
+/// says so.
+#[derive(Clone)]
+pub struct RunToolsAccess {
+    pub host: Arc<RunToolsHost>,
+    pub node: NodeId,
+    pub declared: Vec<ArtifactSpec>,
+}
+
 pub async fn open_session_listener(
-    host: Arc<RunToolsHost>,
-    node: NodeId,
+    access: RunToolsAccess,
     task: Option<TaskId>,
     cwd: PathBuf,
 ) -> std::io::Result<RunToolsSession> {
+    let RunToolsAccess {
+        host,
+        node,
+        declared,
+    } = access;
     // High entropy: 2 × 122 random bits, never logged.
     let token = format!(
         "{}{}",
@@ -183,6 +213,7 @@ pub async fn open_session_listener(
         node,
         task,
         cwd,
+        declared,
     };
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
@@ -238,6 +269,9 @@ struct SessionTools {
     node: NodeId,
     task: Option<TaskId>,
     cwd: PathBuf,
+    /// The artifacts this node's close will verify, names already
+    /// rendered.
+    declared: Vec<ArtifactSpec>,
 }
 
 /// Why a tool call could not be honored — rendered once, at the MCP
@@ -297,11 +331,104 @@ enum RunToolError {
     },
     #[error("unknown tool `{name}`")]
     UnknownTool { name: String },
+    #[error("node `{node}` declares no artifacts, so there is nothing to check")]
+    NoArtifacts { node: NodeId },
+    #[error("`{name}` is not an artifact this node declares; it declares {declared}")]
+    UndeclaredArtifact { name: String, declared: String },
+}
+
+/// What the engine read out of an artifact, so a session sees its meaning
+/// survived the parse and not only its syntax.
+fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
+    use crate::artifacts::ArtifactContent;
+    match &verified.content {
+        ArtifactContent::Opaque => "Verified by existence and content hash.".to_string(),
+        ArtifactContent::TaskLedger(ledger) => format!(
+            "{} task(s) registered: {}",
+            ledger.tasks.len(),
+            names(ledger.tasks.iter().map(|t| t.id.to_string()))
+        ),
+        ArtifactContent::Findings(findings) => format!(
+            "{} finding(s) posted: {}",
+            findings.len(),
+            names(findings.iter().map(|f| f.id.to_string()))
+        ),
+        ArtifactContent::Questions(questions) => format!(
+            "{} question(s) to answer: {}",
+            questions.len(),
+            names(questions.iter().map(|q| q.id.to_string()))
+        ),
+    }
+}
+
+fn names(ids: impl Iterator<Item = String>) -> String {
+    let ids: Vec<String> = ids.map(|id| format!("`{id}`")).collect();
+    if ids.is_empty() {
+        "none".to_string()
+    } else {
+        ids.join(", ")
+    }
 }
 
 impl SessionTools {
     fn in_blackboard_group(&self) -> bool {
         self.host.blackboard_members.contains_key(&self.node)
+    }
+
+    /// The verdict this node's close will reach, while the session can
+    /// still act on it.
+    ///
+    /// Runs `verify_one` — the close's own verification, not a second
+    /// reading of it. What comes back on success is what the engine
+    /// understood, not just that the file parsed: a ledger that reads as
+    /// six tasks when the session meant seven is a failure nothing else
+    /// catches.
+    fn check_artifact(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, RunToolError> {
+        let wanted = args.get("name").and_then(Value::as_str);
+        let specs: Vec<&ArtifactSpec> = self
+            .declared
+            .iter()
+            .filter(|spec| wanted.is_none_or(|name| spec.name() == name))
+            .collect();
+
+        if specs.is_empty() {
+            return Err(match wanted {
+                Some(name) => RunToolError::UndeclaredArtifact {
+                    name: name.to_string(),
+                    declared: self
+                        .declared
+                        .iter()
+                        .map(|spec| format!("`{}`", spec.name()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                },
+                None => RunToolError::NoArtifacts {
+                    node: self.node.clone(),
+                },
+            });
+        }
+
+        let mut verdicts = Vec::new();
+        for spec in specs {
+            match crate::artifacts::verify_one(
+                &self.node,
+                spec,
+                &self.host.run_dir,
+                self.host.max_artifact_bytes,
+            ) {
+                Ok(verified) => {
+                    verdicts.push(format!("{} — ok. {}", spec.name(), read_as(&verified)))
+                }
+                Err(failure) => verdicts.push(
+                    crate::run::repair_instruction(std::slice::from_ref(&failure))
+                        .unwrap_or_else(|| failure.to_string()),
+                ),
+            }
+        }
+        Ok(verdicts.join("\n\n"))
     }
 
     async fn events(&self) -> Result<Vec<StoredEvent>, RunToolError> {
@@ -435,24 +562,45 @@ impl ServerHandler for SessionTools {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let object = |schema: Value| schema.as_object().cloned().unwrap_or_default();
-        let mut tools = vec![Tool::new(
-            "yunta_post_finding",
-            "Report a structured finding the moment you see it — same schema and same \
+        let mut tools = vec![
+            Tool::new(
+                "yunta_check_artifact",
+                "Check an artifact this node declares against the contract, before your \
+             session ends. Runs exactly the verification the node's close runs, so a \
+             clean answer here is a clean close: write the file, call this, fix what it \
+             names, call it again. On success it reports what the engine actually read \
+             out of the file — so you see your meaning survived, not only your syntax. \
+             Omit `name` to check every artifact this node declares.",
+                object(json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The artifact's file name, as the node declares it. \
+                                            Omit to check them all."
+                        }
+                    }
+                })),
+            ),
+            Tool::new(
+                "yunta_post_finding",
+                "Report a structured finding the moment you see it — same schema and same \
              standing as a review artifact's findings: it is counted, deduplicated \
              and consulted with them, and survives this session.",
-            object(json!({
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "severity": {"type": "string", "enum": ["blocking", "major", "minor", "note"]},
-                    "title": {"type": "string"},
-                    "location": {"type": "string", "description": "path, optionally with a range"},
-                    "detail": {"type": "string"},
-                    "proposed_criterion": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
-                },
-                "required": ["id", "severity", "title", "location", "detail"],
-            })),
-        )];
+                object(json!({
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "severity": {"type": "string", "enum": ["blocking", "major", "minor", "note"]},
+                        "title": {"type": "string"},
+                        "location": {"type": "string", "description": "path, optionally with a range"},
+                        "detail": {"type": "string"},
+                        "proposed_criterion": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+                    },
+                    "required": ["id", "severity", "title", "location", "detail"],
+                })),
+            ),
+        ];
         tools.push(Tool::new(
             "yunta_task_status",
             "Read-only view of the run's task ledger (task id -> status) — the same data \
@@ -499,6 +647,7 @@ impl ServerHandler for SessionTools {
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
         let outcome = match request.name.as_ref() {
+            "yunta_check_artifact" => self.check_artifact(&args),
             "yunta_post_finding" => self.post_finding(args).await,
             "yunta_get_blackboard" => self.get_blackboard().await,
             "yunta_task_status" => self.task_status().await,

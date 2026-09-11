@@ -112,4 +112,6 @@ impl crate::shape::Document for FindingsFile {
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::check(self)
     }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
 }

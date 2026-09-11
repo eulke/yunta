@@ -290,7 +290,14 @@ async fn prepare_loop<'a>(
         .capabilities()
         .declares(yunta_core::Capability::RunTools)
     {
-        Some((ctx.run_tools_host.clone(), node.id.clone()))
+        Some(crate::run_tools::RunToolsAccess {
+            host: ctx.run_tools_host.clone(),
+            node: node.id.clone(),
+            // A task session writes into the loop node's own declared
+            // artifacts, so it gets to check them: the file it writes is
+            // the file that node closes on.
+            declared: super::node_exec::declared_artifacts(ctx, node),
+        })
     } else {
         if ctx.run_tools_host.is_blackboard_member(&node.id) {
             let end = fail(

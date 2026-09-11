@@ -12,7 +12,7 @@
 //! rendering four texts drift apart at the first schema change; four
 //! doors rendering one do not.
 
-use yunta_core::shape::published;
+use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
@@ -45,7 +45,7 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
         // binary-size ceiling (D124).
         print!("{}", yunta_core::schema::json(kind));
     } else {
-        print!("{}", published(kind));
+        print!("{}", contract(kind));
     }
     Ok(Outcome::Success)
 }

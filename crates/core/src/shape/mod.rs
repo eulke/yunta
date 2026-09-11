@@ -23,7 +23,7 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::diagnostic::{Diagnostic, DocumentRef, Malformation, Problem, Report, Subject};
+use crate::diagnostic::{Diagnostic, DocumentRef, Malformation, Problem, Report, Rule, Subject};
 use crate::yaml::Value;
 use crate::{ArtifactKind, FindingsFile, Ledger, QuestionsFile};
 
@@ -57,6 +57,14 @@ pub trait Document: DeserializeOwned + sealed::Sealed {
     /// tasks reaching for the same files. Total and pure — the document
     /// is all it needs.
     fn check(&self) -> Vec<Diagnostic>;
+
+    /// What those rules demand, stated for whoever has to satisfy them.
+    ///
+    /// The same list [`check`](Document::check) enforces, read the other
+    /// way round: published with the shape, before anything is written.
+    /// A writer who never heard a rule pays a whole repair attempt for
+    /// something the system already knew.
+    const RULES: &'static [Rule];
 }
 
 mod sealed {
@@ -118,15 +126,41 @@ pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Rep
     Err(Report::new(document, diagnostics))
 }
 
-/// The shape published for a kind: what every door hands to whoever has
-/// to write one. The single place a kind maps to its text, so no door
-/// can render a different one.
-pub fn published(kind: ArtifactKind) -> &'static str {
+/// Everything a writer has to know to produce a document of this kind:
+/// the shape, and the rules the shape cannot show.
+///
+/// The single place a kind turns into text, so no door can hand out a
+/// different contract. The two halves answer different questions — the
+/// example says what a good document looks like, the rules say what
+/// makes one fail — and a writer needs both before writing, not after.
+pub fn contract(kind: ArtifactKind) -> String {
     match kind {
-        ArtifactKind::TaskLedger => Ledger::EXAMPLE,
-        ArtifactKind::Findings => FindingsFile::EXAMPLE,
-        ArtifactKind::Questions => QuestionsFile::EXAMPLE,
+        ArtifactKind::TaskLedger => rendered::<Ledger>(),
+        ArtifactKind::Findings => rendered::<FindingsFile>(),
+        ArtifactKind::Questions => rendered::<QuestionsFile>(),
     }
+}
+
+/// The rules a kind is held to, for a caller that wants them as data.
+pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::TaskLedger => Ledger::RULES,
+        ArtifactKind::Findings => FindingsFile::RULES,
+        ArtifactKind::Questions => QuestionsFile::RULES,
+    }
+}
+
+fn rendered<T: Document>() -> String {
+    let mut text = T::EXAMPLE.trim_end().to_string();
+    if T::RULES.is_empty() {
+        text.push('\n');
+        return text;
+    }
+    text.push_str("\n\n# The engine also refuses the document, and fails the node, unless:\n");
+    for rule in T::RULES {
+        text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+    }
+    text
 }
 
 /// A malformation a writer recognizes, so the diagnostic can name the
@@ -150,6 +184,8 @@ fn looks_like(text: &str) -> Option<Malformation> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+
+    use super::*;
 
     /// Every key a walk accepts is a key the type declares, and every
     /// key a walk demands is a key the type requires.
@@ -181,6 +217,163 @@ mod tests {
             required.iter().copied().collect::<BTreeSet<_>>(),
             "`{name}`: the keys it requires"
         );
+    }
+
+    // --- the published example shows every key, and every key it shows
+    // --- is one the walk can explain
+    //
+    // These two are one chain. The first makes the example exhaustive over
+    // the type; the second makes the walk exhaustive over the example. Held
+    // together they say the thing that matters: every key a writer may write
+    // was shown to them, with a value of the right type, and getting it
+    // wrong names the key rather than falling back on the deserializer.
+
+    /// Every key, at any depth, that the document writes.
+    fn keys_in(value: &crate::yaml::Value, into: &mut BTreeSet<String>) {
+        match value {
+            crate::yaml::Value::Mapping(map) => {
+                for (key, child) in map {
+                    if let Some(name) = key.as_str() {
+                        into.insert(name.to_string());
+                    }
+                    keys_in(child, into);
+                }
+            }
+            crate::yaml::Value::Sequence(items) => {
+                for item in items {
+                    keys_in(item, into);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn shown<T: Document>() -> BTreeSet<String> {
+        let value: crate::yaml::Value =
+            crate::yaml::parse(T::EXAMPLE).expect("the published example is YAML");
+        let mut keys = BTreeSet::new();
+        keys_in(&value, &mut keys);
+        keys
+    }
+
+    /// A key the type accepts and the example never writes leaves a writer
+    /// inferring its type from prose — which is how a boolean gets quoted.
+    fn example_shows_every_key<T: Document>(levels: &[&[&str]]) {
+        let shown = shown::<T>();
+        let accepted: BTreeSet<&str> = levels.iter().flat_map(|l| l.iter().copied()).collect();
+        let missing: Vec<&&str> = accepted
+            .iter()
+            .filter(|key| !shown.contains(**key))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{}'s published example never writes {missing:?}",
+            T::KIND
+        );
+    }
+
+    /// Replaces the first value written under `key`, at any depth.
+    fn with_wrong_value(
+        value: &crate::yaml::Value,
+        key: &str,
+        wrong: &crate::yaml::Value,
+    ) -> (crate::yaml::Value, bool) {
+        match value {
+            crate::yaml::Value::Mapping(map) => {
+                let mut out = crate::yaml::Mapping::new();
+                let mut done = false;
+                for (name, child) in map {
+                    if !done && name.as_str() == Some(key) {
+                        out.insert(name.clone(), wrong.clone());
+                        done = true;
+                        continue;
+                    }
+                    let (child, hit) = if done {
+                        (child.clone(), false)
+                    } else {
+                        with_wrong_value(child, key, wrong)
+                    };
+                    done = done || hit;
+                    out.insert(name.clone(), child);
+                }
+                (crate::yaml::Value::Mapping(out), done)
+            }
+            crate::yaml::Value::Sequence(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                let mut done = false;
+                for item in items {
+                    let (item, hit) = if done {
+                        (item.clone(), false)
+                    } else {
+                        with_wrong_value(item, key, wrong)
+                    };
+                    done = done || hit;
+                    out.push(item);
+                }
+                (crate::yaml::Value::Sequence(out), done)
+            }
+            other => (other.clone(), false),
+        }
+    }
+
+    /// Every key the example writes, given a value of the wrong type, is
+    /// named by a diagnostic of its own.
+    ///
+    /// The probes are `true` and an empty mapping: between them they are the
+    /// wrong type for every shape a document key can hold, so no per-key
+    /// table has to be kept here. A key with no walk check falls through to
+    /// `Problem::Unreadable`, which carries the deserializer's own words —
+    /// the one thing this whole frontier exists to keep from a reader.
+    fn the_walk_explains_every_key<T: Document>() {
+        let example: crate::yaml::Value =
+            crate::yaml::parse(T::EXAMPLE).expect("the published example is YAML");
+        for key in shown::<T>() {
+            let explained = [
+                crate::yaml::Value::Bool(true),
+                crate::yaml::Value::Mapping(crate::yaml::Mapping::new()),
+            ]
+            .iter()
+            .any(|wrong| {
+                let (probe, _) = with_wrong_value(&example, &key, wrong);
+                let text = crate::yaml::to_string(&probe).expect("a value renders");
+                match read::<T>(text.as_bytes(), "probe.yaml") {
+                    Ok(_) => false,
+                    Err(report) => report.diagnostics.iter().any(|d| d.code() != "unreadable"),
+                }
+            });
+            assert!(
+                explained,
+                "{}: a wrong value under `{key}` produces no diagnostic naming it — \
+                 the walk has no check for that key",
+                T::KIND
+            );
+        }
+    }
+
+    #[test]
+    fn every_published_example_writes_every_key_its_type_accepts() {
+        example_shows_every_key::<crate::Ledger>(&[
+            crate::ledger::shape::TASK_REQUIRED,
+            crate::ledger::shape::TASK_OPTIONAL,
+            crate::ledger::shape::CRITERION_REQUIRED,
+            crate::ledger::shape::CRITERION_OPTIONAL,
+        ]);
+        example_shows_every_key::<crate::FindingsFile>(&[
+            crate::findings::shape::FINDING_REQUIRED,
+            crate::findings::shape::FINDING_OPTIONAL,
+            crate::findings::shape::PROPOSED_CRITERION_REQUIRED,
+        ]);
+        example_shows_every_key::<crate::QuestionsFile>(&[
+            crate::questions::shape::QUESTION_REQUIRED,
+            crate::questions::shape::QUESTION_OPTIONAL,
+        ]);
+    }
+
+    #[test]
+    fn every_key_a_writer_may_write_has_a_diagnostic_of_its_own() {
+        the_walk_explains_every_key::<crate::Ledger>();
+        the_walk_explains_every_key::<crate::FindingsFile>();
+        the_walk_explains_every_key::<crate::QuestionsFile>();
     }
 
     #[test]

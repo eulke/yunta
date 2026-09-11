@@ -24,6 +24,7 @@ use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
 use yunta_core::events::Finding;
 use yunta_core::shape::read;
 use yunta_core::FindingsFile;
+use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
 };
@@ -81,7 +82,7 @@ pub fn close_artifacts(
     let mut verified = Vec::new();
     let mut failures = Vec::new();
     for spec in &artifacts.produces {
-        match verify_one(node, spec, run_dir, max_bytes) {
+        match verify_one(&node.id, spec, run_dir, max_bytes) {
             Ok(artifact) => verified.push(artifact),
             Err(failure) => failures.push(failure),
         }
@@ -96,8 +97,15 @@ pub fn close_artifacts(
 
 /// One declared artifact's whole story: the file, its size, and — when
 /// the node declared a `kind:` — what it says.
-fn verify_one(
-    node: &Node,
+/// One declared artifact's whole story: the file, its size, and — when the
+/// node declared a `kind:` — what it says.
+///
+/// The node's close and the session's own `yunta_check_artifact` are its
+/// two callers, and that is the point: a verdict a session can ask for
+/// while it can still act, and the verdict that actually decides the node,
+/// have to be the same code or the first one teaches false confidence.
+pub(crate) fn verify_one(
+    node: &NodeId,
     spec: &ArtifactSpec,
     run_dir: &Path,
     max_bytes: Option<u64>,
@@ -126,7 +134,7 @@ fn verify_one(
 /// the content reaches, which is why each answer here is a
 /// [`FileProblem`] rather than a diagnostic about a document.
 fn read_file(
-    node: &Node,
+    node: &NodeId,
     full_path: &Path,
     path: &str,
     max_bytes: Option<u64>,
@@ -135,9 +143,7 @@ fn read_file(
     let bytes = match std::fs::read(full_path) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            return Err(about(FileProblem::Missing {
-                node: node.id.clone(),
-            }))
+            return Err(about(FileProblem::Missing { node: node.clone() }))
         }
         Err(source) => {
             return Err(about(FileProblem::Unreadable {

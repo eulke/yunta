@@ -207,9 +207,8 @@ async fn open_and_dispatch(
     // tools) rather than sinking the attempt: the tools are an offer, the
     // task's own criteria are the contract.
     let run_tools = match &setup.run_tools {
-        Some((host, node_id)) => match crate::run_tools::open_session_listener(
-            host.clone(),
-            node_id.clone(),
+        Some(access) => match crate::run_tools::open_session_listener(
+            access.clone(),
             Some(task.id.clone()),
             cwd.to_path_buf(),
         )
