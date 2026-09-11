@@ -39,6 +39,7 @@ pub mod policy;
 mod questions;
 pub mod schema;
 mod secret;
+pub mod shape;
 mod workflow;
 pub mod yaml;
 
