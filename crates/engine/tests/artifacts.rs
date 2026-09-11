@@ -382,7 +382,7 @@ artifacts:
     assert_eq!(
         rendered(&errors),
         "artifacts/report.md: 1 error\n  \
-         the document: is 10 bytes; `limits.max_artifact_bytes` is 5"
+         the document is 10 bytes; `limits.max_artifact_bytes` is 5"
     );
 }
 

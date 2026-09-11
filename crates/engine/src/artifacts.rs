@@ -45,12 +45,13 @@ pub struct VerifiedArtifact {
 }
 
 /// One problem with the file itself, before anything inside it is read.
+/// `detail` completes the sentence "the document ...".
 fn about_the_file(document: DocumentRef, code: &'static str, detail: String) -> Report {
     Report::new(
         document,
         vec![Diagnostic::new(
             Subject::Document,
-            Problem::rule(code, detail),
+            Problem::file(code, detail),
         )],
     )
 }
@@ -101,10 +102,7 @@ pub fn close_artifacts(
                 reports.push(about_the_file(
                     document,
                     "artifact-missing",
-                    format!(
-                        "node `{}` declared this artifact and never produced it",
-                        node.id
-                    ),
+                    format!("was declared by node `{}` and never produced", node.id),
                 ));
                 continue;
             }

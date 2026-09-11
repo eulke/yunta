@@ -313,6 +313,14 @@ pub enum Problem {
         code: String,
         detail: String,
     },
+    /// Something about the file rather than anything inside it: it was
+    /// never written, it is empty, it is past a declared limit. `detail`
+    /// completes the sentence "the document ...", because there is no
+    /// entry to blame and pointing at one would be an invention.
+    File {
+        code: String,
+        detail: String,
+    },
     /// The document was refused and nothing in it could be named as the
     /// cause. That is a gap in the walk, reported as one rather than
     /// swallowed: `detail` carries what the parser said, for the log.
@@ -407,11 +415,22 @@ impl Problem {
         }
     }
 
+    /// `detail` completes the sentence "the document ...".
+    pub fn file(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        Problem::File {
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
+
     /// Whether this problem is about the file as a whole, so its
     /// rendering already reads as a sentence about the document and
     /// must not be prefixed with a subject and a colon.
     fn about_document(&self) -> bool {
-        matches!(self, Problem::NotYaml { .. } | Problem::Unreadable { .. })
+        matches!(
+            self,
+            Problem::NotYaml { .. } | Problem::Unreadable { .. } | Problem::File { .. }
+        )
     }
 
     /// The stable name of this kind of problem: what a receipt counts
@@ -425,6 +444,7 @@ impl Problem {
             Problem::InvalidId { .. } => "invalid-id",
             Problem::UnknownValue { .. } => "unknown-value",
             Problem::Rule { code, .. } => code,
+            Problem::File { code, .. } => code,
             Problem::Unreadable { .. } => "unreadable",
         }
     }
@@ -477,7 +497,7 @@ impl Problem {
             Problem::UnknownValue { value, valid } => {
                 format!("`{value}` is not one of {}", backticked(valid))
             }
-            Problem::Rule { detail, .. } => detail.clone(),
+            Problem::Rule { detail, .. } | Problem::File { detail, .. } => detail.clone(),
             Problem::Unreadable { .. } => {
                 "could not be read, and the reason could not be narrowed to any entry. \
                  Compare it against the shape above"
