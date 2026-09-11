@@ -1,20 +1,20 @@
 //! `yunta graph <workflow> [--run <id>] [--format mermaid|dot]`: pure
 //! derivation of the DAG — `depends_on` edges, `on_failure.goto`
 //! re-route edges visually differentiated (dashed) from them, and,
-//! given `--run`, each node annotated with its derived state
-//! (`yunta_engine::derive`). No agent involved in producing the graph
-//! itself, same shape as `status`.
+//! given `--run`, every node annotated with the state that run's event
+//! log derives for it (`yunta_engine::derive`). No agent involved in
+//! producing the graph itself, same shape as `status`.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{NodeId, RunId, Workflow};
-use yunta_engine::NodeState;
 use yunta_storage::Storage;
 
 use crate::commands::{check_or_refuse, resolve_workflow_ref};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::render::NodeDisplay;
 use crate::{load_yaml, project};
 
 type Labels = HashMap<NodeId, String>;
@@ -41,7 +41,7 @@ pub fn graph(
     check_or_refuse(&workflow, &ctx.project.config, &workflow_path)?;
 
     let labels = match run_id {
-        Some(run_id) => Some(derive_labels(&ctx.project, run_id)?),
+        Some(run_id) => Some(derive_labels(&ctx.project, run_id, &workflow)?),
         None => None,
     };
 
@@ -53,10 +53,20 @@ pub fn graph(
     Ok(Outcome::Success)
 }
 
-/// Derives run state from the event log (`yunta_engine::derive`) and
-/// reduces it to one display label per node — the same source
-/// `status` reads, just formatted for a Mermaid node instead of a list.
-fn derive_labels(project: &project::Project, run_id: &RunId) -> Result<Labels, CliError> {
+/// One label per node of the graph, derived from the event log
+/// (`yunta_engine::derive`) and worded by `crate::render`, which is where
+/// `status` and every other surface take the same words from.
+///
+/// Every node gets one, not only the ones the log mentions: a diagram
+/// that leaves a node bare says nothing about whether the run has yet to
+/// reach it or is never going to. A node this run's mode excludes is
+/// skipped, a node the mode includes and the log has nothing for never
+/// ran, and the two are different answers to the same question.
+fn derive_labels(
+    project: &project::Project,
+    run_id: &RunId,
+    workflow: &Workflow,
+) -> Result<Labels, CliError> {
     let storage = Storage::open(&project.storage_path)?;
     let events = storage.events_for_run(run_id)?;
     if events.is_empty() {
@@ -67,25 +77,19 @@ fn derive_labels(project: &project::Project, run_id: &RunId) -> Result<Labels, C
     }
 
     let state = yunta_engine::derive(&events);
-    Ok(state
+    let mode = yunta_core::events::run_mode(&events);
+    let included = yunta_engine::mode_included_nodes(workflow, &mode);
+    Ok(workflow
         .nodes
         .iter()
-        .map(|(id, node)| (id.clone(), node_state_label(node)))
+        .map(|node| {
+            let display = match &included {
+                Some(included) if !included.contains(&node.id) => NodeDisplay::skipped(),
+                _ => NodeDisplay::of(state.nodes.get(&node.id)),
+            };
+            (node.id.clone(), display.label())
+        })
         .collect())
-}
-
-fn node_state_label(node: &NodeState) -> String {
-    match node {
-        NodeState::Running { attempt } => format!("running (attempt {attempt})"),
-        NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
-        NodeState::Failed { failure, .. } => format!("failed — {failure}"),
-        // A run paused on a gate shows its waiting node distinctly —
-        // with the forge handle when there is one.
-        NodeState::Waiting { external_ref } => match external_ref {
-            Some(external_ref) => format!("waiting — {external_ref}"),
-            None => "waiting".to_string(),
-        },
-    }
 }
 
 /// Renders the workflow's DAG as a Mermaid `graph TD`: one declaration per

@@ -28,13 +28,14 @@ use std::sync::Arc;
 use serde::Deserialize;
 use yunta_adapters::{Adapter, MockAdapter, MOCK_ID};
 use yunta_core::{AdapterId, Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
-use yunta_engine::{NodeState, RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::task_status_label;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
+use crate::render::StateWord;
 
 /// The run id every case's single run is created under.
 
@@ -312,13 +313,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         ));
     }
     for (node_id, expected) in &case.expect.nodes {
-        let got = match report.state.nodes.get(node_id.as_str()) {
-            Some(NodeState::Finished { .. }) => "finished",
-            Some(NodeState::Failed { .. }) => "failed",
-            Some(NodeState::Running { .. }) => "running",
-            Some(NodeState::Waiting { .. }) => "waiting",
-            None => "never ran",
-        };
+        let got = StateWord::of(report.state.nodes.get(node_id.as_str())).word();
         if got != expected {
             problems.push(format!("node {node_id}: expected {expected}, got {got}"));
         }

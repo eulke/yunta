@@ -5,7 +5,7 @@
 //! `yunta_engine::derive`) annotated: no new events, no agent involved
 //! in producing the graph itself, same as `status`.
 
-use yunta_testkit::{init_repo, stdout, write, yunta_in};
+use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
 
 const WORKFLOW: &str = r#"
 name: graph-fixture
@@ -263,4 +263,46 @@ fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
         "missing dashed re-route edge: {text}"
     );
     assert!(text.trim_end().ends_with('}'), "got: {text}");
+}
+
+/// A node the run's mode leaves out and a node the run never reached are
+/// two different answers, and a diagram that leaves either one bare says
+/// neither.
+#[test]
+fn graph_with_a_run_id_labels_the_nodes_the_log_never_mentions() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: graph-mode-fixture
+modes:
+  quick: { include: [first, blocked] }
+  full: { include: all }
+nodes:
+  - { id: first, kind: bash, run: "false" }
+  - { id: blocked, kind: bash, run: "true", depends_on: [first] }
+  - { id: excluded, kind: bash, run: "true" }
+"#,
+    );
+
+    // `first` fails, so `blocked` never starts and `excluded` is outside
+    // the mode: one run holds both cases at once.
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "quick"]);
+    let run_id = run_id_from(&run);
+
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = stdout(&output);
+    assert!(text.contains("first: failed"), "got: {text}");
+    assert!(text.contains("blocked: never ran"), "got: {text}");
+    assert!(text.contains("excluded: skipped"), "got: {text}");
 }

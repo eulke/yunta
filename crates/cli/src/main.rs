@@ -27,6 +27,7 @@ mod identity;
 mod json;
 mod pack;
 mod project;
+mod render;
 
 use std::path::Path;
 use std::process::ExitCode;

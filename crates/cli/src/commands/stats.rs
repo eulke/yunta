@@ -2,10 +2,12 @@
 //! number comes from `yunta_engine::stats`'s pure derivation over the
 //! event log — this module only gathers the right events off disk
 //! (the imperative half) and renders them, either as `--json` or as a
-//! terminal visualization (horizontal bars per node/role, a sparkline
+//! terminal visualization (horizontal bars per node/runner, a sparkline
 //! of a workflow's historical CPTV, a comparison table between modes).
-//! Every rendered line stays inside 80 columns and never depends on
-//! color — see this module's own render functions for how.
+//! Every rendered line stays inside [`crate::render::LINE_WIDTH`] and
+//! reads with its glyphs and color stripped, because the columns, bars,
+//! words and glyphs all come from `crate::render`, which is where both
+//! rules live.
 
 use std::path::Path;
 use std::time::Duration;
@@ -20,6 +22,10 @@ use yunta_storage::Storage;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::render::{
+    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay,
+    LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
+};
 
 pub fn stats(
     run_id: Option<&RunId>,
@@ -66,7 +72,14 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
+    render_run_stats(
+        run_id,
+        mode.as_str(),
+        &run_stats,
+        &yunta_engine::derive(&events),
+        pricing.as_ref(),
+        Glyphs::from_env(),
+    );
     Ok(Outcome::Success)
 }
 
@@ -93,7 +106,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_workflow_history(workflow_name, &history);
+    render_workflow_history(workflow_name, &history, Glyphs::from_env());
     if let Some(findings) = &findings {
         let text = render_verification_findings(findings);
         if !text.is_empty() {
@@ -200,50 +213,8 @@ pub(crate) fn collect_raw_history(
     (logs, latest_workflow.map(|(_, wf)| wf))
 }
 
-// --- Terminal rendering — colorless by construction: degrading
-// without color isn't a fallback mode, it's the only mode. --------------
-
-const BAR_WIDTH: usize = 20;
-const LABEL_WIDTH: usize = 12;
-const SPARK_CHARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-
-fn bar(value: u64, max: u64) -> String {
-    if max == 0 {
-        return "·".repeat(BAR_WIDTH);
-    }
-    let filled = (((value as f64 / max as f64) * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
-    format!("{}{}", "█".repeat(filled), "·".repeat(BAR_WIDTH - filled))
-}
-
-fn truncate(s: &str, width: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= width {
-        format!("{s:<width$}")
-    } else {
-        let mut t: String = chars
-            .get(..width.saturating_sub(1))
-            .unwrap_or(chars.as_slice())
-            .iter()
-            .collect();
-        t.push('…');
-        format!("{t:<width$}")
-    }
-}
-
-fn format_duration(d: Duration) -> String {
-    let total = d.as_secs();
-    if total < 60 {
-        format!("{total}s")
-    } else if total < 3600 {
-        format!("{}m{:02}s", total / 60, total % 60)
-    } else {
-        format!("{}h{:02}m", total / 3600, (total % 3600) / 60)
-    }
-}
-
-fn format_pct(fraction: f64) -> String {
-    format!("{:>3.0}%", fraction * 100.0)
-}
+// --- Terminal rendering — every shape, width and word comes from
+// `crate::render`, so this module only decides what to say. -------------
 
 fn currency_line(
     tokens: u64,
@@ -273,7 +244,9 @@ fn render_run_stats(
     run_id: &RunId,
     mode: &str,
     stats: &RunStats,
+    state: &yunta_engine::RunState,
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
+    glyphs: Glyphs,
 ) {
     println!("run {run_id} — mode {mode}");
     if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
@@ -306,69 +279,77 @@ fn render_run_stats(
     if let Some(line) = currency_line(total, pricing) {
         println!("{line}");
     }
+    render_nodes(stats, state, glyphs);
+    render_runners(stats, glyphs);
+}
 
-    if !stats.nodes.is_empty() {
-        println!("\nnodes:");
-        let max_tokens = stats
-            .nodes
-            .iter()
-            .map(|n| n.tokens.total())
-            .max()
-            .unwrap_or(0);
-        for node in &stats.nodes {
-            println!("{}", node_line(node, max_tokens));
-        }
+/// One row per node that started, each opening with the state it is in:
+/// the same token count reads one way under a node that finished and
+/// another under one that failed, so the number never appears without
+/// it.
+fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs) {
+    if stats.nodes.is_empty() {
+        return;
     }
-
-    let by_runner = stats.tokens_by_runner();
-    if !by_runner.is_empty() {
-        println!("\nrunners:");
-        let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
-        for (runner, tokens) in &by_runner {
-            let total = tokens.total();
-            println!(
-                "  {} {}  {total:>8} tok",
-                truncate(runner.as_str(), LABEL_WIDTH),
-                bar(total, max_runner_tokens),
-            );
-        }
+    println!("\nnodes:");
+    let max_tokens = stats
+        .nodes
+        .iter()
+        .map(|n| n.tokens.total())
+        .max()
+        .unwrap_or(0);
+    for node in &stats.nodes {
+        let display = NodeDisplay::of(state.nodes.get(&node.node_id));
+        println!("{}", node_line(node, max_tokens, &display, glyphs));
     }
 }
 
-fn node_line(node: &NodeStat, max_tokens: u64) -> String {
+/// The same tokens grouped by the runner that spent them: where the
+/// run's cost went, across however many nodes each runner was given.
+fn render_runners(stats: &RunStats, glyphs: Glyphs) {
+    let by_runner = stats.tokens_by_runner();
+    if by_runner.is_empty() {
+        return;
+    }
+    println!("\nrunners:");
+    let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
+    for (runner, tokens) in &by_runner {
+        let total = tokens.total();
+        println!(
+            "  {} {}  {total:>8} tok",
+            truncate(runner.as_str(), LABEL_WIDTH, glyphs),
+            bar(total, max_runner_tokens, glyphs),
+        );
+    }
+}
+
+fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Glyphs) -> String {
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
         .map(format_pct)
         .unwrap_or_else(|| " n/a".to_string());
     format!(
-        "  {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
-        truncate(node.node_id.as_str(), LABEL_WIDTH),
-        bar(total, max_tokens),
+        "  {} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
+        glyphs.state(display.word),
+        truncate(display.word.short(), STATE_WIDTH, glyphs),
+        truncate(node.node_id.as_str(), LABEL_WIDTH, glyphs),
+        bar(total, max_tokens, glyphs),
         format_duration(node.wall_clock()),
     )
 }
 
-fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
+fn render_workflow_history(workflow_name: &str, history: &[RunSummary], glyphs: Glyphs) {
     println!("workflow `{workflow_name}` — {} run(s)", history.len());
 
     println!("\nCPTV over time:");
-    let cptv_series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
-    println!(
-        "  {}  (oldest -> newest, latest = {})",
-        sparkline(&cptv_series),
-        history
-            .last()
-            .and_then(|r| r.cptv)
-            .map(|c| format!("{c:.1}"))
-            .unwrap_or_else(|| "n/a".to_string())
-    );
+    println!("{}", cptv_line(history, glyphs));
 
     println!("\nmodes:");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         println!(
             "  {} {:>3} run(s)   median CPTV {}   median tokens {}",
-            truncate(mode.as_str(), LABEL_WIDTH),
+            truncate(mode.as_str(), LABEL_WIDTH, glyphs),
             runs,
             median_cptv
                 .map(|v| format!("{v:.1}"))
@@ -388,6 +369,26 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
             history.len()
         );
     }
+}
+
+/// Every past run's CPTV as one cell, oldest first, with the newest
+/// value spelled out beside it — the sparkline carries the shape and the
+/// number carries the scale.
+///
+/// The sparkline gets whatever [`LINE_WIDTH`] leaves after the indent and
+/// that note, so a workflow with hundreds of runs narrows its window
+/// instead of wrapping the line and breaking the block it sits in.
+fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
+    const INDENT: &str = "  ";
+    let latest = history
+        .last()
+        .and_then(|r| r.cptv)
+        .map(|c| format!("{c:.1}"))
+        .unwrap_or_else(|| "n/a".to_string());
+    let note = format!("  (oldest -> newest, latest = {latest})");
+    let cells = LINE_WIDTH.saturating_sub(cell_width(INDENT) + cell_width(&note));
+    let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
+    format!("{INDENT}{}{note}", sparkline(&series, cells, glyphs))
 }
 
 /// Verification-effectiveness findings — advisory only, never a reason
@@ -441,26 +442,6 @@ pub(crate) fn render_verification_findings(
         ));
     }
     out
-}
-
-fn sparkline(values: &[f64]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
-    let max = values.iter().cloned().fold(0.0_f64, f64::max);
-    if max <= 0.0 {
-        return "·".repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = ((v / max) * (SPARK_CHARS.len() - 1) as f64).round() as usize;
-            SPARK_CHARS
-                .get(idx.min(SPARK_CHARS.len() - 1))
-                .copied()
-                .unwrap_or(' ')
-        })
-        .collect()
 }
 
 /// Median CPTV/tokens per mode — a plain historical comparison, not a
@@ -733,5 +714,42 @@ impl VerificationFindingsJson {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(cptv: f64) -> RunSummary {
+        RunSummary {
+            run_id: RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            mode: ModeName::default(),
+            workflow_hash: ContentHash::sha256(b"workflow"),
+            tokens: 1000,
+            wall_clock: None,
+            tasks_total: 1,
+            cptv: Some(cptv),
+        }
+    }
+
+    #[test]
+    fn a_long_history_narrows_its_sparkline_instead_of_wrapping_the_line() {
+        let history: Vec<RunSummary> = (1..=200).map(|n| summary(f64::from(n))).collect();
+        let line = cptv_line(&history, Glyphs::Ascii);
+        let cells = cell_width(&line);
+        assert!(cells <= LINE_WIDTH, "{cells} cells: {line}");
+        assert!(
+            line.contains(Glyphs::Ascii.ellipsis()),
+            "a narrowed window says so: {line}"
+        );
+    }
+
+    #[test]
+    fn a_history_that_fits_draws_every_run_and_marks_no_window() {
+        let history: Vec<RunSummary> = (1..=3).map(|n| summary(f64::from(n))).collect();
+        let line = cptv_line(&history, Glyphs::Ascii);
+        assert!(!line.contains(Glyphs::Ascii.ellipsis()), "{line}");
+        assert!(line.contains("latest = 3.0"), "{line}");
     }
 }

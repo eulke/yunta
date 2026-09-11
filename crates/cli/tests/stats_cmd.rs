@@ -167,3 +167,45 @@ fn stats_needs_a_run_id_or_workflow_flag() {
     let result = yunta_in!(&repo, &home, &["stats"]);
     assert!(!result.status.success());
 }
+
+/// The same token count reads one way under a node that finished and
+/// another under one that failed, so every node row opens with the state
+/// it is in — in words, which is what the row still says once a terminal
+/// without the glyphs has dropped them.
+#[test]
+fn stats_run_opens_each_node_row_with_that_node_s_state() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: stats-node-states
+nodes:
+  - { id: passes, kind: bash, run: "true" }
+  - { id: breaks, kind: bash, run: "false", depends_on: [passes] }
+"#,
+    );
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+
+    let stats = yunta_in!(&repo, &home, &["stats", &run_id]);
+    assert!(
+        stats.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stats.stderr)
+    );
+    let text = stdout(&stats);
+    let row = |id: &str| {
+        text.lines()
+            .find(|line| line.contains(id))
+            .unwrap_or_else(|| panic!("no row for `{id}` in: {text}"))
+            .to_string()
+    };
+    assert!(row("passes").contains("done"), "got: {}", row("passes"));
+    assert!(row("breaks").contains("fail"), "got: {}", row("breaks"));
+}

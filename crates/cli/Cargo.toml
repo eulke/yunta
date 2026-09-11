@@ -37,6 +37,12 @@ tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "proce
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# Every column a rendered line draws is measured in display cells, which
+# is not the number of characters: a CJK node id takes two cells per
+# character, most emoji take two, and a combining mark takes none. This
+# is the table that says which, so a label cut to fit stays exactly as
+# wide as the column it sits in and every column after it stays aligned.
+unicode-width.workspace = true
 # `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
