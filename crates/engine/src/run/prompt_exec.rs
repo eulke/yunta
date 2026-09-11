@@ -8,7 +8,7 @@ use yunta_core::{Node, PromptSource};
 
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
-use super::node_close::{close_node_staged, fail, fail_with_tokens};
+use super::node_close::{close_node_staged, fail, fail_with_tokens, Closed};
 use super::node_exec::{cancelled_end, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
@@ -37,28 +37,98 @@ pub(super) fn prompt_text<'a>(
     }
 }
 
+/// One `kind: prompt` node, including the repair cycle its declared
+/// artifacts earn.
+///
+/// Verification is unchanged: an artifact that cannot be read still
+/// fails the node. What changes is that a failure a rewrite could fix no
+/// longer ends there. The session that wrote the file is gone by the
+/// time the file is read, so the correction is a fresh session with the
+/// same prompt plus the diagnostics — the same shape the task cycle
+/// already has for work, applied to the frontier that had none.
+///
+/// The budget is `limits.max_artifact_repairs`, declared and frozen in
+/// the manifest like every other limit that governs a run, so the
+/// receipt can account for it.
 pub(super) async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
+    let budget = ctx.manifest.config.resolved_max_artifact_repairs();
+    let mut repair: Option<String> = None;
+    for spent in 0..=budget {
+        // The first attempt is the one `execute_node` already announced;
+        // every repair is a fresh attempt on the log, which is what makes
+        // it visible in `status`, countable in `stats`, and replayable —
+        // `node_failed` followed by `node_started` is a sequence the
+        // derivation already accepts.
+        if spent > 0 {
+            let attempt = started_count(ctx, node).await? + 1;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
+            )
+            .await?;
+        }
+        let closed = one_session(ctx, node, prompt, cancel, repair.as_deref()).await?;
+        match closed.repair {
+            Some(instruction) if spent < budget => repair = Some(instruction),
+            _ => return Ok(closed.end),
+        }
+    }
+    // `budget + 1` attempts all ended repairable: the loop above returns
+    // on the last one, so this is unreachable by construction and the
+    // node's own failure is already on the log either way.
+    Ok(NodeEnd::Failed)
+}
+
+/// How many attempts this node has already announced.
+async fn started_count(ctx: &RunCtx<'_>, node: &Node) -> Result<u32, RunError> {
+    Ok(ctx
+        .load_events()
+        .await?
+        .iter()
+        .filter(|event| {
+            event.node_id.as_ref() == Some(&node.id)
+                && matches!(event.payload(), Some(EventPayload::NodeStarted(_)))
+        })
+        .count() as u32)
+}
+
+/// One session of a `kind: prompt` node. `repair` carries the previous
+/// attempt's diagnostics when this is a repair.
+async fn one_session(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    prompt: &PromptSource,
+    cancel: &CancellationToken,
+    repair: Option<&str>,
+) -> Result<Closed, RunError> {
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
         Step::Value(rendered) => rendered,
-        Step::Ended(end) => return Ok(end),
+        Step::Ended(end) => return Ok(end.into()),
     };
     let context_block =
         match super::context_resolve::resolve_and_assemble(ctx, node, cancel).await? {
             Step::Value(block) => block,
-            Step::Ended(end) => return Ok(end),
+            Step::Ended(end) => return Ok(end.into()),
         };
     let rendered = match context_block {
         Some(block) => format!("{block}\n{rendered}"),
         None => rendered,
     };
+    // Last, after everything stable: what the previous attempt got wrong
+    // is the most volatile thing in the prompt, and putting it here
+    // leaves the cacheable prefix untouched.
+    let rendered = match repair {
+        Some(instruction) => format!("{rendered}\n\n{instruction}"),
+        None => rendered,
+    };
     let chosen = match resolve_node_runner(ctx, node).await? {
         Step::Value(chosen) => chosen,
-        Step::Ended(end) => return Ok(end),
+        Step::Ended(end) => return Ok(end.into()),
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
@@ -73,7 +143,7 @@ pub(super) async fn execute_prompt(
         ctx.worktree,
     ) {
         Ok(skills) => skills,
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+        Err(error) => return Ok(fail(ctx, node, error.to_string(), false).await?.into()),
     };
     let skills = if !skills.is_empty()
         && !adapter
@@ -117,7 +187,7 @@ pub(super) async fn execute_prompt(
             }
             resolution.session
         }
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+        Err(error) => return Ok(fail(ctx, node, error.to_string(), false).await?.into()),
     };
     let request = SessionRequest {
         prompt: rendered,
@@ -207,24 +277,27 @@ pub(super) async fn execute_prompt(
             close_node_staged(ctx, node, summary, tokens, &staged).await
         }
         DispatchOutcome::Failed { message, retryable } => {
-            fail_with_tokens(ctx, node, message, retryable, tokens).await
+            fail_with_tokens(ctx, node, message, retryable, tokens)
+                .await
+                .map(Closed::from)
         }
         // No terminal event means the engine synthesizes a retryable
         // failure — the adapter never invents one.
-        DispatchOutcome::Crashed => {
-            fail_with_tokens(
-                ctx,
-                node,
-                "session ended without a terminal event".to_string(),
-                true,
-                tokens,
-            )
-            .await
-        }
+        DispatchOutcome::Crashed => fail_with_tokens(
+            ctx,
+            node,
+            "session ended without a terminal event".to_string(),
+            true,
+            tokens,
+        )
+        .await
+        .map(Closed::from),
         DispatchOutcome::BudgetExceeded { reason } => {
-            fail_with_tokens(ctx, node, reason, false, tokens).await
+            fail_with_tokens(ctx, node, reason, false, tokens)
+                .await
+                .map(Closed::from)
         }
-        DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
+        DispatchOutcome::Cancelled => cancelled_end(ctx, node).await.map(Closed::from),
     }
 }
 

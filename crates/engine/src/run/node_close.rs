@@ -27,23 +27,45 @@ pub(super) async fn close_node(
     outcome: String,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    close_node_staged(ctx, node, outcome, tokens, &[]).await
+    Ok(close_node_staged(ctx, node, outcome, tokens, &[])
+        .await?
+        .end)
 }
 
 /// Closes a node: its `after` hooks run, its scope is checked over the
 /// whole diff — hook edits included, `staged` paths (what the adapter
 /// declared it wrote for itself) left out — and it finishes.
+/// How a node's close ended, plus the one thing the caller may be able
+/// to act on: an interpreted artifact that could not be read and that
+/// writing again could fix.
+pub(super) struct Closed {
+    pub(super) end: NodeEnd,
+    /// The instruction for a repair attempt, in the words its writer
+    /// needs. `None` whenever a rewrite is not the answer — the node
+    /// finished, it failed for another reason, or the artifact was never
+    /// produced at all.
+    pub(super) repair: Option<String>,
+}
+
+impl From<NodeEnd> for Closed {
+    fn from(end: NodeEnd) -> Self {
+        Closed { end, repair: None }
+    }
+}
+
 pub(super) async fn close_node_staged(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
     tokens: TokenUsage,
     staged: &[std::path::PathBuf],
-) -> Result<NodeEnd, RunError> {
+) -> Result<Closed, RunError> {
     for step in &effective_hooks(ctx, node).after {
         match run_hook(ctx, node, HookPhase::After, step).await? {
             HookRun::Violation(rule) => {
-                return fail_with_tokens(ctx, node, rule, false, tokens).await
+                return fail_with_tokens(ctx, node, rule, false, tokens)
+                    .await
+                    .map(Closed::from)
             }
             HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
                 return fail_with_tokens(
@@ -53,7 +75,8 @@ pub(super) async fn close_node_staged(
                     false,
                     tokens,
                 )
-                .await;
+                .await
+                .map(Closed::from);
             }
             HookRun::Ran(_) => {}
         }
@@ -81,7 +104,8 @@ pub(super) async fn close_node_staged(
                 false,
                 tokens,
             )
-            .await;
+            .await
+            .map(Closed::from);
         }
     }
 
@@ -96,7 +120,11 @@ pub(super) async fn close_node_staged(
     // sibling verifies its own file.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
-        Err(error) => return fail_with_tokens(ctx, node, error.to_string(), false, tokens).await,
+        Err(error) => {
+            return fail_with_tokens(ctx, node, error.to_string(), false, tokens)
+                .await
+                .map(Closed::from)
+        }
     };
     let node = &node_rendered;
     match close_artifacts(node, ctx.run_dir, max_artifact_bytes) {
@@ -217,7 +245,8 @@ pub(super) async fn close_node_staged(
                     false,
                     tokens,
                 )
-                .await;
+                .await
+                .map(Closed::from);
             }
 
             ctx.emit(
@@ -229,21 +258,24 @@ pub(super) async fn close_node_staged(
             )
             .await?;
             write_progress(ctx).await?;
-            Ok(NodeEnd::Finished)
+            Ok(Closed::from(NodeEnd::Finished))
         }
         Err(reports) => {
             // The node fails with the whole picture: the block a person
             // reads, and the diagnostics behind it, which is what lets a
-            // repair attempt address the problems instead of the prompt.
-            fail_with_diagnostics(
+            // repair attempt address the problems instead of repeating
+            // the prompt that already produced the wrong file.
+            let repair = crate::artifacts::render_for_agent(&reports);
+            let end = fail_with_diagnostics(
                 ctx,
                 node,
                 crate::artifacts::render_for_person(&reports),
                 crate::artifacts::diagnostics_of(&reports),
-                false,
+                repair.is_some(),
                 tokens,
             )
-            .await
+            .await?;
+            Ok(Closed { end, repair })
         }
     }
 }

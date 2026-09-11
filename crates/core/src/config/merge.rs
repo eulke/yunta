@@ -91,6 +91,9 @@ fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> Limit
         inline_context_bytes: more_specific
             .inline_context_bytes
             .or(base.inline_context_bytes),
+        max_artifact_repairs: more_specific
+            .max_artifact_repairs
+            .or(base.max_artifact_repairs),
     }
 }
 

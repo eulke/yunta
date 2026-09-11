@@ -585,6 +585,20 @@ impl Report {
         self.diagnostics.is_empty()
     }
 
+    /// Whether writing the document again could fix every problem in it.
+    ///
+    /// False when any problem is about the file rather than its content:
+    /// an artifact never produced, an empty one, one past a declared
+    /// limit. There is nothing in those to correct, and a limit is a
+    /// guard against accidents rather than something to negotiate with.
+    pub fn is_repairable(&self) -> bool {
+        !self.diagnostics.is_empty()
+            && !self
+                .diagnostics
+                .iter()
+                .any(|diagnostic| matches!(diagnostic.problem, Problem::File { .. }))
+    }
+
     /// The block a person reads, in the shape `spec-ledger.md` §4 fixes:
     /// the file and the count, then one violation per line.
     pub fn for_person(&self) -> String {

@@ -216,15 +216,21 @@ pub fn diagnostics_of(reports: &[Report]) -> Vec<Diagnostic> {
 
 /// What the writer of a failed artifact is told, so a repair attempt
 /// starts from the problems and the shape rather than from the same
-/// prompt that already produced the wrong file. `None` when nothing
-/// failed in a way a rewrite could fix.
+/// prompt that already produced the wrong file.
+///
+/// `None` unless EVERY failing artifact is one a rewrite could fix: a
+/// run that also lost a file it never wrote has nothing to gain from
+/// asking for the rest again, and half-repairing would leave the node
+/// failing on the same missing file a session later.
 pub fn render_for_agent(reports: &[Report]) -> Option<String> {
-    let instructions: Vec<String> = reports
-        .iter()
-        .map(|report| {
-            let shape = report.document.kind.map(published);
-            report.for_agent(shape)
-        })
-        .collect();
-    (!instructions.is_empty()).then(|| instructions.join("\n\n"))
+    if reports.is_empty() || !reports.iter().all(Report::is_repairable) {
+        return None;
+    }
+    Some(
+        reports
+            .iter()
+            .map(|report| report.for_agent(report.document.kind.map(published)))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    )
 }
