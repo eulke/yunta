@@ -12,10 +12,10 @@
 //! same facts as an instruction to rewrite the file, with the shape the
 //! document should have had.
 //!
-//! A subject is named the way the document names it — `task \`t1\``,
-//! `task \`t1\`, criterion 1` — never by the path a deserializer walked
-//! to reach it. A reader who writes YAML has no way to act on
-//! `tasks[0].criteria[0]`.
+//! A subject is named the way the document names it, as ``task `t1` ``
+//! or ``task `t1`, criterion 1``, never by the path a deserializer
+//! walked to reach it. A reader who writes YAML has no way to act on
+//! ``tasks[0].criteria[0]``.
 
 use std::fmt;
 

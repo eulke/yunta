@@ -68,3 +68,26 @@ fn a_kind_that_does_not_exist_names_the_ones_that_do() {
     let text = stderr(&output);
     assert!(text.contains("task-ledger"), "{text}");
 }
+
+/// The JSON Schema the binary serves is the one CI proved matches the
+/// types, not one it re-derives. `cargo xtask schema --check` is what
+/// keeps the two the same file; this only proves the binary reads it.
+#[test]
+fn the_json_schema_served_is_the_one_committed_in_the_repository() {
+    let here = tempfile::tempdir().unwrap();
+    for (kind, file) in [
+        ("task-ledger", "ledger.json"),
+        ("findings", "findings.json"),
+        ("questions", "questions.json"),
+    ] {
+        let output = yunta_in!(here.path(), here.path(), &["schema", kind, "--json"]);
+        assert!(output.status.success(), "{kind}: {}", stderr(&output));
+        let committed = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../schemas")
+                .join(file),
+        )
+        .unwrap();
+        assert_eq!(stdout(&output), committed, "{kind}");
+    }
+}

@@ -17,6 +17,23 @@ use yunta_core::DocumentKind;
 
 use crate::error::{CliError, Outcome};
 
+/// The JSON Schema of each kind, as `cargo xtask schema` generated it
+/// from the types and CI proved it still matches (`schema --check`).
+///
+/// Embedded rather than generated here on purpose. Generating it would
+/// pull the whole schema-building machinery into the shipped binary —
+/// reachable only from this one flag, and measurably so — to reproduce
+/// a file the repository already carries and CI already verifies. The
+/// small static binary is a feature of the product (D124); paying for a
+/// generator to re-derive a checked artifact is not a good trade.
+fn json_schema(kind: DocumentKind) -> &'static str {
+    match kind {
+        DocumentKind::TaskLedger => include_str!("../../../../schemas/ledger.json"),
+        DocumentKind::Findings => include_str!("../../../../schemas/findings.json"),
+        DocumentKind::Questions => include_str!("../../../../schemas/questions.json"),
+    }
+}
+
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
     let Some(name) = kind else {
@@ -32,10 +49,7 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
 
     let kind = parse(name)?;
     if json {
-        let schema = yunta_core::schema::for_kind(kind);
-        let rendered = serde_json::to_string_pretty(&schema)
-            .map_err(|error| CliError::msg(format!("cannot render the schema: {error}")))?;
-        println!("{rendered}");
+        print!("{}", json_schema(kind));
     } else {
         print!("{}", published(kind));
     }
