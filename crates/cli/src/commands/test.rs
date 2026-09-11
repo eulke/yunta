@@ -211,14 +211,14 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         .map_err(|_| format!("could not load workflow `{}`", workflow_path.display()))?;
 
     let config = Context::resolve_in(cwd.to_path_buf())
-        .map_err(|e| e.to_string())?
+        .map_err(|e| yunta_core::describe(&e))?
         .project
         .config;
 
     // Sandbox: worktree + runs root + event log, all temp.
     let sandbox = tempfile::tempdir().map_err(|e| format!("cannot create sandbox: {e}"))?;
     let worktree = sandbox.path().join("worktree");
-    std::fs::create_dir_all(&worktree).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&worktree).map_err(|e| yunta_core::describe(&e))?;
     if let Some(seed) = &case.worktree {
         let seed = case_path.parent().unwrap_or(Path::new(".")).join(seed);
         copy_dir_all(&seed, &worktree)
@@ -228,7 +228,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let runs_root = sandbox.path().join("runs");
     let storage = AsyncStorage::open(sandbox.path().join("events.db"))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| yunta_core::describe(&e))?;
 
     let run_id = SystemIdSource.mint_run_id(SystemClock.now());
     let run_dir = runs_root.join(run_id.as_str());
@@ -248,7 +248,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &worktree,
         &provided_inputs,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| yunta_core::describe(&e))?;
 
     // The case's `mode` is frozen into the run the way `--mode` is;
     // the default mode runs the whole graph unfiltered.
@@ -266,7 +266,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &SystemClock,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| yunta_core::describe(&e))?;
     // A test case's every session comes from a scripted fixture — a
     // gate here has no human to ask, same as it has no LLM to call.
     let report = yunta_engine::execute_run(RunEnv {
@@ -289,7 +289,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         ambient: None,
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| yunta_core::describe(&e))?;
 
     // Compare against expect — every mismatch reported, not just the first.
     let mut problems = Vec::new();

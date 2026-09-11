@@ -2060,6 +2060,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "task_index": {
+              "description": "The task's own position, so a criterion still says which task\nit belongs to when that task's id is the thing that could not\nbe read — the case where naming it by id is impossible and\nnaming it not at all leaves a reader with nowhere to look.",
+              "type": "integer",
+              "format": "uint",
+              "default": 0,
+              "minimum": 0
             }
           },
           "required": [

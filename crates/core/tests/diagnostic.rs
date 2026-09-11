@@ -42,9 +42,19 @@ fn a_task_whose_id_did_not_parse_renders_by_its_ordinal() {
 fn a_criterion_names_the_task_it_belongs_to() {
     let subject = Subject::Criterion {
         task: Some(TaskId::from("t1")),
+        task_index: 0,
         index: 0,
     };
     assert_eq!(subject.to_string(), "task `t1`, criterion 1");
+
+    // And when the task's own id is what could not be read, the
+    // criterion still says which task it belongs to.
+    let subject = Subject::Criterion {
+        task: None,
+        task_index: 0,
+        index: 1,
+    };
+    assert_eq!(subject.to_string(), "the first task, criterion 2");
 }
 
 #[test]
@@ -122,6 +132,7 @@ fn a_wrong_shape_shows_what_was_written_and_what_to_write() {
     let diagnostic = Diagnostic::new(
         Subject::Criterion {
             task: Some(TaskId::from("t1")),
+            task_index: 0,
             index: 0,
         },
         Problem::wrong_shape(ValueShape::String, "a mapping", "- cmd: \"cargo test\""),

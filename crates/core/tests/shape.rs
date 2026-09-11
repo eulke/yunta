@@ -219,3 +219,17 @@ fn a_misspelled_key_is_reported_once_not_also_as_the_absence_it_caused() {
         "{text}"
     );
 }
+
+#[test]
+fn a_criterion_still_says_which_task_when_that_task_s_id_is_unreadable() {
+    let report = read::<Ledger>(
+        b"tasks:\n  - id: 1-dark-mode\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cargo test\n",
+        plan(),
+    )
+    .expect_err("an unreadable id and a bad criterion");
+    let text = report.for_person();
+    assert!(
+        text.contains("the first task, criterion 1"),
+        "a reader with no id still has somewhere to look: {text}"
+    );
+}

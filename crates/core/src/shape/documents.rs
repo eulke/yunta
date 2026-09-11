@@ -110,17 +110,22 @@ fn diagnose_task(index: usize, item: &Value, into: &mut Vec<Diagnostic>) {
             Subject::Task { id, .. } => id.clone(),
             _ => None,
         };
-        walk_criteria(map, task_id, into);
+        walk_criteria(map, task_id, index, into);
     }
 }
 
-fn walk_criteria(task: &Mapping, task_id: Option<TaskId>, into: &mut Vec<Diagnostic>) {
+fn walk_criteria(
+    task: &Mapping,
+    task_id: Option<TaskId>,
+    task_index: usize,
+    into: &mut Vec<Diagnostic>,
+) {
     let Some(value) = task.get("criteria") else {
         return;
     };
     let owner = Subject::Task {
         id: task_id.clone(),
-        index: 0,
+        index: task_index,
     };
     let Some(items) = as_sequence(
         value,
@@ -134,6 +139,7 @@ fn walk_criteria(task: &Mapping, task_id: Option<TaskId>, into: &mut Vec<Diagnos
     for (index, item) in items.iter().enumerate() {
         let subject = Subject::Criterion {
             task: task_id.clone(),
+            task_index,
             index,
         };
         let Some(map) = as_mapping(item, &subject, "a mapping", "- cmd: \"cargo test\"", into)

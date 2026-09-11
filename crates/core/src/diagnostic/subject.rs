@@ -31,6 +31,12 @@ pub enum Subject {
     Criterion {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task: Option<TaskId>,
+        /// The task's own position, so a criterion still says which task
+        /// it belongs to when that task's id is the thing that could not
+        /// be read — the case where naming it by id is impossible and
+        /// naming it not at all leaves a reader with nowhere to look.
+        #[serde(default)]
+        task_index: usize,
         index: usize,
     },
     Finding {
@@ -92,10 +98,18 @@ impl fmt::Display for Subject {
             Subject::Criterion {
                 task: Some(task),
                 index,
+                ..
             } => write!(f, "task `{task}`, criterion {}", index + 1),
-            Subject::Criterion { task: None, index } => {
-                write!(f, "criterion {}", index + 1)
-            }
+            Subject::Criterion {
+                task: None,
+                task_index,
+                index,
+            } => write!(
+                f,
+                "{}, criterion {}",
+                ordinal("task", *task_index),
+                index + 1
+            ),
             Subject::Finding { id: Some(id), .. } => write!(f, "finding `{id}`"),
             Subject::Finding { id: None, index } => f.write_str(&ordinal("finding", *index)),
             Subject::Question { id: Some(id), .. } => write!(f, "question `{id}`"),
