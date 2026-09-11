@@ -121,13 +121,16 @@ reading the run fails naming its position.
 ## The schemas as files
 
 `schemas/workflow.json`, `schemas/config.json`, `schemas/pack.json`,
-`schemas/ledger.json` and `schemas/events.json` are the JSON Schema (draft
-2020-12) of a workflow file, a config layer, a pack manifest, a task ledger
+`schemas/ledger.json`, `schemas/findings.json`, `schemas/questions.json` and
+`schemas/events.json` are the JSON Schema (draft 2020-12) of a workflow file,
+a config layer, a pack manifest, the three artifacts the engine interprets,
 and one event of the log — the shape of a line of `events.jsonl`. They are
 generated from the types that read those documents: `cargo xtask schema`
 writes them and CI fails when a committed file differs from what the types
 emit, so any change to a format is a visible diff in the pull request that
-makes it. An editor or a validator can use the files as they are.
+makes it. An editor or a validator can use the files as they are, and
+`yunta schema <kind> --json` prints the same file for the three artifact
+kinds without needing a checkout.
 
 ## Platforms
 
