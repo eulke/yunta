@@ -98,7 +98,8 @@ pub use questions::register as register_questions;
 pub use receipt::{
     build_receipt, fan_out_groups, render_json as render_receipt_json,
     render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
-    CriterionEntry, EventChainStatus, Receipt, ReceiptError, RunnerUsage, ScopeSummary,
+    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunnerUsage,
+    ScopeSummary,
 };
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,

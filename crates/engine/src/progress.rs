@@ -35,7 +35,7 @@ pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Stored
     render_section(&mut out, &nodes, &state, "_none_", |node| {
         match state.nodes.get(&node.id) {
             Some(NodeState::Failed { outcome, .. }) => {
-                Some(format!("- **{}** — {outcome}\n", node.id))
+                Some(format!("- **{}** — {}\n", node.id, fenced(outcome)))
             }
             _ => None,
         }
@@ -79,6 +79,27 @@ fn render_section(
         out.push_str(empty_marker);
         out.push('\n');
     }
+}
+
+/// A failure inside a Markdown bullet.
+///
+/// Two readers share this file: a person, for whom an unescaped `_` or
+/// `*` silently restyles the page, and the next node's session, which
+/// reads it as context. A failure that names several problems keeps
+/// them, inside a fence, where neither reader has to guess where one
+/// ends and the next begins.
+fn fenced(outcome: &str) -> String {
+    if !outcome.contains('\n') && !outcome.contains('`') {
+        return format!("`{outcome}`");
+    }
+    format!("\n\n  ```\n{}\n  ```", indent_lines(outcome, "  "))
+}
+
+fn indent_lines(text: &str, indent: &str) -> String {
+    text.lines()
+        .map(|line| format!("{indent}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn finished_entry(state: &RunState, node: &Node, outcome: &str) -> String {

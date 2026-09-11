@@ -71,100 +71,11 @@ pub fn close_artifacts(
 
     let mut verified = Vec::new();
     let mut reports = Vec::new();
-
     for spec in &artifacts.produces {
-        let (name, kind) = match spec {
-            ArtifactSpec::Plain(name) => (name, None),
-            ArtifactSpec::Typed { name, kind } => (name, Some(kind)),
-        };
-
-        let relative = Path::new("artifacts").join(name);
-        let full_path = run_dir.join(&relative);
-        let document = DocumentRef::new(
-            kind.cloned().map(DocumentKind::from),
-            relative.display().to_string(),
-        );
-
-        let bytes = match std::fs::read(&full_path) {
-            Ok(bytes) => bytes,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                reports.push(about_the_file(
-                    document,
-                    "artifact-missing",
-                    format!("was declared by node `{}` and never produced", node.id),
-                ));
-                continue;
-            }
-            Err(source) => {
-                reports.push(about_the_file(
-                    document,
-                    "artifact-unreadable",
-                    format!("exists but cannot be read: {source}"),
-                ));
-                continue;
-            }
-        };
-
-        if bytes.is_empty() {
-            reports.push(about_the_file(
-                document,
-                "artifact-empty",
-                "is empty; a declared artifact must have content".to_string(),
-            ));
-            continue;
+        match verify_one(node, spec, run_dir, max_bytes) {
+            Ok(artifact) => verified.push(artifact),
+            Err(report) => reports.push(report),
         }
-
-        // A runaway artifact fails the node with both numbers on the
-        // table, never a truncation.
-        if let Some(max_bytes) = max_bytes {
-            if bytes.len() as u64 > max_bytes {
-                reports.push(about_the_file(
-                    document,
-                    "artifact-oversized",
-                    format!(
-                        "is {} bytes; `limits.max_artifact_bytes` is {max_bytes}",
-                        bytes.len()
-                    ),
-                ));
-                continue;
-            }
-        }
-
-        let mut ledger = None;
-        let mut findings = None;
-        let mut questions = None;
-        let interpreted = match kind {
-            Some(ArtifactKind::TaskLedger) => {
-                interpret::<Ledger>(&bytes, document, crate::ledger::register)
-                    .map(|parsed| ledger = Some(parsed))
-            }
-            Some(ArtifactKind::Findings) => {
-                interpret::<FindingsFile>(&bytes, document, crate::findings::register).map(
-                    |parsed| {
-                        findings = Some(parsed.findings.into_iter().map(Finding::from).collect())
-                    },
-                )
-            }
-            Some(ArtifactKind::Questions) => {
-                interpret::<QuestionsFile>(&bytes, document, crate::questions::register)
-                    .map(|parsed| questions = Some(parsed.questions))
-            }
-            None => Ok(()),
-        };
-        if let Err(report) = interpreted {
-            reports.push(report);
-            continue;
-        }
-
-        verified.push(VerifiedArtifact {
-            name: name.clone(),
-            path: relative,
-            content_hash: sha256_hex(&bytes),
-            kind: kind.cloned(),
-            ledger,
-            findings,
-            questions,
-        });
     }
 
     if reports.is_empty() {
@@ -172,6 +83,136 @@ pub fn close_artifacts(
     } else {
         Err(reports)
     }
+}
+
+/// One declared artifact's whole story: the file, its size, and — when
+/// the node declared a `kind:` — what it says.
+fn verify_one(
+    node: &Node,
+    spec: &ArtifactSpec,
+    run_dir: &Path,
+    max_bytes: Option<u64>,
+) -> Result<VerifiedArtifact, Report> {
+    let (name, kind) = match spec {
+        ArtifactSpec::Plain(name) => (name, None),
+        ArtifactSpec::Typed { name, kind } => (name, Some(kind)),
+    };
+
+    let relative = Path::new("artifacts").join(name);
+    let document = DocumentRef::new(
+        kind.cloned().map(DocumentKind::from),
+        relative.display().to_string(),
+    );
+
+    let bytes = read_file(node, &run_dir.join(&relative), document.clone(), max_bytes)?;
+
+    let Interpreted {
+        ledger,
+        findings,
+        questions,
+    } = interpret_kind(kind, &bytes, document)?;
+
+    Ok(VerifiedArtifact {
+        name: name.clone(),
+        path: relative,
+        content_hash: sha256_hex(&bytes),
+        kind: kind.cloned(),
+        ledger,
+        findings,
+        questions,
+    })
+}
+
+/// The file itself, before anything inside it is read: it exists, it has
+/// content, and it is within the declared guard.
+fn read_file(
+    node: &Node,
+    full_path: &Path,
+    document: DocumentRef,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, Report> {
+    let bytes = match std::fs::read(full_path) {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Err(about_the_file(
+                document,
+                "artifact-missing",
+                format!("was declared by node `{}` and never produced", node.id),
+            ))
+        }
+        Err(source) => {
+            return Err(about_the_file(
+                document,
+                "artifact-unreadable",
+                format!("exists but cannot be read: {source}"),
+            ))
+        }
+    };
+
+    if bytes.is_empty() {
+        return Err(about_the_file(
+            document,
+            "artifact-empty",
+            "is empty; a declared artifact must have content".to_string(),
+        ));
+    }
+    // A runaway artifact fails the node with both numbers on the table,
+    // never a truncation.
+    if let Some(max_bytes) = max_bytes {
+        if bytes.len() as u64 > max_bytes {
+            return Err(about_the_file(
+                document,
+                "artifact-oversized",
+                format!(
+                    "is {} bytes; `limits.max_artifact_bytes` is {max_bytes}",
+                    bytes.len()
+                ),
+            ));
+        }
+    }
+    Ok(bytes)
+}
+
+/// What a declared `kind:` turned the bytes into. All three are `None`
+/// for an opaque artifact, which is what "the engine assumes no format"
+/// looks like from here.
+#[derive(Default)]
+struct Interpreted {
+    ledger: Option<Ledger>,
+    findings: Option<Vec<Finding>>,
+    questions: Option<Vec<Question>>,
+}
+
+fn interpret_kind(
+    kind: Option<&ArtifactKind>,
+    bytes: &[u8],
+    document: DocumentRef,
+) -> Result<Interpreted, Report> {
+    Ok(match kind {
+        Some(ArtifactKind::TaskLedger) => Interpreted {
+            ledger: Some(interpret::<Ledger>(
+                bytes,
+                document,
+                crate::ledger::register,
+            )?),
+            ..Interpreted::default()
+        },
+        Some(ArtifactKind::Findings) => {
+            let file = interpret::<FindingsFile>(bytes, document, crate::findings::register)?;
+            Interpreted {
+                findings: Some(file.findings.into_iter().map(Finding::from).collect()),
+                ..Interpreted::default()
+            }
+        }
+        Some(ArtifactKind::Questions) => {
+            let file = interpret::<QuestionsFile>(bytes, document, crate::questions::register)?;
+            Interpreted {
+                questions: Some(file.questions),
+                ..Interpreted::default()
+            }
+        }
+        None => Interpreted::default(),
+    })
 }
 
 /// Reads one interpreted artifact: its shape first, then the rules that

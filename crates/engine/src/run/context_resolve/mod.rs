@@ -164,35 +164,7 @@ async fn resolve_all(
     let mut run_stable_blocks = Vec::new();
     let mut volatile_blocks = Vec::new();
 
-    // The shape of every interpreted artifact this node declares, ahead
-    // of everything the author asked for. It is `stable` by
-    // construction — derived from the node's own declaration and the
-    // types that parse it, identical in every session of this node — so
-    // it sits inside the byte-stable prefix a provider's cache reuses
-    // rather than disturbing it.
-    for (source_id, content) in artifact_shapes(ctx, node) {
-        let bytes = content.into_bytes();
-        let (path, content_hash) =
-            materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize an artifact shape".to_string(),
-                source,
-            })?;
-        let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
-        stable_blocks.push(render_block(
-            &source_id,
-            SHAPE_KIND,
-            &bytes,
-            &path,
-            inline_threshold,
-        ));
-        sources.push(ContextSourceRef {
-            source_id,
-            kind: SHAPE_KIND.to_string(),
-            content_hash,
-        });
-    }
+    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources)?;
 
     for spec in &node.context {
         let source_id = source_id_for(spec);
@@ -338,6 +310,46 @@ fn render_block(
             materialized_path.display()
         )
     }
+}
+
+/// Mounts the shape of every interpreted artifact this node declares,
+/// ahead of everything the author asked for.
+///
+/// `stable` by construction rather than by choice: the text derives from
+/// the node's own declaration and the types that parse it, so it is
+/// identical in every session of this node and sits inside the
+/// byte-stable prefix a provider's cache reuses rather than disturbing
+/// it.
+fn mount_artifact_shapes(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    blocks: &mut Vec<String>,
+    sources: &mut Vec<ContextSourceRef>,
+) -> Result<(), ContextResolveError> {
+    let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
+    for (source_id, content) in artifact_shapes(ctx, node) {
+        let bytes = content.into_bytes();
+        let (path, content_hash) =
+            materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
+                node: node.id.clone(),
+                source_id: source_id.clone(),
+                action: "materialize an artifact shape".to_string(),
+                source,
+            })?;
+        blocks.push(render_block(
+            &source_id,
+            SHAPE_KIND,
+            &bytes,
+            &path,
+            inline_threshold,
+        ));
+        sources.push(ContextSourceRef {
+            source_id,
+            kind: SHAPE_KIND.to_string(),
+            content_hash,
+        });
+    }
+    Ok(())
 }
 
 /// What a shape block is called wherever context sources are named:

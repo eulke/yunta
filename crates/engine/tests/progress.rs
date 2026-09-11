@@ -145,7 +145,7 @@ fn a_failed_node_appears_under_failed_with_its_outcome() {
     let markdown = render_progress(&wf, &events);
     assert_eq!(
         markdown,
-        "# Progress\n\n## Finished\n\n_none yet_\n\n## Failed\n\n- **lint** — clippy: 3 warnings\n\n## Next\n\n_nothing pending_\n"
+        "# Progress\n\n## Finished\n\n_none yet_\n\n## Failed\n\n- **lint** — `clippy: 3 warnings`\n\n## Next\n\n_nothing pending_\n"
     );
 }
 
@@ -196,5 +196,41 @@ fn parallel_children_are_listed_on_the_same_terms_as_top_level_nodes() {
     assert_eq!(
         markdown,
         "# Progress\n\n## Finished\n\n- **write-docs** — Writes docs\n  outcome: exit 0\n\n## Failed\n\n_none_\n\n## Next\n\n- **pre-launch** — pre-launch\n"
+    );
+}
+
+/// `progress.md` has two readers — a person, and the next node's
+/// session, which mounts it as context. A failure that names several
+/// problems reaches both with the problems intact and nothing of it
+/// read as Markdown.
+#[test]
+fn a_multi_problem_failure_is_fenced_so_neither_reader_has_to_guess() {
+    let wf = workflow(vec![node("plan", None)]);
+    let outcome = "artifacts/plan.yaml: 2 errors\n  \
+                   task `t1`: unknown key `description`\n  \
+                   task `t1`, criterion 1: expected a mapping, found a string";
+    let events = vec![
+        event(
+            1,
+            "plan",
+            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+        ),
+        event(
+            2,
+            "plan",
+            EventPayload::NodeFailed(NodeFailedPayload {
+                outcome: outcome.to_string(),
+                tokens_used: TokenUsage::default(),
+                retryable: false,
+                diagnostics: Vec::new(),
+            }),
+        ),
+    ];
+    let markdown = render_progress(&wf, &events);
+    assert!(markdown.contains("```"), "{markdown}");
+    assert!(markdown.contains("unknown key `description`"), "{markdown}");
+    assert!(
+        markdown.contains("criterion 1: expected a mapping"),
+        "every problem survives the transport: {markdown}"
     );
 }

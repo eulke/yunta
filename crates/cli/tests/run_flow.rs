@@ -239,10 +239,18 @@ expect:
         text.lines().any(|l| l == "case wrong-expect ... FAILED"),
         "got: {text}"
     );
+    // The words a case file is written with, not a Rust enum's `Debug`.
     assert!(
         text.lines()
-            .any(|l| l.starts_with("  final_state: expected Finished, got ")),
+            .any(|l| l == "  final_state: expected finished, got paused"),
         "the mismatch names the field, the expected state and the actual one: {text}"
+    );
+    // And the reason sits on its own line under it, unquoted and
+    // unescaped — it was written for a reader already.
+    assert!(
+        text.lines()
+            .any(|l| l.trim_start().starts_with("node `fails` failed:")),
+        "the reason reaches the reader intact: {text}"
     );
 }
 

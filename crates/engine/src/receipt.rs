@@ -111,6 +111,44 @@ pub struct Receipt {
     /// Events this binary could not interpret, by kind — a run with any
     /// is certified only for what the binary understood.
     pub unknown_kinds: Vec<UnknownKindCount>,
+    /// What the run's documents got wrong, counted by the stable name of
+    /// each kind of problem.
+    ///
+    /// Counting is the whole reason a diagnostic is a value: a receipt
+    /// that had to read prose could only reprint it, and "how often does
+    /// a ledger come back unreadable" was a question nobody could answer
+    /// without grepping free text.
+    pub diagnostics: Vec<DiagnosticCount>,
+}
+
+/// One kind of problem and how many times the run hit it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DiagnosticCount {
+    pub code: String,
+    pub occurrences: usize,
+}
+
+/// Every diagnostic the log recorded, by code, most frequent first and
+/// ties broken by name so the same log always renders the same receipt.
+fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for event in events {
+        if let Some(EventPayload::NodeFailed(p)) = event.payload() {
+            for diagnostic in &p.diagnostics {
+                *counts.entry(diagnostic.code().to_string()).or_default() += 1;
+            }
+        }
+    }
+    let mut counts: Vec<DiagnosticCount> = counts
+        .into_iter()
+        .map(|(code, occurrences)| DiagnosticCount { code, occurrences })
+        .collect();
+    counts.sort_by(|a, b| {
+        b.occurrences
+            .cmp(&a.occurrences)
+            .then_with(|| a.code.cmp(&b.code))
+    });
+    counts
 }
 
 /// Builds a [`Receipt`] purely from `manifest` + `events` (+ the chain
@@ -155,6 +193,7 @@ pub fn build_receipt(
         },
         event_chain,
         unknown_kinds,
+        diagnostics: diagnostic_counts(events),
     })
 }
 
@@ -311,6 +350,18 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             "- {} event kind(s) this binary does not know — interpreted partially: {}\n",
             mark(false),
             kinds.join(", ")
+        ));
+    }
+    if !receipt.diagnostics.is_empty() {
+        let counted: Vec<String> = receipt
+            .diagnostics
+            .iter()
+            .map(|count| format!("`{}` ×{}", count.code, count.occurrences))
+            .collect();
+        out.push_str(&format!(
+            "- {} document problem(s) reported during the run: {}\n",
+            mark(false),
+            counted.join(", ")
         ));
     }
     match &receipt.baseline {

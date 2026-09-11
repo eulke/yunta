@@ -56,7 +56,10 @@ pub(crate) fn progress_summary(events: &[StoredEvent], manifest: &Manifest) -> S
             // reason already reads like, so this reuses it verbatim
             // rather than inventing a second vocabulary for the same
             // fact.
-            Some(EventPayload::RunPaused(p)) => Some(format!("waiting — {}", p.reason)),
+            Some(EventPayload::RunPaused(p)) => Some(format!(
+                "waiting — {}",
+                yunta_core::diagnostic::single_line(&p.reason)
+            )),
             Some(EventPayload::RunResumed(_) | EventPayload::NodeStarted(_)) => {
                 Some("running".to_string())
             }
@@ -172,11 +175,41 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         }
     }
 
+    print_failures(&state);
+
     println!(
         "tokens: {} in / {} out",
         state.total_tokens.input, state.total_tokens.output
     );
     Ok(Outcome::Success)
+}
+
+/// Every failure that named more than one problem, with the problems
+/// back on their own lines.
+///
+/// The node list above stays scannable at one line each, which means
+/// collapsing them there. Doing only that would leave the one surface a
+/// person opens to find out what went wrong unable to say.
+fn print_failures(state: &yunta_engine::RunState) {
+    let mut failed: Vec<_> = state
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| match node {
+            NodeState::Failed { outcome, .. } if outcome.contains('\n') => Some((id, outcome)),
+            _ => None,
+        })
+        .collect();
+    if failed.is_empty() {
+        return;
+    }
+    failed.sort_by(|a, b| a.0.cmp(b.0));
+    println!("failures:");
+    for (id, outcome) in failed {
+        println!(
+            "  {id}:\n    {}",
+            yunta_core::diagnostic::block(outcome, "    ")
+        );
+    }
 }
 
 /// One display label for a node's derived state — the same text
@@ -185,8 +218,15 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
 fn node_label(node: &NodeState) -> String {
     match node {
         NodeState::Running { attempt } => format!("running (attempt {attempt})"),
-        NodeState::Finished { outcome, .. } => format!("finished — {outcome}"),
-        NodeState::Failed { outcome, .. } => format!("failed — {outcome}"),
+        NodeState::Finished { outcome, .. } => {
+            format!(
+                "finished — {}",
+                yunta_core::diagnostic::single_line(outcome)
+            )
+        }
+        NodeState::Failed { outcome, .. } => {
+            format!("failed — {}", yunta_core::diagnostic::single_line(outcome))
+        }
         NodeState::Waiting { external_ref } => match external_ref {
             Some(external_ref) => format!("waiting — {external_ref}"),
             None => "waiting".to_string(),
@@ -204,6 +244,12 @@ pub(crate) struct StatusJson {
     summary: String,
     nodes: std::collections::BTreeMap<String, String>,
     tasks: std::collections::BTreeMap<String, &'static str>,
+    /// Why each failed node failed, in the form a program can act on
+    /// rather than parse back out of a sentence: the node's diagnostics
+    /// as they were recorded. Empty for a run whose failures predate the
+    /// field, and absent altogether when nothing failed.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    diagnostics: std::collections::BTreeMap<String, Vec<yunta_core::Diagnostic>>,
     tokens: TokensJson,
 }
 
@@ -236,11 +282,39 @@ pub(crate) fn status_json(
             .iter()
             .map(|(id, status)| (id.to_string(), task_status_label(status)))
             .collect(),
+        diagnostics: node_diagnostics(events),
         tokens: TokensJson {
             input: state.total_tokens.input,
             output: state.total_tokens.output,
         },
     }
+}
+
+/// The diagnostics of each node's most recent failure, keyed by node.
+///
+/// The most recent one and not every one: a node that failed, repaired
+/// and failed again describes its current state with its last failure,
+/// and a reader asking what is wrong now is not asking for a history.
+fn node_diagnostics(
+    events: &[StoredEvent],
+) -> std::collections::BTreeMap<String, Vec<yunta_core::Diagnostic>> {
+    let mut latest = std::collections::BTreeMap::new();
+    for event in events {
+        let Some(node_id) = event.node_id.as_ref() else {
+            continue;
+        };
+        match event.payload() {
+            Some(EventPayload::NodeFailed(p)) if !p.diagnostics.is_empty() => {
+                latest.insert(node_id.to_string(), p.diagnostics.clone());
+            }
+            // A node that started again has left its last failure behind.
+            Some(EventPayload::NodeStarted(_)) => {
+                latest.remove(node_id.as_str());
+            }
+            _ => {}
+        }
+    }
+    latest
 }
 
 /// The event schema's snake_case task-status names — user output never

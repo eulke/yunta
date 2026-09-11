@@ -35,100 +35,124 @@ fn broke(index: usize, id: &TaskId, code: &'static str, detail: impl Into<String
 /// violation rather than stopping at the first — whoever wrote this
 /// corrects once, not once per round.
 pub fn register(ledger: &Ledger) -> Vec<Diagnostic> {
-    let mut errors = Vec::new();
-
-    let mut known_ids: HashSet<TaskId> = HashSet::new();
+    let known_ids: HashSet<TaskId> = ledger.tasks.iter().map(|task| task.id.clone()).collect();
+    let mut errors = duplicate_ids(ledger);
     for (index, task) in ledger.tasks.iter().enumerate() {
-        if !known_ids.insert(task.id.clone()) {
-            errors.push(broke(
+        errors.extend(task_rules(index, task, &known_ids));
+    }
+    errors.extend(cycle(ledger));
+    errors.extend(overlapping_scopes(&ledger.tasks));
+    errors
+}
+
+/// An id used twice: a rule about the document, reported on the second
+/// task to carry it — the one a reader has to change.
+fn duplicate_ids(ledger: &Ledger) -> Vec<Diagnostic> {
+    let mut seen: HashSet<&TaskId> = HashSet::new();
+    ledger
+        .tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, task)| !seen.insert(&task.id))
+        .map(|(index, task)| {
+            broke(
                 index,
                 &task.id,
                 "duplicate-id",
                 "a second task already carries this id; every id is declared once",
+            )
+        })
+        .collect()
+}
+
+/// Everything one task has to satisfy on its own.
+fn task_rules(index: usize, task: &Task, known_ids: &HashSet<TaskId>) -> Vec<Diagnostic> {
+    let mut errors = Vec::new();
+    for dep in &task.depends_on {
+        if !known_ids.contains(dep) {
+            errors.push(broke(
+                index,
+                &task.id,
+                "unknown-dependency",
+                format!("`depends_on` names `{dep}`, which no task in this file declares"),
             ));
         }
     }
-
-    for (index, task) in ledger.tasks.iter().enumerate() {
-        for dep in &task.depends_on {
-            if !known_ids.contains(dep) {
-                errors.push(broke(
-                    index,
-                    &task.id,
-                    "unknown-dependency",
-                    format!("`depends_on` names `{dep}`, which no task in this file declares"),
-                ));
-            }
-        }
-
-        if task.title.trim().is_empty() {
-            errors.push(broke(index, &task.id, "empty-title", "`title` is empty"));
-        }
-        if task.scope.is_empty() {
-            errors.push(broke(
-                index,
-                &task.id,
-                "empty-scope",
-                "`scope` is empty; every task declares at least one glob, the only paths it \
-                 may touch",
-            ));
-        }
-        if task.criteria.is_empty() {
-            errors.push(broke(
-                index,
-                &task.id,
-                "no-criteria",
-                "no criteria declared; every task needs at least one command that verifies it",
-            ));
-        } else if task
-            .criteria
-            .iter()
-            .all(|c| c.r#type == Some(yunta_core::events::CriterionType::Guard))
-        {
-            errors.push(broke(
-                index,
-                &task.id,
-                "all-criteria-are-guards",
-                "every criterion is a `guard`; at least one must be able to fail before the \
-                 work, or there is nothing the work has to make pass",
-            ));
-        }
-        if task.manual_review
-            && task
-                .justification
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .is_empty()
-        {
-            errors.push(broke(
-                index,
-                &task.id,
-                "manual-review-without-justification",
-                "`manual_review: true` without `justification`; say why no command can verify \
-                 this task",
-            ));
-        }
+    if task.title.trim().is_empty() {
+        errors.push(broke(index, &task.id, "empty-title", "`title` is empty"));
     }
-
-    if let Some(cycle) = find_cycle(&ledger.tasks) {
-        let path = cycle
-            .iter()
-            .map(TaskId::as_str)
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        errors.push(Diagnostic::new(
-            Subject::Document,
-            Problem::rule(
-                "dependency-cycle",
-                format!("`depends_on` forms a cycle: {path}"),
-            ),
+    if task.scope.is_empty() {
+        errors.push(broke(
+            index,
+            &task.id,
+            "empty-scope",
+            "`scope` is empty; every task declares at least one glob, the only paths it \
+             may touch",
         ));
     }
-
-    errors.extend(overlapping_scopes(&ledger.tasks));
-
+    errors.extend(criteria_rules(index, task));
+    if task.manual_review
+        && task
+            .justification
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
+        errors.push(broke(
+            index,
+            &task.id,
+            "manual-review-without-justification",
+            "`manual_review: true` without `justification`; say why no command can verify \
+             this task",
+        ));
+    }
     errors
+}
+
+/// What a task's `criteria` have to be for the red pre-check to mean
+/// anything: at least one, and at least one that can fail before the
+/// work starts.
+fn criteria_rules(index: usize, task: &Task) -> Option<Diagnostic> {
+    if task.criteria.is_empty() {
+        return Some(broke(
+            index,
+            &task.id,
+            "no-criteria",
+            "no criteria declared; every task needs at least one command that verifies it",
+        ));
+    }
+    let all_guards = task
+        .criteria
+        .iter()
+        .all(|c| c.r#type == Some(yunta_core::events::CriterionType::Guard));
+    all_guards.then(|| {
+        broke(
+            index,
+            &task.id,
+            "all-criteria-are-guards",
+            "every criterion is a `guard`; at least one must be able to fail before the work, \
+             or there is nothing the work has to make pass",
+        )
+    })
+}
+
+/// A cycle is a property of the whole graph, so the document carries it
+/// rather than any one task in the loop.
+fn cycle(ledger: &Ledger) -> Option<Diagnostic> {
+    let cycle = find_cycle(&ledger.tasks)?;
+    let path = cycle
+        .iter()
+        .map(TaskId::as_str)
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    Some(Diagnostic::new(
+        Subject::Document,
+        Problem::rule(
+            "dependency-cycle",
+            format!("`depends_on` forms a cycle: {path}"),
+        ),
+    ))
 }
 
 fn find_cycle(tasks: &[Task]) -> Option<Vec<TaskId>> {

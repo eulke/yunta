@@ -105,11 +105,17 @@ pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
             Outcome::Success
         }
         RunTerminal::Paused { reason } => {
-            println!("run {run_id}: paused — {reason}");
+            println!(
+                "run {run_id}: paused — {}",
+                yunta_core::diagnostic::block(reason, "  ")
+            );
             Outcome::Reported
         }
         RunTerminal::Failed { reason } => {
-            println!("run {run_id}: failed — {reason}");
+            println!(
+                "run {run_id}: failed — {}",
+                yunta_core::diagnostic::block(reason, "  ")
+            );
             Outcome::Reported
         }
         // `run`/`resume` always route a fresh `RunReport` through

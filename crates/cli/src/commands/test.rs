@@ -71,6 +71,36 @@ struct Expect {
     tasks: BTreeMap<String, String>,
 }
 
+/// How a final state reads in a case file, so a mismatch is reported in
+/// the words the case was written with.
+fn final_state_label(state: FinalState) -> &'static str {
+    match state {
+        FinalState::Finished => "finished",
+        FinalState::Paused => "paused",
+        FinalState::Failed => "failed",
+        FinalState::Promoted => "promoted",
+    }
+}
+
+/// The terminal a run actually reached, with the reason a person needs
+/// laid out under it. `Debug` would wrap the reason in quotes and escape
+/// every one it contains — noise added to a message already written for
+/// a reader.
+fn terminal_label(terminal: &RunTerminal) -> String {
+    match terminal {
+        RunTerminal::Finished => "finished".to_string(),
+        RunTerminal::Paused { reason } => format!(
+            "paused\n    {}",
+            yunta_core::diagnostic::block(reason, "    ")
+        ),
+        RunTerminal::Failed { reason } => format!(
+            "failed\n    {}",
+            yunta_core::diagnostic::block(reason, "    ")
+        ),
+        RunTerminal::Promoted { .. } => "promoted".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum FinalState {
@@ -271,8 +301,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     };
     if got_state != case.expect.final_state {
         problems.push(format!(
-            "final_state: expected {:?}, got {:?}",
-            case.expect.final_state, report.terminal
+            "final_state: expected {}, got {}",
+            final_state_label(case.expect.final_state),
+            terminal_label(&report.terminal)
         ));
     }
     for (node_id, expected) in &case.expect.nodes {

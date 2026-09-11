@@ -669,10 +669,19 @@ async fn drive_child(
                     }),
                 )
                 .await?;
+                // The child's reason keeps its own lines under this
+                // one. Its diagnostics are not copied up: the child is a
+                // run of its own, and its log is where they are recorded
+                // — flattening one run's evidence into another's outcome
+                // is how three levels of composition used to produce a
+                // single unreadable line.
                 return fail(
                     ctx,
                     node,
-                    format!("child run `{current_id}` failed: {reason}"),
+                    format!(
+                        "child run `{current_id}` failed:\n  {}",
+                        yunta_core::diagnostic::block(&reason, "  ")
+                    ),
                     false,
                 )
                 .await;
@@ -686,8 +695,9 @@ async fn drive_child(
                 }
                 return Ok(NodeEnd::ChildPaused {
                     reason: format!(
-                        "child run `{current_id}` paused: {reason} — resuming this run \
-                         resumes it"
+                        "child run `{current_id}` paused, and resuming this run resumes \
+                         it:\n  {}",
+                        yunta_core::diagnostic::block(&reason, "  ")
                     ),
                 });
             }

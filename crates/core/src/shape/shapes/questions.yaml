@@ -1,0 +1,20 @@
+# What a node needs a person to decide. A node that needs an answer does
+# not converse: it writes this file and ends, and the engine asks.
+# Written strictly — any key not listed here fails the node.
+
+questions:                              # required; an empty list is valid and
+                                        #   means nothing needs deciding
+  - id: theme-source                    # required, unique. A letter, then
+                                        #   letters, digits, `_` or `-`.
+    text: "Should dark mode follow the operating system setting?"  # required
+    answer_type: boolean                # required, one of:
+                                        #   text | choice | boolean
+    required: true                      # required: an unanswered `required`
+                                        #   question pauses the run
+
+  - id: accent-colour
+    text: "Which accent colour should the dark theme use?"
+    answer_type: choice
+    values: ["teal", "amber", "violet"] # required when answer_type is `choice`,
+                                        #   and an answer must be one of these
+    required: false
