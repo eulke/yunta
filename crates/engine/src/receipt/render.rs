@@ -71,6 +71,37 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             counted.join(", ")
         ));
     }
+    let checks = &receipt.self_checks;
+    if checks.checks > 0 {
+        let corrected: Vec<String> = checks
+            .corrected
+            .iter()
+            .map(DiagnosticCount::to_string)
+            .collect();
+        out.push_str(&format!(
+            "- {} {} self-check(s) before close, {} clean{}\n",
+            mark(checks.nodes_that_never_checked.is_empty()),
+            checks.checks,
+            checks.clean,
+            if corrected.is_empty() {
+                String::new()
+            } else {
+                format!(" — corrected in place: {}", corrected.join(", "))
+            }
+        ));
+    }
+    if !checks.nodes_that_never_checked.is_empty() {
+        let nodes: Vec<String> = checks
+            .nodes_that_never_checked
+            .iter()
+            .map(|node| format!("`{node}`"))
+            .collect();
+        out.push_str(&format!(
+            "- {} node(s) produced an interpreted artifact without checking it: {}\n",
+            mark(false),
+            nodes.join(", ")
+        ));
+    }
     match &receipt.baseline {
         Some(b) => out.push_str(&format!(
             "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`)\n",

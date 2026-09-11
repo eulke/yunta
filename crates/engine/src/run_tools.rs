@@ -45,7 +45,10 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::RunToolsEndpoint;
-use yunta_core::events::{EventDraft, EventPayload, Finding, FindingPostedPayload, StoredEvent};
+use yunta_core::events::{
+    ArtifactCheckedPayload, CheckVerdict, EventDraft, EventPayload, Finding, FindingPostedPayload,
+    StoredEvent,
+};
 use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, TaskId, Workflow};
 use yunta_storage::AsyncStorage;
 
@@ -337,6 +340,20 @@ enum RunToolError {
     UndeclaredArtifact { name: String, declared: String },
 }
 
+/// Every stable code behind one failed check — what a receipt counts.
+fn codes_of(failure: &yunta_core::diagnostic::ArtifactFailure) -> Vec<String> {
+    match failure {
+        yunta_core::diagnostic::ArtifactFailure::File { problem, .. } => {
+            vec![problem.code().to_string()]
+        }
+        yunta_core::diagnostic::ArtifactFailure::Content(report) => report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code().to_string())
+            .collect(),
+    }
+}
+
 /// What the engine read out of an artifact, so a session sees its meaning
 /// survived the parse and not only its syntax.
 fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
@@ -383,7 +400,7 @@ impl SessionTools {
     /// understood, not just that the file parsed: a ledger that reads as
     /// six tasks when the session meant seven is a failure nothing else
     /// catches.
-    fn check_artifact(
+    async fn check_artifact(
         &self,
         args: &serde_json::Map<String, Value>,
     ) -> Result<String, RunToolError> {
@@ -413,22 +430,55 @@ impl SessionTools {
 
         let mut verdicts = Vec::new();
         for spec in specs {
-            match crate::artifacts::verify_one(
+            let (text, verdict) = match crate::artifacts::verify_one(
                 &self.node,
                 spec,
                 &self.host.run_dir,
                 self.host.max_artifact_bytes,
             ) {
-                Ok(verified) => {
-                    verdicts.push(format!("{} — ok. {}", spec.name(), read_as(&verified)))
-                }
-                Err(failure) => verdicts.push(
+                Ok(verified) => (
+                    format!("{} — ok. {}", spec.name(), read_as(&verified)),
+                    CheckVerdict::Ok,
+                ),
+                Err(failure) => (
                     crate::run::repair_instruction(std::slice::from_ref(&failure))
                         .unwrap_or_else(|| failure.to_string()),
+                    CheckVerdict::Problems {
+                        codes: codes_of(&failure),
+                    },
                 ),
-            }
+            };
+            self.record_check(spec, verdict).await?;
+            verdicts.push(text);
         }
         Ok(verdicts.join("\n\n"))
+    }
+
+    /// The check goes on the log whatever it answered: a session that
+    /// converged before closing leaves no other trace, and that trace is
+    /// the whole evidence that the writer was told enough.
+    async fn record_check(
+        &self,
+        spec: &ArtifactSpec,
+        verdict: CheckVerdict,
+    ) -> Result<(), RunToolError> {
+        self.host
+            .storage
+            .append(
+                EventDraft {
+                    run_id: self.host.run_id.clone(),
+                    node_id: Some(self.node.clone()),
+                    payload: EventPayload::ArtifactChecked(ArtifactCheckedPayload {
+                        name: spec.name().to_string(),
+                        artifact_kind: spec.kind(),
+                        verdict,
+                    }),
+                },
+                self.host.clock.now(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|source| RunToolError::Storage { source })
     }
 
     async fn events(&self) -> Result<Vec<StoredEvent>, RunToolError> {
@@ -647,7 +697,7 @@ impl ServerHandler for SessionTools {
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
         let outcome = match request.name.as_ref() {
-            "yunta_check_artifact" => self.check_artifact(&args),
+            "yunta_check_artifact" => self.check_artifact(&args).await,
             "yunta_post_finding" => self.post_finding(args).await,
             "yunta_get_blackboard" => self.get_blackboard().await,
             "yunta_task_status" => self.task_status().await,

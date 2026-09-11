@@ -190,7 +190,18 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `path` | string | sí | relativo a `run.dir/artifacts/` |
 | `content_hash` | string | sí | los artifacts son inmutables; esto es lo que se verifica en `resume` |
 
-### 5.8 `context_assembled` — engine
+### 5.8 `artifact_checked` — sesión (vía run tools)
+
+`name`, `artifact_kind` cuando el artifact es interpretado, y `verdict`: `ok`, o
+`problems` con los `codes` que el chequeo nombró. Lo emite `yunta_check_artifact`,
+que corre la verificación del cierre mientras la sesión todavía puede corregir.
+
+Es la única huella que deja un problema resuelto dentro de la sesión: si el nodo
+converge antes de cerrar no hay `node_failed` que lo cuente. Sin este evento, la
+pregunta que importa después de un run —si a quien escribió se le dijo lo
+suficiente, o lo descubrió fallando— no tiene con qué contestarse.
+
+### 5.9 `context_assembled` — engine
 **Fuente:** node_id, fuentes resueltas, hash por segmento de estabilidad
 
 | Campo | Tipo | Oblig. | Notas |
@@ -199,7 +210,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `sources` | lista de `{source_id, kind}` | sí | qué `ContextSource` se resolvieron |
 | `segment_hashes` | mapa `stable \| run-stable \| volatile` → hash | sí | orden fijo estable→run-estable→volátil→prompt; insumo directo de replay/diff |
 
-### 5.9 `task_registered` — engine
+### 5.10 `task_registered` — engine
 **Fuente:** task_id, criteria, scope, deps
 
 | Campo | Tipo | Oblig. | Notas |
@@ -209,7 +220,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `scope` | lista de globs | sí | — |
 | `depends_on` | lista de `task_id` | no | default vacío |
 
-### 5.10 `criteria_checked` — engine
+### 5.11 `criteria_checked` — engine
 **Fuente:** task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché
 
 | Campo | Tipo | Oblig. | Notas |
@@ -218,7 +229,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check |
 | `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara |
 
-### 5.11 `task_status_changed` — engine
+### 5.12 `task_status_changed` — engine
 **Fuente:** task_id, estado nuevo, evento que lo justifica
 
 | Campo | Tipo | Oblig. | Notas |
@@ -227,7 +238,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `new_status` | enum `pending \| ready \| running \| done \| blocked \| failed` [inferido, valores exactos a confirmar contra la implementación del scheduler] | sí | solo el engine emite este evento — ningún agente tiene vía para marcarlo |
 | `caused_by` | referencia a `seq` de otro evento | sí | el evento (p. ej. `criteria_checked`) que justifica la transición |
 
-### 5.12 `scope_checked` — engine
+### 5.13 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
 
 | Campo | Tipo | Oblig. | Notas |
@@ -236,7 +247,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `diff` | lista de paths | sí | de `git diff` contra el scope declarado |
 | `violations` | lista de paths | sí (vacía si limpio) | paths fuera de todo glob declarado |
 
-### 5.13 `scope_expansion_requested` — engine
+### 5.14 `scope_expansion_requested` — engine
 **Fuente:** task_id, paths, razón, criterio propuesto y su pre-check
 
 | Campo | Tipo | Oblig. | Notas |
@@ -247,7 +258,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `proposed_criterion` | `Option<{cmd}>` | no | si el agente propone además un criterio nuevo |
 | `proposed_criterion_precheck` [inferido] | `Option<{exit_code}>` | solo si hay `proposed_criterion` | un criterio que ya pasa se rechaza automático sin consultar |
 
-### 5.14 `scope_expansion_granted` / `scope_expansion_denied` — engine
+### 5.15 `scope_expansion_granted` / `scope_expansion_denied` — engine
 **Fuente:** task_id, decisor (regla o persona), modo, conteo del run
 
 | Campo | Tipo | Oblig. | Notas |
@@ -258,7 +269,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
 | `denial_reason` | `Option<string>` | solo en `denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
 
-### 5.15 `node_finished` / `node_failed` — engine
+### 5.16 `node_finished` / `node_failed` — engine
 **Fuente:** resultado, tokens, ¿reintentable?
 
 | Campo | Tipo | Oblig. | Notas |
@@ -278,7 +289,7 @@ texto que ve una persona se produce al leer el evento, nunca al escribirlo (D133
 Un payload que lleva `outcome:` solo se lee como la falla de una frase, sin
 migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este campo.
 
-### 5.16 `hook_executed` — engine
+### 5.17 `hook_executed` — engine
 **Fuente:** node_id, fase before/after, comando, exit code
 
 | Campo | Tipo | Oblig. | Notas |
@@ -287,7 +298,7 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | `command` | string | sí | — |
 | `exit_code` | `i32` | sí | — |
 
-### 5.17 `node_rerouted` — engine
+### 5.18 `node_rerouted` — engine
 **Fuente:** nodo fallido, destino, causa, reintento N de M
 
 | Campo | Tipo | Oblig. | Notas |
@@ -298,7 +309,7 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
 | `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
 
-### 5.18 `gate_waiting` / `gate_resolved` — engine/adapter
+### 5.19 `gate_waiting` / `gate_resolved` — engine/adapter
 **Fuente:** opciones, elección, quién, feedback
 
 | Campo | Tipo | Oblig. | Notas |
@@ -310,7 +321,7 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `free_text` | `Option<string>` | no | siempre disponible como canal |
 
-### 5.19 `questions_answered` — engine
+### 5.20 `questions_answered` — engine
 **Fuente:** node_id, hash del artifact de respuestas, canal (tty\|mcp\|pr), respondiente si se conoce
 
 | Campo | Tipo | Oblig. | Notas |
@@ -319,7 +330,7 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | `channel` | enum `tty \| mcp` | sí | — |
 | `responder` | `Option<string>` | no | si el canal lo identifica |
 
-### 5.20 `loop_iteration` — engine
+### 5.21 `loop_iteration` — engine
 **Fuente:** iteración N, evaluación de `until`
 
 | Campo | Tipo | Oblig. | Notas |
@@ -327,7 +338,7 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | `iteration` | `u32` | sí | — |
 | `until_result` | `bool` | sí | resultado de evaluar la condición del loop — la evalúa el engine, no el agente |
 
-### 5.21 `finding_posted` — engine
+### 5.22 `finding_posted` — engine
 **Fuente:** autor (nodo o engine), hallazgo: id, severidad, título, location, detalle
 
 El engine también es autor: cada degradación que sufre —un `git` de
@@ -345,7 +356,7 @@ deje el log en silencio.
 | `finding.detail` | string | sí | — |
 | `finding.proposed_criterion` | `Option<{cmd}>` | no | — |
 
-### 5.22 `promotion_signaled` — engine
+### 5.23 `promotion_signaled` — engine
 **Fuente:** razón, evidencia, modo sugerido
 
 | Campo | Tipo | Oblig. | Notas |
@@ -354,7 +365,7 @@ deje el log en silencio.
 | `evidence` | estructura del engine | sí | — |
 | `suggested_mode` | string | sí | debe respetar la escalera de promoción |
 
-### 5.23 `child_run_created` / `child_run_finished` — engine
+### 5.24 `child_run_created` / `child_run_finished` — engine
 **Fuente:** node_id, child run_id, `workflow_hash` del hijo, estado terminal
 
 | Campo | Tipo | Oblig. | Notas |
@@ -364,7 +375,7 @@ deje el log en silencio.
 | `terminal_state` | estado | solo en `child_run_finished` | — |
 | `tokens` | `TokenUsage` | solo en `child_run_finished` | el gasto total derivado del hijo a su cierre — el Usage de los hijos agrega hacia arriba: el replay del padre lo suma exactamente una vez por miembro de cadena; el `node_finished` del nodo `workflow` deliberadamente no lleva tokens del hijo (doble conteo) |
 
-### 5.24 `capability_degraded` — engine
+### 5.25 `capability_degraded` — engine
 **Fuente:** capacidad, adapter, política aplicada
 
 | Campo | Tipo | Oblig. | Notas |
@@ -373,7 +384,7 @@ deje el log en silencio.
 | `adapter` | string (`id()` del adapter) | sí | — |
 | `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir— el texto que dice que la sesión corre sin run tools y por qué |
 
-### 5.25 `run_paused` / `run_resumed` / `run_finished` — engine
+### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas
 
 | Campo | Tipo | Oblig. | Notas |
