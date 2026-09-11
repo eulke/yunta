@@ -6,11 +6,8 @@
 //! its manifest is frozen, and its tree is ready — so a stop reported
 //! here reads the same whichever command reached it.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use yunta_adapters::Adapter;
 use yunta_core::{AdapterId, Clock, Manifest, RunId};
 use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
@@ -20,7 +17,7 @@ use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::render::Glyphs;
 use crate::surface::{
-    Closing, ClosingEnv, Curtain, Delivery, Outline, Surface, SurfaceEnv, TerminalEnv,
+    Closing, ClosingEnv, Curtain, Delivery, Diagnostics, Outline, Surface, SurfaceEnv, TerminalEnv,
 };
 
 /// A run's identity and the paths it lives at — what the executing path,
@@ -46,7 +43,7 @@ pub(crate) struct Driving<'a> {
     pub(crate) storage: &'a AsyncStorage,
     pub(crate) manifest: &'a Manifest,
     pub(crate) prepared: &'a Prepared,
-    pub(crate) adapters: HashMap<AdapterId, Arc<dyn Adapter>>,
+    pub(crate) adapters: super::Adapters,
     /// `--adapter <id>`: every runner resolves to its candidate on this
     /// adapter, and the log records each candidate passed over.
     pub(crate) adapter_override: Option<AdapterId>,
@@ -77,15 +74,19 @@ impl Presentation {
 
 /// Everything this invocation holds while the run is being drawn: the
 /// surface the progress goes on, the observer the engine feeds it
-/// through, and the console the run puts its questions to.
+/// through, the console the run puts its questions to, and the token a
+/// person stops it with.
 ///
 /// One object because they are one arrangement over one terminal — the
-/// prompt takes its turn with the surface through the curtain, and a
-/// run with no surface has neither.
+/// prompt takes its turn with the surface through the curtain, the
+/// interrupt says so above the region through the surface's own door,
+/// and a run with no surface has none of it.
 struct Watching {
     surface: Option<Surface>,
     observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
     asking: crate::human_interaction::ConsoleInteraction,
+    /// Ctrl-C, bridged to the run's root cancellation.
+    cancel: tokio_util::sync::CancellationToken,
 }
 
 /// Executes the run under a live surface, chases any promotion to its
@@ -94,9 +95,9 @@ struct Watching {
 pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.quiet);
     let forge = super::real_forge(&env.manifest.config);
-    let root_cancel = super::cancel_on_ctrl_c();
     let ambient = crate::project::process_env();
-    let watching = watch(&env, &shown, &root_cancel).await?;
+    let watching = watch(&env, &shown).await?;
+    let root_cancel = watching.cancel.clone();
     let report = match yunta_engine::execute_run(RunEnv {
         run_id: &env.prepared.run_id,
         manifest: env.manifest,
@@ -133,16 +134,16 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     .await
 }
 
-/// What this invocation draws on and asks on.
+/// What this invocation draws on, asks on, and is stopped through.
 ///
 /// `--json` gets no surface at all: the document is the whole story, so
 /// the engine carries no observer, and a prompt has no region to take a
 /// turn with.
-async fn watch(
-    env: &Driving<'_>,
-    shown: &Presentation,
-    cancel: &tokio_util::sync::CancellationToken,
-) -> Result<Watching, CliError> {
+///
+/// The order is the arrangement's own: the cancellation bridge is armed
+/// once there is a surface for it to say so through, because the line
+/// it raises belongs above the region rather than around it.
+async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliError> {
     let surface = if env.json {
         None
     } else {
@@ -159,6 +160,11 @@ async fn watch(
             .await?,
         )
     };
+    let cancel = super::cancel_on_ctrl_c(
+        surface
+            .as_ref()
+            .map_or_else(Diagnostics::none, Surface::diagnostics),
+    );
     Ok(Watching {
         observer: surface.as_ref().and_then(Surface::observer),
         asking: crate::human_interaction::ConsoleInteraction::new(
@@ -167,6 +173,7 @@ async fn watch(
                 .map_or_else(Curtain::none, Surface::curtain),
             cancel.clone(),
         ),
+        cancel,
         surface,
     })
 }

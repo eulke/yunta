@@ -23,7 +23,7 @@ use yunta_storage::Storage;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::{
-    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay,
+    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay, INDENT,
     LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
 };
 
@@ -235,7 +235,7 @@ fn currency_line(
         / pricing.len() as f64;
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
-        "  ~{estimate:.2} (avg of {} priced model(s), never authoritative)",
+        "{INDENT}~{estimate:.2} (avg of {} priced model(s), never authoritative)",
         pricing.len()
     ))
 }
@@ -316,7 +316,7 @@ fn render_runners(stats: &RunStats, glyphs: Glyphs) {
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
         println!(
-            "  {} {}  {total:>8} tok",
+            "{INDENT}{} {}  {total:>8} tok",
             truncate(runner.as_str(), LABEL_WIDTH, glyphs),
             bar(total, max_runner_tokens, glyphs),
         );
@@ -330,7 +330,7 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
         .map(format_pct)
         .unwrap_or_else(|| " n/a".to_string());
     format!(
-        "  {} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
+        "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
         glyphs.state(display.word),
         truncate(display.word.short(), STATE_WIDTH, glyphs),
         truncate(node.node_id.as_str(), LABEL_WIDTH, glyphs),
@@ -348,7 +348,7 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary], glyphs: 
     println!("\nmodes:");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         println!(
-            "  {} {:>3} run(s)   median CPTV {}   median tokens {}",
+            "{INDENT}{} {:>3} run(s)   median CPTV {}   median tokens {}",
             truncate(mode.as_str(), LABEL_WIDTH, glyphs),
             runs,
             median_cptv
@@ -379,7 +379,6 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary], glyphs: 
 /// that note, so a workflow with hundreds of runs narrows its window
 /// instead of wrapping the line and breaking the block it sits in.
 fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
-    const INDENT: &str = "  ";
     let latest = history
         .last()
         .and_then(|r| r.cptv)
@@ -408,35 +407,35 @@ pub(crate) fn render_verification_findings(
     out.push_str("verification performance — advisory, nothing here is acted on automatically:\n");
     for c in &findings.never_red_criteria {
         out.push_str(&format!(
-            "  criterion `{}` was never red in pre-check across {} run(s) — \
+            "{INDENT}criterion `{}` was never red in pre-check across {} run(s) — \
              either redundant, or mis-written (both readings shown, never just one)\n",
             c.cmd, c.sample_count
         ));
     }
     for r in &findings.never_triggered_reroutes {
         out.push_str(&format!(
-            "  node `{}`'s re-route to `{}` never fired across {} run(s) — \
+            "{INDENT}node `{}`'s re-route to `{}` never fired across {} run(s) — \
              the prior flow is more reliable than expected\n",
             r.node, r.goto, r.sample_count
         ));
     }
     for g in &findings.always_approved_gates {
         out.push_str(&format!(
-            "  gate `{}` was approved without adjustment across {} resolution(s) — \
+            "{INDENT}gate `{}` was approved without adjustment across {} resolution(s) — \
              still adding value, or become ritual?\n",
             g.node, g.sample_count
         ));
     }
     if let Some(t) = &findings.always_first_try_tasks {
         out.push_str(&format!(
-            "  every task passed on its first try across {} task instance(s) — \
+            "{INDENT}every task passed on its first try across {} task instance(s) — \
              the plan may be cutting too fine\n",
             t.sample_count
         ));
     }
     for m in &findings.unused_modes {
         out.push_str(&format!(
-            "  mode `{}` was never chosen across {} run(s) — \
+            "{INDENT}mode `{}` was never chosen across {} run(s) — \
              still worth declaring?\n",
             m.name, m.runs_observed
         ));

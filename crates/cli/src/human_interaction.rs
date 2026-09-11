@@ -61,19 +61,10 @@ impl ConsoleInteraction {
         P: FnOnce(&Console) -> Answered<T> + Send + 'static,
     {
         let console = Console::open()?;
-        // A second handle on the same terminal, for the one ending the
-        // prompt itself cannot reach.
-        let opened = console.clone();
         self.curtain.lower().await;
         let _turn = Turn(&self.curtain);
         let reading = tokio::task::spawn_blocking(move || prompt(&console));
-        match self.read(reading).await {
-            Some(read) => settled(read),
-            None => {
-                opened.restore();
-                None
-            }
-        }
+        self.read(reading).await.and_then(settled)
     }
 
     /// What `reading` answered, or `None` once the run is cancelled out
@@ -85,6 +76,13 @@ impl ConsoleInteraction {
     /// one nobody is going to press now that the run is stopping. So
     /// the engine gets its answer, unwinds the run and kills the tree,
     /// and `main` leaves without waiting on the read.
+    ///
+    /// What that read took from the terminal is not put back here. The
+    /// thread is still running, and it turns raw mode back on between
+    /// its own reads, so the last word on what the terminal is left in
+    /// belongs to the process: `main` hands it back through
+    /// [`crate::ask::restore_terminal`] once nothing is left to take it
+    /// again.
     async fn read<T>(&self, reading: JoinHandle<Answered<T>>) -> Option<Answered<T>> {
         tokio::select! {
             read = reading => Some(read.unwrap_or_else(|failed| Err(NoAnswer::Failed(failed.to_string())))),

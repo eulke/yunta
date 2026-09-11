@@ -492,7 +492,16 @@ nodes:
     )
     .unwrap_err();
     assert!(matches!(err, ReceiptError::NotFinished(_)));
-    assert!(err.to_string().contains("yunta status"));
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "run `{}` hasn't reached a terminal state yet — a receipt is only generated \
+             once a run finishes",
+            bench.run_id
+        ),
+        "the engine names the run's state; which command shows where it stands is the \
+         caller's vocabulary"
+    );
 }
 
 /// A receipt that had to read prose could only reprint it. Counting is

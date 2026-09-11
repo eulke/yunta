@@ -230,7 +230,10 @@ pub(super) async fn gate_exhausted(
         ctx.emit(
             None,
             EventPayload::PromotionSignaled(PromotionSignaledPayload {
-                reason: format!("node `{node}` exhausted its re-routes to `{goto}`: {cause}"),
+                reason: yunta_core::text::detailed(
+                    format!("node `{node}` exhausted its re-routes to `{goto}`"),
+                    &cause,
+                ),
                 evidence: cause,
                 suggested_mode: next_mode.clone(),
             }),
@@ -277,13 +280,9 @@ pub(super) async fn gate_exhausted(
         }))
     } else {
         // The menu offers nothing beyond retry, promote and abort.
-        let reason = format!(
-            "node `{node}`'s gate was resolved to abort{}",
-            choice
-                .free_text
-                .as_deref()
-                .map(|text| format!(": {text}"))
-                .unwrap_or_default()
+        let reason = yunta_core::text::detailed(
+            format!("node `{node}`'s gate was resolved to abort"),
+            choice.free_text.as_deref().unwrap_or_default(),
         );
         Ok(Some(pause(ctx, reason).await?))
     }

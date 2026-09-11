@@ -323,9 +323,12 @@ pub(crate) fn pre_seeded_resolution(
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
+    /// The sentence names the state the run is in and stops there:
+    /// which command shows a reader where that run stands is the
+    /// caller's own vocabulary, not the engine's.
     #[error(
-        "this run isn't parked at a pause — a live process may still be driving it (or it \
-         already finished); check `yunta status` and try again once it's paused"
+        "this run isn't parked at a pause — a live process may still be driving it, or it \
+         already finished"
     )]
     NotPaused,
     #[error(

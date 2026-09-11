@@ -13,10 +13,11 @@ use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{run_frame, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
-use super::feed::{Beat, Standby, Standing};
+use super::feed::Beat;
 use super::fold::Folded;
 use super::lines::Lines;
 use super::region::Region;
+use super::turns::{Standby, Standing};
 use super::SurfaceEnv;
 
 /// How often the surface redraws on its own. The durations it shows are
@@ -63,6 +64,10 @@ pub(super) struct Painter {
     standing: Standing,
     /// How many settled events have gone out as lines.
     written: usize,
+    /// The diagnostics raised while the terminal was somebody else's,
+    /// in the order they were raised. A line a person is owed is not a
+    /// repaint: it waits rather than being dropped.
+    held: Vec<String>,
 }
 
 impl Painter {
@@ -80,6 +85,7 @@ impl Painter {
             stale_gap: false,
             standing: Standing::Drawing,
             written: 0,
+            held: Vec::new(),
         };
         painter.fold(seed);
         painter
@@ -121,6 +127,36 @@ impl Painter {
             }
         }
         *written = folded.settled().len();
+    }
+
+    /// Takes one diagnostic the run raised while it is being drawn.
+    ///
+    /// It goes above the region, never around it: a line printed around
+    /// the region lands inside the rows it is redrawing and the next
+    /// redraw erases the copy it left there.
+    fn note(&mut self, line: String) {
+        self.held.push(line);
+        self.write_held();
+    }
+
+    /// Writes every diagnostic still owed, in the order it was raised.
+    ///
+    /// Nothing goes out while the painter is stood down, for the reason
+    /// no line does: the terminal belongs to the prompt a person is
+    /// reading. What is owed is held rather than dropped, because a
+    /// diagnostic is written in one place only and a person who never
+    /// reads it never learns what happened.
+    fn write_held(&mut self) {
+        if self.standing == Standing::StoodDown {
+            return;
+        }
+        let Self { draw, held, .. } = self;
+        for line in held.drain(..) {
+            match draw {
+                Draw::Live(region) => region.note(&line),
+                Draw::Lines(lines) => lines.note(&line),
+            }
+        }
     }
 
     /// Takes one pass of events: the run's own are folded, and an event
@@ -230,6 +266,10 @@ impl Painter {
                 }
             }
             Standing::Drawing => {
+                // The diagnostics first: each one says what happened to
+                // the run, and the lines under it are what happened
+                // because of it.
+                self.write_held();
                 self.write_settled();
                 self.redraw();
             }
@@ -239,14 +279,16 @@ impl Painter {
     /// Writes what the surface still owes and takes the region down, so
     /// what follows lands on a terminal with nothing pinned to it.
     ///
-    /// The lines held for a prompt go out here even where nothing told
-    /// the surface to come back. A prompt is over by the time the
+    /// What was held for a prompt — the diagnostics raised under it and
+    /// the lines its events earned — goes out here even where nothing
+    /// told the surface to come back. A prompt is over by the time the
     /// invocation closes its surface — the engine has its answer, or
     /// has stopped waiting for one — so the terminal is the surface's
-    /// again, and an event whose line is still owed is an event missing
-    /// from the only place it is written.
+    /// again, and a line still owed is a line missing from the only
+    /// place it is written.
     fn finish(mut self) {
         self.standing = Standing::Drawing;
+        self.write_held();
         self.write_settled();
         if let Draw::Live(region) = self.draw {
             region.close();
@@ -261,6 +303,12 @@ impl Painter {
         for beat in beats {
             match beat {
                 Beat::Event(event) => events.push(*event),
+                // Folded first, so a diagnostic lands under the events
+                // that preceded it on the queue rather than over them.
+                Beat::Note(line) => {
+                    self.absorb(std::mem::take(&mut events)).await;
+                    self.note(line);
+                }
                 Beat::Close => closing = true,
             }
         }

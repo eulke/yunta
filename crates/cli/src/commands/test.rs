@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
-use yunta_adapters::{Adapter, MockAdapter, MOCK_ID};
-use yunta_core::{AdapterId, Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
+use yunta_adapters::{MockAdapter, MOCK_ID};
+use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -359,8 +359,8 @@ pub(crate) fn load_mock_fixture(
 pub(crate) fn mock_adapters(
     config: &yunta_core::ConfigLayer,
     mock: Arc<MockAdapter>,
-) -> HashMap<AdapterId, Arc<dyn Adapter>> {
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+) -> super::Adapters {
+    let mut adapters = super::Adapters::new();
     adapters.insert(MOCK_ID.clone(), mock.clone());
     if let Some(runners) = &config.runners {
         for candidate in runners.values().flatten() {

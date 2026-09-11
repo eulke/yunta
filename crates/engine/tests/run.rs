@@ -239,7 +239,7 @@ sessions:
         RunTerminal::Paused { reason } => {
             assert_eq!(
                 reason,
-                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1"
             );
         }
         other => panic!("expected Paused, got {other:?}"),
@@ -261,7 +261,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 3: "),
+        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 3"),
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(

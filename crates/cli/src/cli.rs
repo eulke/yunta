@@ -47,7 +47,7 @@ enum Command {
         /// Runs every session with this adapter instead of `runners:`'s
         /// own resolution: each role resolves to its candidate on it, and
         /// the log records every candidate passed over. `mock` needs
-        /// `--fixture`.
+        /// `--fixture` and runs attached, never with `--detach`.
         #[arg(long)]
         adapter: Option<AdapterId>,
         /// With `--adapter mock`: the fixture that scripts every session,

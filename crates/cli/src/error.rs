@@ -63,6 +63,9 @@ pub enum CliError {
     Manifest(#[from] yunta_engine::ManifestError),
 
     #[error(transparent)]
+    DetachedResume(#[from] crate::commands::DetachedResumeError),
+
+    #[error(transparent)]
     ResolveGate(#[from] yunta_engine::ResolveGateError),
 
     #[error(transparent)]

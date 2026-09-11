@@ -31,7 +31,7 @@ use yunta_core::CommitSha;
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
-    #[error("git {args} in `{cwd}` failed: {detail}")]
+    #[error("{}", crate::git::failed(.args, .cwd, .detail))]
     Git {
         args: String,
         cwd: PathBuf,

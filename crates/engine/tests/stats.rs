@@ -471,7 +471,26 @@ fn a_cap_below_the_historical_p90_produces_the_warning() {
         .expect("cap 250 < p90 300 must warn");
     assert_eq!(
         warning,
-        "warning: `limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 run(s)) — the run may pause on its budget"
+        "`limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 run(s)) — the run may pause on its budget"
+    );
+}
+
+/// The engine states what it found; the surface showing it decides how a
+/// caution is marked. A sentence that carried its own marking would reach
+/// a CLI that adds one as `warning: warning: ...`.
+#[test]
+fn the_warning_sentence_carries_no_surface_s_own_marking() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = prior_estimation(&history);
+    let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
+        .expect("cap 250 < p90 300 must warn");
+    assert!(
+        !warning.to_lowercase().contains("warning"),
+        "the sentence states the fact and stops there: {warning}"
     );
 }
 

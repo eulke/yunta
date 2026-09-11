@@ -21,6 +21,7 @@ use yunta_storage::Storage;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
+use crate::render::INDENT;
 
 pub use runs::list_runs;
 
@@ -109,7 +110,7 @@ pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Stora
             };
             let description = spec.description().unwrap_or("");
             out.push_str(&format!(
-                "  --input {input_name}=... ({}, {optionality}){}\n",
+                "{INDENT}--input {input_name}=... ({}, {optionality}){}\n",
                 input_type_label(spec),
                 if description.is_empty() {
                     String::new()
@@ -123,7 +124,7 @@ pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Stora
                 super::stats::collect_history(&project.runs_root, storage, &workflow.name);
             if let Some(estimation) = yunta_engine::prior_estimation(&history) {
                 out.push_str(&format!(
-                    "  {}\n",
+                    "{INDENT}{}\n",
                     super::stats::format_estimation_line(&estimation)
                 ));
             }

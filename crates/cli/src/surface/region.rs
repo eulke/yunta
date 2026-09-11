@@ -9,21 +9,22 @@
 //!
 //! **Nothing writes past the region except through it.** A line printed
 //! around it lands inside the rows it is redrawing and leaves a torn
-//! copy behind, so graduating work goes out under
-//! [`MultiProgress::suspend`], which takes the region down, writes, and
-//! puts it back.
+//! copy behind, so everything that goes above it — the work that
+//! graduates, and every diagnostic the run raises while it is drawn —
+//! goes through the [`Scrollback`], which takes the region down, writes,
+//! and puts it back.
 
-use std::collections::HashSet;
 use std::io::Write;
 
 use indicatif::style::TemplateError;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
 
-use yunta_core::{NodeId, RunId};
+use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
 use crate::render::{truncate, Glyphs, LINE_WIDTH};
 
+use super::scrollback::Scrollback;
 use super::{view, Screen};
 
 /// The region's rows carry text and nothing else: no bar, no percentage,
@@ -46,14 +47,12 @@ pub(super) struct Region {
     /// Always the last row.
     counters: ProgressBar,
     glyphs: Glyphs,
-    /// Nodes already sent up into the scrollback, so each one graduates
-    /// exactly once however many times the region redraws after it.
-    graduated: HashSet<NodeId>,
     /// The style every row is drawn with, parsed once so adding a row
     /// later cannot fail.
     style: ProgressStyle,
-    /// The terminal's own history above the region.
-    scrollback: Box<dyn Write + Send>,
+    /// The terminal's own history above the region, and the one door
+    /// onto it.
+    above: Scrollback,
 }
 
 impl Region {
@@ -72,6 +71,7 @@ impl Region {
         let multi = MultiProgress::with_draw_target(screen.target());
         let demand = multi.add(row(&style));
         let counters = multi.add(row(&style));
+        let above = Scrollback::over(&multi, scrollback);
         Ok(Self {
             multi,
             screen,
@@ -79,9 +79,8 @@ impl Region {
             body: Vec::new(),
             counters,
             glyphs,
-            graduated: HashSet::new(),
             style,
-            scrollback,
+            above,
         })
     }
 
@@ -96,7 +95,7 @@ impl Region {
             .set_message(self.fit(&view::demand_line(frame, run_id, answerable)));
         let rows: Vec<String> = view::working(frame)
             .into_iter()
-            .flat_map(|node| view::node_rows(node, self.glyphs))
+            .flat_map(|node| view::node_rows(frame, node, self.glyphs))
             .map(|row| self.fit(&row))
             .collect();
         self.resize(rows.len());
@@ -111,10 +110,22 @@ impl Region {
         self.graduate(frame);
     }
 
+    /// Writes one diagnostic into the terminal's history above the
+    /// region.
+    ///
+    /// Whole, where the region's own rows are cut: a row of the region
+    /// is cut because a wrapped one costs it the row count it redraws
+    /// by, and this is not one of its rows. It is a sentence in the
+    /// scrollback, which a terminal may lay out over as many rows as it
+    /// takes without anything redrawing over it.
+    pub(super) fn note(&mut self, line: &str) {
+        self.above.write(&[line.to_string()]);
+    }
+
     /// Forgets which nodes have graduated — what a promotion successor
     /// needs, since it is a run of its own whose node ids are its own.
     pub(super) fn restart(&mut self) {
-        self.graduated.clear();
+        self.above.restart();
     }
 
     /// Takes the region off the terminal, leaving everything above it
@@ -143,32 +154,17 @@ impl Region {
     }
 
     /// Sends every node that stopped working since the last redraw up
-    /// into the scrollback, in the workflow's own declaration order.
+    /// into the history above, in the workflow's own declaration order.
     fn graduate(&mut self, frame: &RunFrame) {
-        let leaving: Vec<&NodeId> = view::settled_nodes(frame)
-            .into_iter()
-            .filter(|id| !self.graduated.contains(*id))
-            .collect();
-        if leaving.is_empty() {
-            return;
-        }
+        let leaving = self.above.leaving(view::settled_nodes(frame));
         let lines: Vec<String> = frame
             .nodes
             .iter()
-            .filter(|node| leaving.contains(&&node.id))
-            .map(|node| self.fit(&view::graduation(node, self.glyphs)))
+            .filter(|node| leaving.contains(&node.id))
+            .flat_map(|node| view::graduation(frame, node, self.glyphs))
+            .map(|line| self.fit(&line))
             .collect();
-        for id in leaving {
-            self.graduated.insert(id.clone());
-        }
-        let Region {
-            multi, scrollback, ..
-        } = self;
-        multi.suspend(|| {
-            for line in lines {
-                super::write_line(scrollback, &line);
-            }
-        });
+        self.above.write(&lines);
     }
 
     /// Grows or shrinks the body to `rows` rows, keeping the demand line
@@ -216,17 +212,16 @@ fn row(style: &ProgressStyle) -> ProgressBar {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use yunta_core::events::TokenUsage;
+    use yunta_core::NodeId;
     use yunta_engine::{Counter, NodeStanding, NodeState, RunPhase, WaitingOn};
-    use yunta_testkit::Captured;
+    use yunta_testkit::{child_link, node_frame, run_frame, Captured};
 
     use crate::surface::Watched;
 
     use super::*;
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+    const CHILD: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P6");
 
     /// A region drawn into a buffer: no terminal to stand up, and every
     /// draw landing before the next assertion.
@@ -239,58 +234,31 @@ mod tests {
         .expect("the region's row template parses")
     }
 
-    fn node(id: &'static str, state: NodeStanding) -> yunta_engine::NodeFrame {
-        yunta_engine::NodeFrame {
-            id: NodeId::from_static(id),
-            kind: "bash",
-            group: None,
-            state,
-            runner: None,
-            attempt: Some(1),
-            elapsed: Some(Duration::from_secs(12)),
-            last_event_age: Some(Duration::from_secs(3)),
-            tokens: TokenUsage::default(),
-            artifacts: Vec::new(),
-            running_tasks: Vec::new(),
-            sessions: Vec::new(),
-            activity: Vec::new(),
-            reroute: None,
-        }
-    }
-
     fn running(id: &'static str) -> yunta_engine::NodeFrame {
-        node(id, NodeStanding::Reached(NodeState::Running { attempt: 1 }))
-    }
-
-    fn finished(id: &'static str) -> yunta_engine::NodeFrame {
-        node(
-            id,
-            NodeStanding::Reached(NodeState::Finished {
-                outcome: "exit 0".to_string(),
-                tokens: TokenUsage::default(),
-            }),
+        node_frame(
+            &NodeId::from_static(id),
+            NodeStanding::Reached(NodeState::Running { attempt: 1 }),
         )
     }
 
+    /// A run of `nodes` in `phase`, counted as the region counts them.
     fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
         RunFrame {
-            run_id: RUN.clone(),
-            workflow: "paced".to_string(),
-            mode: yunta_core::ModeName::default(),
             phase,
-            elapsed: Some(Duration::from_secs(30)),
             flow: Counter {
                 total: nodes.len(),
                 ..Counter::default()
             },
-            tasks: None,
-            reroutes: 0,
-            tokens: TokenUsage::default(),
-            prior: None,
             nodes,
-            children: Vec::new(),
-            degraded: Vec::new(),
-            unknown_kinds: Vec::new(),
+            ..run_frame(&RUN)
+        }
+    }
+
+    /// The run of `nodes`, with a child run still open under `bore`.
+    fn composing(bore: &'static str, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
+        RunFrame {
+            children: vec![child_link(&CHILD, Some(&NodeId::from_static(bore)), None)],
+            ..frame(RunPhase::Running, nodes)
         }
     }
 
@@ -347,42 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn a_node_that_stops_working_leaves_the_region_and_lands_above_it() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        region.show(
-            &frame(RunPhase::Running, vec![running("plan")]),
-            &RUN,
-            false,
-        );
-        assert!(term.shown().contains("plan"), "{}", term.shown());
-        assert_eq!(scrollback.text(), "", "nothing has stopped working yet");
-
-        region.show(
-            &frame(RunPhase::Running, vec![finished("plan"), running("build")]),
-            &RUN,
-            false,
-        );
-        assert!(
-            !term.shown().contains("plan"),
-            "the finished node left the region: {}",
-            term.shown()
-        );
-        assert!(
-            term.shown().contains("build"),
-            "the working node is still in it: {}",
-            term.shown()
-        );
-        assert!(
-            scrollback.text().contains("plan — finished — exit 0"),
-            "it landed above the region: {:?}",
-            scrollback.text()
-        );
-    }
-
-    #[test]
     fn a_closed_region_leaves_nothing_of_itself_on_the_terminal() {
         let term = Watched::sized(16, 80);
         let scrollback = Captured::default();
@@ -405,27 +337,6 @@ mod tests {
             term.written(),
             drawn,
             "and nothing of the region reaches that terminal after it is taken down"
-        );
-    }
-
-    #[test]
-    fn a_node_graduates_once_however_often_the_region_redraws_after_it() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        for _ in 0..3 {
-            region.show(
-                &frame(RunPhase::Running, vec![finished("plan")]),
-                &RUN,
-                false,
-            );
-        }
-        assert_eq!(
-            scrollback.text().matches("plan").count(),
-            1,
-            "{:?}",
-            scrollback.text()
         );
     }
 
@@ -474,6 +385,59 @@ mod tests {
                 term.shown().contains("needs you"),
                 "and the rows are still the run's: {}",
                 term.shown()
+            );
+        }
+    }
+
+    #[test]
+    fn a_child_run_is_drawn_under_the_node_that_bore_it_and_never_as_a_number() {
+        let term = Watched::sized(16, 80);
+        let scrollback = Captured::default();
+        let mut region = region(&term, &scrollback);
+
+        region.show(&composing("compose", vec![running("compose")]), &RUN, false);
+        let drawn = rows(&term);
+        let node = drawn
+            .iter()
+            .position(|row| row.contains("compose"))
+            .expect("the node that bore the child is on the terminal");
+        let child = drawn
+            .get(node + 1)
+            .map(String::as_str)
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            child.starts_with("    ") && child.contains(&format!("child run {CHILD}")),
+            "the child sits under the node that bore it: {drawn:?}"
+        );
+        assert!(
+            child.contains("still open"),
+            "and says only what the parent's log says of it: {child}"
+        );
+        assert!(
+            !child.contains('%'),
+            "children are a tree, never a figure averaged over them: {child}"
+        );
+    }
+
+    #[test]
+    fn a_child_row_cut_to_a_narrow_terminal_still_says_where_the_child_stands() {
+        const NARROW: u16 = 40;
+        let term = Watched::sized(16, NARROW);
+        let scrollback = Captured::default();
+        let mut region = region(&term, &scrollback);
+
+        region.show(&composing("compose", vec![running("compose")]), &RUN, false);
+        let drawn = rows(&term);
+        assert!(
+            drawn.iter().any(|row| row.contains("still open")),
+            "a row cut at the terminal's edge loses which child and never that there is \
+             one: {drawn:?}"
+        );
+        for row in &drawn {
+            assert!(
+                crate::render::cell_width(row) <= usize::from(NARROW),
+                "{row:?}"
             );
         }
     }

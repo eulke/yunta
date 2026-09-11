@@ -31,9 +31,13 @@ pub enum ReceiptError {
     /// A receipt certifies *closed* work — a run still
     /// `running`/`waiting`/`paused` has no
     /// `run_finished` metrics (CPTV, final token total) to report yet.
+    ///
+    /// The sentence names the state the run is in and stops there:
+    /// which command shows a reader where that run stands is the
+    /// caller's own vocabulary, not the engine's.
     #[error(
-        "run `{0}` hasn't reached a terminal state yet — `yunta status {0}` shows where it is; \
-         a receipt is only generated once a run finishes"
+        "run `{0}` hasn't reached a terminal state yet — a receipt is only generated \
+         once a run finishes"
     )]
     NotFinished(RunId),
 }

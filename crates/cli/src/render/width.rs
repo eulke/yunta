@@ -19,6 +19,22 @@ pub(crate) const LINE_WIDTH: usize = 80;
 /// and the numbers beside it have taken their share.
 pub(crate) const LABEL_WIDTH: usize = 12;
 
+/// One step of indent: how far a block's body sits from the line that
+/// introduced it.
+///
+/// One value for every surface, because the blocks nest — the trailer a
+/// stopped run leaves behind hangs a decision inside a block that is
+/// already one step in — and two steps of different widths turn a
+/// nesting into a ragged left edge. Two spaces, so a block four levels
+/// deep still leaves [`LINE_WIDTH`] most of its room for words.
+pub(crate) const INDENT: &str = "  ";
+
+/// `depth` steps of [`INDENT`], for a caller that places a line at a
+/// known depth rather than under the line above it.
+pub(crate) fn indent(depth: usize) -> String {
+    INDENT.repeat(depth)
+}
+
 /// How many display cells `text` occupies.
 ///
 /// Cells, not characters: a CJK ideograph and most emoji take two, a

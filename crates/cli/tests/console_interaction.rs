@@ -135,6 +135,29 @@ fn gated(root: &Path) -> Terminal {
     yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
 }
 
+/// A run that stops on an unresolved internal gate: the question its
+/// author wrote is the escalation's summary, and who the gate is
+/// assigned to — which that question never says — is the evidence the
+/// engine attaches under it.
+fn approving(root: &Path) -> Terminal {
+    let repo = root.join("repo");
+    let home = home(root);
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: approving\nnodes:\n  - id: ship\n    kind: gate\n    assignee: the release \
+         lead\n    message: \"Ship what is on the branch?\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "approving"]);
+    yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
+}
+
 #[test]
 fn a_console_prompt_does_not_stall_the_run_tools_listener() {
     let root = tempfile::tempdir().unwrap();
@@ -239,7 +262,7 @@ fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further(
 }
 
 #[test]
-fn an_escalation_shows_its_evidence_above_the_options_it_offers() {
+fn an_escalation_says_what_happened_above_the_options_it_offers() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for(
@@ -247,13 +270,70 @@ fn an_escalation_shows_its_evidence_above_the_options_it_offers() {
         "the gate never put its options, or what they cost, on the console",
     );
     let drawn = terminal.drawn();
-    let evidence = drawn
-        .find("evidence, attached by the engine")
-        .expect("the engine's own evidence is what the summary is audited against");
+    let happened = drawn
+        .find("re-route(s) to `fix` are exhausted")
+        .expect("a decision opens with the account of what raised it");
     let options = drawn.find("tradeoff:").unwrap_or_default();
     assert!(
-        evidence < options,
-        "the evidence is read before the options, not after them:\n{drawn}"
+        happened < options,
+        "what happened is read before what to do about it, not after it:\n{drawn}"
+    );
+}
+
+#[test]
+fn an_escalation_whose_summary_already_quotes_its_record_is_not_shown_it_twice() {
+    let root = tempfile::tempdir().unwrap();
+    let terminal = gated(root.path());
+    terminal.wait_for(
+        "tradeoff:",
+        "the gate never put its options, or what they cost, on the console",
+    );
+    let drawn = terminal.drawn();
+
+    // An exhausted re-route is built out of its own record: the engine
+    // quotes the failure into the summary and attaches that same
+    // failure. A heading promising the record behind the claim, over a
+    // second copy of the claim, sends a person waiting at a prompt
+    // hunting for a difference that is not there.
+    assert!(
+        drawn.contains("exit 1"),
+        "the account of what raised the decision never reached the console:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("evidence, attached by the engine"),
+        "the prompt headed a second copy of the summary as the record behind it:\n{drawn}"
+    );
+}
+
+#[test]
+fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
+    let root = tempfile::tempdir().unwrap();
+    let terminal = approving(root.path());
+    terminal.wait_for(
+        "tradeoff:",
+        "the gate never put its options, or what they cost, on the console",
+    );
+    let drawn = terminal.drawn();
+
+    // The summary is an account of what happened and the evidence is
+    // the engine's own record of it. A menu offered without the record
+    // asks for a decision on a claim nobody checked, so the record is
+    // read first — and this gate's record says what its summary never
+    // does, which is who is being asked.
+    let heading = drawn
+        .find("evidence, attached by the engine")
+        .unwrap_or_else(|| panic!("the prompt drew no evidence at all:\n{drawn}"));
+    let attached = drawn
+        .find("assignee: the release lead")
+        .unwrap_or_else(|| panic!("the evidence was headed and left empty:\n{drawn}"));
+    let options = drawn.find("tradeoff:").unwrap_or_default();
+    assert!(
+        heading < attached,
+        "the heading promised the engine's record and nothing under it is one:\n{drawn}"
+    );
+    assert!(
+        attached < options,
+        "the record a decision is audited against is read after the menu it audits:\n{drawn}"
     );
 }
 
@@ -463,6 +543,39 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
     assert!(
         terminal.cursor_is_back(),
         "the cursor is put back as often as it is taken away:\n{drawn}"
+    );
+}
+
+#[test]
+fn a_prompt_abandoned_mid_read_leaves_the_terminal_reading_and_echoing_again() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = gated(root.path());
+    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    // The read turns the line discipline off for as long as it reads,
+    // and this is the moment it has: waiting on it is what makes the
+    // interrupt below land on a prompt that holds the terminal.
+    wait_until(
+        || !terminal.line_discipline_is_back(),
+        || {
+            format!(
+                "the prompt never took the terminal's line discipline\ndrawn so far:\n{}",
+                terminal.drawn()
+            )
+        },
+    );
+
+    terminal.interrupt();
+
+    // The read is abandoned where it stands: the thread that would put
+    // the line discipline back is still waiting on a key nobody is
+    // going to press, so the process does it on its way out. Left as
+    // the read left it, the shell this run returns to echoes nothing a
+    // person types into it.
+    let drawn = terminal.ended();
+    assert!(
+        terminal.line_discipline_is_back(),
+        "the abandoned prompt left the terminal with its echo and line editing \
+         off:\n{drawn}"
     );
 }
 

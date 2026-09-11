@@ -164,9 +164,10 @@ pub(super) async fn integrate_batch(
             // (resolved by the caller, or the pause diagnostic) — its interim
             // Blocked never feeds the generic tail.
             if !needs_human_decision {
-                state
-                    .blocked_reasons
-                    .push(format!("task `{}` blocked: {reason}", task.id));
+                state.blocked_reasons.push(yunta_core::text::detailed(
+                    format!("task `{}` blocked", task.id),
+                    &reason,
+                ));
             }
         }
         if needs_human_decision {
@@ -324,7 +325,7 @@ async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
             "commit",
             "-q",
             "-m",
-            &format!("task {}: {}", task.id, task.title),
+            &yunta_core::text::detailed(format!("task {}", task.id), &task.title),
         ],
     )
     .await

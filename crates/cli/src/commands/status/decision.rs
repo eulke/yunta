@@ -11,10 +11,11 @@
 //! **One block, two layouts.** `yunta status` opens on the decision and
 //! has a page for it; the block a run leaves on the terminal opens on
 //! the outcome and carries the decision as a trailer under it. What the
-//! block *contains* — the summary, the evidence the engine attached,
-//! every option with the tradeoff that makes it a choice, the command
-//! that answers it — is decided once, here; [`Layout`] decides only how
-//! much room each of those parts gets and what heading sits over it.
+//! block *contains* — the summary, the engine's own evidence where it
+//! says more than that summary, every option with the tradeoff that
+//! makes it a choice, the command that answers it — is decided once,
+//! here; [`Layout`] decides only how much room each of those parts gets
+//! and what heading sits over it.
 //!
 //! **Two pauses reconstruct a menu, and only two**: a node whose
 //! re-routes are exhausted, and an unresolved internal gate. A budget
@@ -29,10 +30,9 @@ use yunta_core::events::{GateOption, GateWaitingPayload};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{cell_width, wrap, LINE_WIDTH};
-
-/// How far the body of the block sits from the left margin.
-const INDENT: &str = "  ";
+use crate::render::{
+    cell_width, evidence, indent, option_headline, option_tradeoff, wrap, INDENT, LINE_WIDTH,
+};
 
 /// Which shape of the block to draw.
 ///
@@ -53,9 +53,9 @@ pub(crate) enum Layout {
 }
 
 /// The block a surface prints for a run parked on a decision: the
-/// escalation as the engine built it — summary, mechanical evidence,
-/// every option with its mandatory tradeoff — and the command that
-/// answers it.
+/// escalation as the engine built it — summary, the engine's own
+/// evidence where it adds to that summary, every option with its
+/// mandatory tradeoff — and the command that answers it.
 ///
 /// The command carries the run's own id and leaves the option as
 /// `<option>`, because an example option gets pasted: the reader picks
@@ -69,8 +69,8 @@ pub(crate) fn block(
 ) -> String {
     let mut out = layout.heading(node);
     out.push_str(&layout.lead(&escalation.summary));
-    if !escalation.evidence.is_empty() {
-        out.push_str(&layout.field("evidence", &escalation.evidence));
+    if let Some(attached) = evidence(escalation) {
+        out.push_str(&layout.field("evidence", attached));
     }
     if let Some(external_ref) = &escalation.external_ref {
         out.push_str(&layout.field("published at", external_ref));
@@ -111,7 +111,7 @@ impl Layout {
     fn field(self, label: &str, text: &str) -> String {
         match self {
             Layout::Page => format!("{}{}", self.section(label), paragraph(text, 2)),
-            Layout::Trailer => verbatim(2, &format!("{label}: {}", one_line(text))),
+            Layout::Trailer => verbatim(2, &yunta_core::text::detailed(label, &one_line(text))),
         }
     }
 
@@ -129,8 +129,8 @@ impl Layout {
     /// tradeoff under it. The tradeoff is never dropped — it is what
     /// makes the choice a decision rather than a guess.
     fn option(self, option: &GateOption) -> String {
-        let headline = format!("{} — {}", option.id, option.label);
-        let tradeoff = format!("tradeoff: {}", option.tradeoff);
+        let headline = option_headline(option);
+        let tradeoff = option_tradeoff(option);
         match self {
             Layout::Page => format!("{}{}", paragraph(&headline, 2), paragraph(&tradeoff, 3)),
             Layout::Trailer => format!(
@@ -177,7 +177,7 @@ pub(crate) fn without_menu(run_id: &RunId, reason: &str) -> String {
 /// One line as it stands, `depth` steps in: what a command gets, since
 /// a command broken across lines is a command that does not run.
 fn verbatim(depth: usize, text: &str) -> String {
-    format!("{}{text}\n", INDENT.repeat(depth))
+    format!("{}{text}\n", indent(depth))
 }
 
 /// `text` as whole lines `depth` steps in, each one inside the width a
@@ -187,12 +187,12 @@ fn verbatim(depth: usize, text: &str) -> String {
 /// fields an escalation may leave empty, and an indent on a line of its
 /// own is trailing whitespace a reader never asked for.
 fn paragraph(text: &str, depth: usize) -> String {
-    let indent = INDENT.repeat(depth);
-    let room = LINE_WIDTH.saturating_sub(cell_width(&indent));
+    let margin = indent(depth);
+    let room = LINE_WIDTH.saturating_sub(cell_width(&margin));
     wrap(text, room)
         .into_iter()
         .filter(|line| !line.is_empty())
-        .map(|line| format!("{indent}{line}\n"))
+        .map(|line| format!("{margin}{line}\n"))
         .collect()
 }
 
@@ -255,8 +255,26 @@ mod tests {
         }
     }
 
+    /// An unresolved internal gate, the other pause a menu is rebuilt
+    /// for: it asks with the author's own message, and the evidence
+    /// under it — who the gate is assigned to — appears nowhere in that
+    /// message.
+    fn gate() -> GateWaitingPayload {
+        GateWaitingPayload {
+            summary: "Approve the plan?".to_string(),
+            evidence: "assignee: lead".to_string(),
+            options: vec![GateOption {
+                id: yunta_core::OptionId::from_static("approve"),
+                label: "approve".to_string(),
+                tradeoff: "resolves this gate; the flow continues".to_string(),
+            }],
+            external_ref: None,
+        }
+    }
+
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");
+    const GATE: NodeId = NodeId::from_static("approve");
 
     /// How many two-space steps a line is indented by — the shape of a
     /// block, read without pinning the prose that fills it.
@@ -272,6 +290,8 @@ mod tests {
         // open. A part that wrapped, or a heading over one, would read
         // as a second page under a block that already said its outcome.
         let mut escalation = escalation();
+        // A summary that says nothing about the exit code, so the
+        // evidence under it is a part of its own.
         escalation.summary = "a sentence longer than the width a terminal is taken to \
                               have, so a layout that wrapped it would draw more lines \
                               than there are parts"
@@ -291,13 +311,40 @@ mod tests {
             page.starts_with("decision needed on node `lint`:\n"),
             "{page}"
         );
-        for heading in ["  evidence:", "  options:", "  answer it with:"] {
+        for heading in ["  options:", "  answer it with:"] {
             assert!(page.lines().any(|line| line == heading), "{page}");
         }
         assert!(
             !page.contains("close this terminal"),
             "a page nobody is waiting in front of carries no aside: {page}"
         );
+    }
+
+    #[test]
+    fn a_page_hangs_evidence_under_its_own_heading_when_it_says_more_than_the_summary() {
+        let page = block(Layout::Page, &RUN, &GATE, &gate());
+        assert!(page.lines().any(|line| line == "  evidence:"), "{page}");
+        assert!(page.contains("assignee: lead"), "{page}");
+    }
+
+    #[test]
+    fn evidence_the_summary_already_carries_is_not_printed_a_second_time() {
+        // An exhausted re-route's summary is built out of the very cause
+        // the engine attaches as its evidence. A heading promising the
+        // record behind the claim, over that same string, sends a reader
+        // looking for a difference that is not there.
+        for layout in [Layout::Page, Layout::Trailer] {
+            let drawn = block(layout, &RUN, &NODE, &escalation());
+            assert_eq!(
+                drawn.matches("exit 1").count(),
+                1,
+                "the cause is said once, in the summary: {drawn}"
+            );
+            assert!(
+                !drawn.contains("evidence"),
+                "no heading over what was already said: {drawn}"
+            );
+        }
     }
 
     #[test]

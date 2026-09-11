@@ -280,6 +280,23 @@ pub struct RunEnv<'a> {
     pub observer: Option<Arc<dyn RunObserver>>,
 }
 
+/// The tail of what a child process wrote to stderr, as the diagnostic
+/// of a node that failed quotes it.
+///
+/// Bounded, because a diagnostic is read by a person and a run that
+/// fails on a thousand-line stack trace would otherwise carry all of it
+/// onto the log, into every surface that quotes the log, and into the
+/// receipt. The last lines are the ones that say why, so those are the
+/// ones kept, in the order the process wrote them.
+fn stderr_tail(bytes: &[u8]) -> String {
+    /// How many lines of stderr a failure quotes.
+    const LINES: usize = 20;
+    let text = String::from_utf8_lossy(bytes);
+    let mut tail: Vec<&str> = text.lines().rev().take(LINES).collect();
+    tail.reverse();
+    tail.join("\n")
+}
+
 /// Drives a run until it finishes or pauses. Serving `yunta run` and
 /// `yunta resume` with the same function is the point: the log decides
 /// what remains, never in-process state.

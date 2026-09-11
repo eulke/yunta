@@ -154,19 +154,16 @@ pub(super) async fn execute_executor(
         )
         .await
     } else {
-        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let stderr_tail = super::stderr_tail(&stderr_bytes);
         fail(
             ctx,
             node,
-            format!("executor `{executor}` exited {exit_code}: {stderr_tail}"),
+            // An executor that signals only through its exit code — a
+            // probe that writes nothing — is reported as that code alone.
+            yunta_core::text::detailed(
+                format!("executor `{executor}` exited {exit_code}"),
+                &stderr_tail,
+            ),
             false,
         )
         .await

@@ -40,6 +40,28 @@ pub fn indent(text: &str, prefix: &str) -> String {
         .join("\n")
 }
 
+/// A headline and the detail that explains it, joined by `": "`, and the
+/// headline alone when the detail says nothing.
+///
+/// A colon promises a reader that something follows it, so nothing
+/// promises it when a source of detail — a subprocess that wrote no
+/// stderr, a failure whose cause carries no message — came back empty.
+/// Surrounding whitespace is not detail either: `"  \n"` reads as
+/// nothing said.
+///
+/// ```
+/// # use yunta_core::text::detailed;
+/// assert_eq!(detailed("exit 1", "no such file"), "exit 1: no such file");
+/// assert_eq!(detailed("exit 1", ""), "exit 1");
+/// ```
+pub fn detailed(headline: impl fmt::Display, detail: &str) -> String {
+    let detail = detail.trim();
+    if detail.is_empty() {
+        return headline.to_string();
+    }
+    format!("{headline}: {detail}")
+}
+
 /// The block `spec-ledger.md` §4 fixes: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///
@@ -62,4 +84,35 @@ pub fn problems(heading: impl fmt::Display, items: &[impl fmt::Display]) -> Stri
         text.push_str(&format!("\n  {item}"));
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detailed;
+
+    #[test]
+    fn a_headline_with_detail_is_joined_by_a_colon() {
+        assert_eq!(
+            detailed("exit 1", "cannot open `x`"),
+            "exit 1: cannot open `x`"
+        );
+    }
+
+    #[test]
+    fn a_headline_whose_detail_is_empty_keeps_no_colon_promising_one() {
+        assert_eq!(detailed("exit 1", ""), "exit 1");
+    }
+
+    #[test]
+    fn whitespace_is_not_detail() {
+        assert_eq!(detailed("exit 1", "  \n\t "), "exit 1");
+    }
+
+    #[test]
+    fn detail_keeps_its_own_lines_and_loses_only_its_margins() {
+        assert_eq!(
+            detailed("exit 2", "\nfirst\nsecond\n"),
+            "exit 2: first\nsecond"
+        );
+    }
 }

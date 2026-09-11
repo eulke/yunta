@@ -12,7 +12,7 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, stderr, wait_until_async, write, yunta_in};
+use yunta_testkit::{git, init_repo, run_id_from, stderr, wait_until_async, write, yunta_in};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -737,4 +737,111 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
             "the sentence names {kind}, which does exist: {from_control_plane}"
         );
     }
+}
+
+/// A `run_id` that is not one is answered before any disk is read: the
+/// argument is parsed into the id it has to be, so a caller that
+/// mistypes learns the rule it broke rather than that no such run was
+/// found.
+#[tokio::test]
+async fn a_run_id_that_is_not_an_id_is_refused_by_the_rule_it_breaks() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    for tool in ["workflow_status", "resume_run", "resolve_gate"] {
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new(tool).with_arguments(
+                    json!({"run_id": "../etc", "option": "retry"})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+            )
+            .await
+            .unwrap();
+        let text = tool_text(&result);
+        assert!(
+            result.is_error.unwrap_or(false),
+            "`{tool}` must refuse `../etc`: {text}"
+        );
+        assert!(
+            text.contains("`../etc` is not a valid run id"),
+            "`{tool}` names the rule the value breaks: {text}"
+        );
+        assert!(
+            !text.contains("no run "),
+            "`{tool}` answers before looking on disk: {text}"
+        );
+    }
+
+    client.cancel().await.ok();
+}
+
+/// A run whose directory a person has pruned cannot be handed to a
+/// detached `yunta resume`: the tool says so with the command that was
+/// never started, so the caller can run it by hand.
+#[tokio::test]
+async fn a_hand_off_that_cannot_be_spawned_names_the_resume_it_never_started() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: quick\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "workflow"]);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "run: {}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    // The detached child writes its log into the run's own `scratch/`,
+    // so a run directory missing it is a hand-off that cannot start.
+    std::fs::remove_dir_all(home.join("runs").join(&run_id).join("scratch")).unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("resume_run")
+                .with_arguments(json!({"run_id": run_id}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&result);
+    client.cancel().await.ok();
+
+    assert!(
+        result.is_error.unwrap_or(false),
+        "a hand-off that never started is a failure: {text}"
+    );
+    assert!(
+        text.starts_with(&format!(
+            "cannot spawn a detached `yunta resume {run_id}`: "
+        )),
+        "the failure names the command that was never started: {text}"
+    );
 }

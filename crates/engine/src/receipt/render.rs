@@ -119,9 +119,10 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         EventChainStatus::Intact { events } => out.push_str(&format!(
             "- ✓ event chain: {events} event(s), hash-linked, replayable\n"
         )),
-        EventChainStatus::Broken { seq, detail } => {
-            out.push_str(&format!("- ✗ event chain BROKEN at seq {seq}: {detail}\n"))
-        }
+        EventChainStatus::Broken { seq, detail } => out.push_str(&format!(
+            "{}\n",
+            yunta_core::text::detailed(format!("- ✗ event chain BROKEN at seq {seq}"), detail)
+        )),
     }
 
     if !receipt.criteria.entries.is_empty() {

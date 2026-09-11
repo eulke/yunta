@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use nix::pty::{openpty, Winsize};
 use nix::sys::signal::{kill, Signal};
-use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
+use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
 use crate::wait::{wait_for, wait_until};
@@ -161,6 +161,22 @@ impl Terminal {
     pub fn interrupt(&self) {
         kill(Pid::from_raw(self.child.id() as i32), Signal::SIGINT)
             .expect("the run is alive to be interrupted");
+    }
+
+    /// Whether this terminal still reads a line at a time and echoes
+    /// what is typed into it — the line discipline a shell hands a
+    /// program, and the one a program owes back.
+    ///
+    /// A prompt's key read turns both off for as long as it reads. A
+    /// run that leaves without putting them back hands the shell it
+    /// returns to a terminal that shows nothing a person types into it
+    /// and answers no Enter, and nothing that runs next puts either
+    /// back.
+    pub fn line_discipline_is_back(&self) -> bool {
+        tcgetattr(&self.keyboard)
+            .expect("the pty says what mode it is in")
+            .local_flags
+            .contains(LocalFlags::ECHO | LocalFlags::ICANON)
     }
 
     /// Whether the run put the terminal's cursor back as often as it

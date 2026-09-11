@@ -21,6 +21,7 @@ use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, S
 use yunta_core::{describe, events::EventPayload, Pid, RunId};
 use yunta_engine::NodeState;
 
+use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 
@@ -75,7 +76,8 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         return Err(CliError::msg(format!(
             "run `{run_id}` has a node in progress but no `engine.json` to signal \
              through — the engine that ran it predates this build, or its scratch directory \
-             is gone. `yunta resume {run_id}` recovers the run once its process has stopped."
+             is gone. `{}` recovers the run once its process has stopped.",
+            advice::resume(run_id)
         )));
     };
 
@@ -86,7 +88,11 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
             registry.engine_pid
         );
         signal_process(registry.engine_pid, Signal::SIGINT).map_err(|e| {
-            CliError::msg(format!("{} — retry `yunta cancel {run_id}`", describe(&e)))
+            CliError::msg(format!(
+                "{} — retry `{}`",
+                describe(&e),
+                advice::cancel(run_id)
+            ))
         })?;
 
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;

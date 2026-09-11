@@ -140,6 +140,37 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
 }
 
 #[test]
+fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
+    // Three levels deep: the heading, the node that failed, and each
+    // document that node named. The steps come from one value, so a
+    // reader follows the nesting by eye instead of measuring it — and a
+    // level that started spelling its own margin would show up here as a
+    // ladder with an uneven rung.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    let run_id = run_two_documents(&repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let mut lines = text.lines().skip_while(|line| *line != "failures:");
+    let heading = lines.next().expect("a failed run says what failed");
+    let node = lines.next().expect("the node that failed heads its detail");
+    let document = lines
+        .find(|line| line.trim_start().starts_with("artifacts/"))
+        .expect("a document the node did not close");
+
+    assert_eq!(indent_of(heading), 0, "{text}");
+    let step = indent_of(node);
+    assert!(step > 0, "the node hangs under the heading: {text}");
+    assert_eq!(
+        indent_of(document),
+        step * 2,
+        "one step per level, the same step every time: {text}"
+    );
+}
+
+#[test]
 fn status_json_carries_the_document_each_problem_belongs_to() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");

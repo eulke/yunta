@@ -241,6 +241,14 @@ fn required_str<'a>(
         .ok_or_else(|| format!("missing or non-string argument `{name}`"))
 }
 
+/// The `run_id` argument as the id it has to be, so a call naming
+/// something that is not one is answered before any disk is read.
+fn required_run_id(args: &serde_json::Map<String, Value>) -> Result<RunId, String> {
+    required_str(args, "run_id")?
+        .parse()
+        .map_err(|e: yunta_core::InvalidId| e.to_string())
+}
+
 async fn tool_list_workflows(cwd: &Path) -> Result<String, String> {
     // The same catalog `yunta list` renders, built in-process: shelling
     // out to a subprocess would print onto this server's own stdout — the
@@ -257,9 +265,7 @@ async fn tool_workflow_status(
     cwd: &Path,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
-    let run_id: RunId = required_str(args, "run_id")?
-        .parse()
-        .map_err(|e| format!("{e}"))?;
+    let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
     let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
     let events = storage
@@ -342,17 +348,17 @@ async fn tool_resume_run(
     cwd: &std::path::Path,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
-    let run_id = required_str(args, "run_id")?;
+    let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let run_dir = ctx.project.run_dir(run_id).ok_or_else(|| {
+    let run_dir = ctx.project.run_dir(run_id.as_str()).ok_or_else(|| {
         format!(
             "no run `{run_id}` under {}",
             ctx.project.runs_root.display()
         )
     })?;
-    super::spawn_detached_resume(&run_dir, run_id, cwd)
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
-        .map_err(|e| format!("cannot spawn a detached `yunta resume {run_id}`: {e}"))?;
+        .map_err(|source| super::DetachedResumeError::new(&run_id, source).to_string())?;
     Ok(format!(
         "run {run_id}: resumed, driving forward independently"
     ))
@@ -362,7 +368,7 @@ async fn tool_resolve_gate(
     cwd: &std::path::Path,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, String> {
-    let run_id = required_str(args, "run_id")?;
+    let run_id = required_run_id(args)?;
     let option = required_str(args, "option")?;
     let by = args
         .get("by")
@@ -373,10 +379,7 @@ async fn tool_resolve_gate(
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let run_id_typed = run_id
-        .parse::<yunta_core::RunId>()
-        .map_err(|e| e.to_string())?;
-    let run_dir = ctx.project.run_dir(run_id).ok_or_else(|| {
+    let run_dir = ctx.project.run_dir(run_id.as_str()).ok_or_else(|| {
         format!(
             "no run `{run_id}` under {}",
             ctx.project.runs_root.display()
@@ -390,7 +393,7 @@ async fn tool_resolve_gate(
     yunta_engine::resolve_gate(
         &manifest,
         &storage,
-        &run_id_typed,
+        &run_id,
         &yunta_core::SystemClock,
         yunta_core::events::HumanChoice {
             option: option
@@ -403,9 +406,14 @@ async fn tool_resolve_gate(
     .await
     .map_err(|e| e.to_string())?;
 
-    super::spawn_detached_resume(&run_dir, run_id, cwd)
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
-        .map_err(|e| format!("decision recorded, but cannot spawn a detached resume: {e}"))?;
+        .map_err(|source| {
+            format!(
+                "decision recorded, but {}",
+                super::DetachedResumeError::new(&run_id, source)
+            )
+        })?;
     Ok(format!(
         "run {run_id}: resolved `{option}`, driving forward independently"
     ))

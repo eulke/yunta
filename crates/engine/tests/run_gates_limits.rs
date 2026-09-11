@@ -102,6 +102,54 @@ async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
 }
 
 #[tokio::test]
+async fn a_gate_resolved_to_abort_with_blank_free_text_cites_the_decision_alone() {
+    // A surface that hands back an empty comment said nothing, and the
+    // pause reason reads as though no comment were offered at all.
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "abort".into(),
+        by: "eulke".into(),
+        free_text: Some("   ".to_string()),
+    });
+
+    let (terminal, _) = bench
+        .run_with_interaction(
+            HOPELESS_UNTIL_RETRIED_WORKFLOW,
+            HOPELESS_UNTIL_RETRIED_FIXTURE,
+            &interaction,
+        )
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert_eq!(reason, "node `lint`'s gate was resolved to abort");
+        }
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_internal_gate_aborted_with_blank_free_text_cites_the_gate_alone() {
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "abort".into(),
+        by: "lead".into(),
+        free_text: Some("\n".to_string()),
+    });
+
+    let (terminal, _) = bench
+        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert_eq!(reason, "gate `approve` was resolved to abort");
+        }
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before() {
     // Regression: `NoInteraction` (what every other test in this suite
     // already uses) must reproduce the same pause behavior byte for
@@ -119,7 +167,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
         RunTerminal::Paused { reason } => {
             assert_eq!(
                 reason,
-                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1"
             );
         }
         other => panic!("expected Paused, got {other:?}"),

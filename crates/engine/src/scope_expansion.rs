@@ -77,7 +77,7 @@ pub enum ScopeExpansionError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`git {command}` exited with status {status}: {stderr}")]
+    #[error("{}", crate::git::exited_with(.command, .status, .stderr))]
     GitFailed {
         command: String,
         status: i32,

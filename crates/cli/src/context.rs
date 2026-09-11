@@ -7,12 +7,9 @@
 //! command needs are opened from it on demand, since not every command
 //! touches the event log or the agents.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use yunta_adapters::Adapter;
-use yunta_core::{AdapterId, SystemClock, SystemIdSource};
+use yunta_core::{SystemClock, SystemIdSource};
 use yunta_storage::{AsyncStorage, Storage};
 
 use crate::error::CliError;
@@ -64,7 +61,7 @@ impl Context {
 
     /// The adapter registry this project's `runners:` names, each built
     /// with its own configured settings — the real agents a run can use.
-    pub fn adapters(&self) -> HashMap<AdapterId, Arc<dyn Adapter>> {
+    pub fn adapters(&self) -> crate::commands::Adapters {
         crate::commands::real_adapters(&self.project.config)
     }
 }

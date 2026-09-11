@@ -26,7 +26,7 @@ pub enum ManifestError {
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to resolve the base commit: git {args} in `{cwd}`: {detail}")]
+    #[error("failed to resolve the base commit: {}", crate::git::failed(.args, .cwd, .detail))]
     Git {
         args: String,
         cwd: PathBuf,

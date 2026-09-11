@@ -11,7 +11,7 @@ use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
-    #[error("git {args}: {detail}")]
+    #[error("{}", yunta_core::text::detailed(format!("git {args}"), .detail))]
     Git { args: String, detail: String },
     #[error("failed to read `{path}`: {source}")]
     Read {

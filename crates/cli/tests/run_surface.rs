@@ -2,13 +2,17 @@
 //! line `--quiet` leaves, the append-only lines a reader without a
 //! terminal gets, and the block that closes a run out.
 //!
-//! Every command here runs with both streams piped, which is the
+//! Most commands here run with both streams piped, which is the
 //! no-terminal case by construction — the same shape a CI log, a pipe
-//! and a screen reader see.
+//! and a screen reader see. The pinned region exists only where there
+//! is a terminal to pin it to, so what belongs to it is driven on a
+//! pty instead.
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, run_id_from, stderr, stdout, write, yunta_in};
+use yunta_testkit::{
+    git, init_repo, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal,
+};
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
 /// it under. `isolation: none` keeps every node's work in this checkout,
@@ -261,6 +265,121 @@ fn resume_json_is_the_document_run_json_prints() {
     assert_eq!(from_resume["schema_version"], from_run["schema_version"]);
     assert_eq!(from_resume["run_id"], from_run["run_id"]);
     assert_eq!(from_resume["outcome"], "finished");
+}
+
+/// A repo whose catalog holds the workflow `wf.yaml` composes, and the
+/// state root to run it under. The child's one node runs `child_runs`,
+/// which is what says how long the composition stays open. The child is
+/// a run of its own, with its own id and its own log, so the parent is
+/// left with the default isolation its children need.
+fn composing(root: &Path, child_runs: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(
+        &repo.join(".yunta/workflows/child.yaml"),
+        &format!("name: child\nnodes:\n  - {{ id: work, kind: bash, run: \"{child_runs}\" }}\n"),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: parent\nnodes:\n  - { id: compose, kind: workflow, use: child }\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "catalog"]);
+    (repo, root.join("state"))
+}
+
+#[test]
+fn the_live_region_shows_an_open_child_under_the_node_that_bore_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = composing(root.path(), "sleep 30");
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+
+    terminal.wait_for(
+        "child run ",
+        "the region never drew the run this one composed",
+    );
+    let drawn = terminal.drawn();
+    assert!(
+        drawn.contains("still open"),
+        "a child the parent's log has no close for is open and nothing more:\n{drawn}"
+    );
+    assert!(
+        drawn.contains("compose"),
+        "and it is read under the node that bore it:\n{drawn}"
+    );
+
+    terminal.interrupt();
+    let drawn = terminal.ended();
+    assert!(
+        !terminal.ran_to_the_end(),
+        "a run stopped by a person is not a success:\n{drawn}"
+    );
+}
+
+#[test]
+fn the_closing_block_shows_the_runs_this_one_composed_as_a_tree() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = composing(root.path(), "true");
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let text = stdout(&run);
+
+    // Under the node that bore it, as a tree — never averaged into a
+    // figure of the parent's own, which is what a percentage over
+    // heterogeneous children would be.
+    let children = text.find("children").expect("the composition block");
+    let under = text
+        .find("node `compose`")
+        .expect("every child is read under the node that bore it");
+    let child = text
+        .find("· child run ")
+        .expect("and named by the run id that is the only thing this log can name it by");
+    assert!(children < under && under < child, "{text}");
+    assert!(
+        text.contains("finished · child run"),
+        "carrying how the child closed, in the word its own run closed with: {text}"
+    );
+}
+
+/// A node that holds the run open with nothing to ask anybody: the
+/// region is on the terminal, and no prompt has taken it away.
+const HOLDING: &str = r#"
+name: holding
+nodes:
+  - id: hold
+    kind: bash
+    run: "sleep 30"
+"#;
+
+#[test]
+fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), HOLDING);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
+
+    terminal.interrupt();
+    terminal.wait_for(
+        "interrupt received",
+        "the person who stopped the run was never told it is stopping",
+    );
+
+    // Nothing writes past the region: a line printed around it lands
+    // inside the rows it is redrawing, and the next redraw erases the
+    // copy it left there — so the confirmation a person just asked for
+    // is on the terminal for under a second.
+    assert!(
+        terminal.cleared_before("nodes ", "interrupt received"),
+        "the note landed inside the rows the region was redrawing:\n{}",
+        terminal.drawn()
+    );
+    let drawn = terminal.ended();
+    assert!(
+        !terminal.ran_to_the_end(),
+        "a run stopped by a person is not a success:\n{drawn}"
+    );
 }
 
 /// A prompt node on the mock adapter, whose session reports the usage

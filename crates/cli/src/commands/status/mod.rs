@@ -24,7 +24,7 @@ use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
-use crate::render::NodeDisplay;
+use crate::render::{indent, NodeDisplay, INDENT};
 
 pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -66,7 +66,7 @@ fn print_derived(state: &yunta_engine::RunState) {
         let mut nodes: Vec<_> = state.nodes.iter().collect();
         nodes.sort_by(|a, b| a.0.cmp(b.0));
         for (id, node) in nodes {
-            println!("  {id}: {}", NodeDisplay::of(Some(node)).label());
+            println!("{INDENT}{id}: {}", NodeDisplay::of(Some(node)).label());
         }
     }
 
@@ -75,7 +75,7 @@ fn print_derived(state: &yunta_engine::RunState) {
         let mut tasks: Vec<_> = state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
         for (id, status) in tasks {
-            println!("  {id}: {}", task_status_label(status));
+            println!("{INDENT}{id}: {}", task_status_label(status));
         }
     }
 
@@ -135,19 +135,22 @@ fn print_failures(state: &yunta_engine::RunState) {
     }
     failed.sort_by(|a, b| a.0.cmp(b.0));
     println!("failures:");
+    // A document's problems hang under the node that named it, which is
+    // itself one step under the heading.
+    let detail = indent(2);
     for (id, failure) in failed {
-        println!("  {id}:");
+        println!("{INDENT}{id}:");
         match failure {
             Failure::Artifacts { artifacts } => {
                 for artifact in artifacts {
                     println!(
                         "{}",
-                        yunta_core::text::indent(&artifact.to_string(), "    ")
+                        yunta_core::text::indent(&artifact.to_string(), &detail)
                     );
                 }
             }
             Failure::Message { outcome } => {
-                println!("{}", yunta_core::text::indent(outcome, "    "));
+                println!("{}", yunta_core::text::indent(outcome, &detail));
             }
         }
     }

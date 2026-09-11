@@ -1,6 +1,8 @@
 //! How a run looks to a person at a terminal: the columns a line is
-//! built from, the bars and sparklines that carry a magnitude, the words
-//! a node's state is called by, and the characters it is all drawn with.
+//! built from, the step every block is indented by, the bars and
+//! sparklines that carry a magnitude, the words a node's state and a
+//! decision's options are called by, and the characters it is all drawn
+//! with.
 //!
 //! One module, because two surfaces that size the same column
 //! differently, or call the same state by two names, are read side by
@@ -16,13 +18,15 @@
 //! version of one.
 
 pub(crate) mod bars;
+pub(crate) mod escalation;
 pub(crate) mod glyphs;
 pub(crate) mod state;
 pub(crate) mod units;
 pub(crate) mod width;
 
 pub(crate) use bars::{bar, sparkline};
+pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
 pub(crate) use glyphs::Glyphs;
 pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
-pub(crate) use width::{cell_width, truncate, wrap, LABEL_WIDTH, LINE_WIDTH};
+pub(crate) use width::{cell_width, indent, truncate, wrap, INDENT, LABEL_WIDTH, LINE_WIDTH};

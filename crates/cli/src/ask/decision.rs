@@ -2,10 +2,11 @@
 //!
 //! One component for every escalation the engine raises, because they
 //! are one object: a summary of what happened, the evidence the engine
-//! attached to it, and options that each declare what choosing them
-//! trades off. A gate whose re-routes ran out, a promotion, a scope
-//! expansion put to a person, a budget or loop cap — they differ in
-//! what they say, never in how they are answered.
+//! attached to it where that evidence says more than the summary, and
+//! options that each declare what choosing them trades off. A gate
+//! whose re-routes ran out, a promotion, a scope expansion put to a
+//! person, a budget or loop cap — they differ in what they say, never
+//! in how they are answered.
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::OptionId;
@@ -13,6 +14,7 @@ use yunta_core::OptionId;
 use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER, PARKS};
+use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
 
 /// Free text is offered on every decision, whatever was on the menu:
 /// the menu is there to make the common answer quick, never to be the
@@ -42,15 +44,18 @@ pub(crate) fn decide(console: &Console, escalation: &GateWaitingPayload) -> Answ
 /// is audited against: the summary is an agent's account of what
 /// happened and the evidence is the engine's own record of it, so a
 /// menu offered without the evidence asks for a decision on a claim
-/// nobody checked.
+/// nobody checked. An escalation whose summary already quotes that
+/// record has nothing left to audit it against, and a heading over a
+/// second copy of one sentence costs more room at a prompt someone is
+/// waiting at than it gives them.
 fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Result<()> {
     console.say("")?;
     console.say("a decision is needed")?;
-    console.block(&escalation.summary, "  ")?;
-    if !escalation.evidence.trim().is_empty() {
+    console.block(&escalation.summary, INDENT)?;
+    if let Some(attached) = evidence(escalation) {
         console.say("")?;
         console.say("evidence, attached by the engine from the run's own log")?;
-        console.block(&escalation.evidence, "  ")?;
+        console.block(attached, INDENT)?;
     }
     console.say("")
 }
@@ -61,8 +66,8 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
         .options
         .iter()
         .map(|option| Choice {
-            head: format!("{} — {}", option.id, option.label),
-            detail: Some(format!("tradeoff: {}", option.tradeoff)),
+            head: option_headline(option),
+            detail: Some(option_tradeoff(option)),
             value: option.id.clone(),
         })
         .collect()

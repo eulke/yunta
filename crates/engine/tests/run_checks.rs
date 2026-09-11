@@ -317,6 +317,38 @@ nodes:
 }
 
 #[tokio::test]
+async fn an_executor_node_that_exits_non_zero_saying_nothing_is_named_by_its_code_alone() {
+    // A probe that signals only through its exit code is the ordinary
+    // case; the node's failure names the code and stops there, with no
+    // colon promising a reason the executor never gave.
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        r#"#!/bin/sh
+exit 3
+"#,
+    );
+
+    let workflow = r#"
+name: executor-silent-failure
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+"#;
+
+    let (terminal, _) = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert_eq!(reason, "node `probe` failed: executor `probe` exited 3");
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn an_executor_node_that_exceeds_its_timeout_fails_with_a_diagnostic() {
     let bench = Bench::new();
     write_executable_script(

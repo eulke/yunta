@@ -95,10 +95,14 @@ pub struct PriorEstimation {
 
 pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
 
-/// The informative — never blocking — line `yunta run`
-/// prints when the declared run budget sits below what history says this
-/// workflow typically needs. `None` without a cap to compare, or without
-/// enough history (the estimation's own ≥3-run floor).
+/// What a declared run budget sitting below what history says this
+/// workflow typically needs means for the run about to start —
+/// informative, never blocking. `None` without a cap to compare, or
+/// without enough history (the estimation's own ≥3-run floor).
+///
+/// The sentence states the fact and stops there: how a caution is marked
+/// on a surface is that surface's decision, so a CLI that prefixes its
+/// warnings prefixes this one exactly once.
 pub fn budget_p90_warning(
     cap: Option<u64>,
     estimation: Option<&PriorEstimation>,
@@ -107,7 +111,7 @@ pub fn budget_p90_warning(
     let estimation = estimation?;
     if (cap as f64) < estimation.tokens.p90 {
         Some(format!(
-            "warning: `limits.max_tokens_per_run` ({cap}) is below this workflow's \
+            "`limits.max_tokens_per_run` ({cap}) is below this workflow's \
              historical p90 ({:.0} tokens over {} run(s)) — the run may pause on its budget",
             estimation.tokens.p90, estimation.sample_count
         ))

@@ -11,6 +11,10 @@
 //! cancelled, broken, or carrying blocking findings never gets the mark a
 //! clean finish gets — a tick over work nobody has accepted is the one
 //! decoration that would say something the word does not.
+//!
+//! A run that composed others closes with them under it as a tree, each
+//! child under the node that bore it and never averaged into a figure of
+//! its own (`contrato-del-run.md` §8.5).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -22,12 +26,9 @@ use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 use crate::commands::status::decision::{self, Layout};
 use crate::commands::{advice, counted, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::{format_duration, truncate, Glyphs, StateWord, LABEL_WIDTH};
+use crate::render::{format_duration, indent, truncate, Glyphs, StateWord, INDENT, LABEL_WIDTH};
 
 use super::view;
-
-/// How far a block's body sits under the line that introduces it.
-const INDENT: &str = "  ";
 
 /// How many of the run's longest nodes the block names. Enough to point
 /// at where the time went, few enough that the row stays one row.
@@ -122,6 +123,34 @@ impl Closing {
                 "{INDENT}{} {value}\n",
                 truncate(label, LABEL_WIDTH, glyphs)
             ));
+        }
+        out.push_str(&self.children(glyphs));
+        out
+    }
+
+    /// The runs this one composed, as a tree: every child under the node
+    /// that bore it.
+    ///
+    /// A tree and never an average, because averaging heterogeneous
+    /// children is the lying percentage under another name
+    /// (`contrato-del-run.md` §8.5). It closes the block rather than
+    /// opening it: a child is a run of its own, with its own id to go
+    /// and read, and what this block is for is the run it closes.
+    /// Empty for a run that composed nothing, which is most of them.
+    fn children(&self, glyphs: Glyphs) -> String {
+        if self.frame.children.is_empty() {
+            return String::new();
+        }
+        let mut out = format!("{INDENT}children\n");
+        for (under, born) in view::children_by_node(&self.frame) {
+            out.push_str(&format!("{}{under}\n", indent(2)));
+            for child in born {
+                out.push_str(&format!(
+                    "{}{}\n",
+                    indent(3),
+                    view::child_row(child, glyphs)
+                ));
+            }
         }
         out
     }

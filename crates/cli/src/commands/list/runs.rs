@@ -20,7 +20,7 @@ use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
-use crate::render::{cell_width, format_duration, truncate, Glyphs, LINE_WIDTH};
+use crate::render::{cell_width, format_duration, indent, truncate, Glyphs, INDENT, LINE_WIDTH};
 
 /// The cells a run id gets. A ULID is 26 characters, and the id is what
 /// a reader copies into the next command, so this column pads a shorter
@@ -36,9 +36,6 @@ const NAME_WIDTH: usize = 24;
 /// compares as numbers: `9s` through `23h59m` (see
 /// [`crate::render::format_duration`]).
 const AGE_WIDTH: usize = 6;
-
-/// How far a run's summary sits under the line that identifies it.
-const SUMMARY_INDENT: &str = "    ";
 
 /// The part of a listing a run belongs in — the inbox's own grouping,
 /// derived from the run's phase so a heading can never disagree with the
@@ -160,7 +157,7 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: G
         unreadable.sort_by(|a, b| a.run_id.cmp(&b.run_id));
         push_heading(&mut out, "unreadable", unreadable.len());
         for run in &unreadable {
-            out.push_str(&format!("  {}: {}\n", run.run_id, run.problem));
+            out.push_str(&format!("{INDENT}{}: {}\n", run.run_id, run.problem));
         }
     }
     out
@@ -195,8 +192,12 @@ impl RunRow {
     /// the same summary `yunta status` prints, so the two surfaces say
     /// the same thing about the same run.
     fn render(&self, glyphs: Glyphs) -> String {
+        // The row hangs one step under the heading of its group, and
+        // its summary one step further under the row, so the summary
+        // reads as this run's line rather than the next run's.
+        let margin = indent(2);
         format!(
-            "  {:<ID_WIDTH$}  {}  {:>AGE_WIDTH$}\n{SUMMARY_INDENT}{}\n",
+            "{INDENT}{:<ID_WIDTH$}  {}  {:>AGE_WIDTH$}\n{margin}{}\n",
             self.run_id.as_str(),
             truncate(
                 &format!("{} ({})", self.workflow, self.mode),
@@ -206,7 +207,7 @@ impl RunRow {
             format_duration(self.age),
             truncate(
                 &self.summary,
-                LINE_WIDTH.saturating_sub(cell_width(SUMMARY_INDENT)),
+                LINE_WIDTH.saturating_sub(cell_width(&margin)),
                 glyphs
             )
             .trim_end(),

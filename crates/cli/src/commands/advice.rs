@@ -1,12 +1,14 @@
 //! What a surface says beside a run that has stopped: what the run is
 //! waiting on, and the commands a person runs to move it.
 //!
-//! Every one of them is printed, at some point, beside a stopped run: in
-//! the live region's demand line, in the block that closes a run out, in
-//! `yunta status`, and in the JSON a program reads. They are spelled
-//! once here so a reader who met a phrase on one surface meets the same
-//! phrase on the next, and so renaming a subcommand is a change to this
-//! file rather than a hunt through prose.
+//! Every one of them is printed, at some point, beside a run a person
+//! still has to act on: in the live region's demand line, in the block
+//! that closes a run out, in `yunta status`, in the JSON a program
+//! reads, and in the diagnostic a command hands back when it could not
+//! finish its own job. They are spelled once here so a reader who met a
+//! phrase on one surface meets the same phrase on the next, and so
+//! renaming a subcommand is a change to this file rather than a hunt
+//! through prose.
 //!
 //! Each command carries the run's own id and nothing else a reader would
 //! have to invent — a gate's option stays `<option>`, because an option
@@ -80,6 +82,11 @@ pub(crate) fn resolve_gate(run_id: &RunId) -> String {
 /// forge.
 pub(crate) fn resume(run_id: &RunId) -> String {
     format!("yunta resume {run_id}")
+}
+
+/// Stops a run and the whole process tree under it.
+pub(crate) fn cancel(run_id: &RunId) -> String {
+    format!("yunta cancel {run_id}")
 }
 
 /// Shows where a run stands, derived from its own log.

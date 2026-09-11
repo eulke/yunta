@@ -21,6 +21,8 @@ mod fold;
 mod lines;
 mod painter;
 mod region;
+mod scrollback;
+mod turns;
 mod view;
 
 use std::io::{IsTerminal, Write};
@@ -42,7 +44,8 @@ use painter::{Draw, Painter};
 use region::Region;
 
 pub(crate) use closing::{Closing, ClosingEnv, Outline};
-pub(crate) use feed::Curtain;
+pub(crate) use feed::Diagnostics;
+pub(crate) use turns::Curtain;
 
 /// Why the live region stood down, in the words the reader is given.
 /// Each one names a property of the environment this process was handed,
@@ -204,6 +207,18 @@ impl Surface {
         })
     }
 
+    /// Where a diagnostic raised while this run is drawn goes out.
+    ///
+    /// Above the region rather than around it, and held while a prompt
+    /// has the terminal — the same turn-taking every other line on this
+    /// stream observes. A run drawing nothing hands back a door onto
+    /// stderr, so the caller has one path either way.
+    pub(crate) fn diagnostics(&self) -> Diagnostics {
+        self.feed
+            .as_ref()
+            .map_or_else(Diagnostics::none, Diagnostics::through)
+    }
+
     /// What a prompt on this run's terminal takes its turn with.
     ///
     /// Both surfaces answer it — the region comes off the screen, and
@@ -225,6 +240,9 @@ impl Surface {
     /// with nothing pinned to it.
     pub(crate) async fn close(self) {
         if let Some(feed) = &self.feed {
+            // Whether the painter took it is nothing to act on here: one
+            // that has already stopped takes nothing, and that is the
+            // state this instruction is asking for.
             feed.tell(Beat::Close).await;
         }
         if let Some(painter) = self.painter {

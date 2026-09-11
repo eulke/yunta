@@ -18,9 +18,10 @@
 
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dialoguer::console::{Key, Term};
+use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios};
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::{Pid, Responder};
 
@@ -43,6 +44,43 @@ pub(crate) const PARKS: &str = "esc parks the run";
 /// person reads a round as answers under the things that asked for
 /// them.
 pub(crate) const ANSWER: &str = "> ";
+
+/// The console the last prompt opened on this process's terminal, or
+/// `None` in a process where no prompt opened one.
+///
+/// A key read turns the line discipline off for as long as it reads and
+/// puts it back between reads, so the thread left behind by a read
+/// nobody is coming to finish takes it again a moment after anyone else
+/// hands it over. Nothing runs after that thread except the process
+/// leaving, which is why what a prompt took is kept here and handed
+/// back by [`restore_terminal`] rather than by whoever stopped waiting
+/// on the prompt.
+///
+/// One console, not a list: prompts open one at a time, each one ends
+/// before the next opens, and the terminal the last of them left is the
+/// terminal this process leaves behind.
+static PROMPTED_ON: Mutex<Option<Console>> = Mutex::new(None);
+
+/// Hands the terminal back as this process leaves: the line discipline
+/// a key read turned off, and the cursor a list hid.
+///
+/// A process that prompted nobody has nothing to hand back and touches
+/// nothing — a command with no question to ask never opens a console,
+/// so the terminal it was handed is the terminal it leaves. Handing
+/// back happens once: what is taken here is gone, so a second call is
+/// no second put-back.
+pub(crate) fn restore_terminal() {
+    if let Some(console) = prompted_on().take() {
+        console.restore();
+    }
+}
+
+/// The keeper, readable through a lock a panicking prompt cannot take
+/// away: a terminal left in raw mode is worse than a terminal handed
+/// back from behind a poisoned lock.
+fn prompted_on() -> MutexGuard<'static, Option<Console>> {
+    PROMPTED_ON.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// A prompt that produced no answer, and why.
 ///
@@ -84,14 +122,19 @@ pub(crate) type Answered<T> = Result<T, NoAnswer>;
 /// lines drawn on stderr, leaving stdout to whatever the caller pipes.
 ///
 /// Cloning duplicates the handle, never the terminal. What that is for
-/// is [`Console::restore`]: the caller keeps a handle of its own, so
+/// is [`restore_terminal`]: the process keeps a handle of its own, so
 /// what a prompt took from the terminal is put back even where the
 /// prompt is left mid-read.
 #[derive(Clone)]
 pub(crate) struct Console {
     term: Term,
+    /// The line discipline the terminal was handed over in — what every
+    /// key read turns off for as long as it reads, and what
+    /// [`Console::restore`] means by putting it back. `None` where the
+    /// terminal would not say what mode it is in.
+    mode: Option<Termios>,
     /// Whether a prompt on this terminal has the cursor hidden. Two
-    /// paths put it back — the prompt as it ends, and the caller where
+    /// paths put it back — the prompt as it ends, and the process where
     /// the prompt cannot — and this is what keeps them from both doing
     /// it, so what the terminal is handed back is one put-back for one
     /// taking-away.
@@ -125,10 +168,13 @@ impl Console {
             );
             return None;
         }
-        Some(Self {
+        let console = Self {
             term,
+            mode: handed_mode(),
             hidden: Arc::new(AtomicBool::new(false)),
-        })
+        };
+        *prompted_on() = Some(console.clone());
+        Some(console)
     }
 
     /// One line, drawn as it is.
@@ -196,20 +242,41 @@ impl Console {
     }
 
     /// Puts back what a prompt takes from this terminal while it is
-    /// open: the cursor a list hides for as long as it is drawing.
+    /// open: the line discipline every key read turns off, and the
+    /// cursor a list hides for as long as it is drawing.
     ///
     /// A prompt does this for itself as it ends, whichever way it ends.
-    /// The caller does it for the one ending a prompt cannot reach — a
-    /// read abandoned mid-key, where the thread that would have put the
-    /// cursor back is still waiting on a key nobody is going to press.
-    /// Leaving it hidden hands the shell this run returns to a terminal
-    /// with no cursor in it, which nothing that runs next puts back.
+    /// The process does it for the one ending a prompt cannot reach — a
+    /// read abandoned mid-key, where the thread that would have put
+    /// them back is still waiting on a key nobody is going to press.
+    /// Left as that read left it, the shell this run returns to echoes
+    /// nothing a person types into it, shows no cursor to type at, and
+    /// answers no Enter, and nothing that runs next puts any of it
+    /// back. The process and not whoever stopped waiting on the prompt,
+    /// because that thread turns raw mode back on between its own
+    /// reads: anything that hands the terminal over while it still runs
+    /// is handing over a terminal it takes again.
     ///
-    /// Whichever of the two arrives first does it, and only that one: a
-    /// person stopping a prompt sets both off at once, and a terminal
-    /// told twice to show a cursor it is already showing is a terminal
-    /// nobody can read a run's drawing off.
+    /// The two are put back on different terms because they are taken
+    /// on different terms. Setting the terminal to the mode it was
+    /// handed is what "as it was found" means, and a terminal already
+    /// in that mode is unchanged by being told so, which is why both
+    /// paths may do it. Showing the cursor is a sequence written to the
+    /// terminal, and a second one is a second cursor as far as anything
+    /// reading that terminal can tell: whichever of the two paths
+    /// arrives first does that, and only that one.
     pub(crate) fn restore(&self) {
+        if let Some(mode) = &self.mode {
+            // Now rather than once the output drains: the read this is
+            // putting the terminal back for is one nobody is coming to
+            // finish.
+            if let Err(e) = tcsetattr(std::io::stdin(), SetArg::TCSANOW, mode) {
+                warn(format!(
+                    "could not put this terminal back to reading a line at a time: {e} — \
+                     run `stty sane` to type into your shell again"
+                ));
+            }
+        }
         if !self.hidden.swap(false, Ordering::AcqRel) {
             return;
         }
@@ -231,6 +298,26 @@ impl Console {
     }
 }
 
+/// The line discipline stdin is in as this console opens — what a key
+/// read turns off and what [`Console::restore`] puts back.
+///
+/// A terminal that will not say what mode it is in is one whose mode
+/// cannot be put back either, so the reader is told once, here, rather
+/// than left to find it out in the shell this run returns to.
+fn handed_mode() -> Option<Termios> {
+    match tcgetattr(std::io::stdin()) {
+        Ok(mode) => Some(mode),
+        Err(e) => {
+            warn(format!(
+                "this terminal does not say what mode it is in ({e}) — a prompt this run \
+                 leaves mid-read leaves it as the read left it; run `stty sane` to type \
+                 into your shell again"
+            ));
+            None
+        }
+    }
+}
+
 /// Names the identity the answer is about to be recorded under, and
 /// returns it.
 ///
@@ -244,4 +331,37 @@ fn attributed(console: &Console) -> std::io::Result<Responder> {
         "attributed to `{responder}` — unsigned, nothing here authenticates who typed"
     ))?;
     Ok(responder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A handle on this process's stderr with no line discipline to put
+    /// back: what these tests read is which console the process hands
+    /// back, never what handing one back does to a terminal.
+    fn console() -> Console {
+        Console {
+            term: Term::stderr(),
+            mode: None,
+            hidden: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn the_console_a_prompt_opened_is_handed_back_by_the_process_exactly_once() {
+        let console = console();
+        console.hiding();
+        *prompted_on() = Some(console.clone());
+
+        restore_terminal();
+        assert!(
+            !console.hidden.load(Ordering::Acquire),
+            "the cursor a prompt hid is put back as the process leaves"
+        );
+        assert!(
+            prompted_on().is_none(),
+            "what was handed back is gone, so nothing hands it back a second time"
+        );
+    }
 }

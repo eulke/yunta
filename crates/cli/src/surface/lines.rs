@@ -13,11 +13,12 @@
 use std::io::Write;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{EventPayload, GateResolvedPayload, StoredEvent, TerminalState};
+use yunta_core::events::{EventPayload, GateResolvedPayload, StoredEvent};
+use yunta_core::text::{detailed, one_line};
 
 use crate::render::format_duration;
 
-use super::write_line;
+use super::{view, write_line};
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
@@ -39,6 +40,15 @@ impl Lines {
         Self { out, opened: None }
     }
 
+    /// Writes one diagnostic the run raised, as its own line.
+    ///
+    /// No elapsed time in front of it: the column an event's line opens
+    /// with is that event's position in the run, and a diagnostic is
+    /// not an event on the log.
+    pub(super) fn note(&mut self, line: &str) {
+        write_line(&mut self.out, line);
+    }
+
     /// Writes `event`'s line.
     pub(super) fn event(&mut self, event: &StoredEvent) {
         let opened = *self.opened.get_or_insert(event.timestamp);
@@ -48,10 +58,20 @@ impl Lines {
             line.push_str(&format!(" on `{node}`"));
         }
         if let Some(detail) = event.payload().and_then(detail) {
-            line.push_str(&format!(" — {}", yunta_core::text::one_line(&detail)));
+            line.push_str(&format!(" — {}", one_line(&detail)));
         }
         write_line(&mut self.out, &line);
     }
+}
+
+/// The free text a payload carries, or `None` when it says nothing.
+///
+/// A kind whose whole detail is one field off the log has nothing to add
+/// once that field is blank, and the line reads as one that carries no
+/// detail at all: the dash a line joins its detail with promises a
+/// reader exactly what a colon does.
+fn said(text: &str) -> Option<String> {
+    Some(one_line(text)).filter(|text| !text.is_empty())
 }
 
 /// What one event carries beyond its kind and its node: the fact a reader
@@ -60,6 +80,12 @@ impl Lines {
 /// `None` where the kind says everything it has to say — the event still
 /// gets its line, because a kind this binary cannot detail is still an
 /// event that happened, and one it does not know at all still has a name.
+///
+/// A payload whose free text is empty — a log a writer left a blank
+/// `cause` or `reason` on — is named by what the line already knows, and
+/// never by a separator with nothing behind it: a kind whose whole
+/// detail is that field answers `None`, and one that joins the field to
+/// a headline drops the colon.
 fn detail(payload: &EventPayload) -> Option<String> {
     match payload {
         EventPayload::RunCreated(p) => Some(format!("mode `{}` off {}", p.mode, p.base_branch)),
@@ -84,29 +110,32 @@ fn detail(payload: &EventPayload) -> Option<String> {
         EventPayload::ScopeChecked(p) => {
             Some(format!("{} path(s) out of scope", p.violations.len()))
         }
-        EventPayload::NodeFinished(p) => Some(p.outcome.clone()),
-        EventPayload::NodeFailed(p) => Some(p.failure.to_string()),
+        EventPayload::NodeFinished(p) => said(&p.outcome),
+        EventPayload::NodeFailed(p) => said(&p.failure.to_string()),
         EventPayload::HookExecuted(p) => Some(format!("{:?} exit {}", p.phase, p.exit_code)),
-        EventPayload::NodeRerouted(p) => Some(format!("to `{}`: {}", p.to_node, p.cause)),
-        EventPayload::GateWaiting(p) => Some(p.summary.clone()),
+        EventPayload::NodeRerouted(p) => Some(detailed(format!("to `{}`", p.to_node), &p.cause)),
+        EventPayload::GateWaiting(p) => said(&p.summary),
         EventPayload::GateResolved(p) => Some(resolution(p)),
         EventPayload::LoopIteration(p) => Some(format!("iteration {}", p.iteration)),
-        EventPayload::FindingPosted(p) => {
-            Some(format!("{:?}: {}", p.finding.severity, p.finding.title))
-        }
+        EventPayload::FindingPosted(p) => Some(detailed(
+            format!("{:?}", p.finding.severity),
+            &p.finding.title,
+        )),
         EventPayload::PromotionSignaled(p) => {
-            Some(format!("to `{}`: {}", p.suggested_mode, p.reason))
+            Some(detailed(format!("to `{}`", p.suggested_mode), &p.reason))
         }
         EventPayload::ChildRunCreated(p) => Some(p.child_run_id.to_string()),
-        EventPayload::ChildRunFinished(p) => {
-            Some(format!("{} {}", p.child_run_id, terminal(p.terminal_state)))
-        }
-        EventPayload::CapabilityDegraded(p) => Some(format!(
-            "{:?} on {}: {}",
-            p.capability, p.adapter, p.policy_applied
+        EventPayload::ChildRunFinished(p) => Some(format!(
+            "{} {}",
+            p.child_run_id,
+            view::closed_as(p.terminal_state)
         )),
-        EventPayload::RunPaused(p) => Some(p.reason.clone()),
-        EventPayload::RunFinished(p) => Some(terminal(p.terminal_state).to_string()),
+        EventPayload::CapabilityDegraded(p) => Some(detailed(
+            format!("{:?} on {}", p.capability, p.adapter),
+            &p.policy_applied,
+        )),
+        EventPayload::RunPaused(p) => said(&p.reason),
+        EventPayload::RunFinished(p) => Some(view::closed_as(p.terminal_state).to_string()),
         EventPayload::BaselineCaptured(_)
         | EventPayload::AgentSessionOpened(_)
         | EventPayload::ContextAssembled(_)
@@ -134,13 +163,100 @@ fn resolution(payload: &GateResolvedPayload) -> String {
     }
 }
 
-/// The word a run's terminal state gets on this surface, so the line
-/// that closes a run reads as prose rather than as the name of a variant.
-fn terminal(state: TerminalState) -> &'static str {
-    match state {
-        TerminalState::Done => "finished",
-        TerminalState::Failed => "failed",
-        TerminalState::Cancelled => "cancelled",
-        TerminalState::Promoted => "promoted",
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{
+        CapabilityDegradedPayload, EventPayload, Finding, FindingPostedPayload, FindingSeverity,
+        NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload, RerouteOrigin,
+        RunPausedPayload, TokenUsage,
+    };
+    use yunta_core::Capability;
+
+    use super::detail;
+
+    /// A log this binary reads back was written by some other
+    /// invocation: nothing guarantees the free text on a payload says
+    /// anything, and a line built for it must not promise that it does.
+    fn rerouted(cause: &str) -> EventPayload {
+        EventPayload::NodeRerouted(NodeReroutedPayload {
+            to_node: "fix-lint".into(),
+            cause: cause.to_string(),
+            attempt: None,
+            max_reroutes: None,
+            origin: RerouteOrigin::GateChoice,
+        })
+    }
+
+    #[test]
+    fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
+        assert_eq!(
+            detail(&rerouted("exit 1")).as_deref(),
+            Some("to `fix-lint`: exit 1")
+        );
+    }
+
+    #[test]
+    fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
+        assert_eq!(detail(&rerouted("")).as_deref(), Some("to `fix-lint`"));
+    }
+
+    #[test]
+    fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
+        let payload = EventPayload::PromotionSignaled(PromotionSignaledPayload {
+            reason: String::new(),
+            evidence: String::new(),
+            suggested_mode: "ship".into(),
+        });
+        assert_eq!(detail(&payload).as_deref(), Some("to `ship`"));
+    }
+
+    #[test]
+    fn a_finding_with_no_title_reads_as_its_severity_alone() {
+        let payload = EventPayload::FindingPosted(FindingPostedPayload {
+            finding: Finding {
+                id: "f1".into(),
+                severity: FindingSeverity::Minor,
+                title: String::new(),
+                location: "src/lib.rs".to_string(),
+                detail: String::new(),
+                proposed_criterion: None,
+            },
+        });
+        assert_eq!(detail(&payload).as_deref(), Some("Minor"));
+    }
+
+    #[test]
+    fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
+        let payload = EventPayload::RunPaused(RunPausedPayload {
+            reason: "   ".to_string(),
+        });
+        assert_eq!(detail(&payload), None);
+    }
+
+    #[test]
+    fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
+        let payload = EventPayload::RunPaused(RunPausedPayload {
+            reason: "budget\n  reached".to_string(),
+        });
+        assert_eq!(detail(&payload).as_deref(), Some("budget reached"));
+    }
+
+    #[test]
+    fn a_node_that_finished_saying_nothing_leaves_the_line_at_its_kind() {
+        let payload = EventPayload::NodeFinished(NodeFinishedPayload {
+            outcome: String::new(),
+            tokens_used: TokenUsage::default(),
+        });
+        assert_eq!(detail(&payload), None);
+    }
+
+    #[test]
+    fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
+        let payload = EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
+            capability: Capability::RunTools,
+            adapter: "codex".into(),
+            policy_applied: String::new(),
+        });
+        assert_eq!(detail(&payload).as_deref(), Some("RunTools on codex"));
     }
 }

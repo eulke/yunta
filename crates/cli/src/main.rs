@@ -46,7 +46,14 @@ fn main() -> ExitCode {
     let cli = cli::Cli::parse();
     tracing::debug!("yunta starting");
 
-    match drive(cli) {
+    let outcome = drive(cli);
+    // Last, because a prompt this run abandoned mid-key left a thread
+    // that is still reading the terminal and still turning raw mode on
+    // between its own reads. Nothing runs after this, so nothing takes
+    // the terminal back off the shell this process returns to.
+    ask::restore_terminal();
+
+    match outcome {
         Ok(Outcome::Success) => ExitCode::SUCCESS,
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Err(error) => {

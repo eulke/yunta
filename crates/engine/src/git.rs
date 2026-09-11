@@ -15,7 +15,7 @@ use thiserror::Error;
 /// `code` carry git's own output and exit status in the second (`code`
 /// stays `None` when a signal killed git before it could exit).
 #[derive(Debug, Error)]
-#[error("git {args} in `{cwd}` failed{}", suffix(.stderr, .source))]
+#[error("{}", yunta_core::text::detailed(headline(.args, .cwd), &cause(.stderr, .source)))]
 pub struct GitError {
     pub args: String,
     pub cwd: PathBuf,
@@ -27,21 +27,49 @@ pub struct GitError {
 
 impl GitError {
     /// The human-facing cause: git's own error message when it spawned
-    /// and failed, or the spawn error itself when it never ran.
+    /// and failed, or the spawn error itself when it never ran. Empty
+    /// when git exited non-zero without writing to stderr.
     pub fn detail(&self) -> String {
-        match &self.source {
-            Some(e) => e.to_string(),
-            None => self.stderr.clone(),
-        }
+        cause(&self.stderr, &self.source)
     }
 }
 
-fn suffix(stderr: &str, source: &Option<std::io::Error>) -> String {
+/// What was attempted, which is all a `GitError` says on its own.
+fn headline(args: &str, cwd: &Path) -> String {
+    format!("git {args} in `{}` failed", cwd.display())
+}
+
+/// How a module that keeps git's arguments and directory in an error of
+/// its own names the invocation that failed: what was run, where, and
+/// git's own stderr when it wrote any.
+///
+/// The same sentence [`GitError`] carries, reached from the fields
+/// alone, so a git failure reads the same whichever module reports it.
+pub fn failed(args: &str, cwd: &Path, detail: &str) -> String {
+    yunta_core::text::detailed(headline(args, cwd), detail)
+}
+
+/// See [`GitError::detail`]; a free function so the `Display` impl can
+/// reach it from the fields alone.
+fn cause(stderr: &str, source: &Option<std::io::Error>) -> String {
     match source {
-        Some(e) => format!(": {e}"),
-        None if stderr.is_empty() => String::new(),
-        None => format!(": {stderr}"),
+        Some(e) => e.to_string(),
+        None => stderr.to_string(),
     }
+}
+
+/// How a module that maps [`GitError`] into an error of its own names a
+/// git invocation that ran and exited non-zero: what was run, the status
+/// it came back with, and git's own stderr when it wrote any.
+///
+/// A caller that keeps git's arguments and exit status in its own error
+/// reaches the reader through here, so `git` failures read the same
+/// whichever module reports them.
+pub fn exited_with(command: &str, status: impl std::fmt::Display, stderr: &str) -> String {
+    yunta_core::text::detailed(
+        format!("`git {command}` exited with status {status}"),
+        stderr,
+    )
 }
 
 fn describe<S: AsRef<OsStr>>(args: &[S]) -> String {

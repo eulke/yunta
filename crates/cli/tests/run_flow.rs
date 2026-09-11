@@ -316,6 +316,63 @@ nodes:
 }
 
 #[test]
+fn an_adapter_that_reports_itself_unhealthy_without_saying_why_is_refused_by_name_alone() {
+    // A CLI whose `--version` exits non-zero writing nothing is the
+    // shape a probe has no diagnostic for. The refusal lists the
+    // adapter and stops: a colon with nothing behind it would promise
+    // the reader a reason the CLI never gave.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let silent = repo.join("silent-cli.sh");
+    write(&silent, "#!/bin/sh\nexit 1\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&silent).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&silent, perms).unwrap();
+    }
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            r#"
+runners:
+  executor:
+    - {{ adapter: claude-code, model: some-model }}
+adapters:
+  claude-code:
+    binary: {binary}
+"#,
+            binary = silent.display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: unhealthy-adapter
+nodes:
+  - id: implement
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#,
+    );
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(!run.status.success());
+    assert_eq!(
+        stderr(&run).trim_end(),
+        "error: adapter health check failed (run `yunta doctor` for detail): 1 error\n  \
+         claude-code"
+    );
+}
+
+#[test]
 fn worktree_isolation_is_the_default_and_agent_edits_never_touch_the_original_checkout() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
@@ -1892,7 +1949,109 @@ fn yunta_check_refuses_a_composition_cycle() {
     );
 }
 
+/// A `kind: bash` node whose command fails saying nothing — `test -f x`,
+/// the ordinary case — is reported by its exit code alone. A `:` promises
+/// a reader that something follows it, and every surface that quotes the
+/// diagnostic quotes that promise too.
+#[test]
+fn a_bash_node_that_fails_without_writing_to_stderr_is_reported_by_its_exit_code_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: silent-failure
+nodes:
+  - id: verify
+    kind: bash
+    run: "test -f never-written.txt"
+"#,
+    );
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        state["nodes"]["verify"], "failed — exit 1",
+        "a command that said nothing is quoted with nothing promised: {state:#}"
+    );
+}
+
 // --- `yunta run --detach` ------------------------------------------------
+
+/// A fixture scripts the sessions of whoever runs them, and `--detach`
+/// makes that a separate `yunta resume` — which resolves the adapters
+/// `runners:` names and reads no fixture at all. The combination is
+/// refused with what to do instead, never honoured as a run that quietly
+/// stayed attached.
+#[test]
+fn detaching_a_run_against_a_mock_fixture_is_refused_before_anything_is_created() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // The workflow passes `yunta check` and the fixture completes it, so
+    // the refusal is the only thing standing between this invocation and
+    // a finished run.
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: claude-model }\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: mocked
+nodes:
+  - id: implement
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#,
+    );
+    write(
+        &repo.join("fixture.yaml"),
+        "sessions:\n  - outcome: { type: completed, summary: done }\n",
+    );
+
+    for args in [
+        vec![
+            "run",
+            "wf.yaml",
+            "--detach",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+        // The same rule, reached with the fixture still missing: the
+        // answer names the combination that cannot work rather than
+        // sending the reader to add a flag that is refused next.
+        vec!["run", "wf.yaml", "--detach", "--adapter", "mock"],
+    ] {
+        let refused = yunta_in!(&repo, &home, &args);
+        assert!(
+            !refused.status.success(),
+            "`{args:?}` must be refused, got: {}",
+            stdout(&refused)
+        );
+        let stderr = stderr(&refused);
+        assert!(
+            stderr.contains("--detach") && stderr.contains("yunta resume"),
+            "the refusal names the flag and why a detached child cannot honour it: {stderr}"
+        );
+        assert!(
+            !home.join("runs").exists(),
+            "nothing is created for an invocation that is refused up front"
+        );
+    }
+}
 
 #[test]
 fn yunta_run_detach_returns_immediately_and_the_workflow_finishes_in_a_detached_child() {
@@ -2139,6 +2298,19 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
         "the budget warning names the cap and what history says: {}",
         stderr(&loud)
     );
+    // The CLI marks its own cautions, and marks each one once: the
+    // sentence it prints states the fact and nothing about how it looks.
+    let loud_stderr = stderr(&loud);
+    let marked: Vec<&str> = loud_stderr
+        .lines()
+        .filter(|line| line.contains("max_tokens_per_run"))
+        .collect();
+    assert_eq!(marked.len(), 1, "the warning is printed once: {marked:?}");
+    assert!(
+        marked[0].starts_with("warning: ") && marked[0].matches("warning:").count() == 1,
+        "one layer decides how a caution looks, so the prefix appears once: {}",
+        marked[0]
+    );
     settled(&run_id_from(&loud));
 
     let quiet = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach", "--quiet"]);
@@ -2282,6 +2454,50 @@ nodes:
         stdout(&status).contains("waiting"),
         "an invalid option must not touch the run's state: {}",
         stdout(&status)
+    );
+}
+
+#[test]
+fn resolving_a_run_that_is_not_parked_says_what_shows_where_it_is() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: fine
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+"#,
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    // A run that finished is parked on nothing, so the refusal describes
+    // the state the run is in rather than the request — and a reader told
+    // that is told what shows where the run actually stands.
+    let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
+    assert!(!resolve.status.success());
+    assert_eq!(
+        stderr(&resolve).trim_end(),
+        format!(
+            "error: this run isn't parked at a pause — a live process may still be \
+             driving it, or it already finished — `yunta status {run_id}` shows where it is"
+        ),
+        "the refusal names the state and what shows it"
     );
 }
 

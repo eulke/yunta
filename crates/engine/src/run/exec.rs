@@ -257,7 +257,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
             crate::process_registry::registry_path(ctx.run_dir)
                 .display()
                 .to_string(),
-            format!("`yunta cancel` cannot see this invocation's process tree: {error}"),
+            format!("nothing outside this invocation can see its process tree: {error}"),
         )
         .await?;
     }

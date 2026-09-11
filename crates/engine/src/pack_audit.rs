@@ -212,7 +212,7 @@ fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
 
 fn describe_context(spec: &ContextSpec) -> String {
     match spec {
-        ContextSpec::Files { files } => format!("files: {}", files.join(", ")),
+        ContextSpec::Files { files } => yunta_core::text::detailed("files", &files.join(", ")),
         ContextSpec::Command { command } => format!("command: {command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
             Some(node) => format!("artifact: node={node} name={}", artifact.name),

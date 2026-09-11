@@ -429,14 +429,9 @@ pub(super) async fn resolve_internal_gate(
             .await?;
         }
         return Ok(GateStep::StillWaiting {
-            reason: format!(
-                "gate `{}` was resolved to abort{}",
-                node.id,
-                choice
-                    .free_text
-                    .as_deref()
-                    .map(|text| format!(": {text}"))
-                    .unwrap_or_default()
+            reason: yunta_core::text::detailed(
+                format!("gate `{}` was resolved to abort", node.id),
+                choice.free_text.as_deref().unwrap_or_default(),
             ),
         });
     }

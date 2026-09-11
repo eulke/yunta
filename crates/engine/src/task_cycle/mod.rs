@@ -58,7 +58,10 @@ pub enum TaskCycleError {
         #[source]
         source: crate::scope_expansion::ScopeExpansionError,
     },
-    #[error("failed to compute the working tree's hash for memoization: git {args} in `{cwd}`: {detail}")]
+    #[error(
+        "failed to compute the working tree's hash for memoization: {}",
+        crate::git::failed(.args, .cwd, .detail)
+    )]
     TreeHash {
         args: String,
         cwd: std::path::PathBuf,

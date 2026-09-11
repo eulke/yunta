@@ -138,7 +138,8 @@ fn finding(events: &[StoredEvent], id: &str) -> Option<Finding> {
 async fn an_unwritable_process_registry_is_recorded_as_a_finding() {
     // `create_run` makes `scratch/`; replacing `engine.json` with a
     // directory makes the registry's atomic write fail — the run must
-    // record the loss of `yunta cancel` visibility, not warn and vanish.
+    // record that its process tree became invisible from outside, not
+    // warn and vanish.
     let bench = Bench::new();
     let workflow = r#"
 name: degradation
@@ -158,8 +159,8 @@ nodes:
     let finding = finding(&events, "engine-registry")
         .expect("the unwritable registry must be recorded as a finding");
     assert!(
-        finding.detail.contains("yunta cancel"),
-        "the finding says what cancel cannot do: {}",
+        finding.detail.contains("process tree"),
+        "the finding says what became invisible: {}",
         finding.detail
     );
 }

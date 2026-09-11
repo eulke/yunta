@@ -133,10 +133,10 @@ fn receipt_refuses_a_run_that_has_not_finished() {
         stderr(&receipt_out).trim_end(),
         format!(
             "error: run `{run_id}` hasn't reached a terminal state yet — \
-             `yunta status {run_id}` shows where it is; a receipt is only generated \
-             once a run finishes"
+             a receipt is only generated once a run finishes; \
+             `yunta status {run_id}` shows where it is"
         ),
-        "the refusal explains the run is not terminal and points at `yunta status`"
+        "the refusal explains why a receipt cannot be built yet and says what shows the run's state"
     );
 
     let run_dir = home.join("runs").join(&run_id);

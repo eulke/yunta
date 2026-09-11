@@ -72,19 +72,16 @@ pub(super) async fn execute_bash(
         )
         .await
     } else {
-        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let stderr_tail = super::stderr_tail(&stderr_bytes);
         fail(
             ctx,
             node,
-            format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
+            // A command that fails saying nothing — `test -f x` is the
+            // ordinary case — is reported as the exit code alone.
+            yunta_core::text::detailed(
+                format!("exit {}", status.code().unwrap_or(-1)),
+                &stderr_tail,
+            ),
             false,
         )
         .await

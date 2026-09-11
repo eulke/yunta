@@ -45,15 +45,35 @@ pub async fn resolve_gate(
             free_text: free_text.map(str::to_string),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| refused(run_id, e))?;
 
     super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd)
         .await
-        .map_err(|e| {
+        .map_err(|source| {
             CliError::msg(format!(
-                "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
+                "decision recorded, but {}",
+                super::DetachedResumeError::new(run_id, source)
             ))
         })?;
     println!("run {run_id}: resolved `{option}`, driving forward independently");
     Ok(Outcome::Success)
+}
+
+/// A refusal the engine raised, in this command's own vocabulary.
+///
+/// One of them describes the state the run is in rather than anything
+/// about the request, and a reader told the run is not parked wants to
+/// see where it actually is. Which command shows that is the CLI's word,
+/// not the engine's, so it is said here. Every other refusal already
+/// names what to change — an option that is not on the menu lists the
+/// ones that are — and passes through untouched.
+fn refused(run_id: &RunId, error: yunta_engine::ResolveGateError) -> CliError {
+    match error {
+        yunta_engine::ResolveGateError::NotPaused => CliError::msg(format!(
+            "{error} — `{}` shows where it is",
+            super::advice::status(run_id)
+        )),
+        other => other.into(),
+    }
 }

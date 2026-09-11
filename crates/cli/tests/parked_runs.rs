@@ -25,6 +25,24 @@ nodes:
     run: "touch fixed.txt"
 "#;
 
+/// A gate nobody has answered yet: the run parks on the menu its own
+/// manifest declares, and the engine attaches who the gate is assigned
+/// to — which the message it asks with never says.
+const INTERNAL_GATE: &str = r#"
+name: approval
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+  - id: approve
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Approve the plan?"
+    options: [ship, adjust]
+    on: { adjust: plan }
+"#;
+
 /// A node that fails with no `on_failure` at all: the run parks with
 /// nothing to choose from — one of the pauses no menu reconstructs.
 const PLAIN_FAILURE: &str = r#"
@@ -214,12 +232,6 @@ fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_ask
         Some("  waiting on node `lint`"),
         "{trailer:?}"
     );
-    assert!(
-        trailer
-            .iter()
-            .any(|line| line.trim_start().starts_with("evidence: ")),
-        "a trailer labels a part inline: {trailer:?}"
-    );
     for heading in ["evidence:", "options:", "answer it with:"] {
         assert!(
             !trailer.iter().any(|line| line.trim() == heading),
@@ -240,10 +252,58 @@ fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_ask
         Some("decision needed on node `lint`:"),
         "{page:?}"
     );
-    for heading in ["  evidence:", "  options:", "  answer it with:"] {
+    for heading in ["  options:", "  answer it with:"] {
         assert!(page.contains(&heading), "{page:?}");
     }
     assert!(!page_text.contains("close this terminal"), "{page_text}");
+}
+
+#[test]
+fn evidence_is_printed_only_where_it_says_more_than_the_summary_already_did() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(
+        root.path(),
+        &[("hopeless", EXHAUSTED_REROUTE), ("approval", INTERNAL_GATE)],
+    );
+    let home = root.path().join("state");
+
+    // An exhausted re-route: the engine quotes the failure into the
+    // summary and attaches that same failure as the evidence under it.
+    // A reader meets the failure once, and no heading promises a record
+    // that turns out to be the sentence above it.
+    let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
+    let run_id = run_id_from(&run);
+    let closing = stdout(&run);
+    let status = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    for block in [
+        closing_decision(&closing).join("\n"),
+        decision_block(&status).join("\n"),
+    ] {
+        assert!(
+            !block.contains("evidence"),
+            "the summary already carries it: {block}"
+        );
+        assert_eq!(
+            block.matches("exit 1").count(),
+            1,
+            "the failure the run stopped on is named once: {block}"
+        );
+    }
+
+    // A gate: the message it asks with never says who is being asked, so
+    // the evidence is a part of its own — inline on the trailer, under
+    // its own heading on the page.
+    let gate = yunta_in!(&repo, &home, &["run", "approval.yaml"]);
+    let gate_id = run_id_from(&gate);
+    let gate_closing = stdout(&gate);
+    let gate_status = stdout(&yunta_in!(&repo, &home, &["status", &gate_id]));
+    let trailer = closing_decision(&gate_closing).join("\n");
+    let page = decision_block(&gate_status).join("\n");
+    assert!(trailer.contains("evidence: assignee: lead"), "{trailer}");
+    assert!(
+        page.contains("  evidence:") && page.contains("assignee: lead"),
+        "{page}"
+    );
 }
 
 #[test]
@@ -274,6 +334,15 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
     assert_eq!(
         decision["resolve_with"],
         serde_json::Value::String(format!("yunta resolve-gate {run_id} <option>")),
+        "{state:#}"
+    );
+    // What a page drops because the summary already said it, a document
+    // still carries: the machine surface is the escalation as the log
+    // recorded it, never what a reader was shown.
+    assert!(
+        decision["evidence"]
+            .as_str()
+            .is_some_and(|text| text.contains("exit 1")),
         "{state:#}"
     );
 

@@ -2,12 +2,12 @@
 //!
 //! One canonical copy of every piece of scaffolding an integration test
 //! needs — a git-repo fixture, a fixed clock, a binary runner, a pty a
-//! run is driven on, a writer a test reads back, a run bench, gate
-//! doubles, a recording run observer — so a change to the shape of a
-//! test run happens in one place, and so the fixtures are hermetic by
-//! construction (git isolated from the developer's global config, a
-//! fixed clock, an injected home and terminal) rather than by each test
-//! remembering to be.
+//! run is driven on, a writer a test reads back, a run bench, the
+//! frames a surface draws, gate doubles, a recording run observer — so a
+//! change to the shape of a test run happens in one place, and so the
+//! fixtures are hermetic by construction (git isolated from the
+//! developer's global config, a fixed clock, an injected home and
+//! terminal) rather than by each test remembering to be.
 //!
 //! It is a dev-dependency only: nothing here ships in a published crate.
 
@@ -15,6 +15,7 @@ mod bench;
 mod bin;
 mod capture;
 mod clock;
+mod frames;
 mod interaction;
 mod observer;
 mod repo;
@@ -25,6 +26,7 @@ pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{run_id_from, run_yunta, stderr, stdout};
 pub use capture::Captured;
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
+pub use frames::{child_link, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};

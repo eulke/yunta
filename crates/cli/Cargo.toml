@@ -62,6 +62,13 @@ dialoguer = { workspace = true, features = ["fuzzy-select"] }
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
 async-trait.workspace = true
+# A prompt's key read turns the terminal's line discipline off, and a
+# read abandoned mid-key never turns it back on: this is what reads the
+# mode the console was handed and sets it back, on the one path the read
+# itself cannot reach. `term` alone — the signal and process halves stay
+# behind `yunta-adapters`, which already puts this crate in the binary,
+# so nothing new is linked in.
+nix = { workspace = true, features = ["term"] }
 # `yunta mcp`: the control-plane MCP server, stdio. `server` +
 # `transport-io` only — no HTTP transport, no client features: the
 # per-run MCP server is a separate, later concern with its own

@@ -8,12 +8,11 @@
 //! its returned `(run_id, manifest, worktree, report)` — the *last*
 //! run in the chain — for everything after (release/report).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, Forge};
-use yunta_core::{AdapterId, IdSource, Manifest, RunId, SystemClock};
+use yunta_adapters::Forge;
+use yunta_core::{IdSource, Manifest, RunId, SystemClock};
 use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -29,7 +28,7 @@ pub(crate) struct PromotionEnv<'a> {
     pub project: &'a Project,
     pub(crate) storage: &'a AsyncStorage,
     pub ids: &'a dyn IdSource,
-    pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
+    pub adapters: &'a super::Adapters,
     pub forge: Option<&'a dyn Forge>,
     pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
     /// Where every successor puts its questions — the same console the
@@ -196,7 +195,7 @@ nodes:
             storage_path: root.path().join("yunta.db"),
         };
         let storage = Storage::open(&project.storage_path).unwrap();
-        let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
+        let adapters = crate::commands::Adapters::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
         let manifest =

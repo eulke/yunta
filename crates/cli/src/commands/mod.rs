@@ -32,10 +32,11 @@ use yunta_adapters::{
     Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
     CODEX_ID,
 };
-use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
+use yunta_core::{describe, AdapterId, ConfigLayer, RunId, Secret, Workflow};
 use yunta_engine::UnknownKindCount;
 
-use crate::error::{note, warn, CliError};
+use crate::error::{warn, CliError};
+use crate::surface::Diagnostics;
 
 /// Ctrl-C → the run's root `CancellationToken`. The in-process
 /// interrupt→kill path does the actual exterminating; this only
@@ -43,16 +44,50 @@ use crate::error::{note, warn, CliError};
 /// happening. Installing the handler means SIGINT no longer kills the
 /// process outright — the run pauses cleanly with `run_paused
 /// { reason: "cancelled by user" }` instead.
-pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
+///
+/// What it tells the user goes out through `diagnostics`, which is the
+/// surface's own door: the interrupt arrives while the run is being
+/// drawn, and a line printed around the pinned region lands inside the
+/// rows it is redrawing — so the person who pressed Ctrl-C would read
+/// their confirmation until the next redraw erased it.
+pub(crate) fn cancel_on_ctrl_c(diagnostics: Diagnostics) -> tokio_util::sync::CancellationToken {
     let root = tokio_util::sync::CancellationToken::new();
     let token = root.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            note("interrupt received — stopping the run (sessions get interrupt, then kill)");
+            diagnostics
+                .raise("interrupt received — stopping the run (sessions get interrupt, then kill)")
+                .await;
             token.cancel();
         }
     });
     root
+}
+
+/// A detached `yunta resume` that never started, and the run it was
+/// for. Recover by running that command yourself: the run is on disk
+/// and unchanged, so nothing is lost by handing it forward by hand.
+///
+/// Every surface that hands a run off reports the same failure, so the
+/// sentence is worded here once and each caller only says what it was
+/// doing when it got this back.
+#[derive(Debug, thiserror::Error)]
+#[error("cannot spawn a detached `{}`: {source}", advice::resume(.run_id))]
+pub(crate) struct DetachedResumeError {
+    run_id: RunId,
+    #[source]
+    source: std::io::Error,
+}
+
+impl DetachedResumeError {
+    /// The failure of a hand-off for `run_id`, keeping what the OS said
+    /// about it.
+    pub(crate) fn new(run_id: &RunId, source: std::io::Error) -> Self {
+        Self {
+            run_id: run_id.clone(),
+            source,
+        }
+    }
 }
 
 /// Hands a run off to a fully independent `yunta resume` and returns
@@ -98,14 +133,19 @@ pub(crate) async fn spawn_detached_resume(
     Ok(())
 }
 
+/// The adapters a run executes its sessions on, by the name `runners:`
+/// reaches each one under. Named beside the function that builds it, so
+/// every caller that passes a registry around spells the same type.
+pub(crate) type Adapters = HashMap<AdapterId, Arc<dyn Adapter>>;
+
 /// The adapter registry a real invocation can offer: `claude-code` and
 /// `codex`, each built only when `runners:` names it as a candidate
 /// somewhere in the merged config, with that adapter's own settings (a
 /// `binary` override, if declared). Mock fixtures stay routed through
 /// `yunta test` only — real invocations never touch the mock, and a
 /// real run never gets a simulated agent either.
-pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<AdapterId, Arc<dyn Adapter>> {
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
+    let mut adapters: Adapters = HashMap::new();
     let named: Vec<&AdapterId> = config
         .runners
         .iter()
@@ -165,10 +205,7 @@ pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
 
 /// Refuses early when `workflow` needs agent sessions no available
 /// adapter can provide: an error in check, never emulation at runtime.
-pub(crate) fn refuse_unrunnable(
-    workflow: &Workflow,
-    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
-) -> Result<(), CliError> {
+pub(crate) fn refuse_unrunnable(workflow: &Workflow, adapters: &Adapters) -> Result<(), CliError> {
     let needs_sessions = workflow.nodes.iter().any(|node| {
         matches!(
             node.kind,
@@ -192,17 +229,17 @@ pub(crate) fn refuse_unrunnable(
 /// doctor` calls the same adapters' `probe()` directly instead of
 /// through this helper, since it reports every result rather than
 /// stopping at the first failure.
-pub(crate) async fn probe_or_refuse(
-    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
-) -> Result<(), CliError> {
+pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
         match adapter.probe().await {
             Ok(ProbeReport::Healthy { .. }) => {}
+            // An adapter that reports itself unhealthy without saying
+            // why is listed by name alone.
             Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                unhealthy.push(format!("{name}: {diagnostic}"));
+                unhealthy.push(yunta_core::text::detailed(name, &diagnostic));
             }
-            Err(e) => unhealthy.push(format!("{name}: {e}")),
+            Err(e) => unhealthy.push(yunta_core::text::detailed(name, &e.to_string())),
         }
     }
     if unhealthy.is_empty() {
