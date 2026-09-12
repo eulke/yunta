@@ -109,6 +109,38 @@ impl ArtifactKind {
         }
     }
 
+    /// The run tool a session submits a whole document of this kind
+    /// through, when the kind is one a session submits whole.
+    ///
+    /// `None` for a kind whose entries accumulate one at a time: a
+    /// findings artifact is the projection of what its node posted
+    /// through [`POST_FINDING_TOOL`](ArtifactKind::POST_FINDING_TOOL),
+    /// never a document handed over in one piece. One place, so the
+    /// listing that mounts a tool, the dispatch that answers it and the
+    /// sentence that names it to a session cannot disagree.
+    pub fn submit_tool(self) -> Option<&'static str> {
+        match self {
+            ArtifactKind::TaskLedger => Some("yunta_submit_task_ledger"),
+            ArtifactKind::Questions => Some("yunta_submit_questions"),
+            ArtifactKind::Findings => None,
+        }
+    }
+
+    /// The kind a submission tool name belongs to, or `None` for a name
+    /// no kind submits through.
+    pub fn from_submit_tool(name: &str) -> Option<Self> {
+        ArtifactKind::ALL
+            .into_iter()
+            .find(|kind| kind.submit_tool() == Some(name))
+    }
+
+    /// The run tools one finding is posted, replaced and taken back
+    /// through. Findings are the one kind whose entries arrive
+    /// separately, so these are named rather than derived per kind.
+    pub const POST_FINDING_TOOL: &'static str = "yunta_post_finding";
+    pub const UPDATE_FINDING_TOOL: &'static str = "yunta_update_finding";
+    pub const WITHDRAW_FINDING_TOOL: &'static str = "yunta_withdraw_finding";
+
     /// The kinds as a sentence lists them, so every door that has to
     /// say "one of ..." says it the same way.
     pub fn listed() -> String {

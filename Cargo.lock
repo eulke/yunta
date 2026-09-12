@@ -2783,6 +2783,7 @@ dependencies = [
  "chrono",
  "globset",
  "indexmap",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",

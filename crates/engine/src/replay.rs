@@ -61,10 +61,11 @@ pub struct RunState {
     pub nodes: HashMap<NodeId, NodeState>,
     pub tasks: HashMap<TaskId, TaskStatus>,
     pub total_tokens: TokenUsage,
-    /// Every `finding_posted` entry, in log order, never deduplicated
-    /// here — the raw log keeps every contributing posting ("without
-    /// losing authorship"); [`dedup_findings`] is the query-side view for
-    /// counting/display, not something replay bakes in.
+    /// Every finding that stands: the last state of each id nobody
+    /// withdrew, in the order each was first posted. Never deduplicated
+    /// here — two nodes that find the same thing each keep their own
+    /// posting ("without losing authorship"); [`dedup_findings`] is the
+    /// query-side view for counting and display.
     pub findings: Vec<Finding>,
     /// Every `artifact_written` path, grouped by the node that wrote it,
     /// in log order (`progress.md`'s own "what each node produced"). A
@@ -109,6 +110,9 @@ impl RunView {
 struct Aux {
     pre_gate: HashMap<NodeId, Option<NodeState>>,
     pending_questions: std::collections::HashSet<NodeId>,
+    /// Folds the run's finding events, so `RunState.findings` is what
+    /// stands rather than what was ever posted.
+    findings: yunta_core::events::findings::FindingLedger,
 }
 
 /// How many events a log carries under one `kind` this binary does not
@@ -295,8 +299,19 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             state.tasks.insert(p.task_id.clone(), p.new_status);
             Ok(())
         }
-        EventPayload::FindingPosted(p) => {
-            state.findings.push(p.finding.clone());
+        // The three finding events fold together or not at all: what a
+        // run holds is the last state of every id nobody withdrew, and
+        // `FindingLedger` is the one place that says so.
+        EventPayload::FindingPosted(_)
+        | EventPayload::FindingUpdated(_)
+        | EventPayload::FindingWithdrawn(_) => {
+            aux.findings.apply(event.node_id.as_ref(), payload);
+            state.findings = aux
+                .findings
+                .effective()
+                .into_iter()
+                .map(|posted| posted.finding)
+                .collect();
             Ok(())
         }
         EventPayload::ArtifactWritten(p) => {

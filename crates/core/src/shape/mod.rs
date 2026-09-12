@@ -38,7 +38,7 @@ pub use walk::{Hint, Walk};
 /// change rather than an extension point. Sealing is what lets the trait
 /// name [`Walk`] and [`Value`] in its signatures without those becoming
 /// a contract owed to implementors outside this crate.
-pub trait Document: DeserializeOwned + sealed::Sealed {
+pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// How every door names this document.
     const KIND: ArtifactKind;
 
@@ -124,6 +124,50 @@ pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Rep
         ));
     }
     Err(Report::new(document, diagnostics))
+}
+
+/// Reads a document a session submitted, or reports every problem it
+/// has.
+///
+/// The counterpart of [`read`] for a document that never was a file: it
+/// arrives as a structured value, so the deserializer is the only thing
+/// that differs — the type is the same, the rules it then has to satisfy
+/// are the same, and so is the report a caller gets back. `path` is what
+/// the report names the document by; a submission has no file yet, so
+/// callers pass the name the file will have, or the tool that carried
+/// it.
+pub fn accept<T: Document>(
+    document: serde_json::Value,
+    path: impl Into<String>,
+) -> Result<T, Report> {
+    let document_ref = DocumentRef::new(T::KIND, path);
+    match serde_path_to_error::deserialize::<_, T>(document) {
+        Ok(parsed) => {
+            let broken = parsed.check();
+            if broken.is_empty() {
+                Ok(parsed)
+            } else {
+                Err(Report::new(document_ref, broken))
+            }
+        }
+        Err(error) => Err(Report::new(
+            document_ref,
+            vec![Diagnostic::new(
+                Subject::Document,
+                Problem::parse(error.path().to_string(), error.into_inner().to_string()),
+            )],
+        )),
+    }
+}
+
+/// The canonical YAML of a document the engine holds: the bytes it
+/// writes for a file of this kind.
+///
+/// One document renders to one text, so two sessions that mean the same
+/// thing produce the same file and the same hash — which is what lets a
+/// memo recognize the work and a replay reproduce it.
+pub fn render<T: Document>(document: &T) -> Result<String, crate::yaml::YamlError> {
+    crate::yaml::to_string(document)
 }
 
 /// Everything a writer has to know to produce a document of this kind:

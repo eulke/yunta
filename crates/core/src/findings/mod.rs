@@ -43,6 +43,26 @@ pub struct FindingEntry {
     pub proposed_criterion: Option<ProposedCriterionEntry>,
 }
 
+/// Taking one finding back: which, and why.
+///
+/// A document like any other — strict about its keys, with a rule of its
+/// own — because it reaches the engine the same way a finding does, and
+/// a withdrawal nobody can explain is a finding that disappeared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Withdrawal {
+    pub id: FindingId,
+    pub reason: String,
+}
+
+impl Withdrawal {
+    /// What the document owes once its keys are known: a reason with
+    /// something in it.
+    pub fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_withdrawal(self)
+    }
+}
+
 /// A criterion the author proposes to verify the finding's fix.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

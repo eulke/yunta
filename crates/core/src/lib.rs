@@ -60,7 +60,7 @@ pub use diagnostic::{
     Subject,
 };
 pub use error::{describe, AdapterError, Result};
-pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry};
+pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry, Withdrawal};
 pub use glob::{might_overlap, scope_glob, scope_globset};
 pub use hash::{sha256_hex, CommitSha, ContentHash};
 #[cfg(any(test, feature = "testkit"))]

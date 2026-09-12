@@ -167,6 +167,27 @@
         "questions"
       ]
     },
+    "ArtifactSubmittedPayload": {
+      "description": "What a session offered as a whole document, and what the engine\nanswered.",
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "description": "Named `artifact_kind`, not `kind`, for the reason\n[`ArtifactWrittenPayload`] gives: the envelope's own tag already\nclaims `kind` in the serialized JSON.",
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/SubmissionOutcome"
+        }
+      },
+      "required": [
+        "name",
+        "artifact_kind",
+        "outcome"
+      ]
+    },
     "ArtifactWrittenPayload": {
       "type": "object",
       "properties": {
@@ -772,6 +793,26 @@
               ]
             },
             {
+              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root\n(`tasks[1].manual_review`), and is empty when the root itself is\nthe problem; `message` is what the deserializer said about that\nvalue, which names the key and what it expected.",
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "problem": {
+                  "type": "string",
+                  "const": "parse"
+                }
+              },
+              "required": [
+                "problem",
+                "message"
+              ]
+            },
+            {
               "description": "A rule the document broke once it was readable — the ledger's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `detail` is the clause a reader acts on.",
               "type": "object",
               "properties": {
@@ -886,7 +927,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 31 event kinds, internally tagged by `kind`.",
+      "description": "All 35 event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1205,6 +1246,58 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "finding_updated"
+            }
+          },
+          "$ref": "#/$defs/FindingUpdatedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finding_withdrawn"
+            }
+          },
+          "$ref": "#/$defs/FindingWithdrawnPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finding_refused"
+            }
+          },
+          "$ref": "#/$defs/FindingRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "artifact_submitted"
+            }
+          },
+          "$ref": "#/$defs/ArtifactSubmittedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "promotion_signaled"
             }
           },
@@ -1412,6 +1505,15 @@
       "type": "string",
       "minLength": 1
     },
+    "FindingOperation": {
+      "description": "Which of the three a refused call was making.",
+      "type": "string",
+      "enum": [
+        "post",
+        "update",
+        "withdraw"
+      ]
+    },
     "FindingPostedPayload": {
       "description": "The finding's author is the envelope's own `node_id` — not repeated\nhere.",
       "type": "object",
@@ -1424,6 +1526,33 @@
         "finding"
       ]
     },
+    "FindingRefusedPayload": {
+      "description": "A finding a session offered and the engine did not take, with every\nproblem named. The accepted cases are the three events above; this is\nwhat a session was told instead, kept so the rate a run gets findings\nwrong is a fact about the run rather than something only the session\nsaw.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The id the call named, when it named one that parses.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/FindingOperation"
+        },
+        "report": {
+          "$ref": "#/$defs/Report"
+        }
+      },
+      "required": [
+        "operation",
+        "report"
+      ]
+    },
     "FindingSeverity": {
       "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
       "type": "string",
@@ -1432,6 +1561,34 @@
         "major",
         "minor",
         "note"
+      ]
+    },
+    "FindingUpdatedPayload": {
+      "description": "The node's finding, in its new state — a whole replacement, never a\nmerge: a field absent from an update is absent from the finding.",
+      "type": "object",
+      "properties": {
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        }
+      },
+      "required": [
+        "finding"
+      ]
+    },
+    "FindingWithdrawnPayload": {
+      "description": "The node's finding `id` no longer stands, and why — in the words of\nwhoever took it back.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "reason"
       ]
     },
     "GateOption": {
@@ -1977,6 +2134,21 @@
           "const": "overlapping-scope"
         },
         {
+          "description": "An update or a withdrawal names a finding this node never posted.",
+          "type": "string",
+          "const": "unknown-id"
+        },
+        {
+          "description": "A withdrawn id is final — it is not posted, updated or withdrawn\nagain.",
+          "type": "string",
+          "const": "withdrawn-id"
+        },
+        {
+          "description": "A withdrawal does not say why.",
+          "type": "string",
+          "const": "empty-reason"
+        },
+        {
           "description": "`answer_type` is `choice` and `values` is empty.",
           "type": "string",
           "const": "missing-values"
@@ -2306,6 +2478,51 @@
       "description": "A session id: not empty and without control characters",
       "type": "string",
       "minLength": 1
+    },
+    "SubmissionOutcome": {
+      "description": "Accepted, and the file the engine wrote from it; or refused, and\nevery problem the document has.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accepted": {
+              "type": "object",
+              "properties": {
+                "content_hash": {
+                  "$ref": "#/$defs/ContentHash"
+                }
+              },
+              "required": [
+                "content_hash"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "accepted"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "refused": {
+              "type": "object",
+              "properties": {
+                "report": {
+                  "$ref": "#/$defs/Report"
+                }
+              },
+              "required": [
+                "report"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "refused"
+          ]
+        }
+      ]
     },
     "TaskId": {
       "description": "A task id: a letter followed by letters, digits, `_` or `-`",

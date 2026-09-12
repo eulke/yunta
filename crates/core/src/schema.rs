@@ -40,6 +40,11 @@ pub fn questions() -> Schema {
     titled(schema_for!(crate::QuestionsFile), "yunta questions")
 }
 
+/// A withdrawal, as `yunta_withdraw_finding` receives it.
+pub fn withdrawal() -> Schema {
+    titled(schema_for!(crate::Withdrawal), "yunta finding withdrawal")
+}
+
 /// One stored event — a line of `events.jsonl`: the envelope and the
 /// payload of its kind, side by side.
 pub fn events() -> Schema {
@@ -49,7 +54,7 @@ pub fn events() -> Schema {
 /// Every root schema with the file name it is kept under. A kind the
 /// engine parses and validates is a kind whose schema it publishes, so
 /// the three interpreted artifact kinds are all here.
-pub fn all() -> [(&'static str, Schema); 7] {
+pub fn all() -> [(&'static str, Schema); 8] {
     [
         ("workflow", workflow()),
         ("config", config()),
@@ -57,6 +62,7 @@ pub fn all() -> [(&'static str, Schema); 7] {
         ("ledger", ledger()),
         ("findings", findings()),
         ("questions", questions()),
+        ("withdrawal", withdrawal()),
         ("events", events()),
     ]
 }

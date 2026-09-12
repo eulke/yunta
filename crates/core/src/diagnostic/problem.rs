@@ -150,6 +150,13 @@ rule_codes! {
     EmptyText => "empty-text",
     EmptyLocation => "empty-location",
     EmptyDetail => "empty-detail",
+    /// An update or a withdrawal names a finding this node never posted.
+    UnknownId => "unknown-id",
+    /// A withdrawn id is final — it is not posted, updated or withdrawn
+    /// again.
+    WithdrawnId => "withdrawn-id",
+    /// A withdrawal does not say why.
+    EmptyReason => "empty-reason",
     /// `answer_type` is `choice` and `values` is empty.
     MissingValues => "missing-values",
 }
@@ -218,6 +225,17 @@ pub enum Problem {
         value: String,
         valid: Vec<String>,
     },
+    /// The document does not parse into its kind: an unknown key, a
+    /// value of the wrong type, an id that is not one. `path` locates
+    /// the offending value from the document's root
+    /// (`tasks[1].manual_review`), and is empty when the root itself is
+    /// the problem; `message` is what the deserializer said about that
+    /// value, which names the key and what it expected.
+    Parse {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        path: String,
+        message: String,
+    },
     /// A rule the document broke once it was readable — the ledger's own
     /// registration rules and their siblings. `code` is what a receipt
     /// counts; `detail` is the clause a reader acts on.
@@ -234,6 +252,14 @@ pub enum Problem {
 }
 
 impl Problem {
+    /// A value the deserializer refused, at the path it refused it.
+    pub fn parse(path: impl Into<String>, message: impl Into<String>) -> Self {
+        Problem::Parse {
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn not_yaml(looks_like: Option<Malformation>, detail: impl Into<String>) -> Self {
         Problem::NotYaml {
             looks_like,
@@ -323,7 +349,10 @@ impl Problem {
     /// rendering already reads as a sentence about the document and
     /// must not be prefixed with a subject and a colon.
     pub(super) fn about_document(&self) -> bool {
-        matches!(self, Problem::NotYaml { .. } | Problem::Unreadable { .. })
+        matches!(
+            self,
+            Problem::NotYaml { .. } | Problem::Unreadable { .. } | Problem::Parse { .. }
+        )
     }
 
     /// The stable name of this kind of problem: what a receipt counts
@@ -336,6 +365,7 @@ impl Problem {
             Problem::WrongShape { .. } => "wrong-shape",
             Problem::InvalidId { .. } => "invalid-id",
             Problem::UnknownValue { .. } => "unknown-value",
+            Problem::Parse { .. } => "parse",
             Problem::Rule { code, .. } => code.as_str(),
             Problem::Unreadable { .. } => "unreadable",
         }
@@ -353,6 +383,10 @@ impl Problem {
             Problem::NotYaml { looks_like, .. } => match looks_like {
                 Some(shape) => format!("is not YAML: {}", shape.advice()),
                 None => "is not YAML".to_string(),
+            },
+            Problem::Parse { path, message } => match path.as_str() {
+                "" | "." => format!("does not parse: {message}"),
+                path => format!("does not parse at `{path}`: {message}"),
             },
             Problem::UnknownKey {
                 key,
