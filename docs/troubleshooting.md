@@ -70,12 +70,20 @@ the document's own words. `yunta schema <kind>` prints the shape the document is
 read against.
 
 For a `prompt` or `loop` node, the document arrives through a run tool and the
-engine takes it into the run, so this failure means the session never handed
-over a document the engine accepted — the run holds none at close, and a file of
-that name left in the node's directory is not one, because no acceptance
-explains it. The run's log carries every submission the session made, accepted
-or refused, under `artifact_submitted`. There is no second session: a node that
-produces nothing fails once, and the failure is not retryable.
+engine takes it into the run. A session that never handed one over closes the
+node on a failure of its own, headed by the node rather than by a file:
+
+```
+node `plan`: 1 error
+  handed over no tasks document — produce it before the node ends, or stop declaring it here
+```
+
+No path is named because none was ever going to be there: such a document is
+never a file on its way in, and a file left in the node's directory is not one
+either, because no acceptance explains it. The run's log carries every submission
+the session made, accepted or refused, under `artifact_submitted`. There is no
+second session: a node that produces nothing fails once, and the failure is not
+retryable.
 
 For a `bash`, `check`, `gate` or `executor` node, the command writes the file
 itself. Check that it writes the name the node declared, under

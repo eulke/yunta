@@ -300,7 +300,9 @@ nodes:
 "#;
 
     // The session claims success but submits nothing — the engine
-    // verifies, and the missing document fails the node.
+    // verifies, and the document nobody handed over fails the node. It
+    // names the node and what that node owes: no file was ever going to
+    // be there, so the failure points at nothing on disk.
     let fixture = r#"
 capabilities: { run_tools: true }
 sessions:
@@ -314,8 +316,8 @@ sessions:
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
-                "scratch/staging/plan/plan.yaml: 1 error\n  \
-         the document was declared by node `plan` and never produced"
+                "node `plan`: 1 error\n  handed over no tasks document — \
+                 produce it before the node ends, or stop declaring it here"
             );
         }
         other => panic!("expected Failed, got {other:?}"),

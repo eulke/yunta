@@ -270,15 +270,16 @@ pub(crate) struct StatusJson {
 ///
 /// Every field is absent when the failure has nothing to put there, so
 /// no consumer ever meets an invented path or an empty code: an artifact
-/// another run owes has no file to open and no content that was read,
-/// and a file that was never written has no kind its content could have
-/// met.
+/// another run owes and a document its node never handed over have no
+/// file to open and no content that was read, and a file that was never
+/// written has no kind its content could have met.
 #[derive(Default, serde::Serialize)]
 pub(crate) struct ArtifactProblems {
     /// The stable name of what is wrong with the artifact itself —
-    /// `artifact-missing`, `artifact-unheld`. Absent when the file is
-    /// there and its content is what failed, because that is not one
-    /// problem: each of the document's own carries its code.
+    /// `artifact-missing`, `artifact-undelivered`, `artifact-unheld`.
+    /// Absent when the file is there and its content is what failed,
+    /// because that is not one problem: each of the document's own
+    /// carries its code.
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<&'static str>,
     /// As a reader would type it to open the file.
@@ -292,14 +293,16 @@ pub(crate) struct ArtifactProblems {
     #[serde(skip_serializing_if = "Option::is_none")]
     file: Option<FileProblem>,
     /// The run that owes this artifact and holds none of it — where a
-    /// reader goes to look.
+    /// reader goes to look. Absent when this run owes it, which is what
+    /// a document its own node never handed over is.
     #[serde(skip_serializing_if = "Option::is_none")]
     run: Option<String>,
-    /// The node of that run the artifact was asked of, when the
-    /// reference names one.
+    /// The node the artifact was asked of: of `run` when one is named,
+    /// of this run otherwise. Absent when the question is about a run as
+    /// a whole.
     #[serde(skip_serializing_if = "Option::is_none")]
     producer: Option<String>,
-    /// The identity that run was asked for.
+    /// The identity that was asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     artifact: Option<ArtifactId>,
     /// Every problem this document's content has, in document order.
@@ -315,6 +318,12 @@ impl From<&ArtifactFailure> for ArtifactProblems {
                 code,
                 path: Some(path.clone()),
                 file: Some(problem.clone()),
+                ..ArtifactProblems::default()
+            },
+            ArtifactFailure::Undelivered { node, artifact } => ArtifactProblems {
+                code,
+                producer: Some(node.to_string()),
+                artifact: Some(artifact.clone()),
                 ..ArtifactProblems::default()
             },
             ArtifactFailure::Content(report) => ArtifactProblems {

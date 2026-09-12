@@ -119,13 +119,16 @@ reading the run fails naming its position.
 `node_failed` records what failed, not a sentence about it. Its `failure` is
 either `outcome:` — one sentence the engine states, for a failure with no
 artifact behind it — or `artifacts:`, one entry per declared artifact that did
-not close. An entry is one of three: the file itself (`artifact-missing`,
+not close. An entry is one of four: the file itself (`artifact-missing`,
 `artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`),
-its content — the path, the kind whose shape it was read against, and every
-problem that document has — or an artifact no run holds (`artifact-unheld`),
-which carries the run that owes it, the node of that run it was asked of when
-the reference names one, and the identity it was asked for. A node of
-composition writes no file, so its entry names none. Each content problem names
+a document nobody handed over (`artifact-undelivered`), which carries the node
+that declared it and the identity that node owes, its content — the path, the
+kind whose shape it was read against, and every problem that document has — or
+an artifact no run holds (`artifact-unheld`), which carries the run that owes it,
+the node of that run it was asked of when the reference names one, and the
+identity it was asked for. Only the first names a path: a document that arrives
+through a submission tool and a node of composition write no file, so their
+entries name none. Each content problem names
 its subject in the document's own words — ``task `t1`, criterion 1`` — which is
 the whole of where it is: a diagnostic carries no line and column, and
 `events.json` publishes none. Every surface renders from that value — `status`

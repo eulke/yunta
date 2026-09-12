@@ -30,8 +30,8 @@
 //!
 //! Every failure here is an [`ArtifactFailure`]: a problem with the file
 //! (never produced, empty, past the declared ceiling, refused by the
-//! filesystem) or a document whose content is not what its kind
-//! declares.
+//! filesystem), a document the node ended owing, or a document whose
+//! content is not what its kind declares.
 
 use std::path::{Path, PathBuf};
 
@@ -152,16 +152,12 @@ pub(crate) fn held_document(
     spec: &ArtifactSpec,
     held: &super::RunArtifacts<'_>,
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
-    let Some(found) = held
-        .ledger()
-        .latest(&ArtifactId::of(spec.name(), spec.kind()), Some(node))
-    else {
-        return Err(ArtifactFailure::file(
-            crate::run_dir::staged_path(node, spec.name())
-                .display()
-                .to_string(),
-            FileProblem::Missing { node: node.clone() },
-        ));
+    let artifact = ArtifactId::of(spec.name(), spec.kind());
+    let Some(found) = held.ledger().latest(&artifact, Some(node)) else {
+        return Err(ArtifactFailure::Undelivered {
+            node: node.clone(),
+            artifact,
+        });
     };
     let bytes = held.bytes(found).map_err(|source| {
         ArtifactFailure::file(

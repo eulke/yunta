@@ -279,13 +279,16 @@ registra.
 **La falla es dato, no prosa.** `failure` toma una de dos formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
 `artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
-es una de tres: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
-`artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, el contenido
-—el path del documento, la `kind` que fija su forma y todos sus diagnósticos— o un
-artifact que ningún run tiene (`artifact-unheld`): el `run` que lo debe, el
-`producer` de ese run al que se le pidió cuando la referencia nombra uno, y el
-`artifact` —la identidad— que se le pidió. Un nodo de composición no escribe
-archivo, así que su elemento no nombra ninguno. El texto que ve una persona se
+es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
+`artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
+nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`
+—la identidad— que quedó debiendo; el contenido —el path del documento, la `kind`
+que fija su forma y todos sus diagnósticos— o un artifact que ningún run tiene
+(`artifact-unheld`): el `run` que lo debe, el `producer` de ese run al que se le
+pidió cuando la referencia nombra uno, y el `artifact` que se le pidió. Solo el
+primero nombra un path: el cierre abrió un archivo únicamente cuando el nodo lo
+escribe. Un documento que entra por la herramienta de entrega y un nodo de
+composición no escriben archivo, así que sus elementos no nombran ninguno. El texto que ve una persona se
 produce al leer el evento, nunca al escribirlo (D133). Un payload que lleva
 `outcome:` solo se lee como la falla de una frase, sin migración: es la tolerancia
 de lectura de §3.1 del Contrato aplicada a este campo.

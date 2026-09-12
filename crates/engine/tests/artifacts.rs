@@ -359,6 +359,43 @@ fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
     let failures =
         close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     match &failures[..] {
+        [ArtifactFailure::Undelivered { node, artifact }] => {
+            assert_eq!(node.as_str(), "plan");
+            assert_eq!(
+                *artifact,
+                ArtifactId::Interpreted {
+                    kind: ArtifactKind::Tasks
+                }
+            );
+        }
+        other => panic!("a document nobody handed over: {other:?}"),
+    }
+    assert_eq!(codes(&failures), ["artifact-undelivered"]);
+    // No file is at fault, so none is named: the close never opened one
+    // and a path would send a reader to something that was never going
+    // to be there.
+    assert_eq!(failures[0].path(), None);
+    let rendered = rendered(&failures);
+    assert!(
+        rendered.contains("node `plan`") && rendered.contains("tasks document"),
+        "the failure names the node and the identity it owes: {rendered}"
+    );
+    assert!(
+        !rendered.contains("scratch/") && !rendered.contains("artifacts/"),
+        "a document nobody handed over names no file: {rendered}"
+    );
+}
+
+#[test]
+fn a_command_node_that_wrote_no_file_still_names_the_file_it_did_not_write() {
+    let run_dir = tempfile::tempdir().unwrap();
+
+    // The same tasks document, declared by a node whose close does open
+    // a file: the path is real, the close went looking for it, and that
+    // is what the failure says.
+    let failures =
+        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    match &failures[..] {
         [ArtifactFailure::File {
             path,
             problem: FileProblem::Missing { node },
@@ -366,8 +403,9 @@ fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
             assert_eq!(*path, staged("plan", "plan.yaml"));
             assert_eq!(node.as_str(), "plan");
         }
-        other => panic!("a document nobody handed over: {other:?}"),
+        other => panic!("a file the node never wrote: {other:?}"),
     }
+    assert_eq!(codes(&failures), ["artifact-missing"]);
 }
 
 #[test]

@@ -172,9 +172,11 @@ in the order it first reported them — a node that reports nothing gets a file 
 an empty list. A finding outlives the session that found it, so a session that dies
 after reporting loses nothing.
 
-A document nobody submits fails the node: the file it declared is not there at
-close, and there is no second session to instruct. So does a file that is empty,
-past `limits.max_artifact_bytes`, or refused by the filesystem. An adapter that
+A document nobody submits fails the node, named by the node that owes it and the
+document it owes rather than by a file — there was never going to be one — and
+there is no second session to instruct. A file a command node declared and never
+wrote fails the node too, named by the path the close went looking at, as does one
+that is empty, past `limits.max_artifact_bytes`, or refused by the filesystem. An adapter that
 mounts no run tools fails a node that declares an interpreted artifact before the
 session is dispatched — the document has no way in.
 

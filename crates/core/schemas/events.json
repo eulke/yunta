@@ -139,7 +139,7 @@
       ]
     },
     "ArtifactFailure": {
-      "description": "Why one declared artifact did not close.\n\nThe variants answer the one question that decides what is worth\ndoing next: rewriting the content reaches [`Content`](Self::Content),\nnothing this node writes reaches [`File`](Self::File), and nothing\nthis run does at all reaches [`Unheld`](Self::Unheld), because the\nartifact is another run's to produce.",
+      "description": "Why one declared artifact did not close.\n\nThe variants answer the one question that decides what is worth\ndoing next: rewriting the content reaches [`Content`](Self::Content),\nnothing this node writes reaches [`File`](Self::File) or\n[`Undelivered`](Self::Undelivered), and nothing this run does at all\nreaches [`Unheld`](Self::Unheld), because the artifact is another\nrun's to produce.",
       "oneOf": [
         {
           "description": "The file itself. No rewrite of its content reaches this.",
@@ -160,6 +160,29 @@
             "failure",
             "path",
             "problem"
+          ]
+        },
+        {
+          "description": "Declared by a node the run's own log answers for, and never\nhanded over: the node ended without the document it owes.\n\nNo path, for the same reason [`Unheld`](Self::Unheld) has none.\nSuch a document never is a file on its way in — a session hands\nit over through its submission tool, the engine derives it from\nwhat the node posted — so the close opened nothing and there is\nno file to name.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "What the node owes: the identity, which is what a log\nanswers by.",
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "failure": {
+              "type": "string",
+              "const": "undelivered"
+            },
+            "node": {
+              "description": "The node that declared it and ended owing it.",
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "failure",
+            "node",
+            "artifact"
           ]
         },
         {

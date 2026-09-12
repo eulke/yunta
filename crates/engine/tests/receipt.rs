@@ -526,29 +526,16 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     );
 }
 
-/// A `kind: workflow` node declaring what its child run never produced
-/// fails on the artifact itself, and the receipt counts that like any
-/// other artifact failure — by its stable code, with no document kind,
-/// because nothing ever read a document.
+/// The receipt a run of `workflow_yaml` earns when its one node failed
+/// on `failure` and the run ended.
 ///
-/// Derived from a log built here rather than from a run: an unheld
-/// artifact leaves its run paused, and a receipt certifies closed work
-/// only. What is under test is the derivation from `node_failed`, and
-/// that is exactly what the log carries.
-#[test]
-fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+/// Derived from a log built here rather than from a run: a node that
+/// fails on an artifact leaves its run paused, and a receipt certifies
+/// closed work only. What is under test is the derivation from
+/// `node_failed`, and that is exactly what the log carries.
+fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(
-        r#"
-name: unheld-fixture
-nodes:
-  - id: compose
-    kind: workflow
-    use: producer
-    artifacts: { produces: [report.md] }
-"#,
-    )
-    .unwrap();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
@@ -564,13 +551,9 @@ nodes:
             run_id: bench.run_id.clone(),
             seq: 1_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
-            node_id: Some(NodeId::from("compose")),
+            node_id: Some(NodeId::from(node)),
             body: EventBody::Known(EventPayload::NodeFailed(NodeFailedPayload::new(
-                Failure::artifacts(vec![ArtifactFailure::Unheld {
-                    run: RunId::from("run-child-1"),
-                    producer: None,
-                    artifact: ArtifactId::of("report.md", None),
-                }]),
+                failure,
                 false,
                 TokenUsage::default(),
             ))),
@@ -590,7 +573,7 @@ nodes:
         },
     ];
 
-    let receipt = build_receipt(
+    build_receipt(
         &bench.run_id,
         &manifest,
         &events,
@@ -598,7 +581,31 @@ nodes:
             events: events.len(),
         },
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// A `kind: workflow` node declaring what its child run never produced
+/// fails on the artifact itself, and the receipt counts that like any
+/// other artifact failure — by its stable code, with no document kind,
+/// because nothing ever read a document.
+#[test]
+fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+    let receipt = receipt_of_failure(
+        r#"
+name: unheld-fixture
+nodes:
+  - id: compose
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#,
+        "compose",
+        Failure::artifacts(vec![ArtifactFailure::Unheld {
+            run: RunId::from("run-child-1"),
+            producer: None,
+            artifact: ArtifactId::of("report.md", None),
+        }]),
+    );
 
     assert_eq!(
         receipt.diagnostics,
@@ -611,6 +618,45 @@ nodes:
     );
     assert!(
         render_receipt_markdown(&receipt).contains("`artifact-unheld` \u{d7}1"),
+        "{receipt:?}"
+    );
+}
+
+/// A session node that ended owing the document it declared fails on the
+/// artifact itself too: the receipt counts it by its own code, under no
+/// kind, because nothing ever read a document either.
+#[test]
+fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
+    let receipt = receipt_of_failure(
+        r#"
+name: undelivered-fixture
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the plan."
+    artifacts:
+      produces:
+        - { name: plan.yaml, kind: tasks }
+"#,
+        "plan",
+        Failure::artifacts(vec![ArtifactFailure::Undelivered {
+            node: NodeId::from("plan"),
+            artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+        }]),
+    );
+
+    assert_eq!(
+        receipt.diagnostics,
+        vec![DiagnosticCount {
+            kind: None,
+            code: "artifact-undelivered".to_string(),
+            occurrences: 1,
+        }],
+        "a document nobody handed over is counted by its own code, under no kind"
+    );
+    assert!(
+        render_receipt_markdown(&receipt).contains("`artifact-undelivered` \u{d7}1"),
         "{receipt:?}"
     );
 }

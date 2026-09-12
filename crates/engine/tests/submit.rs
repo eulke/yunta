@@ -371,7 +371,10 @@ sessions:
     match state.nodes.get("plan") {
         Some(NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
-            assert!(text.contains("plan.yaml"), "got: {text}");
+            assert!(
+                text.contains("node `plan`") && text.contains("tasks document"),
+                "got: {text}"
+            );
         }
         other => panic!("expected plan failed, got {other:?}"),
     }

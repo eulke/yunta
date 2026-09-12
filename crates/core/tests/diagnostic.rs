@@ -230,6 +230,68 @@ fn a_log_written_before_failures_were_data_still_reads() {
 }
 
 #[test]
+fn a_document_nobody_handed_over_is_a_failure_of_the_artifact_itself() {
+    let undelivered = ArtifactFailure::Undelivered {
+        node: NodeId::from("plan"),
+        artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+    };
+
+    assert_eq!(
+        undelivered.code(),
+        Some("artifact-undelivered"),
+        "a receipt counts it under its own stable name"
+    );
+    assert!(
+        undelivered.path().is_none(),
+        "the close opened no file, so there is none to open"
+    );
+    assert!(
+        undelivered.report().is_none(),
+        "nothing read a document that was never handed over"
+    );
+}
+
+#[test]
+fn an_undelivered_document_reads_back_with_its_tag_the_node_and_the_identity() {
+    let undelivered = ArtifactFailure::Undelivered {
+        node: NodeId::from("plan"),
+        artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+    };
+
+    let value = serde_json::to_value(&undelivered).expect("a failure is data");
+    assert_eq!(value["failure"], "undelivered", "{value:#}");
+    assert_eq!(value["node"], "plan", "{value:#}");
+    assert_eq!(value["artifact"]["kind"], "tasks", "{value:#}");
+    assert!(
+        value.get("path").is_none(),
+        "no file is named, not even an empty one: {value:#}"
+    );
+
+    let back: ArtifactFailure = serde_json::from_value(value).expect("and reads back as itself");
+    assert_eq!(back, undelivered);
+}
+
+#[test]
+fn a_document_a_node_never_handed_over_renders_as_the_node_that_owes_it() {
+    let failure = Failure::artifacts(vec![ArtifactFailure::Undelivered {
+        node: NodeId::from("plan"),
+        artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+    }]);
+    assert_eq!(
+        failure.to_string(),
+        "node `plan`: 1 error\n  \
+         handed over no tasks document — produce it before the node ends, \
+         or stop declaring it here"
+    );
+    assert_eq!(
+        failure.failures().count(),
+        1,
+        "it is one declared artifact that did not close"
+    );
+    assert_eq!(failure.reports().count(), 0, "no document was read");
+}
+
+#[test]
 fn an_artifact_no_run_holds_is_a_failure_of_the_artifact_itself() {
     let unheld = ArtifactFailure::Unheld {
         run: RunId::from("run-child-1"),

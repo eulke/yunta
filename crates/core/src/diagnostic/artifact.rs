@@ -1,12 +1,18 @@
 //! Why one declared artifact did not close.
 //!
-//! A file that was never written, a file whose content is wrong and an
-//! artifact another run owes are three failures, and every surface reads
-//! them differently: one says the node produced nothing, one says what
+//! A file that was never written, a document nobody handed over, a file
+//! whose content is wrong and an artifact another run owes are four
+//! failures, and every surface reads them differently: one says the node
+//! wrote no file, one says the node ended owing a document, one says what
 //! the document it produced got wrong, and one says nothing this run
-//! does reaches the artifact at all. Three variants make that a fact the
+//! does reaches the artifact at all. Four variants make that a fact the
 //! compiler carries rather than a predicate somebody has to remember to
 //! call.
+//!
+//! Only the first names a path, because it is the only one a close went
+//! looking on disk for. The rest answer about something the log states,
+//! and a path invented for them would send a reader to a file that was
+//! never going to be there.
 
 use std::fmt;
 
@@ -20,14 +26,30 @@ use crate::{NodeId, RunId};
 ///
 /// The variants answer the one question that decides what is worth
 /// doing next: rewriting the content reaches [`Content`](Self::Content),
-/// nothing this node writes reaches [`File`](Self::File), and nothing
-/// this run does at all reaches [`Unheld`](Self::Unheld), because the
-/// artifact is another run's to produce.
+/// nothing this node writes reaches [`File`](Self::File) or
+/// [`Undelivered`](Self::Undelivered), and nothing this run does at all
+/// reaches [`Unheld`](Self::Unheld), because the artifact is another
+/// run's to produce.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "failure", rename_all = "kebab-case")]
 pub enum ArtifactFailure {
     /// The file itself. No rewrite of its content reaches this.
     File { path: String, problem: FileProblem },
+    /// Declared by a node the run's own log answers for, and never
+    /// handed over: the node ended without the document it owes.
+    ///
+    /// No path, for the same reason [`Unheld`](Self::Unheld) has none.
+    /// Such a document never is a file on its way in — a session hands
+    /// it over through its submission tool, the engine derives it from
+    /// what the node posted — so the close opened nothing and there is
+    /// no file to name.
+    Undelivered {
+        /// The node that declared it and ended owing it.
+        node: NodeId,
+        /// What the node owes: the identity, which is what a log
+        /// answers by.
+        artifact: ArtifactId,
+    },
     /// The file is there and its content is not what its kind declares.
     Content(Report),
     /// Declared here and held by no run that could hand it over: the
@@ -69,18 +91,20 @@ impl ArtifactFailure {
     pub fn code(&self) -> Option<&'static str> {
         match self {
             ArtifactFailure::File { problem, .. } => Some(problem.code()),
+            ArtifactFailure::Undelivered { .. } => Some("artifact-undelivered"),
             ArtifactFailure::Unheld { .. } => Some("artifact-unheld"),
             ArtifactFailure::Content(_) => None,
         }
     }
 
     /// Where a reader opens the file. `None` when no file is at fault:
-    /// an artifact another run owes never had one.
+    /// a document nobody handed over and an artifact another run owes
+    /// never had one.
     pub fn path(&self) -> Option<&str> {
         match self {
             ArtifactFailure::File { path, .. } => Some(path),
             ArtifactFailure::Content(report) => Some(&report.document.path),
-            ArtifactFailure::Unheld { .. } => None,
+            ArtifactFailure::Undelivered { .. } | ArtifactFailure::Unheld { .. } => None,
         }
     }
 
@@ -88,7 +112,9 @@ impl ArtifactFailure {
     /// receipt counts and a diagnostic is rendered from.
     pub fn report(&self) -> Option<&Report> {
         match self {
-            ArtifactFailure::File { .. } | ArtifactFailure::Unheld { .. } => None,
+            ArtifactFailure::File { .. }
+            | ArtifactFailure::Undelivered { .. }
+            | ArtifactFailure::Unheld { .. } => None,
             ArtifactFailure::Content(report) => Some(report),
         }
     }
@@ -102,6 +128,17 @@ impl fmt::Display for ArtifactFailure {
                 &[format!("the document {problem}")],
             )),
             ArtifactFailure::Content(report) => report.fmt(f),
+            // Headed by the node rather than by a path: the node is
+            // what a reader has to go instruct, and the remedy is the
+            // same shape as `Unheld`'s, since either the node produces
+            // it or nothing here may declare it.
+            ArtifactFailure::Undelivered { node, artifact } => f.write_str(&crate::text::problems(
+                format!("node `{node}`"),
+                &[format!(
+                    "handed over no {} — produce it before the node ends, or stop declaring it here",
+                    artifact.label()
+                )],
+            )),
             // Headed by the run rather than by a path, because the run
             // is what a reader has to go look at; the remedy holds for
             // both ends of a composition, since either the run produces
