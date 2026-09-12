@@ -78,10 +78,6 @@ impl CodexAdapter {
 
     fn build_args(&self, req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String> {
         let mut args = vec!["exec".to_string(), "--json".to_string()];
-        if let Some(session_id) = resume {
-            args.push("resume".to_string());
-            args.push(session_id.as_str().to_string());
-        }
         if let Some(model) = &req.model {
             args.push("--model".to_string());
             args.push(model.to_string());
@@ -108,10 +104,11 @@ impl CodexAdapter {
         }
         if let Some(endpoint) = &req.run_tools_endpoint {
             let server = RunToolsEndpoint::SERVER_NAME;
-            // Streamable HTTP needs the rmcp client; the CLI's own
-            // default client speaks stdio only.
+            // The per-run server reaches the CLI as an external MCP
+            // server over streamable HTTP: `url` is the key that selects
+            // that transport, and the credential travels as the name of
+            // the variable the CLI reads it from.
             for setting in [
-                ConfigOverride::boolean("experimental_use_rmcp_client", true),
                 ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
                 ConfigOverride::string(
                     format!("mcp_servers.{server}.bearer_token_env_var"),
@@ -120,6 +117,15 @@ impl CodexAdapter {
             ] {
                 args.extend(setting.into_args());
             }
+        }
+        // `exec`'s own options are declared on the parent command and
+        // are not `global`, so clap reads one that follows `resume` as
+        // an unexpected argument and the invocation dies before a
+        // session opens: the subcommand goes last, with only its own
+        // arguments after it.
+        if let Some(session_id) = resume {
+            args.push("resume".to_string());
+            args.push(session_id.as_str().to_string());
         }
         // `codex exec` exposes no cap on turns: `budget.max_turns` is
         // bounded here by the engine's own timeout and token budget.

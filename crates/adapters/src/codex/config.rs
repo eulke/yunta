@@ -19,16 +19,6 @@ pub(super) struct ConfigOverride {
 }
 
 impl ConfigOverride {
-    /// A TOML boolean: bare `true` or `false`, never quoted — the CLI
-    /// reads a quoted one as a string and rejects it for a key typed as
-    /// a boolean.
-    pub(super) fn boolean(key: impl Into<String>, value: bool) -> Self {
-        Self {
-            key: key.into(),
-            value: Value::Boolean(value),
-        }
-    }
-
     /// A TOML string.
     pub(super) fn string(key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -79,11 +69,6 @@ mod tests {
         let table: toml::Table = toml::from_str(&assignment)
             .unwrap_or_else(|e| panic!("`{assignment}` is not readable TOML: {e}"));
         table["k"].clone()
-    }
-
-    #[test]
-    fn a_boolean_renders_unquoted() {
-        assert_eq!(assignment(ConfigOverride::boolean("k", true)), "k=true");
     }
 
     #[test]

@@ -427,6 +427,120 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
     assert_eq!(args[resume_pos + 1], "thread-to-resume");
 }
 
+/// `codex exec resume` takes the thread id, `--last`, `--all` and
+/// `--image`; `exec`'s own options are declared on the parent command
+/// and are not `global`, so clap reads one that follows the subcommand
+/// as an unexpected argument and the invocation dies before a session
+/// opens.
+#[tokio::test]
+async fn resume_places_every_parent_option_before_the_subcommand() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+
+    let mut req = request(dir.path().to_path_buf());
+    req.model = Some("gpt-5-codex".into());
+    req.permissions = PermissionProfile::Edit;
+    req.artifact_dir = Some(artifacts);
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter()
+        .resume(&SessionId::from("thread-to-resume"), req)
+        .await
+        .unwrap();
+    let events = drain(session).await;
+
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Failed { .. })),
+        "the CLI accepts the invocation: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SessionOpened { .. })),
+        "the resumed session opens: {events:?}"
+    );
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let position = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("`{flag}` reaches the CLI: {args:?}"))
+    };
+    let resume_pos = position("resume");
+    assert!(
+        resume_pos > position("--model"),
+        "the model is the parent command's option: {args:?}"
+    );
+    assert!(
+        resume_pos > position("--sandbox"),
+        "the sandbox is the parent command's option: {args:?}"
+    );
+    for (at, arg) in args.iter().enumerate() {
+        assert!(
+            arg != "-c" || resume_pos > at,
+            "every config override precedes the subcommand: {args:?}"
+        );
+    }
+    assert_eq!(
+        args[resume_pos + 1..].to_vec(),
+        vec!["thread-to-resume".to_string(), "-".to_string()],
+        "the subcommand takes the thread id and the stdin prompt, nothing else: {args:?}"
+    );
+}
+
+/// The stub stands in for the CLI's own parser, so what clap rejects it
+/// rejects too: a stub that accepted any argument order would let an
+/// invocation the real binary refuses pass the suite.
+#[test]
+fn the_stub_refuses_a_parent_option_after_resume_like_clap_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+    let run = |args: [&str; 7]| {
+        std::process::Command::new(stub_path())
+            .args(args)
+            .env("CODEX_STUB_LINES_FILE", &lines)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    let refused = run(["exec", "--json", "resume", "x", "--model", "m", "-"]);
+    assert_eq!(refused.status.code(), Some(2), "the parse fails");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("unexpected argument"),
+        "the diagnostic names the argument: {}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(
+        refused.stdout.is_empty(),
+        "no session opens: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+
+    let accepted = run(["exec", "--json", "--model", "m", "resume", "x", "-"]);
+    assert_eq!(accepted.status.code(), Some(0), "the parse succeeds");
+    assert!(
+        String::from_utf8_lossy(&accepted.stdout).contains("thread.started"),
+        "the session streams its events: {}",
+        String::from_utf8_lossy(&accepted.stdout)
+    );
+}
+
 #[tokio::test]
 async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let dir = tempfile::tempdir().unwrap();
@@ -788,5 +902,60 @@ async fn no_per_run_endpoint_configures_no_server() {
             .unwrap()
             .contains("mcp_servers"),
         "nothing to configure, nothing configured"
+    );
+}
+
+/// The CLI reads a server as streamable HTTP from the `url` key alone.
+/// Every override this adapter sends is one the CLI's configuration
+/// reference defines, so a key the CLI does not know cannot ride along
+/// and silently do nothing.
+#[tokio::test]
+async fn no_dead_config_override_reaches_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.contains("experimental_use_rmcp_client")),
+        "no key outside the CLI's configuration reference: {args:?}"
+    );
+    let server: Vec<&String> = args
+        .iter()
+        .filter(|a| a.starts_with("mcp_servers.yunta."))
+        .collect();
+    assert_eq!(
+        server.len(),
+        2,
+        "the per-run server takes its url and its credential's variable, nothing more: {args:?}"
+    );
+    assert!(
+        server
+            .iter()
+            .any(|a| a.starts_with("mcp_servers.yunta.url=")),
+        "the url selects streamable HTTP: {args:?}"
+    );
+    assert!(
+        server
+            .iter()
+            .any(|a| a.starts_with("mcp_servers.yunta.bearer_token_env_var=")),
+        "the credential is named, not inlined: {args:?}"
     );
 }
