@@ -18,8 +18,8 @@ use crate::policy::ScopeExpansionMode;
 use crate::workflow::OnInterrupt;
 use crate::{Capabilities, Capability};
 
-/// A ledger criterion, frozen into `task_registered` — the same shape
-/// the ledger parser produces.
+/// A tasks document criterion, frozen into `task_registered` — the same shape
+/// the tasks parser produces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Criterion {
     pub cmd: String,
@@ -206,7 +206,7 @@ pub struct DiscardedCandidate {
 /// One resolved `ContextSource` reference in `context_assembled.sources`.
 /// `kind` stays a plain string — the engine fixes the *set* of
 /// builtin source kinds (`files | command | artifact | run-events |
-/// ledger | knowledge | node-output`, `mcp` among them) but never closes
+/// tasks | knowledge | node-output`, `mcp` among them) but never closes
 /// it into an enum, since a pack can add its own sources without
 /// this type needing to change. `content_hash` is what makes every
 /// resolution's event carry a verifiable hash — the hash of exactly

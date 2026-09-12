@@ -50,9 +50,9 @@ fn all_kinds() -> Vec<EventPayload> {
             text: None,
         }),
         EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-            path: "artifacts/ledger.yaml".into(),
+            path: "artifacts/tasks.yaml".into(),
             content_hash: yunta_core::sha256_hex(b"sha256:111"),
-            artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
+            artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
             task_id: None,
@@ -219,7 +219,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
             name: "plan.yaml".to_string(),
-            artifact_kind: yunta_core::ArtifactKind::TaskLedger,
+            artifact_kind: yunta_core::ArtifactKind::Tasks,
             outcome: SubmissionOutcome::Accepted {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },

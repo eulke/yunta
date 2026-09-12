@@ -1,6 +1,6 @@
 # Minimal illustrative workflow exercising the core schema:
 # prompt/bash/loop nodes, depends_on, scope, artifacts.produces (kind:
-# task-ledger), hooks.after and on_failure.goto/max_reroutes.
+# tasks), hooks.after and on_failure.goto/max_reroutes.
 name: fix-lint-loop
 description: "Implement via loop, verify with bash, re-route on failure."
 nodes:
@@ -9,10 +9,10 @@ nodes:
     runner: executor
     until: all_tasks_complete
     prompt: |
-      Read your task from the ledger and implement it within its scope.
+      Read your task from the tasks document and implement it within its scope.
     artifacts:
       produces:
-        - { name: ledger.yaml, kind: task-ledger }
+        - { name: tasks.yaml, kind: tasks }
 
   - id: lint
     kind: bash

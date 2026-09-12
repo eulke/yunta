@@ -209,7 +209,7 @@ baseline:
   suite: "true"
 "#;
 
-/// Exercises every receipt section in one run: a ledger task with two
+/// Exercises every receipt section in one run: a task with two
 /// criteria (`plan`/`implement`), a baseline capture-then-compare pair
 /// (`capture`/`compare`), a re-route (`lint` fails once, `fix-lint`
 /// corrects it), and a fan-out review (`runners: [reviewer,
@@ -220,9 +220,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
-      produces: [{ name: ledger.yaml, kind: task-ledger }]
+      produces: [{ name: tasks.yaml, kind: tasks }]
   - id: implement
     kind: loop
     runner: executor
@@ -254,18 +254,18 @@ nodes:
     prompt: "review the change"
 "#;
 
-/// The ledger reaches the run through the run tools, so the planning
+/// The tasks document reaches the run through the run tools, so the planning
 /// session names no path at all; every other session's `path` is
 /// relative to the worktree, which is a session's own cwd.
 const FIXTURE: &str = r#"
 capabilities: { run_tools: true }
 sessions:
-  - match_prompt_contains: "Write the ledger"
+  - match_prompt_contains: "Write the tasks document"
     steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
-          name: ledger.yaml
+          name: tasks.yaml
           document:
             tasks:
               - id: T001
@@ -502,12 +502,12 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
+            kind: Some(ArtifactKind::Tasks),
             code: "parse".to_string(),
             occurrences: 2,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
+            kind: Some(ArtifactKind::Tasks),
             code: "no-criteria".to_string(),
             occurrences: 1,
         },
@@ -515,22 +515,22 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "document problem(s) reported during the run: `parse` in the task ledger \u{d7}2, \
-             `no-criteria` in the task ledger \u{d7}1"
+            "document problem(s) reported during the run: `parse` in the tasks document \u{d7}2, \
+             `no-criteria` in the tasks document \u{d7}1"
         ),
         "{markdown}"
     );
 }
 
 /// `duplicate-id` is one rule asked of three documents. Counting it by
-/// code alone cannot say whether a run hit three broken ledgers or one
+/// code alone cannot say whether a run hit three broken tasks documents or one
 /// of each, so the count carries the kind and the two never merge.
 #[test]
 fn the_same_rule_in_two_documents_counts_as_two_facts() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
+            kind: Some(ArtifactKind::Tasks),
             code: "duplicate-id".to_string(),
             occurrences: 3,
         },
@@ -547,7 +547,7 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     ];
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("`duplicate-id` in the task ledger \u{d7}3"),
+        markdown.contains("`duplicate-id` in the tasks document \u{d7}3"),
         "{markdown}"
     );
     assert!(
@@ -568,13 +568,13 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
 fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
-        kind: Some(ArtifactKind::TaskLedger),
+        kind: Some(ArtifactKind::Tasks),
         code: "parse".to_string(),
         occurrences: 3,
     }];
     let rendered = render_receipt_json(&receipt).expect("the receipt renders");
     let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
-    assert_eq!(json["diagnostics"][0]["kind"], "task-ledger");
+    assert_eq!(json["diagnostics"][0]["kind"], "tasks");
     assert_eq!(json["diagnostics"][0]["code"], "parse");
     assert_eq!(json["diagnostics"][0]["occurrences"], 3);
 }

@@ -19,7 +19,7 @@ use crate::project;
 pub enum Shape {
     OneNode,
     LintFix,
-    Ledger,
+    Tasks,
 }
 
 impl Shape {
@@ -35,7 +35,7 @@ impl Shape {
     }
 
     fn all() -> [Self; 3] {
-        [Self::OneNode, Self::LintFix, Self::Ledger]
+        [Self::OneNode, Self::LintFix, Self::Tasks]
     }
 
     /// The shapes as a sentence lists them — one home for "one of ...",
@@ -52,7 +52,7 @@ impl Shape {
         match self {
             Self::OneNode => "one-node",
             Self::LintFix => "lint-fix",
-            Self::Ledger => "ledger",
+            Self::Tasks => "tasks",
         }
     }
 
@@ -60,7 +60,7 @@ impl Shape {
         let template = match self {
             Self::OneNode => ONE_NODE_TEMPLATE,
             Self::LintFix => LINT_FIX_TEMPLATE,
-            Self::Ledger => LEDGER_TEMPLATE,
+            Self::Tasks => TASKS_TEMPLATE,
         };
         template.replace("{{workflow-name}}", name)
     }
@@ -102,26 +102,26 @@ nodes:
     prompt: \"Fix what `lint` reported.\"
 ";
 
-const LEDGER_TEMPLATE: &str = "\
+const TASKS_TEMPLATE: &str = "\
 name: {{workflow-name}}
-# A task-ledger cycle, empty to start: `plan` opens an agent session
-# that writes a task ledger artifact; `implement` loops
+# A tasks cycle, empty to start: `plan` opens an agent session
+# that writes a tasks document artifact; `implement` loops
 # over it, dispatching one mechanically-verified session per ready
 # task, until every task is `done`.
 nodes:
   - id: plan
     kind: prompt
     # runner: planner  # uncomment once runners: defines this role
-    prompt: \"Write a task ledger to {{run.dir}}/artifacts/ledger.yaml.\"
+    prompt: \"Write a tasks document to {{run.dir}}/artifacts/ledger.yaml.\"
     artifacts:
       produces:
-        - { name: ledger.yaml, kind: task-ledger }
+        - { name: ledger.yaml, kind: tasks }
   - id: implement
     kind: loop
     # runner: implementer  # uncomment once runners: defines this role
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: \"Read your next task from the ledger and implement it.\"
+    prompt: \"Read your next task from the tasks document and implement it.\"
 ";
 
 fn prompt_shape() -> Shape {
@@ -137,7 +137,7 @@ fn prompt_shape() -> Shape {
     }
     match line.trim() {
         "2" => Shape::LintFix,
-        "3" => Shape::Ledger,
+        "3" => Shape::Tasks,
         _ => Shape::OneNode,
     }
 }

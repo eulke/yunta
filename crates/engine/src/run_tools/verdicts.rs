@@ -8,7 +8,7 @@
 //! everywhere at once.
 //!
 //! An acceptance says what the engine *read*, not merely that it parsed:
-//! a ledger that comes back as six tasks when the session meant seven is
+//! a tasks document that comes back as six tasks when the session meant seven is
 //! a mistake only the session can still fix.
 
 use yunta_core::diagnostic::Report;
@@ -67,10 +67,10 @@ pub(super) fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
     use crate::artifacts::ArtifactContent;
     match &verified.content {
         ArtifactContent::Opaque => "Verified by existence and content hash.".to_string(),
-        ArtifactContent::TaskLedger(ledger) => format!(
+        ArtifactContent::Tasks(tasks) => format!(
             "{} task(s) registered: {}",
-            ledger.tasks.len(),
-            names(ledger.tasks.iter().map(|t| t.id.to_string()))
+            tasks.tasks.len(),
+            names(tasks.tasks.iter().map(|t| t.id.to_string()))
         ),
         ArtifactContent::Findings(findings) => format!(
             "{} finding(s) posted: {}",

@@ -87,7 +87,7 @@ fn a_workflow_with_no_events_yet_lists_every_node_as_next() {
 
 #[test]
 fn a_finished_node_shows_its_description_outcome_and_artifacts() {
-    let wf = workflow(vec![node("plan", Some("Writes the ledger"))]);
+    let wf = workflow(vec![node("plan", Some("Writes the tasks document"))]);
     let events = vec![
         event(
             1,
@@ -98,7 +98,7 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
             2,
             "plan",
             EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-                path: "artifacts/ledger.yaml".into(),
+                path: "artifacts/tasks.yaml".into(),
                 content_hash: yunta_core::sha256_hex(b"deadbeef"),
                 artifact_kind: None,
             }),
@@ -117,7 +117,7 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
 
     assert_eq!(
         markdown,
-        "# Progress\n\n## Finished\n\n- **plan** — Writes the ledger\n  outcome: planned\n  artifact: artifacts/ledger.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n"
+        "# Progress\n\n## Finished\n\n- **plan** — Writes the tasks document\n  outcome: planned\n  artifact: artifacts/tasks.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n"
     );
 }
 

@@ -9,7 +9,7 @@
 
 use proptest::prelude::*;
 use yunta_core::shape::{accept, read, render};
-use yunta_core::{FindingsFile, Ledger, QuestionsFile};
+use yunta_core::{FindingsFile, QuestionsFile, TasksFile};
 
 /// Ids the newtypes accept: a letter, then letters, digits, `_` or `-`.
 fn id() -> impl Strategy<Value = String> {
@@ -30,7 +30,7 @@ fn distinct_ids(max: usize) -> impl Strategy<Value = Vec<String>> {
     })
 }
 
-fn ledger() -> impl Strategy<Value = Ledger> {
+fn tasks() -> impl Strategy<Value = TasksFile> {
     distinct_ids(4).prop_flat_map(|ids| {
         let tasks: Vec<_> = ids
             .into_iter()
@@ -60,8 +60,8 @@ fn ledger() -> impl Strategy<Value = Ledger> {
                     )
                 })
                 .collect::<String>();
-            read::<Ledger>(format!("tasks:\n{yaml}").as_bytes(), "generated")
-                .expect("the strategy builds a ledger its own rules accept")
+            read::<TasksFile>(format!("tasks:\n{yaml}").as_bytes(), "generated")
+                .expect("the strategy builds a tasks document its own rules accept")
         })
     })
 }
@@ -138,7 +138,7 @@ macro_rules! round_trips {
     };
 }
 
-round_trips!(a_ledger_round_trips, Ledger, ledger());
+round_trips!(a_tasks_document_round_trips, TasksFile, tasks());
 round_trips!(findings_round_trip, FindingsFile, findings());
 round_trips!(questions_round_trip, QuestionsFile, questions());
 
@@ -153,7 +153,7 @@ fn accept_names_the_path_of_the_value_it_refused() {
             "manual_review": "yes",
         }]
     });
-    let report = accept::<Ledger>(document, "artifacts/plan.yaml")
+    let report = accept::<TasksFile>(document, "artifacts/plan.yaml")
         .expect_err("a string where a boolean belongs is refused");
     let rendered = report.diagnostics[0].to_string();
     assert!(
@@ -196,7 +196,7 @@ fn accept_reports_the_rules_of_a_document_that_parsed() {
             },
         ]
     });
-    let report = accept::<Ledger>(document, "artifacts/plan.yaml")
+    let report = accept::<TasksFile>(document, "artifacts/plan.yaml")
         .expect_err("a dependency on a task nobody declared is refused");
     assert!(
         report

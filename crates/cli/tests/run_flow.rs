@@ -144,10 +144,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document to {{run.dir}}/artifacts/plan.yaml."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
@@ -156,7 +156,7 @@ nodes:
     prompt: "Implement your task."
 "#,
     );
-    // The scripted planner hands its ledger over the way a real one
+    // The scripted planner hands its tasks document over the way a real one
     // does: a tool call the engine answers, and a file the engine writes.
     write(
         &repo.join(".yunta/tests/fixtures/happy.yaml"),
@@ -165,7 +165,7 @@ capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:

@@ -54,7 +54,7 @@ adapters. See [adapters](adapters.md) for configuring this and for what
 ## The engine tells agents what it expects
 
 Three artifact kinds are parsed and validated rather than just stored:
-`task-ledger`, `findings` and `questions`. They are strict — a key that is not
+`tasks`, `findings` and `questions`. They are strict — a key that is not
 in the schema is refused — which only works because the schema is published to
 whoever has to write one, never assumed.
 
@@ -64,7 +64,7 @@ Outside a run, `yunta schema <kind>` prints it and the `document_shape` tool on
 the same way it looks up anything else. Nobody has to relay a format by hand.
 
 A session hands a document over rather than writing a file. The engine gives it a
-tool per interpreted kind the node declares — `yunta_submit_task_ledger`,
+tool per interpreted kind the node declares — `yunta_submit_tasks`,
 `yunta_submit_questions` — whose argument is that published schema, so the model
 fills in an object instead of transcribing a format. Findings are finer-grained
 still: each one is reported on its own with `yunta_post_finding`, corrected with

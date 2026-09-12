@@ -1,4 +1,4 @@
-# A task ledger: one task per independently-verifiable unit of work.
+# A tasks document: one task per independently-verifiable unit of work.
 # Written strictly — any key not listed here fails the node.
 
 tasks:                                  # required, at least one

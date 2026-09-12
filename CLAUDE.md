@@ -137,5 +137,6 @@ Todo texto del repo lo lee un tercero que no estuvo en ninguna conversación.
 | `runner:` | `role:` |
 | pack | plugin |
 | executor | plugin |
+| tasks (el documento de tareas y su kind) | ledger, task-ledger |
 
 "Rol" es una palabra de prosa; en YAML, JSON y código el concepto se llama runner.

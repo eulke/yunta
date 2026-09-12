@@ -2,8 +2,8 @@
 
 **Estado:** normativo v0.1 · **Alcance:** especificación campo por campo de cada
 tipo de evento del event log, la política de versionado aplicada y la política de
-`event_hash`. Precede a los tipos de Rust, igual que la spec del ledger precede al
-parser del ledger.
+`event_hash`. Precede a los tipos de Rust, igual que la spec del documento de tareas precede a
+su parser.
 
 > El Contrato del Run da la tabla evento→emisor→payload-relevante y las políticas de
 > versionado y hashing, pero no el detalle campo por campo de cada payload. Ese
@@ -204,8 +204,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | string (mismo patrón de id que en el schema del ledger) | sí | — |
-| `criteria` | lista de `{cmd, type?}` | sí | copia congelada del ledger |
+| `task_id` | string (mismo patrón de id que en el schema del documento de tareas) | sí | — |
+| `criteria` | lista de `{cmd, type?}` | sí | copia congelada del documento de tareas |
 | `scope` | lista de globs | sí | — |
 | `depends_on` | lista de `task_id` | no | default vacío |
 
@@ -394,7 +394,7 @@ propio `artifact_written` al cierre del nodo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `name` | string | sí | el nombre que el nodo declara en `artifacts.produces` |
-| `artifact_kind` | enum | sí | `task-ledger` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
+| `artifact_kind` | enum | sí | `tasks` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
 | `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico que el engine escribió |
 | `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
 

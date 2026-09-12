@@ -273,7 +273,7 @@ async fn open_and_dispatch(
         skills: setup.skills.clone(),
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
         // A task session produces no declared artifact of its own:
-        // the ledger it works from was written by the node that
+        // the tasks document it works from was written by the node that
         // declared it, and its work lands in the worktree.
         artifact_dir: None,
         scratch_dir: Some(

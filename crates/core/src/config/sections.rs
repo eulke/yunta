@@ -202,7 +202,7 @@ pub struct LimitsConfig {
     /// surface to ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens_per_run: Option<u64>,
-    /// Ceiling on loop-node iterations — the only net under a ledger
+    /// Ceiling on loop-node iterations — the only net under a tasks document
     /// whose state oscillates forever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_loop_iterations: Option<u32>,

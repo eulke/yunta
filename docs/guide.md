@@ -25,11 +25,11 @@ are valid there. A mistyped key never silently becomes a default.
   longer ones). Opens one agent session. `runner:` picks which role from `runners:`
   in config resolves it; `permissions: read-only|edit|full` caps what that session's
   adapter profile allows.
-- **`loop`** — drives a task ledger (`until: all_tasks_complete`, plus a `prompt:`
+- **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [ledger schema](design/spec-ledger.md) for what a task looks
-  like — an earlier `prompt` node produces it as a `kind: task-ledger` artifact, or
+  `1`, sequential). See the [tasks schema](design/spec-ledger.md) for what a task looks
+  like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
   you write one by hand while you're still designing the workflow.
 - **`check`** — automatic verification against data the engine already has: `builtin:
   baseline_compare` (did a passing suite start failing), `builtin: coverage_gate`
@@ -121,7 +121,7 @@ Two environment variables move all of this:
 prompt text itself: `files: [globs]`, `command: "<cmd>"` (stdout), `artifact: {node,
 name}` (another node's declared output — this also creates the implicit dependency
 edge, no separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
-(a read-only query into this run's own log), `ledger: {}` (the task ledger's current
+(a read-only query into this run's own log), `tasks: {}` (the tasks document's current
 state), `knowledge: {layers: [...]}` (repo/user-scoped project knowledge — see
 [knowledge layers](#knowledge-layers) below), and `node-output: {node}` (a prior
 node's own captured output, e.g. what a `parallel` group's blackboard consolidated
@@ -136,14 +136,14 @@ the MCP server, or re-read a file outside what was captured at the time.
 Most artifacts are opaque: the engine records that the file exists and what it
 hashes to, and its structure is whatever the session decided. `kind:` says the
 opposite — that the engine reads the document, validates it, and turns its contents
-into events. There are three: `task-ledger`, `findings` and `questions`.
+into events. There are three: `tasks`, `findings` and `questions`.
 
 Declaring a `kind:` is all it takes. The node declares, the engine publishes the
 shape and names the tool that takes the document, the session hands the document
 over, and the engine writes the file. A node with
-`produces: [{ name: plan.yaml, kind: task-ledger }]` opens its session with the
+`produces: [{ name: plan.yaml, kind: tasks }]` opens its session with the
 shape already in context — annotated field by field, followed by the rules the
-document has to satisfy — and with a `yunta_submit_task_ledger` run tool whose
+document has to satisfy — and with a `yunta_submit_tasks` run tool whose
 `document` argument is that same schema and whose `name` argument accepts only
 the names this node declares. A `questions` artifact arrives the same way,
 through `yunta_submit_questions`. No session writes an interpreted file itself.
@@ -196,7 +196,7 @@ The same shape is available anywhere else you need it:
 
 ```
 yunta schema                    # the kinds
-yunta schema task-ledger        # the shape of the document
+yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
 ```
 
@@ -287,17 +287,17 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A ledger task's `criteria` (see the [ledger schema](design/spec-ledger.md#21-criteria)) run
+A task's `criteria` (see the [tasks schema](design/spec-ledger.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire
 test suite on every single task in a loop is both slow (multiplied by every task in
-the ledger) and a weak signal (a broad suite failing doesn't say *what* broke).
+the tasks document) and a weak signal (a broad suite failing doesn't say *what* broke).
 
 For the suite-wide, no-regression concern, use a `type: guard` criterion — checked
 before and after, never counted as the thing this task proves — sparingly, on the
 tasks where it matters, or once at the workflow's close via a `kind: check` node
-(`builtin: baseline_compare`) shared by every task in the ledger instead of repeated
+(`builtin: baseline_compare`) shared by every task in the tasks document instead of repeated
 per task. `lint-fix.yaml` in the quickstart is this pattern in miniature: `lint`
 verifies the whole workspace once, not per file changed.
 

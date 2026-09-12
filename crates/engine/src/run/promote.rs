@@ -2,7 +2,7 @@
 //! `run_finished: promoted` gets a fresh run in `suggested_mode`,
 //! `promoted_from` it, inheriting its `artifacts/` wholesale at birth
 //! (the successor's initial context automatically includes the
-//! predecessor's artifacts, ledger, and findings — all three are files
+//! predecessor's artifacts, tasks document, and findings — all three are files
 //! under `artifacts/`, so one directory covers them). Lives in the
 //! engine so both drivers of a chain use the identical mechanics: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for

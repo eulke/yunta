@@ -559,25 +559,25 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: 4
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: rules
       within: ["extra-*.txt"]
       max_per_run: 2
 "#;
-    let mut ledger = String::from("tasks:\n");
+    let mut tasks = String::from("tasks:\n");
     for n in 1..=4 {
-        ledger.push_str(&task_yaml(
+        tasks.push_str(&task_yaml(
             &format!("task-{n}"),
             &format!("t{n}"),
             &format!("a{n}.txt"),
@@ -585,7 +585,7 @@ nodes:
         ));
     }
 
-    let mut fixture = plan_session(&ledger);
+    let mut fixture = plan_session(&tasks);
     for n in 1..=4 {
         let request_yaml = format!(
             "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"

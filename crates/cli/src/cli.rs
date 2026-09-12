@@ -211,7 +211,7 @@ enum Command {
     /// Prints the shape of a document Yunta reads and validates, so
     /// nobody has to guess it. With no arguments, lists the kinds.
     Schema {
-        /// Which document: `task-ledger`, `findings` or `questions`.
+        /// Which document: `tasks`, `findings` or `questions`.
         kind: Option<String>,
         /// Emits the JSON Schema instead of the annotated example — what
         /// an editor's language server validates against.
@@ -223,7 +223,7 @@ enum Command {
     New {
         /// The workflow's name — becomes `.yunta/workflows/<name>.yaml`.
         name: String,
-        /// Which skeleton to start from: one-node, lint-fix or ledger.
+        /// Which skeleton to start from: one-node, lint-fix or tasks.
         #[arg(long)]
         shape: Option<String>,
         /// Prompts to choose a shape when `--shape` is omitted (degrades

@@ -347,10 +347,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
@@ -599,7 +599,7 @@ nodes:
 #[tokio::test]
 async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
     // Same final state, same commit sequence, regardless of
-    // concurrency — the batch mechanism integrates strictly in ledger
+    // concurrency — the batch mechanism integrates strictly in declaration
     // declaration order no matter how many tasks dispatch at once.
     let sequential = Bench::new();
     let workflow_seq = concurrency_workflow(1);
@@ -639,7 +639,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     );
     assert_eq!(
         commits_seq, commits_par,
-        "the same ledger must produce the same commit sequence at any concurrency"
+        "the same tasks document must produce the same commit sequence at any concurrency"
     );
     // Declaration order, not finishing order.
     let expected: Vec<String> = (1..=8)
@@ -663,20 +663,20 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: 2
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#;
 
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-a", "Create a", "a.txt", "test -f a.txt"),
         task_yaml(
@@ -687,7 +687,7 @@ nodes:
         ),
     );
 
-    let mut fixture = plan_session(&ledger);
+    let mut fixture = plan_session(&tasks);
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
@@ -786,14 +786,14 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
     let bench = Bench::new();
 
     let workflow = concurrency_workflow(2);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-x", "x", "x.txt", "test -f x.txt"),
         task_yaml("task-y", "y", "y.txt", "test -f y.txt"),
     );
     let fixture = format!(
         "{}  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
-        plan_session(&ledger),
+        plan_session(&tasks),
     );
 
     let (terminal, state) = bench
@@ -857,13 +857,13 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     .await
     .unwrap();
 
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-p", "p", "p.txt", "test -f p.txt"),
         task_yaml("task-q", "q", "q.txt", "test -f q.txt"),
     );
     std::fs::create_dir_all(&artifacts_dir).unwrap();
-    std::fs::write(artifacts_dir.join("plan.yaml"), &ledger).unwrap();
+    std::fs::write(artifacts_dir.join("plan.yaml"), &tasks).unwrap();
 
     // Simulate the crash by hand-writing the log up through: plan already
     // registered, the loop started, task-p already Done and committed,
@@ -1035,10 +1035,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: race
     kind: parallel
     depends_on: [plan]

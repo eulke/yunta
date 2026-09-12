@@ -187,7 +187,7 @@ impl ConfigLayer {
     }
 
     /// `limits.max_loop_iterations`, with the reference default (`12`)
-    /// applied — the only net under a ledger whose state oscillates
+    /// applied — the only net under a tasks document whose state oscillates
     /// forever, so "absent" means the reference cap, never "unbounded".
     /// `limits.max_workflow_depth`, with the reference default (`4`)
     /// applied — how many `kind: workflow` nesting levels below the

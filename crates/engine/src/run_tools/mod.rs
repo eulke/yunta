@@ -37,7 +37,7 @@
 //! one session and the dispatch that routes a call, and [`catalog`] is
 //! what that surface advertises. Each tool family then answers for
 //! itself — [`submission`] for documents, [`findings`] for findings,
-//! [`blackboard`] for the group's shared view, [`tasks`] for the ledger —
+//! [`blackboard`] for the group's shared view, [`tasks`] for the tasks document —
 //! and the two text modules hold every sentence a session reads:
 //! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
 

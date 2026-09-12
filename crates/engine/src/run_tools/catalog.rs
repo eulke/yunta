@@ -2,7 +2,7 @@
 //!
 //! Every tool is built here so the list and its arguments stay one
 //! decision: which tools a session sees depends on that session (a
-//! blackboard group, a ledger task, the kinds of document its node
+//! blackboard group, a task, the kinds of document its node
 //! declares), and each one's `inputSchema` comes from the schema this
 //! repository publishes for the document it carries rather than from a
 //! second description written by hand. A tool whose schema drifts from
@@ -97,8 +97,8 @@ fn withdraw_finding_tool() -> Tool {
 fn task_status_tool() -> Tool {
     Tool::new(
         "yunta_task_status",
-        "Read-only view of the run's task ledger (task id -> status) — the same data \
-         the `ledger` context source mounts, queryable mid-session.",
+        "Read-only view of the run's tasks document (task id -> status) — the same data \
+         the `tasks` context source mounts, queryable mid-session.",
         no_arguments(),
     )
 }

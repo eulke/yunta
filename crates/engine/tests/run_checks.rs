@@ -423,10 +423,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor

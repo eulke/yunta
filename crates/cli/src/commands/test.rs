@@ -437,9 +437,9 @@ mod tests {
     #[test]
     fn a_case_names_the_directory_that_seeds_its_sandbox() {
         let case: TestCase = yunta_core::yaml::parse(
-            "workflow: ledger-task\n\
+            "workflow: run-tasks\n\
              worktree: worktrees/greeting-crate\n\
-             fixture: fixtures/ledger-task.yaml\n\
+             fixture: fixtures/run-tasks.yaml\n\
              expect:\n  final_state: finished\n",
         )
         .unwrap();

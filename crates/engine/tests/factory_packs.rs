@@ -156,7 +156,7 @@ sessions:
     outcome: {{ type: completed, summary: "grilled" }}
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:

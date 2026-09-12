@@ -1,4 +1,4 @@
-//! The task-ledger schema: the types a ledger parses into, the shape
+//! The tasks schema: the types a tasks document parses into, the shape
 //! published to whoever writes one, and the rules that only hold across
 //! the whole document.
 //!
@@ -11,15 +11,15 @@ use serde::{Deserialize, Serialize};
 use crate::events::{self, CriterionType};
 use crate::TaskId;
 
-/// A ledger document — the sole top-level key is `tasks:`, with no
+/// A tasks document — the sole top-level key is `tasks:`, with no
 /// header metadata alongside it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Ledger {
+pub struct TasksFile {
     pub tasks: Vec<Task>,
 }
 
-/// One criterion as the ledger declares it: a command, and whether it
+/// One criterion as the tasks document declares it: a command, and whether it
 /// is a `guard` (passes before and after the work) or an ordinary
 /// criterion (red before, green after). The event log freezes it as
 /// [`events::Criterion`], which reads what a later writer adds; this
@@ -85,8 +85,8 @@ mod rules;
 /// parser.
 const EXAMPLE: &str = include_str!("shape.yaml");
 
-impl crate::shape::Document for Ledger {
-    const KIND: crate::ArtifactKind = crate::ArtifactKind::TaskLedger;
+impl crate::shape::Document for TasksFile {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Tasks;
     const EXAMPLE: &'static str = EXAMPLE;
 
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {

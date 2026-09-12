@@ -1,4 +1,4 @@
-//! The rules a ledger has to satisfy once it is readable, each asserted
+//! The rules a tasks document has to satisfy once it is readable, each asserted
 //! by the code it reports rather than by its wording: the code is what a
 //! receipt counts and a log is searched by, so it is the part that has
 //! to stay put while the sentence is free to improve.
@@ -7,14 +7,14 @@ use yunta_core::diagnostic::Diagnostic;
 use yunta_core::events::CriterionType;
 use yunta_core::shape::Document;
 use yunta_core::Criterion;
-use yunta_core::{Ledger, Task};
+use yunta_core::{Task, TasksFile};
 
-/// Every violation the ledger carries, as `shape::read` asks for them.
-fn check(ledger: &Ledger) -> Vec<Diagnostic> {
-    ledger.check()
+/// Every violation the tasks document carries, as `shape::read` asks for them.
+fn check(tasks: &TasksFile) -> Vec<Diagnostic> {
+    tasks.check()
 }
 
-/// The stable name of every rule a ledger broke, in the order reported.
+/// The stable name of every rule a tasks document broke, in the order reported.
 /// Asserting on these rather than on a variant is deliberate: the code
 /// is what a receipt counts and a log is searched by, so it is the part
 /// that has to stay put while the wording is free to improve.
@@ -60,8 +60,8 @@ fn guard(cmd: &str) -> Criterion {
 }
 
 #[test]
-fn a_well_formed_ledger_has_no_errors() {
-    let ledger = Ledger {
+fn a_well_formed_tasks_document_has_no_errors() {
+    let tasks = TasksFile {
         tasks: vec![
             task(
                 "context-sources",
@@ -77,75 +77,75 @@ fn a_well_formed_ledger_has_no_errors() {
             ),
         ],
     };
-    assert_eq!(check(&ledger), Vec::new());
+    assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn duplicate_id_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("a", &["src/a/**"], vec![cmd("true")], &[]),
             task("a", &["src/b/**"], vec![cmd("true")], &[]),
         ],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["duplicate-id"]);
     assert!(rendered(&errors).contains("task `a`"));
 }
 
 #[test]
 fn unknown_dependency_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![task("a", &["src/**"], vec![cmd("true")], &["ghost"])],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["unknown-dependency"]);
     assert!(rendered(&errors).contains("`ghost`"));
 }
 
 #[test]
 fn dependency_cycle_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("a", &["src/a/**"], vec![cmd("true")], &["b"]),
             task("b", &["src/b/**"], vec![cmd("true")], &["a"]),
         ],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert!(codes(&errors).contains(&"dependency-cycle"));
 }
 
 #[test]
 fn empty_scope_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![task("a", &[], vec![cmd("true")], &[])],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["empty-scope"]);
 }
 
 #[test]
 fn empty_title_is_reported() {
-    let mut ledger = Ledger {
+    let mut tasks = TasksFile {
         tasks: vec![task("a", &["src/**"], vec![cmd("true")], &[])],
     };
-    ledger.tasks[0].title = "   ".to_string();
-    let errors = check(&ledger);
+    tasks.tasks[0].title = "   ".to_string();
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["empty-title"]);
 }
 
 #[test]
 fn no_criteria_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![task("a", &["src/**"], vec![], &[])],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["no-criteria"]);
 }
 
 #[test]
 fn all_criteria_being_guards_is_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![task(
             "a",
             &["src/**"],
@@ -153,13 +153,13 @@ fn all_criteria_being_guards_is_reported() {
             &[],
         )],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["all-criteria-are-guards"]);
 }
 
 #[test]
 fn a_guard_alongside_a_real_criterion_is_fine() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![task(
             "a",
             &["src/**"],
@@ -170,66 +170,66 @@ fn a_guard_alongside_a_real_criterion_is_fine() {
             &[],
         )],
     };
-    assert_eq!(check(&ledger), Vec::new());
+    assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn manual_review_without_justification_is_reported() {
-    let mut ledger = Ledger {
+    let mut tasks = TasksFile {
         tasks: vec![task("a", &["src/**"], vec![cmd("true")], &[])],
     };
-    ledger.tasks[0].manual_review = true;
-    let errors = check(&ledger);
+    tasks.tasks[0].manual_review = true;
+    let errors = check(&tasks);
     assert_eq!(codes(&errors), ["manual-review-without-justification"]);
 }
 
 #[test]
 fn manual_review_with_justification_is_fine() {
-    let mut ledger = Ledger {
+    let mut tasks = TasksFile {
         tasks: vec![task("a", &["docs/**"], vec![cmd("true")], &[])],
     };
-    ledger.tasks[0].manual_review = true;
-    ledger.tasks[0].justification = Some("prose review, no command can verify tone".to_string());
-    assert_eq!(check(&ledger), Vec::new());
+    tasks.tasks[0].manual_review = true;
+    tasks.tasks[0].justification = Some("prose review, no command can verify tone".to_string());
+    assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn overlapping_scopes_without_a_dependency_are_reported() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("a", &["src/**"], vec![cmd("true")], &[]),
             task("b", &["src/lib.rs"], vec![cmd("true")], &[]),
         ],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     assert!(codes(&errors).contains(&"overlapping-scope"));
 }
 
 #[test]
 fn overlapping_scopes_with_a_dependency_between_them_are_fine() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("a", &["src/**"], vec![cmd("true")], &[]),
             task("b", &["src/lib.rs"], vec![cmd("true")], &["a"]),
         ],
     };
-    assert_eq!(check(&ledger), Vec::new());
+    assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn disjoint_scopes_never_get_flagged() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("a", &["crates/core/**"], vec![cmd("true")], &[]),
             task("b", &["crates/cli/**"], vec![cmd("true")], &[]),
         ],
     };
-    assert_eq!(check(&ledger), Vec::new());
+    assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn every_violation_names_the_task_the_field_and_what_to_do() {
-    let ledger = Ledger {
+    let tasks = TasksFile {
         tasks: vec![
             task("graph-cmd", &[], vec![cmd("true")], &[]),
             task(
@@ -246,7 +246,7 @@ fn every_violation_names_the_task_the_field_and_what_to_do() {
             ),
         ],
     };
-    let errors = check(&ledger);
+    let errors = check(&tasks);
     let text = rendered(&errors);
     assert!(
         text.contains("task `graph-cmd`: `scope` is empty; every task declares at least one glob"),
@@ -266,7 +266,7 @@ fn every_violation_names_the_task_the_field_and_what_to_do() {
 }
 
 #[test]
-fn parses_the_reference_ledger_from_the_spec() {
+fn parses_the_reference_tasks_document_from_the_spec() {
     let yaml = r#"
 tasks:
   - id: context-sources
@@ -289,9 +289,10 @@ tasks:
         type: guard
     notes: "Ver Contrato del Run."
 "#;
-    let ledger: Ledger = serde_norway::from_str(yaml).expect("reference ledger should parse");
-    assert_eq!(ledger.tasks.len(), 2);
+    let tasks: TasksFile =
+        serde_norway::from_str(yaml).expect("reference tasks document should parse");
+    assert_eq!(tasks.tasks.len(), 2);
     // Overlapping scope with its own dependency ancestor is fine; the
     // registration should be clean.
-    assert_eq!(check(&ledger), Vec::new());
+    assert_eq!(check(&tasks), Vec::new());
 }

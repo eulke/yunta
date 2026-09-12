@@ -6,7 +6,7 @@
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
 name: build-feature
-description: Full feature cycle — grill, verified ledger, lint/fix, baseline, multi-runner review, PR
+description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
@@ -44,7 +44,7 @@ nodes:
       - command: "git log --oneline -20"
     prompt: { file: prompts/plan.md }
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 
   - id: approve-plan
     kind: gate
@@ -66,7 +66,7 @@ nodes:
       within: ["src/**"]
       max_per_run: 3
     prompt: |
-      Read your task from the ledger. Implement it inside its own scope.
+      Read your task from the tasks document. Implement it inside its own scope.
 
   - id: lint
     kind: bash

@@ -262,10 +262,10 @@ async fn artifacts_violation(
 }
 
 /// Records every verified artifact on the log, and what its content
-/// means to the run: a ledger's tasks registered, a findings file's
+/// means to the run: a tasks document's tasks registered, a findings file's
 /// entries posted.
 ///
-/// A re-plan — this same node producing a task ledger a second time,
+/// A re-plan — this same node producing a tasks document a second time,
 /// whether via a reroute back to it or a resumed run — must not silently
 /// keep a task `done` whose identity actually changed. Identity is same
 /// `id`, same `criteria`, same `scope`; `depends_on` is deliberately not
@@ -351,8 +351,8 @@ async fn record_artifacts(
         )
         .await?;
         match &artifact.content {
-            ArtifactContent::TaskLedger(ledger) => {
-                for task in &ledger.tasks {
+            ArtifactContent::Tasks(tasks) => {
+                for task in &tasks.tasks {
                     let criteria: Vec<yunta_core::events::Criterion> =
                         task.criteria.iter().map(Into::into).collect();
                     let registered_seq = ctx
@@ -416,7 +416,7 @@ async fn record_artifacts(
 ///
 /// A `kind: questions` artifact's own session has already closed by the
 /// time it is read (the same "artifact read only at node close" ordering
-/// `task-ledger` and `findings` rely on), so nothing renders
+/// `tasks` and `findings` rely on), so nothing renders
 /// mid-session. Questions left here close the node waiting-shaped — a
 /// `node_failed` that replay derives as `Waiting` from the typed
 /// `kind: questions` on the artifact event — and the asking happens in

@@ -1,6 +1,6 @@
 //! Publishing the shape of every interpreted artifact a node declares.
 //!
-//! A node that declared `kind: task-ledger` has already said everything
+//! A node that declared `kind: tasks` has already said everything
 //! needed to know this: publishing the shape is the consequence of that
 //! declaration, not a second key an author has to remember. It is the
 //! only context block the engine adds on its own, which is why it lives

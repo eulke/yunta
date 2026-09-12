@@ -31,7 +31,7 @@ use super::host::RunToolsHost;
 /// The run tools of one session. Which of them are even *listed* depends
 /// on the session: `yunta_get_blackboard` only inside a
 /// `coordination: blackboard` group (for `independent` they aren't
-/// mounted at all), `yunta_request_scope_expansion` only for ledger-task
+/// mounted at all), `yunta_request_scope_expansion` only for task
 /// sessions (scope expansion is task-keyed), and one submission tool per
 /// kind of document this node declares.
 #[derive(Clone)]
@@ -79,7 +79,7 @@ pub(super) enum RunToolError {
     )]
     NotInBlackboardGroup,
     #[error(
-        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a \
+        "scope expansion is task machinery, keyed by task — this session has no task; a \
          prompt node's scope is fixed by its own declaration"
     )]
     NoTask,

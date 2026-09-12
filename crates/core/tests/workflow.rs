@@ -29,8 +29,8 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(
         produces[0],
         ArtifactSpec::Typed {
-            name: "ledger.yaml".to_string(),
-            kind: ArtifactKind::TaskLedger,
+            name: "tasks.yaml".to_string(),
+            kind: ArtifactKind::Tasks,
         }
     );
 
@@ -650,7 +650,7 @@ context:
   - files: ["docs/architecture.md", "{{run.dir}}/artifacts/brief.md"]
   - command: "git log --oneline -20"
   - artifact: { node: grill, name: brief.md }
-  - ledger: {}
+  - tasks: {}
   - knowledge: {}
   - node-output: { node: lint }
   - run-events: { filter: failed }
@@ -681,7 +681,7 @@ context:
         }
         other => panic!("expected Artifact, got {other:?}"),
     }
-    assert!(matches!(&node.context[3], ContextSpec::Ledger { .. }));
+    assert!(matches!(&node.context[3], ContextSpec::Tasks { .. }));
     match &node.context[4] {
         ContextSpec::Knowledge { knowledge } => assert!(knowledge.layers.is_empty()),
         other => panic!("expected Knowledge, got {other:?}"),

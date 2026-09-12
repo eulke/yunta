@@ -33,7 +33,6 @@ mod hash;
 mod id_source;
 mod ids;
 mod inputs;
-mod ledger;
 mod manifest;
 mod pack;
 pub mod policy;
@@ -41,6 +40,7 @@ mod questions;
 pub mod schema;
 mod secret;
 pub mod shape;
+mod tasks;
 pub mod text;
 mod workflow;
 pub mod yaml;
@@ -72,7 +72,6 @@ pub use ids::{
     Responder, RunId, RunnerName, Seq, SessionId, TaskId,
 };
 pub use inputs::{InputSpec, InputSpecError};
-pub use ledger::{Criterion, Ledger, Task};
 pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
 pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
@@ -81,13 +80,14 @@ pub use pack::{
 pub use policy::ScopeExpansionMode;
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use secret::Secret;
+pub use tasks::{Criterion, Task, TasksFile};
 pub use workflow::{
     ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
     ContextSpec, Coordination, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks,
-    JoinPolicy, KnowledgeLayer, KnowledgeParams, LedgerParams, LoopUntil, McpQueryParams,
-    ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind,
-    NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource,
-    RunEventsFilter, RunEventsParams, ScopeExpansion, Workflow, WorkflowIsolation,
+    JoinPolicy, KnowledgeLayer, KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
+    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
+    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsFilter,
+    RunEventsParams, ScopeExpansion, TasksParams, Workflow, WorkflowIsolation,
 };
 
 /// The schema major this binary speaks — what a

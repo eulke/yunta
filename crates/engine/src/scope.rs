@@ -1,6 +1,6 @@
 //! Scope post-check by `git diff`: what a task
 //! actually touched, checked against what its `scope` globs declared it
-//! could touch. Unlike the ledger's overlap heuristic (which
+//! could touch. Unlike the tasks document's overlap heuristic (which
 //! compares two *patterns* to each other with no library that does
 //! that), this checks real *paths* against real globs — exactly what
 //! `globset` is for, so it's used here instead of a hand-rolled

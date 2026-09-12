@@ -1,5 +1,5 @@
 //! End-to-end runs with the mock adapter: the bootstrap
-//! shape — a prompt plan node that produces the ledger, a loop that
+//! shape — a prompt plan node that produces the tasks document, a loop that
 //! implements it task by task, a bash gate — plus re-routes, hooks,
 //! findings and the birth of a run, all derived from the event log alone.
 
@@ -26,23 +26,23 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
   - id: verify
     kind: bash
     depends_on: [implement]
     run: "test -f hello.txt && test -f world.txt"
 "#;
 
-    // Session 1 is the planner: it hands the ledger over through its run
+    // Session 1 is the planner: it hands the tasks document over through its run
     // tools. Sessions 2 and 3 are one executor session per task, each
     // writing the file its task is scoped to.
     let fixture = r#"
@@ -50,7 +50,7 @@ capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -296,7 +296,7 @@ nodes:
     prompt: "Write the plan."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
 "#;
 
     // The session claims success but submits nothing — the engine

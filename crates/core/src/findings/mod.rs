@@ -13,7 +13,7 @@ use crate::events::{self, FindingSeverity};
 use crate::ids::FindingId;
 
 /// The artifact's document — sole top-level key `findings:`, mirroring
-/// a ledger's `tasks:`-only shape.
+/// a tasks document's `tasks:`-only shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {

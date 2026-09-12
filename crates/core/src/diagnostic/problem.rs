@@ -13,7 +13,7 @@ use super::Subject;
 /// countable, so a receipt reports what a run keeps getting wrong
 /// without reading prose. A code says which rule broke and nothing
 /// about which document it broke in: `DuplicateId` is one rule asked of
-/// ledgers, findings and questions alike, and what separates the three
+/// tasks documents, findings and questions alike, and what separates the three
 /// is the [`ArtifactKind`](crate::ArtifactKind) on the report carrying
 /// it. Counting by code alone conflates them; counting by kind and code
 /// does not.
@@ -30,7 +30,7 @@ macro_rules! rule_codes {
         /// and countable, so a receipt reports what a run keeps getting
         /// wrong without reading prose. A code says which rule broke and
         /// nothing about which document it broke in: `DuplicateId` is one
-        /// rule asked of ledgers, findings and questions alike, and what
+        /// rule asked of tasks documents, findings and questions alike, and what
         /// separates the three is the
         /// [`ArtifactKind`](crate::ArtifactKind) on the report carrying
         /// it. Counting by code alone conflates them; counting by kind
@@ -137,7 +137,7 @@ pub enum Problem {
         path: String,
         message: String,
     },
-    /// A rule the document broke once it was readable — the ledger's own
+    /// A rule the document broke once it was readable — the tasks document's own
     /// registration rules and their siblings. `code` is what a receipt
     /// counts; `detail` is the clause a reader acts on.
     Rule { code: RuleCode, detail: String },

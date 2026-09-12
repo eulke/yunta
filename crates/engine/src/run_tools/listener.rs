@@ -38,7 +38,7 @@ impl Drop for RunToolsSession {
 }
 
 /// Starts the listener for one session attempt: fresh port, fresh
-/// single-use token. `task` is `Some` for ledger-task sessions — the
+/// single-use token. `task` is `Some` for task sessions — the
 /// only ones `yunta_request_scope_expansion` exists for (scope expansion
 /// is task-keyed machinery); `cwd` is where that request file lands (the
 /// same worktree `scope_expansion::load_request` consumes it from).

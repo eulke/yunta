@@ -507,7 +507,7 @@ fn finding(id: &str) -> Finding {
     Finding {
         id: id.into(),
         severity: FindingSeverity::Major,
-        title: "the ledger has no criteria".to_string(),
+        title: "the tasks document has no criteria".to_string(),
         location: "plan.yaml".to_string(),
         detail: "every task needs one".to_string(),
         proposed_criterion: None,
@@ -540,7 +540,7 @@ fn handover_events() -> Vec<StoredEvent> {
             Some("a"),
             EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
                 name: "plan.yaml".to_string(),
-                artifact_kind: yunta_core::ArtifactKind::TaskLedger,
+                artifact_kind: yunta_core::ArtifactKind::Tasks,
                 outcome: SubmissionOutcome::Accepted {
                     content_hash: yunta_core::sha256_hex(b"plan"),
                 },

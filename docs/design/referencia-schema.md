@@ -101,7 +101,7 @@ secrets:                            # nombres de env vars; valores JAMÁS acá
 
 ```yaml
 name: build-feature
-description: Feature completa con grill, ledger verificado, review multi-runner y PR
+description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
 yunta_schema: ">=1 <2"              # opcional (§2.1); sin declarar, se infiere del binario
 inputs:
   idea:
@@ -147,7 +147,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }   # §9.3 — también admite string inline
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 
   - id: approve-plan
     kind: gate
@@ -169,7 +169,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       within: ["src/**"]
       max_per_run: 3
     prompt: |
-      Leé tu tarea del ledger. Implementala dentro de su scope.
+      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
 
   - id: lint
     kind: bash
@@ -292,7 +292,7 @@ que siempre está al día.
 
 ## Notas de schema
 
-- **`kind:` de un artifact**: el conjunto es cerrado — `task-ledger`, `findings` y
+- **`kind:` de un artifact**: el conjunto es cerrado — `tasks`, `findings` y
   `questions` — y lo nombra un único tipo, del que salen el valor que se escribe acá,
   el argumento de `yunta schema <kind>`, el catálogo de la tool `document_shape` y el
   documento del que habla un reporte de lectura (D132). Declarar el `kind` alcanza

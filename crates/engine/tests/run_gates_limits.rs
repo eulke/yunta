@@ -746,9 +746,9 @@ async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
 }
 
 #[tokio::test]
-async fn a_ledger_within_the_default_iteration_cap_runs_unasked() {
+async fn a_tasks_document_within_the_default_iteration_cap_runs_unasked() {
     // No `limits:` declared — the reference default (12) covers a
-    // three-task ledger with room to spare, and nothing escalates.
+    // three-task document with room to spare, and nothing escalates.
     let bench = Bench::new();
     let fixture = loop_cap_fixture();
     let (terminal, _) = bench.run(LOOP_CAP_WORKFLOW, &fixture).await;

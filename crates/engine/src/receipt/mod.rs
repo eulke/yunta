@@ -123,9 +123,9 @@ pub struct Receipt {
     ///
     /// Counting is the whole reason a diagnostic is a value: a receipt
     /// that had to read prose could only reprint it, and "how often does
-    /// a ledger come back unreadable" is a question nobody can answer by
+    /// a tasks document come back unreadable" is a question nobody can answer by
     /// grepping free text. The kind is half the answer — `duplicate-id`
-    /// is one rule asked of three documents, so three broken ledgers and
+    /// is one rule asked of three documents, so three broken tasks documents and
     /// one of each are different facts and count separately.
     pub diagnostics: Vec<DiagnosticCount>,
 }

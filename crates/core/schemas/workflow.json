@@ -100,7 +100,7 @@
       "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
       "enum": [
-        "task-ledger",
+        "tasks",
         "findings",
         "questions"
       ]
@@ -128,7 +128,7 @@
       ]
     },
     "Artifacts": {
-      "description": "`artifacts.produces`. `task-ledger`, `findings` and\n`questions` are interpreted. A plain string stays\nopaque.",
+      "description": "`artifacts.produces`. `tasks`, `findings` and\n`questions` are interpreted. A plain string stays\nopaque.",
       "type": "object",
       "properties": {
         "produces": {
@@ -213,12 +213,12 @@
         {
           "type": "object",
           "properties": {
-            "ledger": {
-              "$ref": "#/$defs/LedgerParams"
+            "tasks": {
+              "$ref": "#/$defs/TasksParams"
             }
           },
           "required": [
-            "ledger"
+            "tasks"
           ]
         },
         {
@@ -577,13 +577,8 @@
       },
       "additionalProperties": false
     },
-    "LedgerParams": {
-      "description": "`ledger: {}` — no parameters in the current resolution\n(the aggregate ledger/task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
-      "type": "object",
-      "additionalProperties": false
-    },
     "LoopUntil": {
-      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the ledger\nhas no task left to do.",
+      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the tasks document\nhas no task left to do.",
       "type": "string",
       "enum": [
         "all_tasks_complete"
@@ -859,7 +854,7 @@
               "$ref": "#/$defs/PromptSource"
             },
             "scope_expansion": {
-              "description": "The agent never widens its own scope — it requests,\nthe engine (or a person, in `ask`) decides. Absent has the\nsame effect as declaring it with no `mode:` — `deny` (the\ndefault): every request becomes a finding, none are\ngranted. Loop-scoped, not workflow- or config-scoped, because\n`scope_expansion_requested`'s own payload is keyed by\n`task_id` — this is ledger-task machinery, the same rung\n`concurrency:` already occupies on this node kind.",
+              "description": "The agent never widens its own scope — it requests,\nthe engine (or a person, in `ask`) decides. Absent has the\nsame effect as declaring it with no `mode:` — `deny` (the\ndefault): every request becomes a finding, none are\ngranted. Loop-scoped, not workflow- or config-scoped, because\n`scope_expansion_requested`'s own payload is keyed by\n`task_id` — this is task machinery, the same rung\n`concurrency:` already occupies on this node kind.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ScopeExpansion"
@@ -1295,6 +1290,11 @@
         "ask",
         "deny"
       ]
+    },
+    "TasksParams": {
+      "description": "`tasks: {}` — no parameters in the current resolution\n(the aggregate task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
+      "type": "object",
+      "additionalProperties": false
     },
     "WorkflowIsolation": {
       "description": "A `kind: workflow` node's `isolation:` — deliberately its own\nenum, not [`crate::Isolation`]: `inherit` only exists for workflow\nnodes, and a run-level `none` is not a per-node choice.",

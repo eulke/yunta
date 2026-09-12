@@ -13,10 +13,10 @@ sessions:
     effects:
       - { path: "{{run.dir}}/artifacts/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
     outcome: { type: completed, summary: "brief written" }
-  - match_prompt_contains: "task ledger"
+  - match_prompt_contains: "tasks document"
     steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -27,8 +27,8 @@ sessions:
                 criteria:
                   - cmd: "test -f Cargo.toml"
                   - cmd: "test -f src/lib.rs"
-    outcome: { type: completed, summary: "ledger registered" }
-  - match_prompt_contains: "Read your task from the ledger"
+    outcome: { type: completed, summary: "tasks document registered" }
+  - match_prompt_contains: "Read your task from the tasks document"
     effects:
       - path: Cargo.toml
         content: |

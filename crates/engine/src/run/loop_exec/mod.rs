@@ -1,5 +1,5 @@
 //! The loop node's task cycle: each iteration forms a batch of up to
-//! `concurrency` `ready` tasks (ledger declaration order), dispatches
+//! `concurrency` `ready` tasks (declaration order), dispatches
 //! every member in its own isolated worktree concurrently, then
 //! integrates them **serially, in that same declaration order** —
 //! rebase onto the current tree, re-verify criteria and scope there,
@@ -12,7 +12,7 @@ mod escalate;
 mod integrate;
 
 use yunta_core::events::{EventPayload, LoopIterationPayload, StoredEvent, TaskStatus, TokenUsage};
-use yunta_core::{Ledger, Node, NodeKind, PromptSource, Task};
+use yunta_core::{Node, NodeKind, PromptSource, Task, TasksFile};
 
 use crate::replay::RunState;
 
@@ -46,11 +46,11 @@ pub(super) async fn execute_loop(
     loop {
         state.iteration += 1;
         let view = ctx.run_view().await?;
-        let batch = select_batch(&prep.ledger, &view.state, prep.concurrency);
+        let batch = select_batch(&prep.tasks, &view.state, prep.concurrency);
 
         if batch.is_empty() {
             let all_done = prep
-                .ledger
+                .tasks
                 .tasks
                 .iter()
                 .all(|task| view.state.tasks.get(&task.id) == Some(&TaskStatus::Done));
@@ -67,7 +67,7 @@ pub(super) async fn execute_loop(
                     ctx,
                     node,
                     Close::new(
-                        format!("{} task(s) done", prep.ledger.tasks.len()),
+                        format!("{} task(s) done", prep.tasks.tasks.len()),
                         state.tokens,
                     ),
                 )
@@ -188,7 +188,7 @@ struct LoopPrep<'a> {
     instruction: String,
     adapter: std::sync::Arc<dyn yunta_adapters::Adapter>,
     setup: crate::task_cycle::SessionSetup,
-    ledger: Ledger,
+    tasks: TasksFile,
     concurrency: u32,
     scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     context_memo: super::context_resolve::StableContextMemo,
@@ -196,7 +196,7 @@ struct LoopPrep<'a> {
 }
 
 /// The outcome of preparing a loop: ready to run, or already ended (a
-/// missing ledger, an unresolvable runner, a capability a blackboard needs).
+/// missing tasks document, an unresolvable runner, a capability a blackboard needs).
 enum LoopReady<'a> {
     Go(Box<LoopPrep<'a>>),
     Ended(NodeEnd),
@@ -223,8 +223,8 @@ enum BatchIntegration {
 /// Resolves everything a loop needs once, before any task runs: the rendered
 /// instruction, the adapter and the session setup every task shares (skills
 /// and run tools gated by the adapter's declared capabilities), the
-/// registered task ledger, and the loop's own knobs. A capability a
-/// blackboard group needs, a missing runner, or an unregistered ledger ends
+/// registered tasks document, and the loop's own knobs. A capability a
+/// blackboard group needs, a missing runner, or an unregistered tasks document ends
 /// the node here, before a token is spent.
 async fn prepare_loop<'a>(
     ctx: &RunCtx<'_>,
@@ -321,12 +321,12 @@ async fn prepare_loop<'a>(
         node: node.id.clone(),
     };
 
-    let Some(ledger) = load_registered_ledger(ctx)? else {
+    let Some(tasks) = load_registered_tasks(ctx)? else {
         let end = fail(
             ctx,
             node,
-            "no task ledger has been registered before this loop — a previous node must \
-             produce an artifact with `kind: task-ledger`"
+            "no tasks document has been registered before this loop — a previous node must \
+             produce an artifact with `kind: tasks`"
                 .to_string(),
             false,
         )
@@ -354,29 +354,29 @@ async fn prepare_loop<'a>(
         instruction,
         adapter,
         setup,
-        ledger,
+        tasks,
         concurrency,
         scope_expansion,
         // Stable/run-stable context resolved once and reused across every
         // task brief this invocation builds; volatile sources re-resolve per
         // brief.
         context_memo: super::context_resolve::StableContextMemo::default(),
-        // The only net under a ledger whose state oscillates forever.
+        // The only net under a tasks document whose state oscillates forever.
         max_iterations: ctx.manifest.config.resolved_max_loop_iterations(),
     })))
 }
 
-/// Up to `concurrency` tasks this iteration may work on, in ledger
+/// Up to `concurrency` tasks this iteration may work on, in
 /// declaration order: a task whose dependencies are all `Done` and is
 /// itself still `Pending`, or an orphaned `Running` task with no
 /// terminal event after it (a crash mid-batch — orphaned tasks always
 /// get re-run on resume). Scope disjointness between independent tasks
-/// is **not** re-checked here: `ledger::register` already refuses two
+/// is **not** re-checked here: `tasks::register` already refuses two
 /// tasks without a `depends_on` edge declaring overlapping scope, so
 /// any two tasks that can both be `ready` at once are disjoint by
 /// construction.
-fn select_batch<'a>(ledger: &'a Ledger, state: &RunState, concurrency: u32) -> Vec<&'a Task> {
-    ledger
+fn select_batch<'a>(tasks: &'a TasksFile, state: &RunState, concurrency: u32) -> Vec<&'a Task> {
+    tasks
         .tasks
         .iter()
         .filter(|task| match state.tasks.get(&task.id) {
@@ -410,10 +410,10 @@ fn granted_count(events: &[StoredEvent]) -> u32 {
         .count() as u32
 }
 
-/// Finds the task ledger the run registered: the `kind: task-ledger`
+/// Finds the tasks document the run registered: the `kind: tasks`
 /// artifact of a node that produced it earlier, re-read from the run's
 /// frozen `artifacts/` — artifacts are immutable once written.
-fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> {
+fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, RunError> {
     for node in &ctx.manifest.workflow.nodes {
         let Some(artifacts) = &node.artifacts else {
             continue;
@@ -422,7 +422,7 @@ fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> 
             let yunta_core::ArtifactSpec::Typed { name, kind } = spec else {
                 continue;
             };
-            if !matches!(kind, yunta_core::ArtifactKind::TaskLedger) {
+            if !matches!(kind, yunta_core::ArtifactKind::Tasks) {
                 continue;
             }
             let path = ctx.run_dir.join("artifacts").join(name);
@@ -430,15 +430,15 @@ fn load_registered_ledger(ctx: &RunCtx<'_>) -> Result<Option<Ledger>, RunError> 
                 continue;
             }
             let bytes = std::fs::read(&path).map_err(|source| RunError::Io {
-                context: format!("read task ledger `{}`", path.display()),
+                context: format!("read tasks document `{}`", path.display()),
                 source,
             })?;
-            // The same door `close_artifacts` reads a ledger through, so
+            // The same door `close_artifacts` reads a tasks document through, so
             // a file that stops being readable between the node that
             // wrote it and the loop that consumes it is reported as the
             // document it is, with every problem named.
-            let ledger = yunta_core::shape::read::<Ledger>(&bytes, path.display().to_string())?;
-            return Ok(Some(ledger));
+            let tasks = yunta_core::shape::read::<TasksFile>(&bytes, path.display().to_string())?;
+            return Ok(Some(tasks));
         }
     }
     Ok(None)

@@ -39,7 +39,7 @@ _Evitar_: artifact sin tipo, blob.
 
 **Artifact interpretado**:
 Un artifact cuyo `kind:` declara que el engine parsea su contenido, lo valida y
-lo convierte en eventos. Los kinds son `task-ledger`, `findings` y `questions`.
+lo convierte en eventos. Los kinds son `tasks`, `findings` y `questions`.
 _Evitar_: artifact estructurado, artifact tipado.
 
 **Kind de artifact**:
@@ -48,6 +48,22 @@ nombra en todas partes: el `kind:` de un workflow, el argumento de
 `yunta schema`, el catálogo de la tool `document_shape` y el documento del que
 habla un reporte son el mismo conjunto y el mismo tipo (D132).
 _Evitar_: DocumentKind, tipo de documento, formato.
+
+**Tasks** (*documento de tareas*):
+El artifact interpretado de `kind: tasks`: la lista de tareas verificables que un
+nodo de planificación entrega o que un input trae escrita a mano, con `tasks:`
+como única clave. Al cerrarse el nodo, cada tarea pasa al event log
+(`task_registered`) y el archivo queda congelado. Nombra al documento y a su
+kind en el workflow, en `yunta schema`, en la tool de entrega
+(`yunta_submit_tasks`) y en la fuente de contexto `tasks:`.
+_Evitar_: ledger, task-ledger, plan (que es un nombre de archivo, no un kind).
+
+**Ledger**:
+Un pliegue del event log: la estructura que se deriva aplicando en orden los
+eventos de un tipo y responde qué quedó en pie —`FindingLedger` para los
+hallazgos. Nombra siempre algo derivado del log, nunca un documento que alguien
+escribe.
+_Evitar_: usar la palabra para el documento de tareas.
 
 **Entrega** (*submission*):
 Un documento entero que una sesión le pasa al engine por su tool

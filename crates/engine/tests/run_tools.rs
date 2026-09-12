@@ -369,10 +369,10 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
     client.cancel().await.unwrap();
 }
 
-// --- yunta_task_status (read-only ledger view) -------------------------------
+// --- yunta_task_status (read-only tasks view) -------------------------------
 
 #[tokio::test]
-async fn task_status_reflects_the_ledger_derived_from_the_log() {
+async fn task_status_reflects_the_task_state_derived_from_the_log() {
     let bench = Bench::new();
     bench
         .storage
@@ -471,7 +471,7 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert!(is_error);
     assert_eq!(
         text,
-        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+        "scope expansion is task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
     );
     client.cancel().await.unwrap();
 }
@@ -544,10 +544,10 @@ async fn dropping_the_session_closes_the_endpoint() {
 // same code. These name the two halves of that: what it says when the file
 // is right, and that it names the same problems a failed close would.
 
-fn ledger_spec() -> yunta_core::ArtifactSpec {
+fn tasks_spec() -> yunta_core::ArtifactSpec {
     yunta_core::ArtifactSpec::Typed {
         name: "plan.yaml".to_string(),
-        kind: yunta_core::ArtifactKind::TaskLedger,
+        kind: yunta_core::ArtifactKind::Tasks,
     }
 }
 
@@ -559,7 +559,7 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
 
@@ -582,7 +582,7 @@ async fn a_check_names_the_same_problems_the_close_would() {
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (_, text) = call(
         &client,
@@ -605,7 +605,7 @@ async fn a_check_names_the_same_problems_the_close_would() {
 #[tokio::test]
 async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
     let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(
         &client,

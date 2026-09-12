@@ -22,7 +22,7 @@
 use serde::de::DeserializeOwned;
 
 use crate::diagnostic::{Diagnostic, DocumentRef, Problem, Report, Rule, Subject};
-use crate::{ArtifactKind, FindingsFile, Ledger, QuestionsFile};
+use crate::{ArtifactKind, FindingsFile, QuestionsFile, TasksFile};
 
 /// A document whose shape the system publishes, whose failures it
 /// explains, and whose rules it enforces.
@@ -57,7 +57,7 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
 
 mod sealed {
     pub trait Sealed {}
-    impl Sealed for crate::Ledger {}
+    impl Sealed for crate::TasksFile {}
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
 }
@@ -67,7 +67,7 @@ mod sealed {
 /// The only way to obtain an interpreted document, so no caller can get
 /// one that skipped its rules. `path` is where a reader opens the file;
 /// the kind comes from `T` itself, which is what makes a report about a
-/// ledger unable to publish the shape of a questions file.
+/// tasks document unable to publish the shape of a questions file.
 pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Report> {
     let document = DocumentRef::new(T::KIND, path);
     let one = |problem: Problem| {
@@ -150,7 +150,7 @@ pub fn render<T: Document>(document: &T) -> Result<String, crate::yaml::YamlErro
 /// makes one fail — and a writer needs both before writing, not after.
 pub fn contract(kind: ArtifactKind) -> String {
     match kind {
-        ArtifactKind::TaskLedger => rendered::<Ledger>(),
+        ArtifactKind::Tasks => rendered::<TasksFile>(),
         ArtifactKind::Findings => rendered::<FindingsFile>(),
         ArtifactKind::Questions => rendered::<QuestionsFile>(),
     }
@@ -159,7 +159,7 @@ pub fn contract(kind: ArtifactKind) -> String {
 /// The rules a kind is held to, for a caller that wants them as data.
 pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
     match kind {
-        ArtifactKind::TaskLedger => Ledger::RULES,
+        ArtifactKind::Tasks => TasksFile::RULES,
         ArtifactKind::Findings => FindingsFile::RULES,
         ArtifactKind::Questions => QuestionsFile::RULES,
     }
@@ -209,8 +209,8 @@ mod tests {
 
     #[test]
     fn every_published_example_writes_every_key_its_type_accepts() {
-        example_writes_every_key::<Ledger>(schemars::schema_for!(Ledger), "Task");
-        example_writes_every_key::<Ledger>(schemars::schema_for!(Ledger), "Criterion");
+        example_writes_every_key::<TasksFile>(schemars::schema_for!(TasksFile), "Task");
+        example_writes_every_key::<TasksFile>(schemars::schema_for!(TasksFile), "Criterion");
         example_writes_every_key::<FindingsFile>(
             schemars::schema_for!(FindingsFile),
             "FindingEntry",
@@ -225,7 +225,8 @@ mod tests {
     /// Every published example is a document its own kind accepts.
     #[test]
     fn every_published_example_reads_back_through_its_own_door() {
-        read::<Ledger>(Ledger::EXAMPLE.as_bytes(), "example").expect("the ledger example");
+        read::<TasksFile>(TasksFile::EXAMPLE.as_bytes(), "example")
+            .expect("the tasks document example");
         read::<FindingsFile>(FindingsFile::EXAMPLE.as_bytes(), "example")
             .expect("the findings example");
         read::<QuestionsFile>(QuestionsFile::EXAMPLE.as_bytes(), "example")

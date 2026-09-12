@@ -24,7 +24,7 @@ nodes:
       printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{run.dir}}/artifacts/notes.yaml
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
         - { name: notes.yaml, kind: findings }
 "#;
 
@@ -85,20 +85,20 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "the failing node heads its own detail: {text}"
     );
 
-    let (ledger_heading, ledger_problems) = document_block(&text, "artifacts/plan.yaml");
+    let (tasks_heading, tasks_problems) = document_block(&text, "artifacts/plan.yaml");
     let (findings_heading, findings_problems) = document_block(&text, "artifacts/notes.yaml");
 
     // The §4 block counts what it lists, and says `errors` for more than
     // one — never the `error(s)` hedge.
-    for heading in [&ledger_heading, &findings_heading] {
+    for heading in [&tasks_heading, &findings_heading] {
         assert!(
             !heading.contains("error(s)"),
             "the block pluralises properly: {heading}"
         );
     }
     assert_eq!(
-        ledger_heading,
-        format!("artifacts/plan.yaml: {} errors", ledger_problems.len()),
+        tasks_heading,
+        format!("artifacts/plan.yaml: {} errors", tasks_problems.len()),
         "the heading counts the problems under it: {text}"
     );
     assert_eq!(
@@ -107,20 +107,20 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "the heading counts the problems under it: {text}"
     );
 
-    // Attribution: the task ledger's problems are about its task, the
+    // Attribution: the tasks document's problems are about its task, the
     // findings artifact's are about its finding, and neither block
     // carries the other's.
     assert!(
-        ledger_problems.iter().all(|p| p.contains("`T001`")),
-        "the ledger's block carries only the ledger's problems: {ledger_problems:?}"
+        tasks_problems.iter().all(|p| p.contains("`T001`")),
+        "the tasks document's block carries only the tasks document's problems: {tasks_problems:?}"
     );
     assert!(
         findings_problems.iter().all(|p| p.contains("`F1`")),
         "the findings block carries only its own problems: {findings_problems:?}"
     );
     assert!(
-        ledger_problems.iter().any(|p| p.contains("title")),
-        "a task with an empty `title` says so: {ledger_problems:?}"
+        tasks_problems.iter().any(|p| p.contains("title")),
+        "a task with an empty `title` says so: {tasks_problems:?}"
     );
     assert!(
         findings_problems.iter().any(|p| p.contains("location")),
@@ -160,42 +160,42 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
         "one entry per document that did not close: {state:#}"
     );
 
-    let ledger = documents
+    let tasks = documents
         .iter()
         .find(|d| d["path"] == "artifacts/plan.yaml")
-        .unwrap_or_else(|| panic!("the ledger is named by its path: {state:#}"));
+        .unwrap_or_else(|| panic!("the tasks document is named by its path: {state:#}"));
     let findings = documents
         .iter()
         .find(|d| d["path"] == "artifacts/notes.yaml")
         .unwrap_or_else(|| panic!("the findings artifact is named by its path: {state:#}"));
 
     // The kind a consumer needs to know which shape the file had to meet.
-    assert_eq!(ledger["kind"], "task-ledger", "{state:#}");
+    assert_eq!(tasks["kind"], "tasks", "{state:#}");
     assert_eq!(findings["kind"], "findings", "{state:#}");
 
     // And the attribution itself: a problem is reachable only through
     // the document it came from, so no consumer has to guess.
-    let ledger_problems = ledger["diagnostics"].as_array().expect("ledger problems");
+    let tasks_problems = tasks["diagnostics"].as_array().expect("tasks problems");
     let findings_problems = findings["diagnostics"]
         .as_array()
         .expect("findings problems");
     assert!(
-        !ledger_problems.is_empty() && !findings_problems.is_empty(),
+        !tasks_problems.is_empty() && !findings_problems.is_empty(),
         "{state:#}"
     );
     assert!(
-        ledger_problems.iter().all(|d| d["id"] == "T001"),
-        "every ledger problem names the ledger's own task: {state:#}"
+        tasks_problems.iter().all(|d| d["id"] == "T001"),
+        "every tasks problem names the tasks document's own task: {state:#}"
     );
     assert!(
         findings_problems.iter().all(|d| d["id"] == "F1"),
         "every findings problem names the findings artifact's own finding: {state:#}"
     );
     assert!(
-        ledger_problems
+        tasks_problems
             .iter()
             .any(|d| d["problem"] == "rule" && d["code"] == "empty-title"),
-        "the ledger's task has an empty `title`: {state:#}"
+        "the tasks document's task has an empty `title`: {state:#}"
     );
     assert!(
         findings_problems

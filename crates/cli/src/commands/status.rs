@@ -1,7 +1,7 @@
 //! `yunta status <run_id>`: progress derived from the event log alone,
 //! never an estimate or an agent's own report. Two levels — **flow**
 //! (nodes finished over the DAG frozen in the manifest) and **task**
-//! (ledger tasks done/total) — presented as counters with context,
+//! (tasks done/total) — presented as counters with context,
 //! never a percentage: a percentage lies the moment a reroute grows
 //! the denominator.
 

@@ -50,7 +50,7 @@ pub struct Capabilities {
     /// (habilita la tasa de cache de Contrato §8.4).
     pub usage_reporting: bool,
     /// Puede conectarse al servidor MCP por-run de Yunta como cliente
-    /// (blackboard, ledger, findings, solicitud de ampliación de scope).
+    /// (blackboard, tareas, findings, solicitud de ampliación de scope).
     pub run_tools: bool,
 }
 

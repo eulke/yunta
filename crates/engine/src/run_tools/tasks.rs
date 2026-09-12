@@ -1,4 +1,4 @@
-//! The two tools that speak about the run's task ledger: where its tasks
+//! The two tools that speak about the run's tasks document: where its tasks
 //! stand, and how a session asks for one task's scope to be widened.
 //!
 //! Both are read or ask, never write. A session never widens its own

@@ -50,13 +50,13 @@ artifacts:
 const PLAN_NODE: &str = r#"
 id: plan
 kind: prompt
-prompt: "Write the ledger."
+prompt: "Write the tasks document."
 artifacts:
   produces:
-    - { name: plan.yaml, kind: task-ledger }
+    - { name: plan.yaml, kind: tasks }
 "#;
 
-const VALID_LEDGER: &str = r#"
+const VALID_TASKS: &str = r#"
 tasks:
   - id: T001
     title: "First task"
@@ -136,24 +136,24 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
 }
 
 #[test]
-fn a_valid_task_ledger_is_parsed_and_returned_for_registration() {
+fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "plan.yaml", VALID_LEDGER);
+    write_artifact(run_dir.path(), "plan.yaml", VALID_TASKS);
 
     let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap();
-    let ArtifactContent::TaskLedger(ledger) = &verified[0].content else {
-        panic!("a parsed ledger: {:?}", verified[0].content);
+    let ArtifactContent::Tasks(tasks) = &verified[0].content else {
+        panic!("a parsed tasks document: {:?}", verified[0].content);
     };
-    let ids: Vec<&str> = ledger.tasks.iter().map(|t| t.id.as_str()).collect();
+    let ids: Vec<&str> = tasks.tasks.iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ids, ["T001", "T002"]);
     assert_eq!(
         verified[0].content.kind(),
-        Some(yunta_core::ArtifactKind::TaskLedger)
+        Some(yunta_core::ArtifactKind::Tasks)
     );
 }
 
 #[test]
-fn an_invalid_ledger_reports_every_violation_together() {
+fn an_invalid_tasks_document_reports_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     // Two independent violations: T001 has no criteria, T002 has an
     // empty scope. Both must surface in one pass.
@@ -187,14 +187,14 @@ tasks:
 #[test]
 fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "plan.yaml", "tasks: [not, a, ledger");
+    write_artifact(run_dir.path(), "plan.yaml", "tasks: [not, a, document");
 
     let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
     // Not a flat list of diagnostics: each one is reachable through the
     // document it is about, so a later reader knows which file to open
     // and which kind's rules were asked.
     let report = failures[0].report().expect("a problem with the content");
-    assert_eq!(report.document.kind, yunta_core::ArtifactKind::TaskLedger);
+    assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks);
     assert_eq!(report.document.path, "artifacts/plan.yaml");
     assert_eq!(codes(&failures), ["parse"]);
 }
@@ -204,7 +204,7 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     let run_dir = tempfile::tempdir().unwrap();
 
     let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
-    // A ledger that was never written has no content whose kind could
+    // A tasks document that was never written has no content whose kind could
     // be wrong — which is exactly why a rewrite cannot fix it.
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
     assert_eq!(failures[0].path(), "artifacts/plan.yaml");

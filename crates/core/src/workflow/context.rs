@@ -30,8 +30,8 @@ pub enum ContextSpec {
         #[serde(rename = "run-events")]
         run_events: RunEventsParams,
     },
-    Ledger {
-        ledger: LedgerParams,
+    Tasks {
+        tasks: TasksParams,
     },
     Knowledge {
         knowledge: KnowledgeParams,
@@ -49,15 +49,20 @@ impl ContextSpec {
         "artifact",
         "mcp",
         "run-events",
-        "ledger",
+        "tasks",
         "knowledge",
         "node-output",
     ];
+
+    /// Spellings an earlier workflow may carry, each read as the key
+    /// it stands for and never listed as one an author writes today.
+    const ALIASES: &'static [(&'static str, &'static str)] = &[("ledger", "tasks")];
 }
 
 impl<'de> Deserialize<'de> for ContextSpec {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (key, value) = keyed_entry(deserializer, "a context source", Self::KEYS)?;
+        let (key, value) =
+            keyed_entry(deserializer, "a context source", Self::KEYS, Self::ALIASES)?;
         let spec = match key.as_str() {
             "files" => ContextSpec::Files {
                 files: nested::<D, _>(&key, value)?,
@@ -74,8 +79,8 @@ impl<'de> Deserialize<'de> for ContextSpec {
             "run-events" => ContextSpec::RunEvents {
                 run_events: nested::<D, _>(&key, value)?,
             },
-            "ledger" => ContextSpec::Ledger {
-                ledger: nested::<D, _>(&key, value)?,
+            "tasks" => ContextSpec::Tasks {
+                tasks: nested::<D, _>(&key, value)?,
             },
             "knowledge" => ContextSpec::Knowledge {
                 knowledge: nested::<D, _>(&key, value)?,
@@ -154,13 +159,13 @@ impl RunEventsFilter {
     }
 }
 
-/// `ledger: {}` — no parameters in the current resolution
-/// (the aggregate ledger/task-status view; see the node's own doc
+/// `tasks: {}` — no parameters in the current resolution
+/// (the aggregate task-status view; see the node's own doc
 /// comment on `context` for the task-scoped variant this doesn't cover
 /// yet).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LedgerParams {}
+pub struct TasksParams {}
 
 /// One layer of `knowledge:`, most to least local. `Org` resolves
 /// as the union of every installed knowledge pack's declared contents

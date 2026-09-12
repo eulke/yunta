@@ -170,32 +170,32 @@ permissions:
     deny: ["*forbidden-marker*"]
 "#;
 
-// --- task ledgers handed over through the run tools -----
+// --- tasks documents handed over through the run tools -----
 
-/// One session that hands `ledger` over as `plan.yaml` through
-/// `yunta_submit_task_ledger` and closes with `summary` — the engine
+/// One session that hands `tasks` over as `plan.yaml` through
+/// `yunta_submit_tasks` and closes with `summary` — the engine
 /// validates the document and writes the file itself. This is a session
 /// entry alone, to append after others in a fixture; [`plan_session`]
 /// opens a fixture with it.
-pub fn ledger_session(ledger: &str, summary: &str) -> String {
-    let document: String = ledger
+pub fn tasks_session(tasks: &str, summary: &str) -> String {
+    let document: String = tasks
         .lines()
         .map(|line| format!("            {line}\n"))
         .collect();
     format!(
-        "  - steps:\n      - type: run_tool\n        tool: yunta_submit_task_ledger\n\
+        "  - steps:\n      - type: run_tool\n        tool: yunta_submit_tasks\n\
          \x20       arguments:\n          name: plan.yaml\n          document:\n{document}\
          \x20   outcome: {{ type: completed, summary: {summary} }}\n"
     )
 }
 
 /// The fixture a loop test starts from: the run tools its planner
-/// submits through, and the planner's own session handing `ledger` over.
+/// submits through, and the planner's own session handing `tasks` over.
 /// Executor sessions a test appends land after it, in dispatch order.
-pub fn plan_session(ledger: &str) -> String {
+pub fn plan_session(tasks: &str) -> String {
     format!(
         "capabilities: {{ run_tools: true }}\nsessions:\n{}",
-        ledger_session(ledger, "planned")
+        tasks_session(tasks, "planned")
     )
 }
 
@@ -230,8 +230,8 @@ runners:
     - { adapter: mock, model: mock-model }
 "#;
 
-/// An 8-independent-task ledger: no `depends_on` between any of them, each
-/// with its own disjoint scope (`out-N.txt`) so `ledger::register`
+/// An 8-independent-task document: no `depends_on` between any of them, each
+/// with its own disjoint scope (`out-N.txt`) so `tasks::register`
 /// accepts it as a legal batch of fully parallelizable work.
 pub fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String {
     format!(
@@ -239,7 +239,7 @@ pub fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String 
     )
 }
 
-pub fn eight_independent_tasks_ledger() -> String {
+pub fn eight_independent_tasks() -> String {
     let mut yaml = String::from("tasks:\n");
     for n in 1..=8 {
         yaml.push_str(&format!(
@@ -257,27 +257,27 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - {{ name: plan.yaml, kind: task-ledger }}
+        - {{ name: plan.yaml, kind: tasks }}
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: {concurrency}
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#
     )
 }
 
-/// One mock session per task of [`eight_independent_tasks_ledger`],
+/// One mock session per task of [`eight_independent_tasks`],
 /// matched by its own id (never by call order — concurrent dispatch
 /// races several `spawn()` calls at once), behind the planner's own
 /// session.
 pub fn eight_tasks_fixture() -> String {
-    let mut yaml = plan_session(&eight_independent_tasks_ledger());
+    let mut yaml = plan_session(&eight_independent_tasks());
     for n in 1..=8 {
         yaml.push_str(&format!(
             "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: out-{n}.txt, content: \"{n}\" }}\n    outcome: {{ type: completed, summary: \"did task-{n}\" }}\n"
@@ -328,16 +328,16 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - {{ name: plan.yaml, kind: task-ledger }}
+        - {{ name: plan.yaml, kind: tasks }}
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: {mode}
 {within_line}{cap_line}"#
@@ -355,16 +355,16 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#
     .to_string()
 }
@@ -655,23 +655,23 @@ sessions:
 
 /// Three sequential tasks at concurrency 1 need four loop iterations
 /// (one per batch plus the closing empty-batch check) — a cap of 2 trips
-/// mid-ledger.
+/// mid-document.
 pub const LOOP_CAP_WORKFLOW: &str = r#"
 name: loop-cap
 nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Hand over the task ledger."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#;
 
 pub const LOOP_CAP_CONFIG: &str = r#"
@@ -691,22 +691,22 @@ limits:
 pub fn loop_cap_fixture() -> String {
     const CHAIN: [(&str, &str); 3] = [("T001", "a"), ("T002", "b"), ("T003", "c")];
 
-    let mut ledger = String::from("tasks:\n");
+    let mut tasks = String::from("tasks:\n");
     let mut previous: Option<&str> = None;
     for (task, file) in CHAIN {
-        ledger.push_str(&task_yaml(
+        tasks.push_str(&task_yaml(
             task,
             file,
             &format!("{file}.txt"),
             &format!("test -f {file}.txt"),
         ));
         if let Some(previous) = previous {
-            ledger.push_str(&format!("    depends_on: [{previous}]\n"));
+            tasks.push_str(&format!("    depends_on: [{previous}]\n"));
         }
         previous = Some(task);
     }
 
-    let mut yaml = plan_session(&ledger);
+    let mut yaml = plan_session(&tasks);
     for (task, file) in CHAIN {
         yaml.push_str(&format!(
             "  - effects:\n      - {{ path: {file}.txt, content: \"{file}\" }}\n    outcome: {{ type: completed, summary: \"did {task}\" }}\n"

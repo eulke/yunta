@@ -18,9 +18,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 "#;
 
 const REVIEW_NODE: &str = r#"
@@ -35,7 +35,7 @@ nodes:
 "#;
 
 /// A `run_tool` step's arguments, as a fixture writes them.
-fn ledger_document(tasks: &[(&str, &str)]) -> String {
+fn tasks_document(tasks: &[(&str, &str)]) -> String {
     let entries: String = tasks
         .iter()
         .map(|(id, title)| {
@@ -86,7 +86,7 @@ fn kinds(bench: &Bench, wanted: &str) -> usize {
 }
 
 #[tokio::test]
-async fn a_session_submits_a_ledger_and_the_engine_writes_the_file() {
+async fn a_session_submits_a_tasks_document_and_the_engine_writes_the_file() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
@@ -94,14 +94,14 @@ capabilities: {{ run_tools: true }}
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
 {}
     outcome: {{ type: completed, summary: "planned" }}
 "#,
-        ledger_document(&[("alpha", "First"), ("beta", "Second")])
+        tasks_document(&[("alpha", "First"), ("beta", "Second")])
     );
 
     let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
@@ -114,9 +114,9 @@ sessions:
 
     // The file is the engine's, and it reads back as the document.
     let bytes = bench.artifact("plan.yaml").expect("the engine wrote it");
-    let ledger: yunta_core::Ledger =
-        yunta_core::shape::read(&bytes, "plan.yaml").expect("a canonical ledger");
-    let ids: Vec<String> = ledger.tasks.iter().map(|t| t.id.to_string()).collect();
+    let tasks: yunta_core::TasksFile =
+        yunta_core::shape::read(&bytes, "plan.yaml").expect("a canonical tasks document");
+    let ids: Vec<String> = tasks.tasks.iter().map(|t| t.id.to_string()).collect();
     assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
 }
 
@@ -129,14 +129,14 @@ capabilities: {{ run_tools: true }}
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
 {}
     outcome: {{ type: completed, summary: "planned" }}
 "#,
-        ledger_document(&[("alpha", "First")])
+        tasks_document(&[("alpha", "First")])
     );
     bench.run(PLAN_NODE, &fixture).await;
     assert_eq!(
@@ -157,7 +157,7 @@ capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         expect: refused
         arguments:
           name: plan.yaml
@@ -176,7 +176,7 @@ sessions:
                 criteria:
                   - cmd: "cargo test beta"
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -222,7 +222,7 @@ capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         expect: refused
         arguments:
           name: plan.yaml
@@ -257,7 +257,7 @@ capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -268,7 +268,7 @@ sessions:
                 criteria:
                   - cmd: "cargo test alpha"
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -306,7 +306,7 @@ capabilities: {{ run_tools: true }}
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         expect: refused
         arguments:
           name: other.yaml
@@ -314,7 +314,7 @@ sessions:
 {}
     outcome: {{ type: completed, summary: "submitted the wrong name" }}
 "#,
-        ledger_document(&[("alpha", "First")])
+        tasks_document(&[("alpha", "First")])
     );
 
     let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;

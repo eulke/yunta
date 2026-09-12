@@ -130,7 +130,7 @@ paused on a gate, `resume` and `resolve-gate` pick it back up from exactly where
 log left off, in a different process if you like; nothing about a run depends on
 the terminal that started it staying open.
 
-That's the whole loop. Real workflows add more node kinds (`loop` over a task ledger,
+That's the whole loop. Real workflows add more node kinds (`loop` over a tasks document,
 `parallel` groups, `check` builtins, `gate` for human decisions, `workflow` to compose
 other workflows) and richer context sourcing — all covered in the
 [workflow guide](docs/guide.md). None of it requires a pack; [packs](docs/packs.md)
@@ -142,15 +142,15 @@ Two example packs ship in this repo's own [`packs/`](packs/) directory as
 installable, removable third-party packs — the engine grants them no special
 status: [`yunta/starter`](packs/starter) (two minimal workflows that teach the
 shape) and [`yunta/fragua`](packs/fragua) (the full reference pipeline — grill,
-a verified task ledger, lint→fix, a baseline check, multi-runner review, PR).
+a verified tasks document, lint→fix, a baseline check, multi-runner review, PR).
 
 ## Commands
 
 | Command | Does |
 |---|---|
 | `yunta init` | Detects language, test command, base branch and available adapters; writes `.yunta/config.yaml`. |
-| `yunta new <name> [--shape one-node\|lint-fix\|ledger]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and checks it. |
-| `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `task-ledger`, `findings`, `questions` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
+| `yunta new <name> [--shape one-node\|lint-fix\|tasks]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and checks it. |
+| `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `findings`, `questions` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
 | `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
 | `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--follow] [--detach]` | Creates a run from a workflow and executes it. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--follow` prints live progress; `--detach` returns the run id immediately and keeps running independent of the calling process. |
 | `yunta list [--runs]` | Without `--runs`: the workflow catalog (repo + packs) with descriptions, inputs and modes. With `--runs`: local runs and their derived state. |

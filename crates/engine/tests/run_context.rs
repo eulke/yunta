@@ -154,25 +154,25 @@ nodes:
 }
 
 #[tokio::test]
-async fn a_ledger_source_resolves_aggregate_task_state_and_is_replayable() {
+async fn a_tasks_source_resolves_aggregate_task_state_and_is_replayable() {
     let bench = Bench::new();
     let workflow = r#"
-name: ctx-ledger
+name: ctx-tasks
 nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: audit
     kind: prompt
     runner: executor
     depends_on: [plan]
-    prompt: "Summarize the ledger."
+    prompt: "Summarize the tasks document."
     context:
-      - ledger: {}
+      - tasks: {}
 "#;
     let fixture = format!(
         "{}  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
@@ -187,7 +187,7 @@ nodes:
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let sources = context_sources(&events, "audit");
-    assert_eq!(sources[0].kind, "ledger");
+    assert_eq!(sources[0].kind, "tasks");
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
@@ -613,10 +613,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
@@ -624,9 +624,9 @@ nodes:
     until: all_tasks_complete
     context:
       - files: ["notes.md"]
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#;
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-1", "one", "one.txt", "test -f one.txt"),
         task_yaml("task-2", "two", "two.txt", "test -f two.txt"),
@@ -635,7 +635,7 @@ nodes:
     // The executor sessions only match if their prompt actually carries
     // the context block's content — a brief without it dispatches no
     // session and the run fails, so a Finished terminal IS the proof.
-    let mut fixture = plan_session(&ledger);
+    let mut fixture = plan_session(&tasks);
     for n in 1..=2 {
         let file = if n == 1 { "one.txt" } else { "two.txt" };
         fixture.push_str(&format!(
@@ -676,7 +676,7 @@ nodes:
 
 // --- the shape of a declared artifact reaches the session -----------------
 //
-// A node that declared `kind: task-ledger` has already said everything
+// A node that declared `kind: tasks` has already said everything
 // needed to publish the shape. These prove it arrives without the author
 // asking, that it names what carries the document, and that an opaque
 // artifact — which has no shape to demand — mounts nothing.
@@ -690,9 +690,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 "#;
     // The script only matches a prompt carrying the published shape, so
     // the run reaching a session at all is the assertion. `type: guard`
@@ -703,7 +703,7 @@ sessions:
   - match_prompt_contains: "type: guard"
     steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:
@@ -734,9 +734,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 "#;
     // The file is the engine's to write, so the shape names the way in
     // rather than a path: the script only matches a prompt that says so.
@@ -746,7 +746,7 @@ sessions:
   - match_prompt_contains: "submits through its run tools"
     steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:

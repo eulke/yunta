@@ -113,7 +113,7 @@ fn init_detects_a_rust_ecosystem_from_cargo_toml() {
 fn every_new_shape_writes_a_workflow_that_passes_check() {
     let (_root, repo, home) = setup();
 
-    for shape in ["one-node", "lint-fix", "ledger"] {
+    for shape in ["one-node", "lint-fix", "tasks"] {
         let name = format!("wf-{shape}");
         let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(
@@ -132,7 +132,7 @@ fn every_new_shape_writes_a_workflow_that_passes_check() {
 fn new_never_references_a_pack_or_touches_the_lock_file() {
     let (_root, repo, home) = setup();
 
-    for shape in ["one-node", "lint-fix", "ledger"] {
+    for shape in ["one-node", "lint-fix", "tasks"] {
         let name = format!("structural-{shape}");
         let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(result.status.success());
@@ -214,7 +214,7 @@ fn new_works_before_init_ever_ran() {
     // No `.yunta/config.yaml` exists yet — `check` must still pass, since
     // these skeletons never reference a `runner:` a missing config could
     // fail to resolve.
-    let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "ledger"]);
+    let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "tasks"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 }
 
@@ -254,7 +254,7 @@ fn new_writes_only_a_parseable_skeleton() {
 
     // Every shape the CLI writes parses back as a real `Workflow` — `new`
     // builds the type from its skeleton before the file ever touches disk.
-    for shape in ["one-node", "lint-fix", "ledger"] {
+    for shape in ["one-node", "lint-fix", "tasks"] {
         let name = format!("parseable-{shape}");
         let result = yunta_in!(&repo, &home, &["new", &name, "--shape", shape]);
         assert!(

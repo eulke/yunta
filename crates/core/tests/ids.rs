@@ -4,9 +4,9 @@
 
 use yunta_core::events::{EventPayload, RunnerResolvedPayload};
 use yunta_core::{
-    AdapterId, AgentName, ExecutorName, FindingId, InvalidId, Ledger, ModeName, ModelName, NodeId,
+    AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName, NodeId,
     PackManifest, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
-    TaskId, Workflow,
+    TaskId, TasksFile, Workflow,
 };
 
 fn rule_of<T>(result: Result<T, InvalidId>) -> String {
@@ -230,7 +230,7 @@ tasks:
     criteria:
       - cmd: \"true\"
 ";
-    let error = yunta_core::yaml::parse::<Ledger>(yaml)
+    let error = yunta_core::yaml::parse::<TasksFile>(yaml)
         .unwrap_err()
         .to_string();
     assert_eq!(

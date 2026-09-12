@@ -17,7 +17,7 @@ use super::escalate::{emit_scope_expansion_events, PendingEscalation};
 use super::{BatchIntegration, LoopState};
 use crate::run::{RunCtx, RunError};
 
-/// Integrates one dispatched batch, serially and in ledger declaration order
+/// Integrates one dispatched batch, serially and in declaration order
 /// (never the order dispatch finished in): drains each task's attempts onto
 /// the log, rebases and fast-forwards a `Done` task onto the run's current
 /// tree, and marks each task's new status. A cancelled dispatch ends the

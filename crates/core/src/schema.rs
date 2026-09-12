@@ -25,9 +25,9 @@ pub fn pack() -> Schema {
     titled(schema_for!(crate::PackManifest), "yunta pack manifest")
 }
 
-/// A task ledger, as a `kind: task-ledger` artifact carries it.
-pub fn ledger() -> Schema {
-    titled(schema_for!(crate::Ledger), "yunta task ledger")
+/// A tasks document, as a `kind: tasks` artifact carries it.
+pub fn tasks() -> Schema {
+    titled(schema_for!(crate::TasksFile), "yunta tasks")
 }
 
 /// A findings artifact, as a `kind: findings` artifact carries it.
@@ -59,7 +59,7 @@ pub fn all() -> [(&'static str, Schema); 8] {
         ("workflow", workflow()),
         ("config", config()),
         ("pack", pack()),
-        ("ledger", ledger()),
+        ("tasks", tasks()),
         ("findings", findings()),
         ("questions", questions()),
         ("withdrawal", withdrawal()),
@@ -81,7 +81,7 @@ fn titled(mut schema: Schema, title: &str) -> Schema {
 /// `schemars` — out of the shipped binary.
 pub fn json(kind: crate::ArtifactKind) -> &'static str {
     match kind {
-        crate::ArtifactKind::TaskLedger => include_str!("../schemas/ledger.json"),
+        crate::ArtifactKind::Tasks => include_str!("../schemas/tasks.json"),
         crate::ArtifactKind::Findings => include_str!("../schemas/findings.json"),
         crate::ArtifactKind::Questions => include_str!("../schemas/questions.json"),
     }

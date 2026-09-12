@@ -11,7 +11,7 @@ use yunta_core::events::Failure;
 use yunta_core::{ArtifactKind, NodeId, TaskId};
 
 fn plan() -> DocumentRef {
-    DocumentRef::new(ArtifactKind::TaskLedger, "artifacts/plan.yaml")
+    DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
 }
 
 fn task(id: &str, index: usize) -> Subject {

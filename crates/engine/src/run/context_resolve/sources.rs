@@ -1,5 +1,5 @@
 //! The sources a `context:` entry resolves from: files, a command's
-//! output, an artifact, the run's own events, the ledger, and a node's
+//! output, an artifact, the run's own events, the tasks document, and a node's
 //! captured output — plus writing that output where the next node reads it.
 
 use std::path::{Path, PathBuf};
@@ -169,12 +169,12 @@ pub(super) async fn resolve_run_events(
     Ok(jsonl.into_bytes())
 }
 
-pub(super) async fn resolve_ledger(
+pub(super) async fn resolve_tasks(
     ctx: &RunCtx<'_>,
     node: &Node,
     source_id: &str,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    // A storage failure is not an empty ledger: handing the agent "no
+    // A storage failure is not an empty tasks document: handing the agent "no
     // tasks" as context would hide the failure behind plausible content,
     // so the read propagates exactly as its sibling `resolve_run_events`
     // already does.

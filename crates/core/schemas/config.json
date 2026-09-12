@@ -441,7 +441,7 @@
           "minimum": 0
         },
         "max_loop_iterations": {
-          "description": "Ceiling on loop-node iterations — the only net under a ledger\nwhose state oscillates forever.",
+          "description": "Ceiling on loop-node iterations — the only net under a tasks document\nwhose state oscillates forever.",
           "type": [
             "integer",
             "null"

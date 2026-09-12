@@ -146,6 +146,12 @@ each came from: the receipt counts a problem by its code together with the kind 
 document it was found in, and a failure of the file itself, which has no document,
 counts by code alone.
 
+An artifact kind is read under its current name and under the one it had. The
+tasks document is `tasks`; a log — `artifact_written`, `artifact_submitted` — or
+a frozen manifest that spells it `task-ledger` reads as `tasks`, and so does a
+workflow's `kind: task-ledger` or a `ledger: {}` context source. What the binary
+writes is always the current spelling.
+
 ## Documents a session hands over, and findings it reports
 
 `artifact_submitted` records a whole document a session offered and what the engine
@@ -204,11 +210,11 @@ The `document_shape` tool refuses an unknown kind with the same sentence
 
 A run tool that refuses something a session offered opens with what was not accepted
 and which call to make again, then lists the problems numbered from 1, one per
-paragraph. The heading names the document by the noun of its kind — `task ledger`,
+paragraph. The heading names the document by the noun of its kind — `tasks document`,
 `findings artifact`, `questions artifact`:
 
 ```
-The task ledger `plan.yaml` was not accepted. Fix these and submit again:
+The tasks document `plan.yaml` was not accepted. Fix these and submit again:
 The finding was not accepted. Fix these and post it again:
 The finding update was not accepted. Fix these and update it again:
 The withdrawal was not accepted. Fix these and withdraw it again:
@@ -248,7 +254,7 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`ledger.json`, `findings.json`, `questions.json` and `events.json`: the JSON
+`tasks.json`, `findings.json`, `questions.json` and `events.json`: the JSON
 Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
 three artifacts the engine interprets, and one event of the log — the shape of a
 line of `events.jsonl`. They are generated from the types that read those
@@ -259,6 +265,10 @@ them, which is also the crate that ships them: the binary embeds those exact
 files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.
+
+`tasks.json` is the schema of the tasks document; `yunta schema task-ledger`
+still answers with it, as an alias of `yunta schema tasks`, and the JSON Schema
+itself lists `tasks` alone as the kind's spelling.
 
 ## Platforms
 

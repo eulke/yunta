@@ -25,7 +25,7 @@ impl SessionTools {
     ///
     /// Runs `verify_one` — the close's own verification, not a second
     /// reading of it. What comes back on success is what the engine
-    /// understood, not just that the file parsed: a ledger that reads as
+    /// understood, not just that the file parsed: a tasks document that reads as
     /// six tasks when the session meant seven is a failure nothing else
     /// catches.
     pub(super) fn check_artifact(

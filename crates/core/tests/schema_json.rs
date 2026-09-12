@@ -30,7 +30,7 @@ fn every_root_schema_names_itself_and_speaks_draft_2020_12() {
         ("yunta workflow", yunta_core::schema::workflow()),
         ("yunta config layer", yunta_core::schema::config()),
         ("yunta pack manifest", yunta_core::schema::pack()),
-        ("yunta task ledger", yunta_core::schema::ledger()),
+        ("yunta tasks", yunta_core::schema::tasks()),
         ("yunta event", yunta_core::schema::events()),
     ] {
         let json = rendered(schema);

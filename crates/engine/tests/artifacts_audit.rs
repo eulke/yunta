@@ -11,7 +11,7 @@ use yunta_core::events::EventPayload;
 use yunta_engine::RunTerminal;
 use yunta_testkit::Bench;
 
-/// A node with both kinds of artifact: the ledger it hands over through
+/// A node with both kinds of artifact: the tasks document it hands over through
 /// the run tools, and a file of its own the session writes. The opaque
 /// one is what earns the session its reach into `artifacts/` — a node
 /// that only submits needs none, so it never gets one, and there would
@@ -22,14 +22,14 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger and leave your notes."
+    prompt: "Write a tasks document and leave your notes."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
         - notes.md
 "#;
 
-/// A session that submits its ledger and writes `effects` besides — one
+/// A session that submits its tasks document and writes `effects` besides — one
 /// `path: content` pair per line, already indented for the script.
 fn fixture(effects: &str) -> String {
     format!(
@@ -38,7 +38,7 @@ capabilities: {{ run_tools: true }}
 sessions:
   - steps:
       - type: run_tool
-        tool: yunta_submit_task_ledger
+        tool: yunta_submit_tasks
         arguments:
           name: plan.yaml
           document:

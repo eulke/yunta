@@ -4,10 +4,10 @@
 //! `artifacts.produces` must exist and be non-empty under the run's
 //! `artifacts/` directory — no matter what the agent reported. Opaque
 //! artifacts are verified by existence and content hash only, never by
-//! format. `task-ledger`, `findings` and `questions` are the interpreted
+//! format. `tasks`, `findings` and `questions` are the interpreted
 //! kinds: each is read through the one door that names every problem at
 //! once ([`yunta_core::shape::read`], which runs the document's own
-//! rules), and the parsed result handed back to the caller — `Ledger`
+//! rules), and the parsed result handed back to the caller — `TasksFile`
 //! for `task_registered`, `Finding`s for `finding_posted`, `Question`s
 //! so `node_exec.rs` can pause the run instead of finishing the node.
 //!
@@ -33,7 +33,7 @@ use yunta_core::shape::read;
 use yunta_core::FindingsFile;
 use yunta_core::NodeId;
 use yunta_core::{
-    sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
+    sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Node, Question, QuestionsFile, TasksFile,
 };
 
 /// The run directory's own name for where artifacts live. Every path
@@ -64,7 +64,7 @@ pub struct VerifiedArtifact {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArtifactContent {
     Opaque,
-    TaskLedger(Ledger),
+    Tasks(TasksFile),
     Findings(Vec<Finding>),
     Questions(Vec<Question>),
 }
@@ -76,7 +76,7 @@ impl ArtifactContent {
     pub fn kind(&self) -> Option<ArtifactKind> {
         match self {
             ArtifactContent::Opaque => None,
-            ArtifactContent::TaskLedger(_) => Some(ArtifactKind::TaskLedger),
+            ArtifactContent::Tasks(_) => Some(ArtifactKind::Tasks),
             ArtifactContent::Findings(_) => Some(ArtifactKind::Findings),
             ArtifactContent::Questions(_) => Some(ArtifactKind::Questions),
         }
@@ -195,7 +195,7 @@ fn interpret(
 ) -> Result<ArtifactContent, Report> {
     Ok(match kind {
         None => ArtifactContent::Opaque,
-        Some(ArtifactKind::TaskLedger) => ArtifactContent::TaskLedger(read::<Ledger>(bytes, path)?),
+        Some(ArtifactKind::Tasks) => ArtifactContent::Tasks(read::<TasksFile>(bytes, path)?),
         Some(ArtifactKind::Findings) => {
             let file = read::<FindingsFile>(bytes, path)?;
             ArtifactContent::Findings(file.findings.into_iter().map(Finding::from).collect())
@@ -275,11 +275,11 @@ pub(crate) fn submit(
     let path = Path::new(ARTIFACTS_DIR).join(name).display().to_string();
 
     let (content, yaml) = match kind {
-        ArtifactKind::TaskLedger => {
-            let ledger: Ledger =
+        ArtifactKind::Tasks => {
+            let tasks: TasksFile =
                 yunta_core::shape::accept(document, &path).map_err(SubmitError::Refused)?;
-            let yaml = render(&ledger, &path)?;
-            (ArtifactContent::TaskLedger(ledger), yaml)
+            let yaml = render(&tasks, &path)?;
+            (ArtifactContent::Tasks(tasks), yaml)
         }
         ArtifactKind::Questions => {
             let file: QuestionsFile =
