@@ -64,11 +64,24 @@ fn lower_hex(bytes: &[u8]) -> String {
     hex
 }
 
+/// How many hex digits a content hash shows when a surface names one
+/// beside something else. Twelve: enough that no two artifacts of one
+/// run read as the same object, short enough to scan in a line a person
+/// reads.
+const ABBREVIATED_DIGITS: usize = 12;
+
 impl ContentHash {
     /// The SHA-256 of `bytes`, hex-encoded: the one way this workspace
     /// produces a content hash, so every hash it records has this shape.
     pub fn sha256(bytes: &[u8]) -> Self {
         Self(Cow::Owned(lower_hex(&Sha256::digest(bytes))))
+    }
+
+    /// The hash as a reader meets it in a line about something else:
+    /// `sha256:` and the first twelve digits. Prose, not an identifier —
+    /// what compares, and what a log records, is the whole value.
+    pub fn abbreviated(&self) -> String {
+        format!("sha256:{}", &self.as_str()[..ABBREVIATED_DIGITS])
     }
 }
 
@@ -86,9 +99,9 @@ impl CommitSha {
     }
 }
 
-/// Lowercase-hex SHA-256 of raw bytes — what `artifact_written` records
-/// for a file's content (artifacts are verified by existence and hash,
-/// never by format).
+/// Lowercase-hex SHA-256 of raw bytes — what `artifact_accepted` records
+/// for an artifact's content, and the name that content is stored under
+/// (artifacts are identified by their bytes, never by their format).
 pub fn sha256_hex(bytes: &[u8]) -> ContentHash {
     ContentHash::sha256(bytes)
 }
@@ -114,6 +127,16 @@ mod tests {
             hash.as_str().to_uppercase().parse::<ContentHash>().is_err(),
             "lowercase only"
         );
+    }
+
+    #[test]
+    fn an_abbreviated_hash_is_a_prefix_a_person_can_read() {
+        let hash = sha256_hex(b"content");
+        let short = hash.abbreviated();
+        assert_eq!(short, format!("sha256:{}", &hash.as_str()[..12]));
+        assert!(hash
+            .as_str()
+            .starts_with(short.trim_start_matches("sha256:")));
     }
 
     #[test]

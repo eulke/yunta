@@ -1,5 +1,5 @@
-# standard mode: grill and plan produce their artifacts, the ledger
-# registers, and the run pauses at `approve-plan` — its first human
+# standard mode: grill and plan produce their artifacts, the tasks
+# document registers, and the run pauses at `approve-plan` — its first human
 # decision — before any task runs. A gate with nobody to answer it
 # leaves the run paused with the gate named in the pause reason.
 workflow: build-feature

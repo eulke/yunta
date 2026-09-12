@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "yunta task ledger",
-  "description": "A ledger document — the sole top-level key is `tasks:`, with no\nheader metadata alongside it.",
+  "title": "yunta tasks",
+  "description": "A tasks document — the sole top-level key is `tasks:`, with no\nheader metadata alongside it.",
   "type": "object",
   "properties": {
     "tasks": {
@@ -17,7 +17,7 @@
   ],
   "$defs": {
     "Criterion": {
-      "description": "One criterion as the ledger declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
+      "description": "One criterion as the tasks document declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
       "type": "object",
       "properties": {
         "cmd": {

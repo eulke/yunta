@@ -29,8 +29,9 @@
 //! friction, not a bug.
 
 use serde::Serialize;
+use yunta_core::events::findings::effective;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
-use yunta_core::{sha256_hex, Isolation, ModeName, OnFinishStep};
+use yunta_core::{Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
 
@@ -87,32 +88,35 @@ fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
         green: 0,
         reused: 0,
     };
+    for event in events {
+        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
+            for result in &p.results {
+                criteria.executed += 1;
+                if result.exit_code == 0 {
+                    criteria.green += 1;
+                }
+                if result.reused {
+                    criteria.reused += 1;
+                }
+            }
+        }
+    }
+    // A finding spans more than one event — it can be replaced and taken
+    // back — so an event-by-event tally counts an update twice and a
+    // withdrawal as one that no longer stands. The evidence reports the
+    // set the run holds at the close, which is what the fold answers.
     let mut findings = FindingCounts {
         blocking: 0,
         major: 0,
         minor: 0,
         note: 0,
     };
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::CriteriaChecked(p)) => {
-                for result in &p.results {
-                    criteria.executed += 1;
-                    if result.exit_code == 0 {
-                        criteria.green += 1;
-                    }
-                    if result.reused {
-                        criteria.reused += 1;
-                    }
-                }
-            }
-            Some(EventPayload::FindingPosted(p)) => match p.finding.severity {
-                FindingSeverity::Blocking => findings.blocking += 1,
-                FindingSeverity::Major => findings.major += 1,
-                FindingSeverity::Minor => findings.minor += 1,
-                FindingSeverity::Note => findings.note += 1,
-            },
-            _ => {}
+    for posted in effective(events) {
+        match posted.finding.severity {
+            FindingSeverity::Blocking => findings.blocking += 1,
+            FindingSeverity::Major => findings.major += 1,
+            FindingSeverity::Minor => findings.minor += 1,
+            FindingSeverity::Note => findings.note += 1,
         }
     }
     ProvenanceVerification { criteria, findings }
@@ -148,11 +152,16 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         source,
     })?;
 
+    // What the run holds, so the distillate is the bytes the log names
+    // and its provenance carries that same hash — never a second reading
+    // of a view somebody may have replaced.
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
     for name in &declared {
-        let source = ctx.run_dir.join("artifacts").join(name.as_str());
-        match std::fs::read(&source) {
-            Ok(bytes) => {
+        match held.named(&ctx.manifest.workflow, None, name) {
+            Some(artifact) => {
+                let bytes = held.bytes(artifact)?;
                 let dest = dest_dir.join(name.as_str());
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
@@ -166,11 +175,11 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                 })?;
                 artifacts.push(ProvenanceArtifact {
                     name: name.to_string(),
-                    content_hash: Some(format!("sha256:{}", sha256_hex(&bytes))),
+                    content_hash: Some(format!("sha256:{}", artifact.content_hash)),
                     missing: false,
                 });
             }
-            Err(_) => {
+            None => {
                 // Declared durable, never produced (a mode excluded its
                 // node, a reroute never reached it): registered, never
                 // lost — reported as a finding — and the rest distills
@@ -280,4 +289,114 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             .await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{
+        CriteriaCheckedPayload, CriterionResult, EventBody, Finding, FindingPostedPayload,
+        FindingUpdatedPayload, FindingWithdrawnPayload, Phase,
+    };
+
+    use super::*;
+
+    fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
+        StoredEvent {
+            run_id: "run-1".into(),
+            seq: seq.into(),
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            node_id: Some(node.into()),
+            body: EventBody::Known(payload),
+        }
+    }
+
+    fn finding(id: &str, severity: FindingSeverity) -> Finding {
+        Finding {
+            id: id.into(),
+            severity,
+            title: format!("finding {id}"),
+            location: format!("tasks/{id}"),
+            detail: "detail".to_string(),
+            proposed_criterion: None,
+        }
+    }
+
+    #[test]
+    fn the_finding_counts_report_the_severities_the_run_still_holds() {
+        let events = vec![
+            event(
+                1,
+                "review",
+                EventPayload::FindingPosted(FindingPostedPayload {
+                    finding: finding("f1", FindingSeverity::Minor),
+                }),
+            ),
+            event(
+                2,
+                "review",
+                EventPayload::FindingPosted(FindingPostedPayload {
+                    finding: finding("f2", FindingSeverity::Major),
+                }),
+            ),
+            // `f1` turns out to block: it counts once, at the severity it
+            // carries now.
+            event(
+                3,
+                "review",
+                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                    finding: finding("f1", FindingSeverity::Blocking),
+                }),
+            ),
+            event(
+                4,
+                "review",
+                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                    id: "f2".into(),
+                    reason: "the criterion covers it".to_string(),
+                }),
+            ),
+        ];
+
+        let counts = verification(&events).findings;
+        assert_eq!(
+            counts.blocking, 1,
+            "the update moved f1, it did not add one"
+        );
+        assert_eq!(counts.minor, 0, "f1 no longer carries the severity it had");
+        assert_eq!(counts.major, 0, "f2 was taken back");
+        assert_eq!(counts.note, 0);
+    }
+
+    #[test]
+    fn the_criteria_counts_read_every_result_of_every_check() {
+        let events = vec![event(
+            1,
+            "build",
+            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: "t1".into(),
+                phase: Phase::Post,
+                results: vec![
+                    CriterionResult {
+                        cmd: "cargo test".to_string(),
+                        exit_code: 0,
+                        r#type: None,
+                        reused: false,
+                        duration_ms: Some(1),
+                    },
+                    CriterionResult {
+                        cmd: "cargo clippy".to_string(),
+                        exit_code: 1,
+                        r#type: None,
+                        reused: true,
+                        duration_ms: None,
+                    },
+                ],
+            }),
+        )];
+
+        let criteria = verification(&events).criteria;
+        assert_eq!(criteria.executed, 2);
+        assert_eq!(criteria.green, 1);
+        assert_eq!(criteria.reused, 1);
+    }
 }

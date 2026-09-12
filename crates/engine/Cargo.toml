@@ -80,6 +80,12 @@ indexmap.workspace = true
 # production code (not just tests) needs to subtract and format
 # timestamps.
 chrono.workspace = true
+# A canonical artifact is written through the run's own `scratch/` and
+# renamed into place, so a reader never meets half a document.
+tempfile.workspace = true
+# A document a session hands over is refused at the path of the value
+# that refused it, the same way a document read from a file is.
+serde_path_to_error.workspace = true
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }

@@ -118,6 +118,26 @@
         "capabilities"
       ]
     },
+    "ArtifactAcceptedPayload": {
+      "description": "One artifact the run holds: what it is, the bytes it is made of, and\nhow the run came by it.\n\nThis is what makes an artifact a fact of the log rather than a file\nsomebody may have replaced: the identity says which artifact, the\nhash says which content, and the envelope's `node_id` says who\nproduced it — absent for what a run acquires without a node of its\nown (a `document` input, a mount, a promotion).\n\nThe field is named `artifact`, not `kind`, for the reason\n[`ArtifactWrittenPayload::artifact_kind`] gives: the event\nenvelope's own internally-tagged discriminant already claims `kind`\nin the serialized JSON, and a colliding field name silently corrupts\nthe payload.",
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactId"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "origin": {
+          "$ref": "#/$defs/ArtifactOrigin"
+        }
+      },
+      "required": [
+        "artifact",
+        "content_hash",
+        "origin"
+      ]
+    },
     "ArtifactFailure": {
       "description": "Why one declared artifact did not close.",
       "oneOf": [
@@ -158,13 +178,185 @@
         }
       ]
     },
+    "ArtifactId": {
+      "description": "What an artifact is, which is what a reader asks for it by.\n\nAn artifact the engine interprets is identified by its kind: a run\nholds one tasks document, whoever produced it, so a reader asks for\nthe kind and never needs to know the file name its workflow chose.\nOne the engine only carries is identified by the name the workflow\ndeclared, which is the only thing that distinguishes it from any\nother opaque artifact.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "type": {
+              "type": "string",
+              "const": "interpreted"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "opaque"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ]
+        }
+      ]
+    },
     "ArtifactKind": {
       "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
       "enum": [
-        "task-ledger",
+        "tasks",
         "findings",
         "questions"
+      ]
+    },
+    "ArtifactOrigin": {
+      "description": "How the run came by an artifact.\n\nThe origin is what tells apart an artifact a node produced from one\nthe run was handed, which no hash and no name can: two runs holding\nthe same tasks document differ in whether they planned it or\ninherited it, and every rule about who may replace an artifact reads\nthat difference.",
+      "oneOf": [
+        {
+          "description": "A session handed the whole document over through its submission\ntool.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "submitted"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A command node wrote the file and the engine took it as declared.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ingested"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The engine derived the document from the log itself, as it does\nfor a findings artifact.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "derived"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The answers to a questions artifact.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "answered"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A `type: document` input, named by the input it came in as.",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input"
+            }
+          },
+          "required": [
+            "kind",
+            "input"
+          ]
+        },
+        {
+          "description": "Another run's artifact: a mount, a child's output, a promotion.\n`producer` is the node that produced it there, absent when that\nrun acquired it without a node either.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inherited"
+            },
+            "producer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        },
+        {
+          "description": "A log that recorded the artifact without saying where it came\nfrom — every `artifact_written` there is. The honest origin of a\nfact stated before origins were: the run held it, and the log\ndoes not say how.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "legacy"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "ArtifactSubmittedPayload": {
+      "description": "What a session offered as a whole document, and what the engine\nanswered.",
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "description": "Named `artifact_kind`, not `kind`, for the reason\n[`ArtifactWrittenPayload`] gives: the envelope's own tag already\nclaims `kind` in the serialized JSON.",
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/SubmissionOutcome"
+        }
+      },
+      "required": [
+        "name",
+        "artifact_kind",
+        "outcome"
       ]
     },
     "ArtifactWrittenPayload": {
@@ -402,7 +594,7 @@
       ]
     },
     "ContextSourceRef": {
-      "description": "One resolved `ContextSource` reference in `context_assembled.sources`.\n`kind` stays a plain string — the engine fixes the *set* of\nbuiltin source kinds (`files | command | artifact | run-events |\nledger | knowledge | node-output`, `mcp` among them) but never closes\nit into an enum, since a pack can add its own sources without\nthis type needing to change. `content_hash` is what makes every\nresolution's event carry a verifiable hash — the hash of exactly\nthe bytes materialized under `context/<content_hash>/` for this\nsource, so replay can name precisely what a session saw without\nre-running anything.",
+      "description": "One resolved `ContextSource` reference in `context_assembled.sources`.\n`kind` stays a plain string — the engine fixes the *set* of\nbuiltin source kinds (`files | command | artifact | run-events |\ntasks | knowledge | node-output`, `mcp` among them) but never closes\nit into an enum, since a pack can add its own sources without\nthis type needing to change. `content_hash` is what makes every\nresolution's event carry a verifiable hash — the hash of exactly\nthe bytes the run stored under `objects/<content_hash>` for this\nsource, so replay can name precisely what a session saw without\nre-running anything.",
       "type": "object",
       "properties": {
         "content_hash": {
@@ -444,7 +636,7 @@
       ]
     },
     "Criterion": {
-      "description": "A ledger criterion, frozen into `task_registered` — the same shape\nthe ledger parser produces.",
+      "description": "A tasks document criterion, frozen into `task_registered` — the same shape\nthe tasks parser produces.",
       "type": "object",
       "properties": {
         "cmd": {
@@ -630,149 +822,27 @@
         {
           "oneOf": [
             {
-              "description": "The bytes are not a YAML document at all.",
+              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root\n(`tasks[1].manual_review`), and is empty when the root itself is\nthe problem; `message` is what the deserializer said about that\nvalue, which names the key and what it expected.",
               "type": "object",
               "properties": {
-                "detail": {
-                  "description": "What the parser said, kept for the log and never rendered to\na reader — a parser's account of its own scanner is not\nsomething anyone can act on.",
+                "message": {
                   "type": "string"
                 },
-                "looks_like": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/Malformation"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "not-yaml"
-                }
-              },
-              "required": [
-                "problem"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "instead": {
-                  "description": "What to write instead, when the key is one a reader plausibly\nreaches for.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "key": {
+                "path": {
                   "type": "string"
                 },
                 "problem": {
                   "type": "string",
-                  "const": "unknown-key"
-                },
-                "valid": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "const": "parse"
                 }
               },
               "required": [
                 "problem",
-                "key",
-                "valid"
+                "message"
               ]
             },
             {
-              "type": "object",
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "missing-key"
-                }
-              },
-              "required": [
-                "problem",
-                "key"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "example": {
-                  "description": "A line the reader can copy.",
-                  "type": "string"
-                },
-                "expected": {
-                  "type": "string"
-                },
-                "found": {
-                  "$ref": "#/$defs/ValueShape"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "wrong-shape"
-                }
-              },
-              "required": [
-                "problem",
-                "found",
-                "expected",
-                "example"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "problem": {
-                  "type": "string",
-                  "const": "invalid-id"
-                },
-                "rule": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "problem",
-                "value",
-                "rule"
-              ]
-            },
-            {
-              "description": "A value outside the closed set its key accepts: a severity that\nis not on the ladder, an answer type that does not exist.",
-              "type": "object",
-              "properties": {
-                "problem": {
-                  "type": "string",
-                  "const": "unknown-value"
-                },
-                "valid": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "problem",
-                "value",
-                "valid"
-              ]
-            },
-            {
-              "description": "A rule the document broke once it was readable — the ledger's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `detail` is the clause a reader acts on.",
+              "description": "A rule the document broke once it was readable — the tasks document's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `detail` is the clause a reader acts on.",
               "type": "object",
               "properties": {
                 "code": {
@@ -789,23 +859,6 @@
               "required": [
                 "problem",
                 "code",
-                "detail"
-              ]
-            },
-            {
-              "description": "The document was refused and nothing in it could be named as the\ncause. That is a gap in the walk, reported as one rather than\nswallowed: `detail` carries what the parser said, for the log.",
-              "type": "object",
-              "properties": {
-                "detail": {
-                  "type": "string"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "unreadable"
-                }
-              },
-              "required": [
-                "problem",
                 "detail"
               ]
             }
@@ -886,7 +939,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 31 event kinds, internally tagged by `kind`.",
+      "description": "All 36 event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1205,6 +1258,71 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "finding_updated"
+            }
+          },
+          "$ref": "#/$defs/FindingUpdatedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finding_withdrawn"
+            }
+          },
+          "$ref": "#/$defs/FindingWithdrawnPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "finding_refused"
+            }
+          },
+          "$ref": "#/$defs/FindingRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "artifact_submitted"
+            }
+          },
+          "$ref": "#/$defs/ArtifactSubmittedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "artifact_accepted"
+            }
+          },
+          "$ref": "#/$defs/ArtifactAcceptedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "promotion_signaled"
             }
           },
@@ -1412,6 +1530,15 @@
       "type": "string",
       "minLength": 1
     },
+    "FindingOperation": {
+      "description": "Which of the three a refused call was making.",
+      "type": "string",
+      "enum": [
+        "post",
+        "update",
+        "withdraw"
+      ]
+    },
     "FindingPostedPayload": {
       "description": "The finding's author is the envelope's own `node_id` — not repeated\nhere.",
       "type": "object",
@@ -1424,6 +1551,33 @@
         "finding"
       ]
     },
+    "FindingRefusedPayload": {
+      "description": "A finding a session offered and the engine did not take, with every\nproblem named. The accepted cases are the three events above; this is\nwhat a session was told instead, kept so the rate a run gets findings\nwrong is a fact about the run rather than something only the session\nsaw.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The id the call named, when it named one that parses.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/FindingOperation"
+        },
+        "report": {
+          "$ref": "#/$defs/Report"
+        }
+      },
+      "required": [
+        "operation",
+        "report"
+      ]
+    },
     "FindingSeverity": {
       "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
       "type": "string",
@@ -1432,6 +1586,34 @@
         "major",
         "minor",
         "note"
+      ]
+    },
+    "FindingUpdatedPayload": {
+      "description": "The node's finding, in its new state — a whole replacement, never a\nmerge: a field absent from an update is absent from the finding.",
+      "type": "object",
+      "properties": {
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        }
+      },
+      "required": [
+        "finding"
+      ]
+    },
+    "FindingWithdrawnPayload": {
+      "description": "The node's finding `id` no longer stands, and why — in the words of\nwhoever took it back.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "reason"
       ]
     },
     "GateOption": {
@@ -1571,26 +1753,6 @@
       "required": [
         "iteration",
         "until_result"
-      ]
-    },
-    "Malformation": {
-      "description": "A shape a reader has met before, recognized so the diagnostic can\nname the cause instead of the symptom. A stray backtick is a\ncharacter; a Markdown fence is a mistake with a name.",
-      "oneOf": [
-        {
-          "description": "The document opens with ```` ``` ````.",
-          "type": "string",
-          "const": "markdown-fence"
-        },
-        {
-          "description": "The document is JSON, which YAML mostly accepts but this one did\nnot.",
-          "type": "string",
-          "const": "json-document"
-        },
-        {
-          "description": "Prose before the first key — an agent explaining what it wrote.",
-          "type": "string",
-          "const": "leading-prose"
-        }
       ]
     },
     "ModeName": {
@@ -1894,7 +2056,7 @@
       ]
     },
     "Report": {
-      "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a repair cycle that\nworks that way exhausts its budget before the file is readable.",
+      "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a writer who hears\none rule at a time rewrites the document once per rule.",
       "type": "object",
       "properties": {
         "diagnostics": {
@@ -1941,7 +2103,7 @@
       ]
     },
     "RuleCode": {
-      "description": "The stable name of a rule that only holds across a whole\ndocument.\n\nExhaustive, so a rule cannot be minted by typing a new string,\nand countable, so a receipt reports what a run keeps getting\nwrong without reading prose. A code says which rule broke and\nnothing about which document it broke in: `DuplicateId` is one\nrule asked of ledgers, findings and questions alike, and what\nseparates the three is the\n[`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind\nand code does not.\n\nEvery variant belongs to some document's\n[`RULES`](crate::shape::Document::RULES), so a rule the engine\nenforces is a rule the writer was told about before writing.",
+      "description": "The stable name of a rule that only holds across a whole\ndocument.\n\nExhaustive, so a rule cannot be minted by typing a new string,\nand countable, so a receipt reports what a run keeps getting\nwrong without reading prose. A code says which rule broke and\nnothing about which document it broke in: `DuplicateId` is one\nrule asked of tasks documents, findings and questions alike, and what\nseparates the three is the\n[`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind\nand code does not.\n\nEvery variant belongs to some document's\n[`RULES`](crate::shape::Document::RULES), so a rule the engine\nenforces is a rule the writer was told about before writing.",
       "oneOf": [
         {
           "type": "string",
@@ -1975,6 +2137,21 @@
           "description": "Two independent tasks reach for the same files.",
           "type": "string",
           "const": "overlapping-scope"
+        },
+        {
+          "description": "An update or a withdrawal names a finding this node never posted.",
+          "type": "string",
+          "const": "unknown-id"
+        },
+        {
+          "description": "A withdrawn id is final — it is not posted, updated or withdrawn\nagain.",
+          "type": "string",
+          "const": "withdrawn-id"
+        },
+        {
+          "description": "A withdrawal does not say why.",
+          "type": "string",
+          "const": "empty-reason"
         },
         {
           "description": "`answer_type` is `choice` and `values` is empty.",
@@ -2307,6 +2484,51 @@
       "type": "string",
       "minLength": 1
     },
+    "SubmissionOutcome": {
+      "description": "Accepted, and the file the engine wrote from it; or refused, and\nevery problem the document has.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accepted": {
+              "type": "object",
+              "properties": {
+                "content_hash": {
+                  "$ref": "#/$defs/ContentHash"
+                }
+              },
+              "required": [
+                "content_hash"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "accepted"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "refused": {
+              "type": "object",
+              "properties": {
+                "report": {
+                  "$ref": "#/$defs/Report"
+                }
+              },
+              "required": [
+                "report"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "refused"
+          ]
+        }
+      ]
+    },
     "TaskId": {
       "description": "A task id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -2418,19 +2640,6 @@
       "required": [
         "input",
         "output"
-      ]
-    },
-    "ValueShape": {
-      "description": "What kind of YAML value was found where another was expected. Named\nas a person writing YAML names them, never as a deserializer names\nits own types.",
-      "type": "string",
-      "enum": [
-        "null",
-        "bool",
-        "number",
-        "string",
-        "sequence",
-        "mapping",
-        "tagged"
       ]
     }
   }

@@ -106,10 +106,14 @@ fn finished_entry(state: &RunState, node: &Node, outcome: &str) -> String {
         node.id,
         description_of(node)
     );
-    if let Some(paths) = state.artifacts.get(&node.id) {
-        for path in paths {
-            entry.push_str(&format!("  artifact: {}\n", path.display()));
-        }
+    // Identity and content, which is what an artifact is: the name a
+    // reader asks for it by, and the hash of the bytes the run accepted.
+    for held in state.artifacts.by_producer(&node.id) {
+        entry.push_str(&format!(
+            "  artifact: {} · {}\n",
+            held.artifact,
+            held.content_hash.abbreviated()
+        ));
     }
     entry
 }

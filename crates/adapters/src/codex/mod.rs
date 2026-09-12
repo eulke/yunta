@@ -31,6 +31,7 @@
 //! through `real_adapters()`, a bigger change than this one adapter
 //! justifies on its own.
 
+mod config;
 mod parse;
 mod permissions;
 mod settings;
@@ -40,11 +41,20 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::session::{
+    Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
+};
 use crate::subprocess::{self, Launch, LineParser};
+
+use config::ConfigOverride;
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
+
+/// The variable the CLI reads the per-run bearer token from. Naming the
+/// variable in the config, rather than inlining the token, is what keeps
+/// the credential out of `argv` — which `ps` shows to any local process.
+const TOKEN_VAR: &str = "YUNTA_RUN_TOOLS_TOKEN";
 
 pub struct CodexAdapter {
     binary: PathBuf,
@@ -68,10 +78,6 @@ impl CodexAdapter {
 
     fn build_args(&self, req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String> {
         let mut args = vec!["exec".to_string(), "--json".to_string()];
-        if let Some(session_id) = resume {
-            args.push("resume".to_string());
-            args.push(session_id.as_str().to_string());
-        }
         if let Some(model) = &req.model {
             args.push("--model".to_string());
             args.push(model.to_string());
@@ -83,6 +89,16 @@ impl CodexAdapter {
             .and_then(|settings| settings.sandbox)
             .unwrap_or_default();
         args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
+        args.extend(config_overrides(req));
+        // `exec`'s own options are declared on the parent command and
+        // are not `global`, so clap reads one that follows `resume` as
+        // an unexpected argument and the invocation dies before a
+        // session opens: the subcommand goes last, with only its own
+        // arguments after it.
+        if let Some(session_id) = resume {
+            args.push("resume".to_string());
+            args.push(session_id.as_str().to_string());
+        }
         // `codex exec` exposes no cap on turns: `budget.max_turns` is
         // bounded here by the engine's own timeout and token budget.
         // `-` makes the CLI read the prompt from stdin, so nothing of
@@ -97,12 +113,18 @@ impl CodexAdapter {
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
         let args = self.build_args(&req, resume);
+        // The credential the config names, placed where a secret is
+        // allowed to travel: the child's own environment.
+        let mut env = req.env.clone();
+        if let Some(endpoint) = &req.run_tools_endpoint {
+            env.insert(TOKEN_VAR.to_string(), endpoint.token.clone());
+        }
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
             args,
             cwd: &req.cwd,
-            env: &req.env,
+            env: &env,
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
@@ -110,6 +132,46 @@ impl CodexAdapter {
         })
         .await
     }
+}
+
+/// The `-c` overrides one request needs, in the order they are written.
+///
+/// What a session may reach beyond its working directory, and how it
+/// reaches the run's own tools: both are settings of the CLI's config
+/// file, which `-c` overrides for this invocation alone rather than
+/// writing to the user's own `~/.codex/config.toml`.
+fn config_overrides(req: &SessionRequest) -> Vec<String> {
+    let mut args = Vec::new();
+    // `workspace-write` confines writes to the workspace, and a
+    // declared artifact lands in the run directory, which is never
+    // inside it. Without this the session is told to write a file
+    // the sandbox then refuses it.
+    if let Some(dir) = &req.artifact_dir {
+        args.extend(
+            ConfigOverride::list(
+                "sandbox_workspace_write.writable_roots",
+                [dir.display().to_string()],
+            )
+            .into_args(),
+        );
+    }
+    if let Some(endpoint) = &req.run_tools_endpoint {
+        let server = RunToolsEndpoint::SERVER_NAME;
+        // The per-run server reaches the CLI as an external MCP server
+        // over streamable HTTP: `url` is the key that selects that
+        // transport, and the credential travels as the name of the
+        // variable the CLI reads it from.
+        for setting in [
+            ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
+            ConfigOverride::string(
+                format!("mcp_servers.{server}.bearer_token_env_var"),
+                TOKEN_VAR,
+            ),
+        ] {
+            args.extend(setting.into_args());
+        }
+    }
+    args
 }
 
 /// The CLI's JSONL, one event list per line. The last note seen is
@@ -156,8 +218,12 @@ impl Adapter for CodexAdapter {
             // capability would be claiming something that isn't built.
             custom_agents: false,
             usage_reporting: true,
-            // MCP per-run tools aren't wired yet.
-            run_tools: false,
+            // The per-run MCP server reaches the CLI as an external
+            // streamable-HTTP server, configured by `-c` overrides.
+            // Like every other mapping in this adapter, this is read
+            // off the CLI's own source rather than confirmed live —
+            // see this module's doc comment.
+            run_tools: true,
             // `codex exec` isolates no network — declaring the capability
             // would claim a sandbox that isn't built, so `network: false`
             // degrades to declarative-only here.

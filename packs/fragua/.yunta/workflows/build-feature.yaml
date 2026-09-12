@@ -6,7 +6,7 @@
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
 name: build-feature
-description: Full feature cycle — grill, verified ledger, lint/fix, baseline, multi-runner review, PR
+description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
@@ -25,8 +25,8 @@ nodes:
     runner: planner
     interactive: true
     prompt: |
-      Identify the ambiguities in "{{inputs.idea}}" and write the questions
-      you need as an artifact; don't converse. Once answered, write the brief.
+      Identify the ambiguities in "{{inputs.idea}}" and raise the questions
+      you need; don't converse. Once answered, write the brief.
     artifacts:
       produces:
         - { name: questions.yaml, kind: questions }
@@ -44,7 +44,7 @@ nodes:
       - command: "git log --oneline -20"
     prompt: { file: prompts/plan.md }
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 
   - id: approve-plan
     kind: gate
@@ -66,7 +66,7 @@ nodes:
       within: ["src/**"]
       max_per_run: 3
     prompt: |
-      Read your task from the ledger. Implement it inside its own scope.
+      Read your task from the tasks document. Implement it inside its own scope.
 
   - id: lint
     kind: bash
@@ -93,7 +93,7 @@ nodes:
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Audit the changes; findings to {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    prompt: "Audit the changes and report what you find."
     artifacts:
       produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
 

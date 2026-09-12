@@ -18,9 +18,9 @@ del mock. `yunta check` lo alcanza antes de gastar un token.
 _Evitar_: YAML de usuario, input.
 
 **YAML de agente**:
-Un documento que escribe un agente durante un run: el contenido de todo
-artifact interpretado. No existe antes del run, así que ningún `check` lo
-alcanza, y su primer lector es el agente que lo escribió.
+Un documento cuyo contenido nace en un run: el de todo artifact interpretado. No
+existe antes del run, así que ningún `check` lo alcanza. Una sesión lo entrega
+como objeto y el engine rinde el YAML; un nodo de comando escribe el archivo.
 _Evitar_: output estructurado, artifact de salida.
 
 **YAML persistido**:
@@ -39,7 +39,7 @@ _Evitar_: artifact sin tipo, blob.
 
 **Artifact interpretado**:
 Un artifact cuyo `kind:` declara que el engine parsea su contenido, lo valida y
-lo convierte en eventos. Los kinds son `task-ledger`, `findings` y `questions`.
+lo convierte en eventos. Los kinds son `tasks`, `findings` y `questions`.
 _Evitar_: artifact estructurado, artifact tipado.
 
 **Kind de artifact**:
@@ -48,6 +48,51 @@ nombra en todas partes: el `kind:` de un workflow, el argumento de
 `yunta schema`, el catálogo de la tool `document_shape` y el documento del que
 habla un reporte son el mismo conjunto y el mismo tipo (D132).
 _Evitar_: DocumentKind, tipo de documento, formato.
+
+**Tasks** (*documento de tareas*):
+El artifact interpretado de `kind: tasks`: la lista de tareas verificables que un
+nodo de planificación entrega o que un input trae escrita a mano, con `tasks:`
+como única clave. Al cerrarse el nodo, cada tarea pasa al event log
+(`task_registered`) y el archivo queda congelado. Nombra al documento y a su
+kind en el workflow, en `yunta schema`, en la tool de entrega
+(`yunta_submit_tasks`) y en la fuente de contexto `tasks:`.
+_Evitar_: ledger, task-ledger, plan (que es un nombre de archivo, no un kind).
+
+**Ledger**:
+Un pliegue del event log: la estructura que se deriva aplicando en orden los
+eventos de un tipo y responde qué quedó en pie —`FindingLedger` para los
+hallazgos. Nombra siempre algo derivado del log, nunca un documento que alguien
+escribe.
+_Evitar_: usar la palabra para el documento de tareas.
+
+**Entrega** (*submission*):
+Un documento entero que una sesión le pasa al engine por su tool
+`yunta_submit_<kind>`, como objeto estructurado y nunca como archivo. El engine
+lo valida con el tipo y las reglas del cierre y, si lo acepta, escribe él el YAML
+canónico (D156).
+_Evitar_: subida, escritura del artifact, guardado.
+
+**Posteo**:
+Un hallazgo que una sesión reporta solo, en el momento en que lo ve, por
+`yunta_post_finding`. La unidad de validación es el hallazgo: un rechazo alcanza
+a ese y a ninguno de los ya reportados. `yunta_update_finding` lo reemplaza entero
+por id y `yunta_withdraw_finding` lo retira con motivo, definitivamente (D156).
+_Evitar_: entrega de findings, envío.
+
+**Archivo derivado**:
+El artifact `findings` de un nodo `prompt` o `loop`: lo escribe el engine al
+cierre como proyección de lo que ese nodo reporta, no la sesión. Un nodo que no
+reporta nada obtiene una lista vacía, que es el resultado de una revisión sin
+hallazgos.
+_Evitar_: artifact de salida, volcado.
+
+**Conjunto efectivo**:
+Los hallazgos que un log deja en pie: el último estado de cada par `(nodo, id)`,
+sin los retirados, en el orden en que cada uno se posteó por primera vez. Lo
+calcula un único pliegue, `events::findings::FindingLedger`, del que leen la
+derivación, la herencia entre nodos, la destilación y las estadísticas — con tres
+eventos por hallazgo, un segundo pliegue es una segunda respuesta.
+_Evitar_: findings vigentes, lista final.
 
 ## Documentos y su lectura
 
@@ -64,12 +109,6 @@ y servido por las cuatro puertas de D129. Es lo que se le da a quien tiene que
 escribir el archivo.
 _Evitar_: template, schema — el JSON Schema es otra cosa, la salida de
 `yunta schema <kind> --json`.
-
-**Recorrido**:
-La pasada sobre un documento que no deserializó, que junta todos sus problemas
-en orden en vez de detenerse en el primero, cargando la entrada que está
-mirando para que ninguna llamada tenga que repetirla.
-_Evitar_: visitor, segundo parser.
 
 **Regla**:
 Lo que solo se puede afirmar con el documento entero a la vista — un id usado
@@ -90,8 +129,8 @@ _Evitar_: outcome, mensaje de error, motivo.
 **Falla de artifact**:
 Por qué un artifact declarado no cerró. Hay dos y solo dos: el archivo —
 ausente, vacío, por encima de `limits.max_artifact_bytes`, rechazado por el
-filesystem — o su contenido, que es un reporte. La distinción es la que decide
-si una reescritura puede arreglarlo (D134).
+filesystem — o su contenido, que es un reporte. La distinción vive en el tipo y
+no en un predicado, así que ninguna superficie la deduce de la prosa (D134).
 _Evitar_: is_repairable, artifact inválido a secas.
 
 **Reporte**:
@@ -120,12 +159,11 @@ indentada por problema (spec-ledger §4). Vive en un solo lugar, que no sabe
 nada de diagnósticos, y de ahí salen también los errores del CLI.
 _Evitar_: formateo por superficie, redacción por lector.
 
-**Ciclo de reparación**:
-El reintento de un nodo cuyo artifact interpretado no se pudo leer: la sesión
-se reabre con los problemas de lo que falló, contra un tope propio. Es la
-contraparte del ciclo de tarea — aquél reintenta trabajo, éste reintenta una
-declaración.
-_Evitar_: retry, segunda pasada.
+**Rechazo**:
+La respuesta del engine a una entrega o un posteo que no acepta: el reporte
+entero, en la misma llamada, con la instrucción de corregir y volver a
+intentar. No es una falla del nodo — cuesta una llamada, y la sesión sigue.
+_Evitar_: error de validación, fallo de artifact.
 
 ## Reglas y contrato
 
@@ -144,13 +182,14 @@ es el único lugar donde un kind se vuelve texto, así que ninguna puerta puede
 entregar un contrato distinto.
 
 **Cobertura** — el invariante de que el ejemplo publicado escribe cada clave que el
-tipo acepta, y de que cada clave que el ejemplo escribe tiene su propio diagnóstico
-en el recorrido (D144).
+tipo acepta, derivado del schema del propio tipo y no de una segunda lista (D144).
 
 _Evitar_: «el esquema» para el contrato — el JSON Schema es otra cosa, y dice menos.
 
 **Verificación en sesión** — el veredicto que una sesión pide con
-`yunta_check_artifact` antes de terminar. Corre la misma verificación que el cierre,
-así que su respuesta y la del nodo no pueden diferir (D146). Es consultiva: el cierre
+`yunta_check_artifact` antes de terminar: confirma un archivo que la sesión escribió
+—un artifact opaco, o el de un nodo de comando— y lee lo que el engine escribió de
+un documento entregado. Corre la misma verificación que el cierre, así que su
+respuesta y la del nodo no pueden diferir (D146, D156). Es consultiva: el cierre
 sigue siendo el único juez.
 

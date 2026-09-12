@@ -173,8 +173,25 @@ pub enum MockStep {
         #[serde(default)]
         arguments: serde_json::Map<String, serde_json::Value>,
         #[serde(default)]
+        expect: ToolExpectation,
+        #[serde(default)]
         after_ms: u64,
     },
+}
+
+/// What a scripted tool call expects the engine to answer.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExpectation {
+    /// The call succeeds. A tool error fails the session, which is what
+    /// a fixture that scripted a working call means by scripting it.
+    #[default]
+    Accepted,
+    /// The engine refuses the call and the session goes on — the shape
+    /// every refusal has: a diagnostic the session can act on, not the
+    /// end of it. A success fails the session instead, so a fixture
+    /// cannot claim a refusal it did not get.
+    Refused,
 }
 
 impl MockStep {

@@ -66,18 +66,28 @@ pub(super) async fn publish_gate(
         Step::Ended(step) => return Ok(step),
     };
 
+    // What the reviewer is shown is what the run holds: the acceptance
+    // its log states, with the bytes out of its object store.
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
-    for rel_path in &external.artifacts {
-        let full_path = ctx.run_dir.join("artifacts").join(rel_path);
-        let content = std::fs::read(&full_path).map_err(|source| RunError::Io {
-            context: format!(
-                "read gate artifact `{rel_path}` for node `{}` at {}",
-                node.id,
-                full_path.display()
-            ),
-            source,
-        })?;
-        artifacts.push((rel_path.clone(), content));
+    for name in &external.artifacts {
+        let Some(artifact) = held.named(&ctx.manifest.workflow, None, name) else {
+            emit_started(ctx, node).await?;
+            fail(
+                ctx,
+                node,
+                format!(
+                    "node `{}` publishes `{name}` with its external gate, and this run holds \
+                     no such artifact — no node produced it",
+                    node.id
+                ),
+                false,
+            )
+            .await?;
+            return Ok(GateStep::Resolved);
+        };
+        artifacts.push((name.clone(), held.bytes(artifact)?));
     }
 
     let summary = format!(

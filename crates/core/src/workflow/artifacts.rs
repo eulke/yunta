@@ -7,7 +7,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::parse::{describe, nested};
 use crate::yaml::Value;
 
-/// `artifacts.produces`. `task-ledger`, `findings` and
+/// The run directory's own name for where artifacts live. Every path a
+/// run records for an artifact is relative to the run directory and
+/// starts here, which is the shape the log, the diagnostics and the run
+/// contract all use — so writing one and reading one back read the same
+/// name.
+pub const ARTIFACTS_DIR: &str = "artifacts";
+
+/// `artifacts.produces`. `tasks`, `findings` and
 /// `questions` are interpreted. A plain string stays
 /// opaque.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -72,10 +79,28 @@ impl ArtifactSpec {
 /// it only checks for existence. The kind fixes the document's shape, so
 /// it is what every door — the workflow's own `kind:`, `yunta schema`,
 /// the `document_shape` tool, a failed read's report — names it by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactKind {
-    TaskLedger,
+    // Every door reads the kind through this derive, so an alias declared
+    // here holds at all of them at once: a workflow, a frozen manifest or
+    // an event log that spells the tasks document `task-ledger` reads as
+    // `tasks`. A plain comment rather than rustdoc, so the published
+    // schema names the kind by its one spelling.
+    #[serde(alias = "task-ledger")]
+    Tasks,
     Findings,
     Questions,
 }
@@ -84,7 +109,7 @@ impl ArtifactKind {
     /// Every kind a door can be asked about, in the order a catalog
     /// lists them.
     pub const ALL: [ArtifactKind; 3] = [
-        ArtifactKind::TaskLedger,
+        ArtifactKind::Tasks,
         ArtifactKind::Findings,
         ArtifactKind::Questions,
     ];
@@ -92,7 +117,7 @@ impl ArtifactKind {
     /// How the kind names itself to a reader.
     pub fn label(self) -> &'static str {
         match self {
-            ArtifactKind::TaskLedger => "task ledger",
+            ArtifactKind::Tasks => "tasks document",
             ArtifactKind::Findings => "findings artifact",
             ArtifactKind::Questions => "questions artifact",
         }
@@ -100,14 +125,47 @@ impl ArtifactKind {
 
     /// The value `kind:` carries in a workflow, and the argument
     /// `yunta schema` takes. Tied to what serde derives by a test, so
-    /// the two spellings of these three names cannot drift apart.
+    /// the two spellings of these three names cannot drift apart. The
+    /// canonical spelling only: a kind's alias is read, never written.
     pub fn as_str(self) -> &'static str {
         match self {
-            ArtifactKind::TaskLedger => "task-ledger",
+            ArtifactKind::Tasks => "tasks",
             ArtifactKind::Findings => "findings",
             ArtifactKind::Questions => "questions",
         }
     }
+
+    /// The run tool a session submits a whole document of this kind
+    /// through, when the kind is one a session submits whole.
+    ///
+    /// `None` for a kind whose entries accumulate one at a time: a
+    /// findings artifact is the projection of what its node posted
+    /// through [`POST_FINDING_TOOL`](ArtifactKind::POST_FINDING_TOOL),
+    /// never a document handed over in one piece. One place, so the
+    /// listing that mounts a tool, the dispatch that answers it and the
+    /// sentence that names it to a session cannot disagree.
+    pub fn submit_tool(self) -> Option<&'static str> {
+        match self {
+            ArtifactKind::Tasks => Some("yunta_submit_tasks"),
+            ArtifactKind::Questions => Some("yunta_submit_questions"),
+            ArtifactKind::Findings => None,
+        }
+    }
+
+    /// The kind a submission tool name belongs to, or `None` for a name
+    /// no kind submits through.
+    pub fn from_submit_tool(name: &str) -> Option<Self> {
+        ArtifactKind::ALL
+            .into_iter()
+            .find(|kind| kind.submit_tool() == Some(name))
+    }
+
+    /// The run tools one finding is posted, replaced and taken back
+    /// through. Findings are the one kind whose entries arrive
+    /// separately, so these are named rather than derived per kind.
+    pub const POST_FINDING_TOOL: &'static str = "yunta_post_finding";
+    pub const UPDATE_FINDING_TOOL: &'static str = "yunta_update_finding";
+    pub const WITHDRAW_FINDING_TOOL: &'static str = "yunta_withdraw_finding";
 
     /// The kinds as a sentence lists them, so every door that has to
     /// say "one of ..." says it the same way.
@@ -136,15 +194,20 @@ pub struct UnknownArtifactKind {
     pub value: String,
 }
 
+/// Reads a kind the way every other door does — through `Deserialize`,
+/// so the spellings `yunta schema` and the `document_shape` tool accept
+/// are exactly the ones a workflow or an event log accepts, alias
+/// included, with the derive as the one place that lists them.
 impl std::str::FromStr for ArtifactKind {
     type Err = UnknownArtifactKind;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        ArtifactKind::ALL
-            .into_iter()
-            .find(|kind| kind.as_str() == value)
-            .ok_or_else(|| UnknownArtifactKind {
-                value: value.to_string(),
-            })
+        use serde::de::IntoDeserializer;
+
+        let deserializer: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
+            value.into_deserializer();
+        ArtifactKind::deserialize(deserializer).map_err(|_| UnknownArtifactKind {
+            value: value.to_string(),
+        })
     }
 }

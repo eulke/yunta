@@ -6,8 +6,10 @@
 //! conversational state: the questions are re-read from the artifact on
 //! disk, never from memory.
 
-use yunta_core::events::EventPayload;
+use yunta_core::events::{ArtifactOrigin, EventPayload};
 use yunta_core::{ArtifactKind, ArtifactSpec, Node};
+
+use crate::artifacts::{accept, Declared, ANSWERS_SUFFIX};
 
 use super::node_close::write_progress;
 use super::{RunCtx, RunError};
@@ -25,7 +27,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     // The declared questions artifacts, re-read from the frozen run.dir
     // — artifacts are immutable once written — the node produced them
     // before it closed waiting.
-    let mut question_files: Vec<(std::path::PathBuf, yunta_core::QuestionsFile)> = Vec::new();
+    let mut question_files: Vec<(String, yunta_core::QuestionsFile)> = Vec::new();
     if let Some(artifacts) = &node.artifacts {
         for spec in &artifacts.produces {
             let ArtifactSpec::Typed { name, kind } = spec else {
@@ -34,7 +36,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             if !matches!(kind, ArtifactKind::Questions) {
                 continue;
             }
-            let relative = std::path::Path::new("artifacts").join(name);
+            let relative = std::path::Path::new(yunta_core::ARTIFACTS_DIR).join(name);
             let bytes =
                 std::fs::read(ctx.run_dir.join(&relative)).map_err(|source| RunError::Io {
                     context: format!("read questions artifact `{}`", relative.display()),
@@ -47,7 +49,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                 &bytes,
                 relative.display().to_string(),
             )?;
-            question_files.push((relative, file));
+            question_files.push((name.clone(), file));
         }
     }
 
@@ -56,7 +58,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     // partial resolution.
     let mut replies = Vec::new();
     let mut unanswered: Vec<String> = Vec::new();
-    for (relative, file) in &question_files {
+    for (name, file) in &question_files {
         match ctx.human_interaction.ask(file, node.interactive).await {
             None => {
                 // No surface (headless, `yunta test`) — cite every id.
@@ -65,7 +67,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             Some(reply) => {
                 let violations = yunta_core::validate_answers(file, &reply.answers);
                 if violations.is_empty() {
-                    replies.push((relative.clone(), reply));
+                    replies.push((name.clone(), reply));
                 } else {
                     // The surface answered but the reply doesn't satisfy
                     // the questions' own declared rules — the engine is
@@ -107,9 +109,12 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
     )
     .await?;
-    for (relative, reply) in replies {
-        let answers_path = std::path::PathBuf::from(format!("{}.answers.yaml", relative.display()));
-        let answers_abs = ctx.run_dir.join(&answers_path);
+    for (name, reply) in replies {
+        let answers_name = format!("{name}{ANSWERS_SUFFIX}");
+        let answers_abs = ctx
+            .run_dir
+            .join(yunta_core::ARTIFACTS_DIR)
+            .join(&answers_name);
         let answers_file = yunta_core::AnswersFile {
             answers: reply.answers,
         };
@@ -119,24 +124,28 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
                 detail: e.to_string(),
             })?
             .into_bytes();
+        // The answers sit beside the questions they answer, which is
+        // where the next node's `artifact:` context source reads them.
         std::fs::write(&answers_abs, &bytes).map_err(|source| RunError::Io {
             context: format!("write `{}`", answers_abs.display()),
             source,
         })?;
-        let answers_hash = yunta_core::sha256_hex(&bytes);
-        ctx.emit(
+        let accepted = accept(
+            &ctx.log(),
+            ctx.run_dir,
             Some(&node.id),
-            EventPayload::ArtifactWritten(yunta_core::events::ArtifactWrittenPayload {
-                path: answers_path,
-                content_hash: answers_hash.clone(),
-                artifact_kind: None,
-            }),
+            Declared {
+                name: &answers_name,
+                kind: None,
+            },
+            &bytes,
+            ArtifactOrigin::Answered,
         )
         .await?;
         ctx.emit(
             Some(&node.id),
             EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
-                answers_hash,
+                answers_hash: accepted.content_hash,
                 channel: reply.channel,
                 responder: reply.responder,
             }),

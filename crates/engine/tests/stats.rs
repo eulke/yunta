@@ -5,12 +5,16 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    EventBody, EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
-    NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent,
+    ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
+    FindingPostedPayload, FindingRefusedPayload, FindingSeverity, FindingUpdatedPayload,
+    FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
+    NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent, SubmissionOutcome,
     TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
-use yunta_core::{Node, NodeKind, RunnerCandidate, Workflow};
-use yunta_engine::{compute_run_stats, prior_estimation, run_summary, RunSummary};
+use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
+use yunta_engine::{
+    compute_run_stats, prior_estimation, run_summary, FindingActivity, RunSummary, Submissions,
+};
 
 fn node(id: &str, depends_on: &[&str]) -> Node {
     Node {
@@ -495,4 +499,156 @@ fn a_cap_at_or_above_the_p90_or_missing_pieces_stay_silent() {
     );
     // Not enough history (<3 runs): the estimation itself is None.
     assert_eq!(yunta_engine::budget_p90_warning(Some(1), None), None);
+}
+
+// --- what sessions handed over -------------------------------------------------
+
+fn finding(id: &str) -> Finding {
+    Finding {
+        id: id.into(),
+        severity: FindingSeverity::Major,
+        title: "the tasks document has no criteria".to_string(),
+        location: "plan.yaml".to_string(),
+        detail: "every task needs one".to_string(),
+        proposed_criterion: None,
+    }
+}
+
+fn report() -> yunta_core::diagnostic::Report {
+    yunta_core::diagnostic::Report::new(
+        yunta_core::diagnostic::DocumentRef::new(
+            yunta_core::ArtifactKind::Findings,
+            "yunta_post_finding",
+        ),
+        vec![yunta_core::diagnostic::Diagnostic::new(
+            yunta_core::diagnostic::Subject::Document,
+            yunta_core::diagnostic::Problem::rule(
+                yunta_core::diagnostic::RuleCode::EmptyDetail,
+                "`detail` is empty",
+            ),
+        )],
+    )
+}
+
+/// `a` submits one document the engine takes and posts findings; `b`
+/// submits one the engine refuses.
+fn handover_events() -> Vec<StoredEvent> {
+    vec![
+        event(
+            0,
+            0,
+            Some("a"),
+            EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+                name: "plan.yaml".to_string(),
+                artifact_kind: yunta_core::ArtifactKind::Tasks,
+                outcome: SubmissionOutcome::Accepted {
+                    content_hash: yunta_core::sha256_hex(b"plan"),
+                },
+            }),
+        ),
+        event(
+            1,
+            1,
+            Some("b"),
+            EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+                name: "questions.yaml".to_string(),
+                artifact_kind: yunta_core::ArtifactKind::Questions,
+                outcome: SubmissionOutcome::Refused { report: report() },
+            }),
+        ),
+        event(
+            2,
+            2,
+            Some("a"),
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("f-1"),
+            }),
+        ),
+        event(
+            3,
+            3,
+            Some("a"),
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("f-2"),
+            }),
+        ),
+        event(
+            4,
+            4,
+            Some("a"),
+            EventPayload::FindingUpdated(FindingUpdatedPayload {
+                finding: finding("f-1"),
+            }),
+        ),
+        event(
+            5,
+            5,
+            Some("a"),
+            EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                id: "f-2".into(),
+                reason: "the call it named is gone".to_string(),
+            }),
+        ),
+        event(
+            6,
+            6,
+            Some("a"),
+            EventPayload::FindingRefused(FindingRefusedPayload {
+                operation: FindingOperation::Post,
+                id: Some("f-3".into()),
+                report: report(),
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn submissions_and_finding_calls_are_counted_by_verdict_and_by_node() {
+    let wf = workflow(vec![node("a", &[]), node("b", &[])]);
+    let stats = compute_run_stats(&wf, &handover_events());
+
+    assert_eq!(
+        stats.artifact_submissions,
+        Submissions {
+            accepted: 1,
+            refused: 1,
+        }
+    );
+    assert_eq!(
+        stats.submissions_by_node.get(&NodeId::from("a")),
+        Some(&Submissions {
+            accepted: 1,
+            refused: 0,
+        })
+    );
+    assert_eq!(
+        stats.submissions_by_node.get(&NodeId::from("b")),
+        Some(&Submissions {
+            accepted: 0,
+            refused: 1,
+        })
+    );
+
+    let posted_by_a = FindingActivity {
+        posted: 2,
+        updated: 1,
+        withdrawn: 1,
+        refused: 1,
+    };
+    assert_eq!(stats.findings, posted_by_a);
+    assert_eq!(
+        stats.findings_by_node.get(&NodeId::from("a")),
+        Some(&posted_by_a)
+    );
+    // `b` submitted but posted nothing, so it holds no finding row.
+    assert_eq!(stats.findings_by_node.get(&NodeId::from("b")), None);
+}
+
+#[test]
+fn findings_effective_counts_what_stands_rather_than_what_was_posted() {
+    // Two posted, one replaced in place and one taken back: one stands.
+    let wf = workflow(vec![node("a", &[]), node("b", &[])]);
+    let stats = compute_run_stats(&wf, &handover_events());
+    assert_eq!(stats.findings.posted, 2);
+    assert_eq!(stats.findings_effective, 1);
 }

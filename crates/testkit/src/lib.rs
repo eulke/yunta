@@ -12,6 +12,7 @@
 mod bench;
 mod bin;
 mod clock;
+mod events;
 mod interaction;
 mod repo;
 mod wait;
@@ -19,6 +20,7 @@ mod wait;
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{run_id_from, run_yunta, stderr, stdout};
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
+pub use events::accepted;
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};

@@ -37,7 +37,7 @@ pub enum NodeKind {
         /// default): every request becomes a finding, none are
         /// granted. Loop-scoped, not workflow- or config-scoped, because
         /// `scope_expansion_requested`'s own payload is keyed by
-        /// `task_id` — this is ledger-task machinery, the same rung
+        /// `task_id` — this is task machinery, the same rung
         /// `concurrency:` already occupies on this node kind.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope_expansion: Option<ScopeExpansion>,

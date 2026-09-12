@@ -25,10 +25,10 @@ use crate::inputs::InputSpec;
 use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
 
-pub use artifacts::{ArtifactKind, ArtifactSpec, Artifacts};
+pub use artifacts::{ArtifactKind, ArtifactSpec, Artifacts, ARTIFACTS_DIR};
 pub use context::{
-    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams,
-    NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion,
+    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
+    NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
 pub use node::{LoopUntil, Node, NodeDefaults, NodePermissions, OnInterrupt};
@@ -164,7 +164,7 @@ impl OnFinishStep {
 
 impl<'de> Deserialize<'de> for OnFinishStep {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (key, value) = keyed_entry(deserializer, "an `on_finish` step", Self::KEYS)?;
+        let (key, value) = keyed_entry(deserializer, "an `on_finish` step", Self::KEYS, &[])?;
         match key.as_str() {
             "cleanup" => Ok(OnFinishStep::Cleanup {
                 cleanup: nested::<D, _>(&key, value)?,

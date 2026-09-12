@@ -1,7 +1,7 @@
 //! The one place YAML enters and leaves the system.
 //!
 //! Every file a person or an agent writes — workflows, config layers,
-//! pack manifests, test cases, mock fixtures, ledgers, findings,
+//! pack manifests, test cases, mock fixtures, tasks documents, findings,
 //! questions — parses through [`parse`]; what the engine persists and
 //! reads back (manifests, locks) parses through the same function with
 //! types that tolerate what they do not know. A parse error names the

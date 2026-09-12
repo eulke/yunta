@@ -90,7 +90,11 @@ impl Bench {
             )
             .unwrap();
         let run_dir = root.path().join("run");
-        std::fs::create_dir_all(run_dir.join("artifacts")).unwrap();
+        // The directories `create_run` gives every run: what a session
+        // writes into, and what the engine writes through.
+        for dir in ["artifacts", "scratch"] {
+            std::fs::create_dir_all(run_dir.join(dir)).unwrap();
+        }
         let host = Arc::new(RunToolsHost::new(
             storage.async_handle(),
             run_id.clone(),
@@ -369,10 +373,10 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
     client.cancel().await.unwrap();
 }
 
-// --- yunta_task_status (read-only ledger view) -------------------------------
+// --- yunta_task_status (read-only tasks view) -------------------------------
 
 #[tokio::test]
-async fn task_status_reflects_the_ledger_derived_from_the_log() {
+async fn task_status_reflects_the_task_state_derived_from_the_log() {
     let bench = Bench::new();
     bench
         .storage
@@ -471,7 +475,7 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert!(is_error);
     assert_eq!(
         text,
-        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+        "scope expansion is task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
     );
     client.cancel().await.unwrap();
 }
@@ -544,10 +548,10 @@ async fn dropping_the_session_closes_the_endpoint() {
 // same code. These name the two halves of that: what it says when the file
 // is right, and that it names the same problems a failed close would.
 
-fn ledger_spec() -> yunta_core::ArtifactSpec {
+fn tasks_spec() -> yunta_core::ArtifactSpec {
     yunta_core::ArtifactSpec::Typed {
         name: "plan.yaml".to_string(),
-        kind: yunta_core::ArtifactKind::TaskLedger,
+        kind: yunta_core::ArtifactKind::Tasks,
     }
 }
 
@@ -559,7 +563,7 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
 
@@ -574,14 +578,15 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 #[tokio::test]
 async fn a_check_names_the_same_problems_the_close_would() {
     let bench = Bench::new();
-    // The failure that motivated the tool: a quoted boolean, and the rule
-    // that a repair round would have discovered next.
+    // The failure that motivated the tool: a quoted boolean where a
+    // boolean belongs. The check reads the file through the same code the
+    // close does, so it locates the value and says what was expected.
     std::fs::write(
         bench.run_dir.join("artifacts").join("plan.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (_, text) = call(
         &client,
@@ -590,18 +595,61 @@ async fn a_check_names_the_same_problems_the_close_would() {
     )
     .await;
 
-    assert!(text.contains("could not be read"), "{text}");
-    assert!(text.contains("task `t1`"), "{text}");
+    assert!(text.contains("cannot be read"), "{text}");
     assert!(
-        text.contains("expected true or false"),
+        text.contains("tasks[0].manual_review"),
+        "the path locates the value: {text}"
+    );
+    assert!(
+        text.contains("expected a boolean"),
         "the same diagnostic the close produces: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() {
+    // Once a document is handed over it is a fact of the run. The verdict
+    // is about that document, so a file somebody wrote over afterwards
+    // does not change what the session is told.
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(
+        &client,
+        "yunta_submit_tasks",
+        json!({
+            "name": "plan.yaml",
+            "document": {
+                "tasks": [{
+                    "id": "t1",
+                    "title": "Work",
+                    "scope": ["src/**"],
+                    "criteria": [{"cmd": "cargo test"}],
+                }],
+            },
+        }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+
+    std::fs::write(
+        bench.run_dir.join("artifacts").join("plan.yaml"),
+        "not a tasks document at all\n",
+    )
+    .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(
+        text.contains("1 task(s) registered: `t1`"),
+        "the verdict is about the document the run holds: {text}"
     );
 }
 
 #[tokio::test]
 async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
     let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(
         &client,

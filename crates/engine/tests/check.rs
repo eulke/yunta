@@ -845,8 +845,8 @@ fn context_on_a_bash_node_is_a_check_error() {
 #[test]
 fn context_on_a_prompt_node_is_never_an_error() {
     let mut node = prompt("plan", "planner", &[]);
-    node.context = vec![yunta_core::ContextSpec::Ledger {
-        ledger: yunta_core::LedgerParams::default(),
+    node.context = vec![yunta_core::ContextSpec::Tasks {
+        tasks: yunta_core::TasksParams::default(),
     }];
     let wf = workflow(vec![node]);
     let errors = check(
@@ -1807,4 +1807,42 @@ nodes:
         msg.contains("bogus") || msg.contains("failed"),
         "the rejection names the bad filter or the valid vocabulary: {msg}"
     );
+}
+
+// --- any node may declare an interpreted artifact -----------------------------
+
+/// A workflow whose single node `plan` produces a tasks document, with the
+/// node's own kind lines spliced in.
+fn producing_tasks(node_kind: &str) -> Workflow {
+    let yaml = format!(
+        r#"
+name: tasks
+nodes:
+  - id: plan
+{node_kind}
+    artifacts:
+      produces: [{{ name: plan.yaml, kind: tasks }}]
+"#
+    );
+    serde_norway::from_str(&yaml).expect("the fixture parses")
+}
+
+#[test]
+fn every_node_kind_may_declare_an_interpreted_artifact() {
+    // A session hands its document to the run tools; a command writes
+    // the file, as `run-tasks` does when it stages a tasks document a person
+    // wrote. Both end at the same close, reading the same file through
+    // the same door, so neither is a kind of node the declaration is
+    // wrong on.
+    for node_kind in [
+        "    kind: prompt\n    prompt: \"plan it\"",
+        "    kind: workflow\n    use: planner",
+        "    kind: bash\n    run: \"cp tasks.yaml {{run.dir}}/artifacts/plan.yaml\"",
+    ] {
+        assert_eq!(
+            check(&producing_tasks(node_kind), &ConfigLayer::default()),
+            Vec::new(),
+            "`{node_kind}` may declare a tasks document"
+        );
+    }
 }

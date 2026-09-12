@@ -211,3 +211,23 @@ fn a_path_input_validates_existence_against_the_given_base_dir() {
         "CHANGELOG.md"
     );
 }
+
+#[test]
+fn a_document_input_validates_existence_against_the_given_base_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.yaml"), "tasks: []\n").unwrap();
+
+    let specs = specs("inputs:\n  plan:\n    type: document\n    kind: tasks\n");
+
+    let missing = HashMap::from([("plan".to_string(), "NOPE.yaml".to_string())]);
+    assert!(matches!(
+        resolve_inputs(&specs, &missing, dir.path()),
+        Err(InputsError::PathNotFound { .. })
+    ));
+
+    let present = HashMap::from([("plan".to_string(), "plan.yaml".to_string())]);
+    assert_eq!(
+        resolve_inputs(&specs, &present, dir.path()).unwrap()["plan"],
+        "plan.yaml"
+    );
+}

@@ -980,6 +980,51 @@ nodes:
             .trim(),
         "the-plan"
     );
+
+    // The child's own log names each one, after its `run_created` and
+    // with no node of its own behind it: the child produced neither.
+    let child_events = bench.storage.events_for_run(&cons_id).unwrap();
+    assert!(
+        matches!(
+            child_events.first().and_then(|e| e.payload()),
+            Some(EventPayload::RunCreated(_))
+        ),
+        "the child exists in its log before anything is said about it"
+    );
+    let mounted = yunta_testkit::accepted(&child_events);
+    assert_eq!(mounted.len(), 2, "{mounted:?}");
+    assert!(
+        mounted.iter().all(|held| held.producer.is_none()),
+        "a mount has no producer in the run that receives it: {mounted:?}"
+    );
+    assert_eq!(
+        mounted
+            .iter()
+            .map(|held| held.artifact.to_string())
+            .collect::<Vec<_>>(),
+        vec!["report.md".to_string(), "brief.md".to_string()],
+        "each is opaque under the name the mount carries it as"
+    );
+    // The parent's own artifact comes from the parent's log; the
+    // sibling's comes from the child run that produced it.
+    let from_parent = yunta_core::events::ArtifactOrigin::Inherited {
+        run: run_id.clone(),
+        producer: Some("plan".into()),
+    };
+    assert_eq!(mounted[1].origin, from_parent);
+    let prod_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "prod")
+        .map(|(_, id)| id)
+        .expect("the prod child is linked on the parent's log");
+    assert_eq!(
+        mounted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: prod_id,
+            producer: Some("work".into()),
+        }
+    );
 }
 
 #[tokio::test]
@@ -1083,4 +1128,75 @@ sessions:
         state.nodes.get("cons"),
         Some(NodeState::Finished { .. })
     ));
+}
+
+#[tokio::test]
+async fn a_mount_carries_the_bytes_the_log_names_even_with_no_view_left() {
+    // A mount resolves through the source run's log and its object
+    // store, so a view somebody deleted between the producer and the
+    // mount changes nothing the child receives.
+    let bench = Bench::new(&[(
+        "consumer",
+        r#"
+name: consumer
+nodes:
+  - id: verify
+    kind: bash
+    run: "test \"$(cat {{run.dir}}/artifacts/brief.md)\" = the-plan"
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: plan
+    kind: bash
+    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
+    artifacts: { produces: [plan.yaml] }
+  - id: wipe
+    kind: bash
+    depends_on: [plan]
+    run: "rm -rf {{run.dir}}/artifacts"
+  - id: cons
+    kind: workflow
+    use: consumer
+    depends_on: [wipe]
+    mounts:
+      - artifact: { node: plan, name: plan.yaml, as: brief.md }
+"#;
+    let run_id = RunId::from("run-mount-from-log");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            EMPTY_FIXTURE,
+            &NoInteraction,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let cons_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "cons")
+        .map(|(_, id)| id)
+        .expect("the cons child is linked on the parent's log");
+    let child_events = bench.storage.events_for_run(&cons_id).unwrap();
+    let mounted = yunta_testkit::accepted(&child_events);
+    assert_eq!(mounted.len(), 1, "{mounted:?}");
+    assert_eq!(
+        mounted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: run_id.clone(),
+            producer: Some("plan".into()),
+        },
+        "the mount carries where it came from and who produced it there"
+    );
+    let parent_events = bench.storage.events_for_run(&run_id).unwrap();
+    let parent_held = yunta_testkit::accepted(&parent_events);
+    assert_eq!(
+        mounted[0].content_hash, parent_held[0].content_hash,
+        "the child holds exactly the bytes the parent's log names"
+    );
 }

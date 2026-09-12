@@ -56,7 +56,7 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
         "{markdown}"
     );
 
-    // A bash-only workflow has no ledger tasks at all — 0/0 criteria, the
+    // A bash-only workflow has no tasks at all — 0/0 criteria, the
     // honest reading (marked ✗, not a green ✓), never a manufactured pass.
     assert!(
         markdown

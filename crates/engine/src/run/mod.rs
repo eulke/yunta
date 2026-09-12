@@ -30,14 +30,13 @@ mod executor_exec;
 mod gate_exec;
 mod hooks_exec;
 mod loop_exec;
+mod node_artifacts;
 mod node_close;
 mod node_exec;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;
 mod questions_exec;
-mod repair;
-pub(crate) use repair::instruction as repair_instruction;
 mod runner_resolve;
 mod schedule;
 mod step;
@@ -196,6 +195,17 @@ pub enum RunError {
 
     #[error(transparent)]
     Worktree(#[from] crate::worktree::WorktreeError),
+
+    /// An artifact the run acquired that could not become a fact of the
+    /// run: its bytes, its acceptance or its view did not land.
+    #[error(transparent)]
+    Artifact(#[from] crate::artifacts::AcceptError),
+
+    /// An artifact the run's log holds whose bytes the run cannot hand
+    /// over — the object is gone, or no longer hashes to what was
+    /// accepted.
+    #[error(transparent)]
+    Object(#[from] crate::artifacts::ObjectError),
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or

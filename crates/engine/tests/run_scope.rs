@@ -15,15 +15,14 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     // request. `scope_expansion: { mode: rules, within: [b.txt] }` está
     // declarado, pero el agente jamás escribe el archivo de request.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = scope_expansion_workflow("rules", &["b.txt"], None);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-s", "s", "a.txt", "test -f a.txt")
     );
 
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     for _ in 0..=DEFAULT_MAX_RETRIES {
         fixture.push_str(
             "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
@@ -58,16 +57,15 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
     // consultar en NINGÚN modo — ni siquiera `ask`, que de otro modo
     // escalaría y pausaría el run.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = scope_expansion_workflow("ask", &[], None);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-p", "p", "a.txt", "test -f a.txt")
     );
 
     let request_yaml = "paths:\n  - c.txt\nreason: \"already fine, no work needed\"\nproposed_criterion:\n  cmd: \"true\"\n";
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-p\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-p }}\n",
         yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
@@ -120,16 +118,15 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
     // finding que lleva el reason y el proposed_criterion del
     // propio agente, no una explicación inventada por el engine.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = no_scope_expansion_workflow();
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-d", "d", "a.txt", "test -f a.txt")
     );
 
     let request_yaml = "paths:\n  - b.txt\nreason: \"need an adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f b.txt\"\n";
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-d\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-d }}\n",
         yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
@@ -180,7 +177,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     // ✓ del Plan: "el diff final se evalúa contra scope declarado más
     // ampliaciones autorizadas" — mismo diff, mismo agente; sólo el modo
     // cambia entre las dos corridas.
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-w", "w", "a.txt", "test -f a.txt")
     );
@@ -193,9 +190,8 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
 
     // Granted: `rules` mode, `within` covers b.txt.
     let granted_bench = Bench::new();
-    let granted_artifacts = granted_bench.run_dir().join("artifacts");
     let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
-    let mut granted_fixture = plan_session(&granted_artifacts, &ledger);
+    let mut granted_fixture = plan_session(&tasks);
     granted_fixture.push_str(&session);
     let (granted_terminal, granted_state) =
         granted_bench.run(&granted_workflow, &granted_fixture).await;
@@ -210,9 +206,8 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     // same write is now a real violation and the task never satisfies
     // its own scope check.
     let denied_bench = Bench::new();
-    let denied_artifacts = denied_bench.run_dir().join("artifacts");
     let denied_workflow = scope_expansion_workflow("deny", &[], None);
-    let mut denied_fixture = plan_session(&denied_artifacts, &ledger);
+    let mut denied_fixture = plan_session(&tasks);
     for _ in 0..=DEFAULT_MAX_RETRIES {
         denied_fixture.push_str(&session);
     }
@@ -232,7 +227,7 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     // de la config cambia entre corridas. El evento `ScopeExpansionRequested`
     // debe grabar exactamente lo mismo en los tres casos, incluso cuando
     // el veredicto que sigue difiere.
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-g", "g", "a.txt", "test -f a.txt")
     );
@@ -246,9 +241,8 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     let mut requested_payloads = Vec::new();
     for mode in ["rules", "ask", "deny"] {
         let bench = Bench::new();
-        let artifacts_dir = bench.run_dir().join("artifacts");
         let workflow = scope_expansion_workflow(mode, &[], None);
-        let mut fixture = plan_session(&artifacts_dir, &ledger);
+        let mut fixture = plan_session(&tasks);
         fixture.push_str(&session);
         // The terminal deliberately differs by mode (rules grants, ask
         // pauses, deny blocks); this test's subject is the request event
@@ -292,14 +286,13 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     // diff is evaluated against scope + the granted paths, which the
     // engine derives from the log's own `scope_expansion_granted.paths`.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = scope_expansion_workflow("ask", &[], None);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.txt", "test -f a.txt")
     );
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     // Attempt 1: asks. Attempt 2 (after the human grants): same diff,
     // no new request — b.txt must now be covered by the grant on the log.
     fixture.push_str(&requesting_session("task-h"));
@@ -365,14 +358,13 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
 #[tokio::test]
 async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_retries_in_scope() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = scope_expansion_workflow("ask", &[], None);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-n", "n", "a.txt", "test -f a.txt")
     );
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     // Attempt 1 asks; the human denies; attempt 2 complies with the
     // original scope (a.txt only) and succeeds.
     fixture.push_str(&requesting_session("task-n"));
@@ -438,14 +430,13 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     // test, CI) keeps degrading to a pause, with no gate recorded (an
     // unresolved question re-asks on resume, same convention as any gate).
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = scope_expansion_workflow("ask", &[], None);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-p", "p", "a.txt", "test -f a.txt")
     );
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     fixture.push_str(&requesting_session("task-p"));
 
     let (terminal, _state) = bench.run(&workflow, &fixture).await;
@@ -467,13 +458,12 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
 
 #[tokio::test]
 async fn a_replan_preserves_an_identical_task_and_resets_one_whose_criteria_changed() {
-    // ✓ del Plan (los tres): task-a se declara idéntica en ambos ledgers
+    // ✓ del Plan (los tres): task-a se declara idéntica en ambos tasks documents
     // y debe conservar `done` sin volver a correr; task-c cambia de
     // criterio (mismo id) y debe volver a `pending`; el commit de task-a
     // sigue en el worktree después del re-plan, y task-c corre sobre ese
     // mismo estado, no sobre uno revertido.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: replan
@@ -481,20 +471,20 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     on_failure: { goto: plan, max_reroutes: 1 }
 "#;
 
-    let ledger_v1 = format!(
+    let tasks_v1 = format!(
         "tasks:\n{}{}",
         task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
         // Never satisfiable by any effect a session can produce — task-c
@@ -510,17 +500,13 @@ nodes:
     // Same id, same scope for both tasks; task-a's criterion is byte-
     // identical, task-c's is fixed to something satisfiable — the one
     // real identity change in this re-plan.
-    let ledger_v2 = format!(
+    let tasks_v2 = format!(
         "tasks:\n{}{}",
         task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
         task_yaml("task-c", "Write c (fixed)", "c.txt", "test -f c.txt"),
     );
 
-    let mut fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
-        ledger_v1,
-    );
+    let mut fixture = plan_session(&tasks_v1);
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
@@ -529,11 +515,7 @@ nodes:
             "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
         );
     }
-    fixture.push_str(&format!(
-        "  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: replanned }}\n",
-        artifacts_dir.display(),
-        ledger_v2,
-    ));
+    fixture.push_str(&tasks_session(&tasks_v2, "replanned"));
     fixture.push_str(
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
     );

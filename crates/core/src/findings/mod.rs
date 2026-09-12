@@ -13,7 +13,7 @@ use crate::events::{self, FindingSeverity};
 use crate::ids::FindingId;
 
 /// The artifact's document — sole top-level key `findings:`, mirroring
-/// a ledger's `tasks:`-only shape.
+/// a tasks document's `tasks:`-only shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {
@@ -41,6 +41,26 @@ pub struct FindingEntry {
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
+}
+
+/// Taking one finding back: which, and why.
+///
+/// A document like any other — strict about its keys, with a rule of its
+/// own — because it reaches the engine the same way a finding does, and
+/// a withdrawal nobody can explain is a finding that disappeared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Withdrawal {
+    pub id: FindingId,
+    pub reason: String,
+}
+
+impl Withdrawal {
+    /// What the document owes once its keys are known: a reason with
+    /// something in it.
+    pub fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_withdrawal(self)
+    }
 }
 
 /// A criterion the author proposes to verify the finding's fix.
@@ -89,7 +109,6 @@ impl From<events::ProposedCriterion> for ProposedCriterionEntry {
 }
 
 mod rules;
-pub(crate) mod shape;
 
 /// The shape this document publishes, as the YAML it is.
 ///
@@ -104,10 +123,6 @@ const EXAMPLE: &str = include_str!("shape.yaml");
 impl crate::shape::Document for FindingsFile {
     const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
     const EXAMPLE: &'static str = EXAMPLE;
-
-    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
-        shape::diagnose(value, walk);
-    }
 
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::check(self)

@@ -1,25 +1,34 @@
 # One script per session the workflow spawns, selected by prompt: the
 # planner's two sessions and the executor's one task. A mode that never
 # reaches a session leaves its script unused.
+#
+# The planner hands both of its interpreted artifacts over through run
+# tools, so the fixture declares that capability; only `brief.md`, an
+# opaque artifact, is a file a session writes itself.
+capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "ambiguities"
+    steps:
+      - { type: run_tool, tool: yunta_submit_questions, arguments: { name: questions.yaml, document: { questions: [] } } }
     effects:
-      - { path: "{{run.dir}}/artifacts/questions.yaml", content: "questions: []\n" }
       - { path: "{{run.dir}}/artifacts/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
     outcome: { type: completed, summary: "brief written" }
-  - match_prompt_contains: "task ledger"
-    effects:
-      - path: "{{run.dir}}/artifacts/plan.yaml"
-        content: |
-          tasks:
-            - id: T001
-              title: "Bootstrap the crate"
-              scope: ["Cargo.toml", "src/**"]
-              criteria:
-                - cmd: "test -f Cargo.toml"
-                - cmd: "test -f src/lib.rs"
-    outcome: { type: completed, summary: "ledger registered" }
-  - match_prompt_contains: "Read your task from the ledger"
+  - match_prompt_contains: "tasks document"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Bootstrap the crate"
+                scope: ["Cargo.toml", "src/**"]
+                criteria:
+                  - cmd: "test -f Cargo.toml"
+                  - cmd: "test -f src/lib.rs"
+    outcome: { type: completed, summary: "tasks document registered" }
+  - match_prompt_contains: "Read your task from the tasks document"
     effects:
       - path: Cargo.toml
         content: |

@@ -85,9 +85,14 @@ mejor.
 - Las dependencias entre crates van estrictamente hacia abajo; el engine desconoce
   SQLite y a cada CLI concreto, y el compilador lo impone.
 - Un trait existe donde hay una frontera real con más de una implementación.
-- Una dependencia nueva se defiende en el PR (compilación, tamaño del binario,
-  superficie de auditoría) y entra en el crate que la necesita: el binario estático
-  chico es una feature.
+- Una dependencia mantenida que resuelve el problema gana a una implementación
+  propia: lo que no escribimos no lo mantenemos ni lo auditamos, y un spec ajeno no
+  se sigue a mano. Entra en el crate que la necesita, con las features que ese crate
+  usa, y el PR declara qué trae: su árbol y su licencia, que `cargo deny` verifica.
+  El tamaño del binario no es hoy un criterio de decisión —CI lo mide contra un techo
+  holgado que solo salta ante algo enorme— y vuelve a serlo cuando el sistema esté
+  estable. El binario de Linux es estático: eso es cómo se distribuye, no cuánto
+  pesa.
 
 ## Código
 
@@ -132,5 +137,6 @@ Todo texto del repo lo lee un tercero que no estuvo en ninguna conversación.
 | `runner:` | `role:` |
 | pack | plugin |
 | executor | plugin |
+| tasks (el documento de tareas y su kind) | ledger, task-ledger |
 
 "Rol" es una palabra de prosa; en YAML, JSON y código el concepto se llama runner.

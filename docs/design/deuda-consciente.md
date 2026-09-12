@@ -98,7 +98,7 @@ Se conservan para que nadie los reabra por accidente; el ADR citado manda.
 - Locks de merge concurrente → **D48** (Yunta no mergea; crea PRs).
 - Política org sobre executors y publishers de packs → **D51 + D72**.
 - Prompt injection en packs de terceros → **D71** (audit inventaría, no juzga).
-- Paralelismo de tareas del ledger → **D65** (§5.5).
+- Paralelismo de tareas del documento de tareas → **D65** (§5.5).
 
 ## Ideas estacionadas (no comprometidas)
 

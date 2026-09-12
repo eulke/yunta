@@ -2,7 +2,7 @@
 # as a parse fixture — exercises the full round-trip criterion,
 # including `runners:`.
 name: build-feature
-description: Feature completa con grill, ledger verificado, review multi-runner y PR
+description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
@@ -47,7 +47,7 @@ nodes:
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 
   - id: approve-plan
     kind: gate
@@ -69,7 +69,7 @@ nodes:
       within: ["src/**"]
       max_per_run: 3
     prompt: |
-      Leé tu tarea del ledger. Implementala dentro de su scope.
+      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
 
   - id: lint
     kind: bash

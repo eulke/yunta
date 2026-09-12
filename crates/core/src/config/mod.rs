@@ -177,19 +177,6 @@ impl ConfigLayer {
             .unwrap_or(DefaultOnFailure::Pause)
     }
 
-    /// `limits.max_artifact_repairs`, with the reference default (`1`)
-    /// applied. One, not the task cycle's two: with the shape published
-    /// to whoever writes the document, a rewrite that has the
-    /// diagnostics in hand either converges on the first attempt or
-    /// does not converge, and a third session buys a rare case at the
-    /// cost of every common one.
-    pub fn resolved_max_artifact_repairs(&self) -> u32 {
-        self.limits
-            .as_ref()
-            .and_then(|limits| limits.max_artifact_repairs)
-            .unwrap_or(1)
-    }
-
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
     /// hidden default: absent means unlimited, exactly as before.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {
@@ -200,7 +187,7 @@ impl ConfigLayer {
     }
 
     /// `limits.max_loop_iterations`, with the reference default (`12`)
-    /// applied — the only net under a ledger whose state oscillates
+    /// applied — the only net under a tasks document whose state oscillates
     /// forever, so "absent" means the reference cap, never "unbounded".
     /// `limits.max_workflow_depth`, with the reference default (`4`)
     /// applied — how many `kind: workflow` nesting levels below the

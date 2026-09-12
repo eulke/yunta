@@ -50,9 +50,9 @@ fn all_kinds() -> Vec<EventPayload> {
             text: None,
         }),
         EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-            path: "artifacts/ledger.yaml".into(),
+            path: "artifacts/tasks.yaml".into(),
             content_hash: yunta_core::sha256_hex(b"sha256:111"),
-            artifact_kind: Some(yunta_core::ArtifactKind::TaskLedger),
+            artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
         }),
         EventPayload::ContextAssembled(ContextAssembledPayload {
             task_id: None,
@@ -175,6 +175,65 @@ fn all_kinds() -> Vec<EventPayload> {
                 proposed_criterion: None,
             },
         }),
+        EventPayload::FindingUpdated(FindingUpdatedPayload {
+            finding: Finding {
+                id: "f-1".into(),
+                severity: FindingSeverity::Blocking,
+                title: "missing error handling".to_string(),
+                location: "crates/cli/src/main.rs:10-14".to_string(),
+                detail: "unwrap on a fallible call, reached on every run".to_string(),
+                proposed_criterion: None,
+            },
+        }),
+        EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+            id: "f-2".into(),
+            reason: "the call it named is gone".to_string(),
+        }),
+        EventPayload::FindingRefused(FindingRefusedPayload {
+            operation: FindingOperation::Post,
+            id: Some("f-3".into()),
+            report: yunta_core::diagnostic::Report::new(
+                yunta_core::diagnostic::DocumentRef::new(
+                    yunta_core::ArtifactKind::Findings,
+                    "yunta_post_finding",
+                ),
+                vec![
+                    yunta_core::diagnostic::Diagnostic::new(
+                        yunta_core::diagnostic::Subject::Document,
+                        yunta_core::diagnostic::Problem::parse("severity", "unknown variant `big`"),
+                    ),
+                    yunta_core::diagnostic::Diagnostic::new(
+                        yunta_core::diagnostic::Subject::Finding(
+                            yunta_core::diagnostic::Named::new(
+                                yunta_core::FindingId::try_from("f-3".to_string()).unwrap(),
+                                0,
+                            ),
+                        ),
+                        yunta_core::diagnostic::Problem::rule(
+                            yunta_core::diagnostic::RuleCode::EmptyDetail,
+                            "`detail` is empty",
+                        ),
+                    ),
+                ],
+            ),
+        }),
+        EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+            name: "plan.yaml".to_string(),
+            artifact_kind: yunta_core::ArtifactKind::Tasks,
+            outcome: SubmissionOutcome::Accepted {
+                content_hash: yunta_core::sha256_hex(b"plan"),
+            },
+        }),
+        EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            artifact: ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            },
+            content_hash: yunta_core::sha256_hex(b"plan"),
+            origin: ArtifactOrigin::Inherited {
+                run: RunId::from("run-parent"),
+                producer: Some(yunta_core::NodeId::from("plan")),
+            },
+        }),
         EventPayload::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
             evidence: "criteria log".to_string(),
@@ -248,6 +307,11 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::QuestionsAnswered(_)
         | EventPayload::LoopIteration(_)
         | EventPayload::FindingPosted(_)
+        | EventPayload::FindingUpdated(_)
+        | EventPayload::FindingWithdrawn(_)
+        | EventPayload::FindingRefused(_)
+        | EventPayload::ArtifactSubmitted(_)
+        | EventPayload::ArtifactAccepted(_)
         | EventPayload::PromotionSignaled(_)
         | EventPayload::ChildRunCreated(_)
         | EventPayload::ChildRunFinished(_)
@@ -259,12 +323,12 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
 }
 
 #[test]
-fn there_are_exactly_31_kinds_with_distinct_names() {
+fn there_are_exactly_36_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 31);
+    assert_eq!(kinds.len(), 36);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 31, "expected 31 distinct kind names");
+    assert_eq!(names.len(), 36, "expected 36 distinct kind names");
 }
 
 #[test]
@@ -310,6 +374,11 @@ fn kind_names_match_the_spec_exactly() {
         "questions_answered",
         "loop_iteration",
         "finding_posted",
+        "finding_updated",
+        "finding_withdrawn",
+        "finding_refused",
+        "artifact_submitted",
+        "artifact_accepted",
         "promotion_signaled",
         "child_run_created",
         "child_run_finished",

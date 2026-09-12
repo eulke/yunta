@@ -78,6 +78,17 @@ nodes:
     let sources = context_sources(&events, "plan");
     assert_eq!(sources[0].kind, "artifact");
     assert_materialized(&bench.run_dir(), &sources[0]);
+
+    // One store, not two: the bytes `context_assembled` names and the
+    // bytes the artifact's own acceptance names are the same object,
+    // held once under the hash both events carry.
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].content_hash, sources[0].content_hash);
+    assert_eq!(
+        bench.object(&sources[0].content_hash).expect("the object"),
+        b"MARKER-ARTIFACT-CONTENT"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +115,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
+            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -154,35 +165,32 @@ nodes:
 }
 
 #[tokio::test]
-async fn a_ledger_source_resolves_aggregate_task_state_and_is_replayable() {
+async fn a_tasks_source_resolves_aggregate_task_state_and_is_replayable() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow = r#"
-name: ctx-ledger
+name: ctx-tasks
 nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: audit
     kind: prompt
     runner: executor
     depends_on: [plan]
-    prompt: "Summarize the ledger."
+    prompt: "Summarize the tasks document."
     context:
-      - ledger: {}
+      - tasks: {}
 "#;
-    let ledger = format!(
-        "tasks:\n{}",
-        task_yaml("task-x", "x", "x.txt", "test -f x.txt")
-    );
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
-        artifacts_dir.display(),
-        ledger,
+        "{}  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
+        plan_session(&format!(
+            "tasks:\n{}",
+            task_yaml("task-x", "x", "x.txt", "test -f x.txt")
+        )),
     );
 
     let (terminal, _state) = bench.run(workflow, &fixture).await;
@@ -190,7 +198,7 @@ nodes:
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let sources = context_sources(&events, "audit");
-    assert_eq!(sources[0].kind, "ledger");
+    assert_eq!(sources[0].kind, "tasks");
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
@@ -425,9 +433,8 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     assert_materialized(&bench.run_dir(), &sources[0]);
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         content.contains("MARKER-FROM-REPO-WINS"),
@@ -501,9 +508,8 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     let sources = context_sources(&events, "ask");
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         content.contains("MARKER-FROM-REPO-WINS"),
@@ -580,9 +586,8 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     let sources = context_sources(&events, "ask");
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         !content.contains("MARKER-ORG-MUST-NOT-APPEAR"),
@@ -608,7 +613,6 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
 #[tokio::test]
 async fn a_loop_s_context_reaches_every_task_s_brief() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     std::fs::write(bench.worktree.join("notes.md"), "the-shared-notes").unwrap();
 
     let workflow = r#"
@@ -617,10 +621,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
@@ -628,9 +632,9 @@ nodes:
     until: all_tasks_complete
     context:
       - files: ["notes.md"]
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#;
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-1", "one", "one.txt", "test -f one.txt"),
         task_yaml("task-2", "two", "two.txt", "test -f two.txt"),
@@ -639,7 +643,7 @@ nodes:
     // The executor sessions only match if their prompt actually carries
     // the context block's content — a brief without it dispatches no
     // session and the run fails, so a Finished terminal IS the proof.
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     for n in 1..=2 {
         let file = if n == 1 { "one.txt" } else { "two.txt" };
         fixture.push_str(&format!(
@@ -680,10 +684,10 @@ nodes:
 
 // --- the shape of a declared artifact reaches the session -----------------
 //
-// A node that declared `kind: task-ledger` has already said everything
+// A node that declared `kind: tasks` has already said everything
 // needed to publish the shape. These prove it arrives without the author
-// asking, that it says where to write, and that an opaque artifact —
-// which has no shape to demand — mounts nothing.
+// asking, that it names what carries the document, and that an opaque
+// artifact — which has no shape to demand — mounts nothing.
 
 #[tokio::test]
 async fn a_node_that_declares_an_interpreted_artifact_is_told_its_shape() {
@@ -694,19 +698,28 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 "#;
     // The script only matches a prompt carrying the published shape, so
     // the run reaching a session at all is the assertion. `type: guard`
     // appears only in the shape, never in the author's prompt.
-    let fixture = format!(
-        "sessions:\n  - match_prompt_contains: \"type: guard\"\n    effects:\n      - {{ path: \"{}/plan.yaml\", content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        bench.run_dir().join("artifacts").display()
-    );
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "type: guard"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          name: plan.yaml
+          document:
+            tasks: []
+    outcome: { type: completed, summary: planned }
+"#;
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let (terminal, _state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -721,28 +734,35 @@ nodes:
 }
 
 #[tokio::test]
-async fn the_shape_tells_the_session_the_path_the_engine_will_verify() {
+async fn the_shape_tells_the_session_the_run_tools_carry_the_document() {
     let bench = Bench::new();
     let workflow = r#"
-name: shape-path
+name: shape-carrier
 nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [{ name: plan.yaml, kind: tasks }]
 "#;
-    // A session's working directory is the worktree, not the run
-    // directory: without the absolute path there is nowhere to write.
-    let expected = bench.run_dir().join("artifacts").join("plan.yaml");
-    let fixture = format!(
-        "sessions:\n  - match_prompt_contains: {:?}\n    effects:\n      - {{ path: {:?}, content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        expected.display().to_string(),
-        expected.display().to_string(),
-    );
+    // The file is the engine's to write, so the shape names the way in
+    // rather than a path: the script only matches a prompt that says so.
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "submits through its run tools"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          name: plan.yaml
+          document:
+            tasks: []
+    outcome: { type: completed, summary: planned }
+"#;
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let (terminal, _state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -779,4 +799,116 @@ nodes:
         !assembled_anything,
         "an opaque artifact has no shape, so nothing is mounted at all"
     );
+}
+
+#[tokio::test]
+async fn an_artifact_reference_reaches_only_the_node_it_names() {
+    // Two nodes, one name. The reference names `bare`, which produced
+    // nothing — and `alpha`'s file of the same name is not an answer to
+    // a question about `bare`.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: ctx-wrong-producer
+nodes:
+  - id: alpha
+    kind: prompt
+    runner: executor
+    prompt: "Write the report."
+    artifacts:
+      produces: [report.md]
+  - id: bare
+    kind: bash
+    depends_on: [alpha]
+    run: "true"
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Plan from the report."
+    context:
+      - artifact: { node: bare, name: report.md }
+"#;
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: reported }}
+  - outcome: {{ type: completed, summary: planned }}
+"#,
+        dir = artifacts_dir.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    match state.nodes.get("plan") {
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            let text = failure.to_string();
+            assert!(
+                text.contains("report.md") && text.contains("bare"),
+                "the failure names the artifact and the node that did not produce it: {text}"
+            );
+        }
+        other => {
+            panic!("expected plan to fail on an artifact `bare` never produced, got {other:?}")
+        }
+    }
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_artifact_reference_without_a_node_resolves_the_last_acceptance_not_the_file() {
+    // Two producers of one name, then the view is deleted outright. What
+    // the reference resolves is the acceptance standing last on the log,
+    // and its bytes come from the store — the directory is not the
+    // answer to anything.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: ctx-latest-acceptance
+nodes:
+  - id: alpha
+    kind: prompt
+    runner: executor
+    prompt: "Write the first report."
+    artifacts:
+      produces: [report.md]
+  - id: beta
+    kind: prompt
+    runner: executor
+    depends_on: [alpha]
+    prompt: "Write the second report."
+    artifacts:
+      produces: [report.md]
+  - id: wipe
+    kind: bash
+    depends_on: [beta]
+    run: "rm -rf {{run.dir}}/artifacts"
+  - id: plan
+    kind: prompt
+    runner: executor
+    depends_on: [wipe]
+    prompt: "Plan from the report."
+    context:
+      - artifact: { name: report.md }
+"#;
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: first }}
+  - effects:
+      - {{ path: "{dir}/report.md", content: "BETA-REPORT" }}
+    outcome: {{ type: completed, summary: second }}
+  - match_prompt_contains: "BETA-REPORT"
+    outcome: {{ type: completed, summary: planned }}
+"#,
+        dir = artifacts_dir.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 }

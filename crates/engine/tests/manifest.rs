@@ -17,11 +17,11 @@ name: bootstrap
 nodes:
   - id: plan
     kind: bash
-    run: "cp ledger.yaml artifacts/plan.yaml"
+    run: "cp tasks.yaml artifacts/plan.yaml"
   - id: implement
     kind: loop
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     depends_on: [plan]
 "#;
 

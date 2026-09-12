@@ -276,10 +276,10 @@ fn always_approved_gates(
 }
 
 /// Workflow-level, not per-task: task identity isn't durable across
-/// separately-planned runs (a fresh ledger can renumber `T001`), so
+/// separately-planned runs (a fresh tasks document can renumber `T001`), so
 /// "this exact task always passes first try" isn't a claim the log can
 /// support across runs — whether *any* task anywhere needed a retry is.
-/// One sample per task instance across every historical run's ledger.
+/// One sample per task instance across every historical run's tasks document.
 fn always_first_try_tasks(history: &[Vec<StoredEvent>]) -> Option<AlwaysFirstTryTasks> {
     let mut total = 0usize;
     let mut needed_retry = 0usize;

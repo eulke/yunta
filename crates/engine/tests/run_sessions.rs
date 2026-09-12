@@ -552,7 +552,6 @@ async fn max_per_run_holds_exactly_under_a_fully_concurrent_batch() {
     // count is deterministic — exactly 2 granted, 2 escalated — never
     // "up to concurrency - 1 over".
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: capped-concurrency
@@ -560,25 +559,25 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: 4
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: rules
       within: ["extra-*.txt"]
       max_per_run: 2
 "#;
-    let mut ledger = String::from("tasks:\n");
+    let mut tasks = String::from("tasks:\n");
     for n in 1..=4 {
-        ledger.push_str(&task_yaml(
+        tasks.push_str(&task_yaml(
             &format!("task-{n}"),
             &format!("t{n}"),
             &format!("a{n}.txt"),
@@ -586,7 +585,7 @@ nodes:
         ));
     }
 
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     for n in 1..=4 {
         let request_yaml = format!(
             "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"
@@ -911,5 +910,53 @@ sessions:
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an adapter that declares network isolation leaves nothing to degrade"
+    );
+}
+
+#[tokio::test]
+async fn distill_carries_the_hash_the_log_names_never_a_rehash_of_the_view() {
+    // The view is a projection, and a node that overwrites one changes
+    // no fact of the run: what distill copies and what it records as the
+    // content hash both come from the artifact the log holds.
+    let bench = Bench::new();
+    let workflow = r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    artifacts:
+      produces: [plan.md]
+  - id: tamper
+    kind: bash
+    depends_on: [plan]
+    run: "echo TAMPERED-VIEW > {{run.dir}}/artifacts/plan.md"
+on_finish:
+  - distill: [plan.md]
+"#;
+    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let dest = bench
+        .worktree
+        .join(".yunta/knowledge/distilled/distiller")
+        .join(bench.run_id.as_str());
+    assert_eq!(
+        std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land"),
+        "DISTILLED-MARKER: the durable decision\n",
+        "distill copies the bytes the run accepted, not what is lying in the view"
+    );
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    let provenance: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+            .unwrap();
+    assert_eq!(
+        provenance["artifacts"][0]["content_hash"].as_str(),
+        Some(format!("sha256:{}", held[0].content_hash).as_str()),
+        "the recorded hash is the one on the log, never a rehash"
     );
 }

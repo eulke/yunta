@@ -290,7 +290,7 @@ pub enum CheckError {
     /// Only `kind: prompt` opens a node-scoped session —
     /// declaring `resume_session` anywhere else names a conversation
     /// that doesn't exist (a loop's per-task sessions re-run from the
-    /// ledger; bash/check/executor/gate/workflow open none).
+    /// tasks document; bash/check/executor/gate/workflow open none).
     #[error(
         "node `{node}`: `on_interrupt: resume_session` is only supported on `kind: prompt` \
          nodes — nothing else has a node-scoped session to resume; declare `restart_node` \

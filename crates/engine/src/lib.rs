@@ -55,10 +55,12 @@ mod receipt;
 mod replay;
 mod reserved;
 mod run;
+mod run_log;
 mod run_tools;
 mod runner;
 mod scope;
 pub mod scope_expansion;
+mod session_dir;
 mod skills;
 mod stats;
 mod task_cycle;
@@ -66,7 +68,8 @@ mod template;
 mod verification_effectiveness;
 mod worktree;
 
-pub use artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub use artifacts::store::{ObjectError, ObjectStore};
+pub use artifacts::{close_artifacts, AcceptError, ArtifactContent, VerifiedArtifact};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
@@ -75,7 +78,7 @@ pub use check::{
     check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
-pub use findings::inherited_findings;
+pub use findings::{inherited_findings, INHERITED_FINDINGS};
 pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};
@@ -107,10 +110,11 @@ pub use run_tools::{
     consolidate_blackboard, open_session_listener, RunToolsAccess, RunToolsHost, RunToolsSession,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
-pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
+pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{
-    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, NodeStat,
-    Percentiles, PriorEstimation, RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
+    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, FindingActivity,
+    NodeStat, Percentiles, PriorEstimation, RunStats, RunSummary, Submissions,
+    MIN_SAMPLES_FOR_ESTIMATION,
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,

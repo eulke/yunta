@@ -1,5 +1,5 @@
 //! End-to-end runs with the mock adapter: the bootstrap
-//! shape — a prompt plan node that produces the ledger, a loop that
+//! shape — a prompt plan node that produces the tasks document, a loop that
 //! implements it task by task, a bash gate — plus re-routes, hooks,
 //! findings and the birth of a run, all derived from the event log alone.
 
@@ -19,7 +19,6 @@ use common::*;
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: bootstrap
@@ -27,46 +26,60 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
   - id: verify
     kind: bash
     depends_on: [implement]
     run: "test -f hello.txt && test -f world.txt"
 "#;
 
-    // Session 1 is the planner: it "writes" the ledger artifact the way a
-    // real agent would, at the absolute path its prompt named. Sessions 2
-    // and 3 are one executor session per task.
-    let fixture = format!(
-        r#"
+    // Session 1 is the planner: it hands the tasks document over through its run
+    // tools. Sessions 2 and 3 are one executor session per task, each
+    // writing the file its task is scoped to.
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Create hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+              - id: T002
+                title: "Create world"
+                scope: ["world.txt"]
+                criteria:
+                  - cmd: "test -f world.txt"
+                depends_on: [T001]
+    outcome: { type: completed, summary: "planned" }
   - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Create hello\"\n    scope: [\"hello.txt\"]\n    criteria:\n      - cmd: \"test -f hello.txt\"\n  - id: T002\n    title: \"Create world\"\n    scope: [\"world.txt\"]\n    criteria:\n      - cmd: \"test -f world.txt\"\n    depends_on: [T001]\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - effects:
-      - {{ path: hello.txt, content: "hello" }}
+      - { path: hello.txt, content: "hello" }
     steps:
-      - {{ type: usage, input_tokens: 100, output_tokens: 20 }}
-    outcome: {{ type: completed, summary: "did T001" }}
+      - { type: usage, input_tokens: 100, output_tokens: 20 }
+    outcome: { type: completed, summary: "did T001" }
   - effects:
-      - {{ path: world.txt, content: "world" }}
+      - { path: world.txt, content: "world" }
     steps:
-      - {{ type: usage, input_tokens: 80, output_tokens: 10 }}
-    outcome: {{ type: completed, summary: "did T002" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+      - { type: usage, input_tokens: 80, output_tokens: 10 }
+    outcome: { type: completed, summary: "did T002" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
@@ -271,7 +284,7 @@ nodes:
 }
 
 #[tokio::test]
-async fn an_agent_that_never_writes_its_declared_artifact_fails_the_node() {
+async fn a_session_that_never_hands_over_its_declared_document_fails_the_node() {
     let bench = Bench::new();
 
     let workflow = r#"
@@ -283,12 +296,13 @@ nodes:
     prompt: "Write the plan."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
 "#;
 
-    // The session claims success but writes nothing — the engine
-    // verifies, and the missing artifact fails the node.
+    // The session claims success but submits nothing — the engine
+    // verifies, and the missing document fails the node.
     let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "trust me, it is written" }
 "#;
@@ -554,18 +568,22 @@ nodes:
         - { name: findings.yaml, kind: findings }
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: major\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+  - steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: f1
+          severity: major
+          title: "Unchecked error"
+          location: "src/lib.rs:10"
+          detail: "The Result is discarded."
+    outcome: { type: completed, summary: "reviewed" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(state.findings.len(), 1);
     assert_eq!(state.findings[0].id, "f1");
@@ -615,9 +633,8 @@ nodes:
     let content = std::fs::read_to_string(
         bench
             .run_dir()
-            .join("context")
-            .join(source.content_hash.as_str())
-            .join("content"),
+            .join("objects")
+            .join(source.content_hash.as_str()),
     )
     .unwrap();
     assert!(
@@ -635,6 +652,98 @@ nodes:
     assert!(
         content.lines().any(|l| l.contains("run_created")),
         "the run's own events are present in the context"
+    );
+}
+
+// --- what a command node writes enters the run at its close ------------------
+
+#[tokio::test]
+async fn a_file_a_command_node_writes_enters_the_run_as_ingested() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ingest
+nodes:
+  - id: report
+    kind: bash
+    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    artifacts: { produces: [report.md] }
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(
+        held[0].producer.as_ref().map(|n| n.to_string()),
+        Some("report".to_string())
+    );
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Opaque {
+            name: "report.md".to_string()
+        }
+    );
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        bench.object(&held[0].content_hash).expect("the object"),
+        b"the-report\n"
+    );
+    assert_eq!(
+        std::fs::read(bench.run_dir().join("artifacts/report/report.md")).expect("the view"),
+        b"the-report\n",
+        "the view sits under the node that produced it"
+    );
+}
+
+#[tokio::test]
+async fn an_interpreted_artifact_a_node_wrote_is_stored_canonical() {
+    let bench = Bench::new();
+    // A valid tasks document in the node's own spelling: a comment and a
+    // flow style nothing canonical writes.
+    let workflow = r#"
+name: ingest-typed
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{run.dir}}/artifacts/plan.yaml"
+    artifacts:
+      produces: [{ name: plan.yaml, kind: tasks }]
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks
+        }
+    );
+
+    // What the run stores is the document, rendered the way the engine
+    // renders every document of that kind — not the spelling the node
+    // happened to write.
+    let written = bench
+        .projection(None, "plan.yaml")
+        .expect("the node wrote it");
+    let stored = bench.object(&held[0].content_hash).expect("the object");
+    assert_ne!(stored, written, "the file was not canonical to begin with");
+    let parsed: yunta_core::TasksFile =
+        yunta_core::shape::read(&stored, "plan.yaml").expect("a canonical tasks document");
+    assert_eq!(
+        stored,
+        yunta_core::shape::render(&parsed).unwrap().into_bytes(),
+        "the stored bytes re-render to themselves"
+    );
+    assert_eq!(
+        parsed
+            .tasks
+            .iter()
+            .map(|t| t.id.to_string())
+            .collect::<Vec<_>>(),
+        vec!["alpha".to_string()]
     );
 }
 
@@ -714,11 +823,19 @@ async fn create_run_refuses_an_existing_run_dir() {
 }
 
 #[tokio::test]
-async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log() {
+async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     let bench = BirthBench::new();
     let run_id = RunId::from("run-with-brief");
+    let from = RunId::from("run-predecessor");
     let artifacts = vec![yunta_engine::BirthArtifact {
         name: "brief/plan.md".to_string(),
+        artifact: yunta_core::events::ArtifactId::Opaque {
+            name: "brief/plan.md".to_string(),
+        },
+        origin: yunta_core::events::ArtifactOrigin::Inherited {
+            run: from.clone(),
+            producer: Some("write".into()),
+        },
         bytes: b"hello".to_vec(),
     }];
 
@@ -726,15 +843,38 @@ async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log(
 
     assert_eq!(
         std::fs::read(run_dir.join("artifacts").join("brief").join("plan.md")).unwrap(),
-        b"hello"
+        b"hello",
+        "the view of what the run was handed sits at the root: it has no producer here"
     );
     let events = bench.storage.events_for_run(&run_id).unwrap();
     assert!(
         matches!(
-            events.as_slice(),
-            [only] if matches!(only.payload(), Some(yunta_core::events::EventPayload::RunCreated(_)))
+            events.first().and_then(|e| e.payload()),
+            Some(yunta_core::events::EventPayload::RunCreated(_))
         ),
-        "the birth is one run_created after the directory is complete"
+        "the run exists in the log before anything is said about it"
+    );
+    let accepted = yunta_testkit::accepted(&events);
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    assert_eq!(
+        accepted[0].producer, None,
+        "no node of this run produced it"
+    );
+    assert_eq!(
+        accepted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: from,
+            producer: Some("write".into()),
+        }
+    );
+    assert_eq!(
+        std::fs::read(
+            run_dir
+                .join("objects")
+                .join(accepted[0].content_hash.as_str())
+        )
+        .unwrap(),
+        b"hello"
     );
 }
 
@@ -900,5 +1040,45 @@ nodes:
         resumed.resume_policy_applied.as_deref(),
         Some("fail_if_uncertain"),
         "the one policy every orphan shares, never a fixed literal"
+    );
+}
+
+#[tokio::test]
+async fn the_loop_finds_its_tasks_after_the_view_of_them_is_deleted() {
+    // The tasks document is a fact of the log and bytes in the store.
+    // Deleting the whole `artifacts/` view leaves both untouched, so the
+    // loop still has its tasks.
+    let bench = Bench::new();
+    let workflow = r#"
+name: tasks-from-the-log
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{run.dir}}/artifacts/plan.yaml"
+    artifacts:
+      produces: [{ name: plan.yaml, kind: tasks }]
+  - id: wipe
+    kind: bash
+    depends_on: [plan]
+    run: "rm -rf {{run.dir}}/artifacts"
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [wipe]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let fixture = r#"
+sessions:
+  - effects:
+      - { path: hello.txt, content: "hello" }
+    outcome: { type: completed, summary: "did T001" }
+"#;
+
+    let (terminal, state) = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
     );
 }

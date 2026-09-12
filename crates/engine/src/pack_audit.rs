@@ -229,7 +229,7 @@ fn describe_context(spec: &ContextSpec) -> String {
             Some(filter) => format!("run-events: filter={}", filter.as_str()),
             None => "run-events: (no filter)".to_string(),
         },
-        ContextSpec::Ledger { .. } => "ledger".to_string(),
+        ContextSpec::Tasks { .. } => "tasks".to_string(),
         ContextSpec::Knowledge { knowledge } => {
             if knowledge.layers.is_empty() {
                 "knowledge: (every layer)".to_string()

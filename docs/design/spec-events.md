@@ -2,8 +2,8 @@
 
 **Estado:** normativo v0.1 · **Alcance:** especificación campo por campo de cada
 tipo de evento del event log, la política de versionado aplicada y la política de
-`event_hash`. Precede a los tipos de Rust, igual que la spec del ledger precede al
-parser del ledger.
+`event_hash`. Precede a los tipos de Rust, igual que la spec del documento de tareas precede a
+su parser.
 
 > El Contrato del Run da la tabla evento→emisor→payload-relevante y las políticas de
 > versionado y hashing, pero no el detalle campo por campo de cada payload. Ese
@@ -12,9 +12,9 @@ parser del ledger.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 25 filas y **31 `kind` distintos**
-(20 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
-contenido normativo; este documento especifica esos 31 kinds tal como la tabla los
+La tabla de eventos del Contrato del Run tiene 30 filas y **36 `kind` distintos**
+(25 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
+contenido normativo; este documento especifica esos 36 kinds tal como la tabla los
 enumera.
 
 ## 1. Envelope común
@@ -27,7 +27,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 31 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | uno de los 36 nombres de este documento, con su sufijo `_vN` si no es la v1 |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -115,7 +115,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 31 tipos de evento, campo por campo
+## 5. Los 36 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -182,13 +182,21 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché |
 | `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado |
 
-### 5.7 `artifact_written` — engine
+### 5.7 `artifact_written` — solo lectura
 **Fuente:** node_id, path, content hash
+
+El engine no lo escribe: todo artifact que un run adquiere entra por
+`artifact_accepted` (§5.21.5). Queda como kind para que un log anterior
+se lea, y un lector lo pliega como identidad de artifact: `artifact_kind`
+presente da la identidad interpretada, ausente da la opaca con el nombre
+bajo `artifacts/`, y el origen es `legacy` porque el evento no lo
+registra.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `path` | string | sí | relativo a `run.dir/artifacts/` |
+| `path` | string | sí | relativo al run dir: `artifacts/<nombre>`, con el nombre que el nodo declara en `artifacts.produces` |
 | `content_hash` | string | sí | los artifacts son inmutables; esto es lo que se verifica en `resume` |
+| `artifact_kind` | enum | no | `tasks` \| `findings` \| `questions` cuando el artifact declara `kind:`; ausente para uno opaco y para un log escrito antes del campo |
 
 ### 5.8 `context_assembled` — engine
 **Fuente:** node_id, fuentes resueltas, hash por segmento de estabilidad
@@ -204,8 +212,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | string (mismo patrón de id que en el schema del ledger) | sí | — |
-| `criteria` | lista de `{cmd, type?}` | sí | copia congelada del ledger |
+| `task_id` | string (mismo patrón de id que en el schema del documento de tareas) | sí | — |
+| `criteria` | lista de `{cmd, type?}` | sí | copia congelada del documento de tareas |
 | `scope` | lista de globs | sí | — |
 | `depends_on` | lista de `task_id` | no | default vacío |
 
@@ -344,6 +352,97 @@ deje el log en silencio.
 | `finding.location` | string | sí | usada para deduplicación |
 | `finding.detail` | string | sí | — |
 | `finding.proposed_criterion` | `Option<{cmd}>` | no | — |
+
+### 5.21.1 `finding_updated` — engine
+**Fuente:** autor (nodo), el hallazgo entero en su estado nuevo
+
+Un hallazgo se reemplaza, nunca se fusiona: el payload lleva el hallazgo
+completo, así que un campo ausente está ausente. Solo el nodo que posteó
+un id puede actualizarlo, y un id retirado no se actualiza. El estado
+anterior queda en el log: lo que el run tiene es el último.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `finding` | objeto | sí | mismos campos que `finding_posted`; `finding.id` nombra el hallazgo que reemplaza |
+
+### 5.21.2 `finding_withdrawn` — engine
+**Fuente:** autor (nodo), id del hallazgo y el motivo
+
+Retirar es definitivo: un id retirado no se postea, ni se actualiza, ni
+se retira de nuevo. Un hallazgo que vuelve es un id nuevo. El log
+conserva el hallazgo y el motivo por el que dejó de estar en pie.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `id` | string | sí | un hallazgo que este nodo posteó y no retiró |
+| `reason` | string | sí | no vacío; por qué ya no está en pie |
+
+### 5.21.3 `finding_refused` — engine
+**Fuente:** autor (nodo), la operación que no se aceptó y por qué
+
+Un hallazgo que el engine no toma es un hecho del run, no algo que solo
+vio la sesión: la tasa a la que un run reporta mal es medible desde el
+log. Un rechazo no cambia ningún hallazgo.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `operation` | enum | sí | `post` \| `update` \| `withdraw` |
+| `id` | `Option<string>` | no | el id que la llamada nombró, cuando nombró uno que parsea |
+| `report` | objeto | sí | el documento y cada problema, con la forma de §5.15 |
+
+### 5.21.4 `artifact_submitted` — engine
+**Fuente:** node_id, el artifact que una sesión entregó y el veredicto
+
+Toda entrega queda registrada, aceptada o no. Una aceptación lleva el
+hash del archivo que el engine escribió; un rechazo lleva el reporte
+entero, de modo que qué se rechazó y por qué se deriva del log sin
+reconstruir la sesión. Son dos hechos, no uno: este evento es la llamada
+que la sesión hizo y cómo se le respondió, y está en el log haya
+aterrizado el documento o no; una entrega aceptada es además un artifact
+que el run tiene, y eso lo dice su propio `artifact_accepted` (§5.21.5)
+con origen `submitted`.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `name` | string | sí | el nombre que el nodo declara en `artifacts.produces` |
+| `artifact_kind` | enum | sí | `tasks` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
+| `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico que el engine escribió |
+| `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
+
+### 5.21.5 `artifact_accepted` — engine
+**Fuente:** node_id del productor, identidad del artifact, content hash y origen
+
+Un artifact es un hecho del log, no un archivo que alguien puede haber
+reemplazado: este evento dice qué artifact es, con qué bytes y cómo el
+run lo obtuvo. La identidad es lo que un lector pregunta —un kind para
+los documentos que el engine interpreta, un nombre para los opacos—, así
+que resolver un artifact no depende de la ruta en que se escribió.
+`artifacts/` es la vista que el engine escribe desde el log, nunca la
+respuesta a él.
+
+El productor es el `node_id` del envelope, ausente para lo que el run
+adquiere sin nodo propio: un input `type: document`, un mount, una
+promoción. Lo que el run tiene de una identidad es la última aceptación
+de esa identidad.
+
+El campo se llama `artifact`, no `kind`, por la misma razón que
+`artifact_written.artifact_kind` (§5.7): el `kind` del envelope ya ocupa
+ese nombre en el objeto. Los discriminantes de `artifact` y de `origin`
+viven un nivel adentro, donde no colisionan con él.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `artifact.type` | enum | sí | `interpreted` \| `opaque` |
+| `artifact.kind` | enum | en `interpreted` | `tasks` \| `findings` \| `questions` |
+| `artifact.name` | string | en `opaque` | el nombre bajo `artifacts/`, anidado incluido |
+| `content_hash` | string | sí | el hash de los bytes aceptados |
+| `origin.kind` | enum | sí | `submitted` (una sesión lo entregó por su tool) \| `ingested` (un nodo de comando escribió el archivo) \| `derived` (el engine lo derivó del log) \| `answered` (respuestas a un `questions`) \| `input` \| `inherited` \| `legacy` |
+| `origin.input` | string | en `input` | el input `type: document` por el que entró |
+| `origin.run` | string | en `inherited` | el run del que viene: mount, salida de hijo, promoción |
+| `origin.producer` | string | no | en `inherited`, el nodo que lo produjo allá; ausente si ese run tampoco lo produjo con un nodo |
+
+`legacy` es el origen de un `artifact_written` plegado (§5.7): el run
+tuvo el artifact y el log no dice cómo.
 
 ### 5.22 `promotion_signaled` — engine
 **Fuente:** razón, evidencia, modo sugerido

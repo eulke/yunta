@@ -1,6 +1,6 @@
-//! The rules a task ledger has to satisfy once it is readable.
+//! The rules a tasks document has to satisfy once it is readable.
 //!
-//! Shape is the frontier before this one: by the time a [`Ledger`]
+//! Shape is the frontier before this one: by the time a [`TasksFile`]
 //! exists, every key is known and every value has its type. What is left
 //! are the rules that only hold across a whole document — an id used
 //! twice, a dependency on a task nobody declared, two independent tasks
@@ -17,11 +17,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::events::CriterionType;
-use crate::{Ledger, Task, TaskId};
+use crate::{Task, TaskId, TasksFile};
 
 /// Every rule this document is held to, in the order a writer meets them.
 ///
-/// The list is what the shape publishes before a ledger is written and what
+/// The list is what the shape publishes before a tasks document is written and what
 /// the functions below enforce after. A rule that is not here is a rule no
 /// writer was told about, and the tests hold the two ends together: every
 /// `RuleCode` belongs to some document's list, and every entry here is
@@ -75,24 +75,24 @@ fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -
     )
 }
 
-/// Every violation the ledger carries, collected rather than stopped at
+/// Every violation the tasks document carries, collected rather than stopped at
 /// the first — whoever wrote this corrects once, not once per round.
-pub(super) fn check(ledger: &Ledger) -> Vec<Diagnostic> {
-    let known_ids: HashSet<TaskId> = ledger.tasks.iter().map(|task| task.id.clone()).collect();
-    let mut broken = duplicate_ids(ledger);
-    for (index, task) in ledger.tasks.iter().enumerate() {
+pub(super) fn check(tasks: &TasksFile) -> Vec<Diagnostic> {
+    let known_ids: HashSet<TaskId> = tasks.tasks.iter().map(|task| task.id.clone()).collect();
+    let mut broken = duplicate_ids(tasks);
+    for (index, task) in tasks.tasks.iter().enumerate() {
         broken.extend(task_rules(index, task, &known_ids));
     }
-    broken.extend(cycle(ledger));
-    broken.extend(overlapping_scopes(&ledger.tasks));
+    broken.extend(cycle(tasks));
+    broken.extend(overlapping_scopes(&tasks.tasks));
     broken
 }
 
 /// An id used twice: a rule about the document, reported on the second
 /// task to carry it — the one a reader has to change.
-fn duplicate_ids(ledger: &Ledger) -> Vec<Diagnostic> {
+fn duplicate_ids(tasks: &TasksFile) -> Vec<Diagnostic> {
     let mut seen: HashSet<&TaskId> = HashSet::new();
-    ledger
+    tasks
         .tasks
         .iter()
         .enumerate()
@@ -187,8 +187,8 @@ fn criteria_rules(index: usize, task: &Task) -> Option<Diagnostic> {
 
 /// A cycle is a property of the whole graph, so the document carries it
 /// rather than any one task in the loop.
-fn cycle(ledger: &Ledger) -> Option<Diagnostic> {
-    let adjacency: BTreeMap<TaskId, Vec<TaskId>> = ledger
+fn cycle(tasks: &TasksFile) -> Option<Diagnostic> {
+    let adjacency: BTreeMap<TaskId, Vec<TaskId>> = tasks
         .tasks
         .iter()
         .map(|t| (t.id.clone(), t.depends_on.clone()))

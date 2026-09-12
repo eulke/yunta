@@ -12,13 +12,13 @@ fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 #[test]
 fn a_known_variable_is_replaced_wherever_it_appears() {
     let out = render_template(
-        "Write the ledger to {{run.dir}}/artifacts/plan.yaml under {{run.dir}}.",
+        "Write the tasks document to {{run.dir}}/artifacts/plan.yaml under {{run.dir}}.",
         &vars(&[("run.dir", "/tmp/run-1")]),
     )
     .unwrap();
     assert_eq!(
         out,
-        "Write the ledger to /tmp/run-1/artifacts/plan.yaml under /tmp/run-1."
+        "Write the tasks document to /tmp/run-1/artifacts/plan.yaml under /tmp/run-1."
     );
 }
 

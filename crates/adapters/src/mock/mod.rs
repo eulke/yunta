@@ -4,24 +4,33 @@
 //! engine's whole cycle — tasks, degradation, cancellation, resume,
 //! eventually parallelism — is testable without an LLM. A fixture
 //! scripts every session of a run in spawn order; see [`MockFixture`].
+//!
+//! Spawning a session is claiming a script and handing it to
+//! [`script::play`], which owns everything after that: the adapter
+//! decides *which* script a request gets and what the session is born
+//! with, the player decides what the session then does. What the adapter
+//! keeps is the record of what it was asked to mount, which is how an
+//! engine test proves a skill, an agent or a run-tools endpoint reached
+//! the session without a real CLI.
 
 mod fixture;
+mod run_tool;
+mod script;
 
-pub use fixture::{MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript};
+pub use fixture::{
+    MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript, ToolExpectation,
+};
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
 use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, Result, SessionId};
 
-use crate::session::{
-    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, ProbeReport, SessionRequest,
-};
+use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("mock");
@@ -51,6 +60,11 @@ pub struct MockAdapter {
     /// the endpoint reached the session (or deliberately didn't)
     /// without a real CLI.
     endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
+    /// Every session's `req.artifact_dir`, in claim order — same
+    /// record-the-mount principle as `skills_seen`: engine tests prove
+    /// which sessions were granted the run's artifact directory without
+    /// a real CLI.
+    artifact_dirs_seen: Mutex<Vec<Option<std::path::PathBuf>>>,
     /// The next session id's number: every adapter counts from one, so
     /// a fixture's ids never depend on what else ran in the process.
     next_session: AtomicU64,
@@ -66,6 +80,7 @@ impl MockAdapter {
             agents_seen: Mutex::new(Vec::new()),
             resumes_seen: Mutex::new(Vec::new()),
             endpoints_seen: Mutex::new(Vec::new()),
+            artifact_dirs_seen: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
         }
     }
@@ -74,46 +89,39 @@ impl MockAdapter {
     /// a test asserts is empty once a run opened every session it
     /// scripted.
     pub fn unconsumed(&self) -> Vec<usize> {
-        self.consumed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
+        read(&self.consumed)
+            .into_iter()
             .enumerate()
-            .filter(|(_, claimed)| !**claimed)
+            .filter(|(_, claimed)| !claimed)
             .map(|(index, _)| index)
             .collect()
     }
 
     /// Every session id `resume()` was asked to continue, in call order.
     pub fn resumes_seen(&self) -> Vec<SessionId> {
-        self.resumes_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        read(&self.resumes_seen)
     }
 
     /// The `agent` of every session spawned so far, in claim order.
     pub fn agents_seen(&self) -> Vec<Option<AgentName>> {
-        self.agents_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        read(&self.agents_seen)
     }
 
     /// The `skills` of every session spawned so far, in claim order.
     pub fn skills_seen(&self) -> Vec<Vec<std::path::PathBuf>> {
-        self.skills_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        read(&self.skills_seen)
     }
 
     /// The `run_tools_endpoint` of every session so far, in claim order.
     pub fn endpoints_seen(&self) -> Vec<Option<crate::RunToolsEndpoint>> {
-        self.endpoints_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        read(&self.endpoints_seen)
+    }
+
+    /// The `artifact_dir` of every session so far, in claim order — what a
+    /// test reads to see which sessions were granted the run's artifact
+    /// directory and which never needed it.
+    pub fn artifact_dirs_seen(&self) -> Vec<Option<std::path::PathBuf>> {
+        read(&self.artifact_dirs_seen)
     }
 
     pub fn from_yaml(yaml: &str) -> std::result::Result<Self, yunta_core::yaml::YamlError> {
@@ -187,98 +195,21 @@ impl Adapter for MockAdapter {
         session: &SessionId,
         req: SessionRequest,
     ) -> Result<Box<dyn AgentSession>> {
-        self.resumes_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(session.clone());
+        record(&self.resumes_seen, session.clone());
         self.spawn_scripted(req, Some(session.clone()))
     }
 }
 
 impl MockAdapter {
+    /// Claims the script this request gets and opens the session that
+    /// plays it.
     fn spawn_scripted(
         &self,
         req: SessionRequest,
         resume_as: Option<SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        self.skills_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(req.skills.clone());
-        self.endpoints_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(req.run_tools_endpoint.clone());
-        self.agents_seen
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(req.agent.clone());
-        let index = {
-            let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
-            let matching: Vec<(usize, &str)> = self
-                .fixture
-                .sessions
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| consumed.get(*i) != Some(&true))
-                .filter_map(|(i, script)| {
-                    script
-                        .match_prompt_contains
-                        .as_deref()
-                        .filter(|needle| req.prompt.contains(needle))
-                        .map(|needle| (i, needle))
-                })
-                .collect();
-            // Several scripts with one and the same needle are one
-            // request's attempts, served in declaration order. Scripts
-            // with different needles that both match cannot say which
-            // one the request gets: that fixture is wrong, not lucky.
-            let mut needles: Vec<&str> = matching.iter().map(|(_, needle)| *needle).collect();
-            needles.dedup();
-            if needles.len() > 1 {
-                return Err(AdapterError::Adapter {
-                    adapter: ID.clone(),
-                    message: format!(
-                        "fixture ambiguous: {} unconsumed scripts with different needles match \
-                         this request's prompt (`match_prompt_contains`: {}) — make the needles \
-                         tell them apart",
-                        matching.len(),
-                        needles.join(", ")
-                    ),
-                });
-            }
-            let claim = matching.first().map(|(i, _)| *i);
-            // No script named this request explicitly — fall back to the
-            // next unconsumed script that never opted into matching by
-            // prompt at all, in declaration order. This is the whole
-            // behavior for every fixture that doesn't use
-            // `match_prompt_contains`.
-            let claim = claim.or_else(|| {
-                self.fixture
-                    .sessions
-                    .iter()
-                    .enumerate()
-                    .find(|(i, script)| {
-                        consumed.get(*i) != Some(&true) && script.match_prompt_contains.is_none()
-                    })
-                    .map(|(i, _)| i)
-            });
-            let Some(index) = claim else {
-                return Err(AdapterError::Adapter {
-                    adapter: ID.clone(),
-                    message: format!(
-                        "fixture exhausted: {} scripted session(s), none left unconsumed and \
-                         matching this request — add a session to the fixture for every \
-                         session the run opens",
-                        self.fixture.sessions.len(),
-                    ),
-                });
-            };
-            if let Some(slot) = consumed.get_mut(index) {
-                *slot = true;
-            }
-            index
-        };
+        self.record_mount(&req);
+        let index = self.claim(&req)?;
         let Some(script) = self.fixture.sessions.get(index) else {
             return Err(AdapterError::Adapter {
                 adapter: ID.clone(),
@@ -288,8 +219,117 @@ impl MockAdapter {
 
         self.apply_effects(script, &req)?;
 
-        let session_id = match resume_as {
-            Some(session_id) => session_id,
+        let (events, receiver) = mpsc::unbounded_channel();
+        let interrupt = Arc::new(Notify::new());
+        let kill = Arc::new(Notify::new());
+        let stops = script::Stops::of(&script.outcome, Arc::clone(&interrupt), Arc::clone(&kill));
+        let played = script::Script {
+            session_id: self.session_id(resume_as)?,
+            model: script.model.clone(),
+            blocked_markers: self.blocked_markers(script, &req),
+            steps: script.steps.clone(),
+            outcome: script.outcome.clone(),
+            run_tools_endpoint: req.run_tools_endpoint.clone(),
+        };
+        tokio::spawn(script::play(played, events, stops));
+
+        Ok(Box::new(MockSession {
+            receiver: Some(receiver),
+            interrupt,
+            kill,
+        }))
+    }
+
+    /// Records what this session was asked to mount, in claim order.
+    fn record_mount(&self, req: &SessionRequest) {
+        record(&self.skills_seen, req.skills.clone());
+        record(&self.endpoints_seen, req.run_tools_endpoint.clone());
+        record(&self.artifact_dirs_seen, req.artifact_dir.clone());
+        record(&self.agents_seen, req.agent.clone());
+    }
+
+    /// The index of the script this request claims, marked consumed so no
+    /// other session gets it.
+    fn claim(&self, req: &SessionRequest) -> Result<usize> {
+        let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
+        let index = match self.named(&consumed, &req.prompt)? {
+            Some(index) => index,
+            None => self
+                .unnamed(&consumed)
+                .ok_or_else(|| AdapterError::Adapter {
+                    adapter: ID.clone(),
+                    message: format!(
+                        "fixture exhausted: {} scripted session(s), none left unconsumed and \
+                     matching this request — add a session to the fixture for every \
+                     session the run opens",
+                        self.fixture.sessions.len(),
+                    ),
+                })?,
+        };
+        if let Some(slot) = consumed.get_mut(index) {
+            *slot = true;
+        }
+        Ok(index)
+    }
+
+    /// The unconsumed script that named this request by a substring of
+    /// its prompt, if one did.
+    ///
+    /// Several scripts with one and the same needle are one request's
+    /// attempts, served in declaration order. Scripts with different
+    /// needles that both match cannot say which one the request gets:
+    /// that fixture is wrong, not lucky.
+    fn named(&self, consumed: &[bool], prompt: &str) -> Result<Option<usize>> {
+        let matching: Vec<(usize, &str)> = self
+            .fixture
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| consumed.get(*i) != Some(&true))
+            .filter_map(|(i, script)| {
+                script
+                    .match_prompt_contains
+                    .as_deref()
+                    .filter(|needle| prompt.contains(needle))
+                    .map(|needle| (i, needle))
+            })
+            .collect();
+        let mut needles: Vec<&str> = matching.iter().map(|(_, needle)| *needle).collect();
+        needles.dedup();
+        if needles.len() > 1 {
+            return Err(AdapterError::Adapter {
+                adapter: ID.clone(),
+                message: format!(
+                    "fixture ambiguous: {} unconsumed scripts with different needles match \
+                     this request's prompt (`match_prompt_contains`: {}) — make the needles \
+                     tell them apart",
+                    matching.len(),
+                    needles.join(", ")
+                ),
+            });
+        }
+        Ok(matching.first().map(|(i, _)| *i))
+    }
+
+    /// The next unconsumed script that never opted into matching by
+    /// prompt at all, in declaration order. This is the whole behavior
+    /// for every fixture that doesn't use `match_prompt_contains`.
+    fn unnamed(&self, consumed: &[bool]) -> Option<usize> {
+        self.fixture
+            .sessions
+            .iter()
+            .enumerate()
+            .find(|(i, script)| {
+                consumed.get(*i) != Some(&true) && script.match_prompt_contains.is_none()
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// The id the session reports: the one being resumed, or the next of
+    /// this adapter's own.
+    fn session_id(&self, resume_as: Option<SessionId>) -> Result<SessionId> {
+        match resume_as {
+            Some(session_id) => Ok(session_id),
             None => SessionId::try_from(format!(
                 "mock-session-{}",
                 self.next_session.fetch_add(1, Ordering::Relaxed)
@@ -297,147 +337,34 @@ impl MockAdapter {
             .map_err(|error| AdapterError::Adapter {
                 adapter: ID.clone(),
                 message: error.to_string(),
-            })?,
-        };
+            }),
+        }
+    }
 
-        let blocked_markers: Vec<PathBuf> = script
+    /// The effects this request's edit constraints kept from landing —
+    /// what the session reports as refused edits.
+    fn blocked_markers(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
+        script
             .effects
             .iter()
-            .filter(|e| self.is_blocked(&req, &e.path))
+            .filter(|e| self.is_blocked(req, &e.path))
             .map(|e| e.path.clone())
-            .collect();
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        let interrupt = Arc::new(Notify::new());
-        let kill = Arc::new(Notify::new());
-        let (task_interrupt, task_kill) = (Arc::clone(&interrupt), Arc::clone(&kill));
-
-        let model = script.model.clone();
-        let steps = script.steps.clone();
-        let outcome = script.outcome.clone();
-        // Every session honors an ordered stop except one scripted to
-        // ignore it; a forced stop ends any of them.
-        let ends_on_interrupt = !matches!(
-            outcome,
-            MockOutcome::Hang {
-                on_interrupt: fixture::OnInterrupt::Ignore
-            }
-        );
-        let run_tools_endpoint = req.run_tools_endpoint.clone();
-
-        tokio::spawn(async move {
-            // SessionOpened is always the first event, unconditionally.
-            if tx
-                .send(AgentEvent::SessionOpened {
-                    session_id,
-                    model: Some(model),
-                })
-                .is_err()
-            {
-                return;
-            }
-
-            for path in blocked_markers {
-                if tx
-                    .send(AgentEvent::ToolUse {
-                        name: "edit".to_string(),
-                        target_digest: format!("blocked:{}", path.display()),
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-
-            for step in steps {
-                let delay = Duration::from_millis(step.after_ms());
-                tokio::select! {
-                    _ = tokio::time::sleep(delay) => {}
-                    _ = task_kill.notified() => return,
-                    _ = task_interrupt.notified(), if ends_on_interrupt => return,
-                }
-                let event = match step {
-                    fixture::MockStep::ToolUse {
-                        name,
-                        target_digest,
-                        ..
-                    } => AgentEvent::ToolUse {
-                        name,
-                        target_digest,
-                    },
-                    fixture::MockStep::Usage {
-                        input_tokens,
-                        output_tokens,
-                        cached_input_tokens,
-                        ..
-                    } => AgentEvent::Usage {
-                        input_tokens,
-                        output_tokens,
-                        cached_input_tokens,
-                    },
-                    fixture::MockStep::Note { text, .. } => AgentEvent::Note { text },
-                    fixture::MockStep::RunTool {
-                        tool, arguments, ..
-                    } => {
-                        // A real MCP call over the wire — a tool error
-                        // fails the whole session loudly: fixtures
-                        // script intent, and an intent the engine
-                        // refuses is a test outcome, not noise.
-                        match call_run_tool(run_tools_endpoint.as_ref(), &tool, arguments).await {
-                            Ok(digest) => AgentEvent::ToolUse {
-                                name: tool,
-                                target_digest: digest,
-                            },
-                            Err(error) => {
-                                let _ = tx.send(AgentEvent::Failed {
-                                    error: AgentError {
-                                        message: yunta_core::describe(&error),
-                                    },
-                                    retryable: false,
-                                });
-                                return;
-                            }
-                        }
-                    }
-                };
-                if tx.send(event).is_err() {
-                    return;
-                }
-            }
-
-            match outcome {
-                MockOutcome::Completed { summary } => {
-                    let _ = tx.send(AgentEvent::Completed {
-                        result: AgentOutcome { summary },
-                    });
-                }
-                MockOutcome::Failed { message, retryable } => {
-                    let _ = tx.send(AgentEvent::Failed {
-                        error: AgentError { message },
-                        retryable,
-                    });
-                }
-                // Both end with no terminal event — a real crash: the
-                // engine synthesizes Failed{retryable:true}, not the
-                // adapter. Hang additionally waits for a stop before
-                // ending, simulating a stuck session a timeout would
-                // have to act on.
-                MockOutcome::Crash => {}
-                MockOutcome::Hang { .. } => {
-                    tokio::select! {
-                        _ = task_kill.notified() => {}
-                        _ = task_interrupt.notified(), if ends_on_interrupt => {}
-                    }
-                }
-            }
-        });
-
-        Ok(Box::new(MockSession {
-            receiver: Some(rx),
-            interrupt,
-            kill,
-        }))
+            .collect()
     }
+}
+
+/// Appends to one of the mock's records of what it was asked.
+///
+/// A poisoned lock is taken back rather than panicked on: a test thread
+/// that already failed must not turn every later session into a second
+/// failure with nothing to do with the first.
+fn record<T>(into: &Mutex<Vec<T>>, value: T) {
+    into.lock().unwrap_or_else(|e| e.into_inner()).push(value);
+}
+
+/// One of the mock's records, as a test reads it back.
+fn read<T: Clone>(from: &Mutex<Vec<T>>) -> Vec<T> {
+    from.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 pub struct MockSession {
@@ -468,89 +395,4 @@ impl AgentSession for MockSession {
         self.kill.notify_one();
         Ok(())
     }
-}
-
-/// Why the mock's own MCP call failed — the session fails with it.
-#[derive(Debug, thiserror::Error)]
-enum RunToolCallError {
-    #[error(
-        "fixture step run_tool `{tool}` but this session has no run_tools_endpoint — the \
-         engine never offered one (missing `run_tools` capability, or the listener wasn't \
-         opened)"
-    )]
-    NoEndpoint { tool: String },
-    #[error("run_tool `{tool}`: cannot reach the per-run endpoint")]
-    Connect {
-        tool: String,
-        #[source]
-        source: Box<rmcp::service::ClientInitializeError>,
-    },
-    #[error("run_tool `{tool}` failed")]
-    Call {
-        tool: String,
-        #[source]
-        source: Box<rmcp::service::ServiceError>,
-    },
-    #[error("run_tool `{tool}` returned an error: {text}")]
-    Refused { tool: String, text: String },
-}
-
-/// The mock's own MCP client leg: one `tools/call` against the
-/// session's per-run endpoint, exactly as a real CLI would place it.
-/// Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content), or the error that
-/// fails the session.
-async fn call_run_tool(
-    endpoint: Option<&crate::RunToolsEndpoint>,
-    tool: &str,
-    arguments: serde_json::Map<String, serde_json::Value>,
-) -> std::result::Result<String, RunToolCallError> {
-    use rmcp::ServiceExt;
-
-    let Some(endpoint) = endpoint else {
-        return Err(RunToolCallError::NoEndpoint {
-            tool: tool.to_string(),
-        });
-    };
-    let config =
-        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
-            endpoint.url.clone(),
-        )
-        .auth_header(endpoint.token.expose().clone());
-    let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
-        reqwest::Client::default(),
-        config,
-    );
-    let client =
-        ().serve(transport)
-            .await
-            .map_err(|source| RunToolCallError::Connect {
-                tool: tool.to_string(),
-                source: Box::new(source),
-            })?;
-    let mut params = rmcp::model::CallToolRequestParams::new(tool.to_string());
-    if !arguments.is_empty() {
-        params = params.with_arguments(arguments);
-    }
-    let result = client.call_tool(params).await;
-    let _ = client.cancel().await;
-    let result = result.map_err(|source| RunToolCallError::Call {
-        tool: tool.to_string(),
-        source: Box::new(source),
-    })?;
-    let text: String = result
-        .content
-        .iter()
-        .filter_map(|block| block.as_text())
-        .map(|t| t.text.clone())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if result.is_error.unwrap_or(false) {
-        return Err(RunToolCallError::Refused {
-            tool: tool.to_string(),
-            text,
-        });
-    }
-    let hash = yunta_core::sha256_hex(text.as_bytes()).to_string();
-    Ok(format!("{tool}:{}", &hash[..12]))
 }

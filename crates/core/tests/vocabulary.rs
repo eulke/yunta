@@ -8,7 +8,7 @@
 
 use yunta_core::events::FindingSeverity;
 use yunta_core::shape::Document;
-use yunta_core::{AnswerType, ArtifactKind, FindingsFile, Ledger, QuestionsFile};
+use yunta_core::{AnswerType, ArtifactKind, FindingsFile, QuestionsFile, TasksFile};
 
 /// What serde writes for a value, unquoted.
 fn serialized(value: &impl serde::Serialize) -> String {
@@ -79,7 +79,7 @@ fn the_answer_types_a_diagnostic_lists_are_the_ones_the_parser_accepts() {
 #[test]
 fn the_schema_a_door_publishes_is_the_one_the_repository_checked() {
     for (kind, schema) in [
-        (ArtifactKind::TaskLedger, yunta_core::schema::ledger()),
+        (ArtifactKind::Tasks, yunta_core::schema::tasks()),
         (ArtifactKind::Findings, yunta_core::schema::findings()),
         (ArtifactKind::Questions, yunta_core::schema::questions()),
     ] {
@@ -100,7 +100,7 @@ fn every_kind_publishes_a_shape_and_a_schema() {
 
 #[test]
 fn a_documents_kind_is_the_one_its_own_type_declares() {
-    assert_eq!(<Ledger as Document>::KIND, ArtifactKind::TaskLedger);
+    assert_eq!(<TasksFile as Document>::KIND, ArtifactKind::Tasks);
     assert_eq!(<FindingsFile as Document>::KIND, ArtifactKind::Findings);
     assert_eq!(<QuestionsFile as Document>::KIND, ArtifactKind::Questions);
 }

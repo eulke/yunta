@@ -4,7 +4,7 @@
 //! `FromStr`, `TryFrom` or `Deserialize` — so an invalid value is
 //! unrepresentable past the parser that read it, and two kinds of id can
 //! never be swapped by accident. The rules are the ones the schema and
-//! the ledger document; each type's rustdoc states its own.
+//! the tasks document; each type's rustdoc states its own.
 //!
 //! Unchecked construction from a literal (`From<&str>`) exists only for
 //! tests, behind the `testkit` feature; production code parses through
@@ -398,7 +398,7 @@ impl From<ulid::Ulid> for RunId {
 }
 
 string_id!(
-    /// A task's id from the ledger, unique within one ledger:
+    /// A task's id from the tasks document, unique within one tasks document:
     /// `^[A-Za-z][A-Za-z0-9_-]*$`.
     TaskId, what = "task id", rule = NAME_RULE, check = is_name
 );

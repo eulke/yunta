@@ -1,9 +1,10 @@
+# Both reviewers report through their run tools, so the fixture declares
+# the capability the nodes need. Neither finds anything, and neither
+# needs a step to say so: the engine writes an empty findings artifact
+# from what the node reported.
+capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "findings-reviewer.yaml"
-    effects:
-      - { path: "{{run.dir}}/artifacts/findings-reviewer.yaml", content: "findings: []\n" }
     outcome: { type: completed, summary: "reviewed" }
   - match_prompt_contains: "findings-reviewer-alt.yaml"
-    effects:
-      - { path: "{{run.dir}}/artifacts/findings-reviewer-alt.yaml", content: "findings: []\n" }
     outcome: { type: completed, summary: "reviewed-alt" }

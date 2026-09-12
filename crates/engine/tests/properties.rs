@@ -10,11 +10,14 @@
 //! properties must hold over arbitrary logs, not just tidy ones.
 
 use proptest::prelude::*;
+use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
-    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent,
-    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventBody, EventPayload, Failure, Finding,
+    FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
+    NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload, TokenUsage,
 };
+use yunta_core::ArtifactKind;
 use yunta_engine::derive;
 
 const RUN: &str = "run-prop";
@@ -97,7 +100,31 @@ fn payload() -> impl Strategy<Value = EventPayload> {
                 },
             })
         }),
+        (artifact_id(), "[a-z]{1,4}").prop_map(|(artifact, content)| {
+            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                artifact,
+                content_hash: yunta_core::sha256_hex(content.as_bytes()),
+                origin: ArtifactOrigin::Submitted,
+            })
+        }),
         "[a-z ]{0,10}".prop_map(|reason| EventPayload::RunPaused(RunPausedPayload { reason })),
+    ]
+}
+
+/// An artifact identity drawn from a tiny pool, so generated logs
+/// actually accept the same identity twice and the fold folds real
+/// replacements rather than a sea of singletons.
+fn artifact_id() -> impl Strategy<Value = ArtifactId> {
+    prop_oneof![
+        Just(ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks
+        }),
+        Just(ArtifactId::Interpreted {
+            kind: ArtifactKind::Findings
+        }),
+        Just(ArtifactId::Opaque {
+            name: "notes.md".to_string()
+        }),
     ]
 }
 
@@ -138,6 +165,30 @@ proptest! {
     #[test]
     fn derive_is_deterministic(log in log()) {
         prop_assert_eq!(derive(&log), derive(&log));
+    }
+
+    /// The artifact fold is a pure function of the log, like `derive`,
+    /// and it holds every identity the log accepted: `every` returns one
+    /// ref per `(producer, identity)` the log named, never fewer.
+    #[test]
+    fn the_artifact_fold_is_deterministic_and_holds_every_identity(log in log()) {
+        let ledger = ArtifactLedger::of(&log);
+        prop_assert_eq!(&ledger, &ArtifactLedger::of(&log));
+
+        let held: std::collections::BTreeSet<_> = ledger
+            .every()
+            .map(|artifact| (artifact.producer.clone(), artifact.artifact.clone()))
+            .collect();
+        let accepted: std::collections::BTreeSet<_> = log
+            .iter()
+            .filter_map(|event| match event.payload() {
+                Some(EventPayload::ArtifactAccepted(p)) => {
+                    Some((event.node_id.clone(), p.artifact.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        prop_assert_eq!(held, accepted);
     }
 
     /// Every event survives a trip through its JSON wire form unchanged —

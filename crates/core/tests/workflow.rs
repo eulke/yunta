@@ -29,8 +29,8 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(
         produces[0],
         ArtifactSpec::Typed {
-            name: "ledger.yaml".to_string(),
-            kind: ArtifactKind::TaskLedger,
+            name: "tasks.yaml".to_string(),
+            kind: ArtifactKind::Tasks,
         }
     );
 
@@ -650,7 +650,7 @@ context:
   - files: ["docs/architecture.md", "{{run.dir}}/artifacts/brief.md"]
   - command: "git log --oneline -20"
   - artifact: { node: grill, name: brief.md }
-  - ledger: {}
+  - tasks: {}
   - knowledge: {}
   - node-output: { node: lint }
   - run-events: { filter: failed }
@@ -681,7 +681,7 @@ context:
         }
         other => panic!("expected Artifact, got {other:?}"),
     }
-    assert!(matches!(&node.context[3], ContextSpec::Ledger { .. }));
+    assert!(matches!(&node.context[3], ContextSpec::Tasks { .. }));
     match &node.context[4] {
         ContextSpec::Knowledge { knowledge } => assert!(knowledge.layers.is_empty()),
         other => panic!("expected Knowledge, got {other:?}"),
@@ -885,6 +885,80 @@ nodes:
 "#;
     let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
     assert!(workflow.inputs.is_empty());
+}
+
+#[test]
+fn a_document_input_declares_the_kind_the_run_reads_it_as() {
+    let yaml = r#"
+name: with-document
+inputs:
+  plan:
+    type: document
+    kind: tasks
+    description: "The tasks document this run starts from"
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    match &workflow.inputs["plan"] {
+        yunta_core::InputSpec::Document {
+            kind,
+            default,
+            description,
+        } => {
+            assert_eq!(*kind, yunta_core::ArtifactKind::Tasks);
+            assert_eq!(*default, None);
+            assert_eq!(
+                description.as_deref(),
+                Some("The tasks document this run starts from")
+            );
+        }
+        other => panic!("expected Document, got {other:?}"),
+    }
+    assert!(workflow.inputs["plan"].is_required());
+}
+
+#[test]
+fn a_document_input_without_a_kind_is_refused_naming_the_key() {
+    let yaml = r#"
+name: with-document
+inputs:
+  plan:
+    type: document
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+        .expect_err("a document input names the kind it is read as");
+    let text = error.to_string();
+    assert!(text.contains("kind"), "the refusal names the key: {text}");
+}
+
+#[test]
+fn a_document_input_that_contradicts_itself_is_refused_like_any_other() {
+    let yaml = r#"
+name: with-document
+inputs:
+  plan:
+    type: document
+    kind: tasks
+    required: true
+    default: plan.yaml
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+        .expect_err("`required: true` and a `default` contradict each other");
+    assert!(
+        error.to_string().contains("contradict each other"),
+        "{error}"
+    );
 }
 
 // --- Reference-schema fields (interactive, yunta_schema, skills,

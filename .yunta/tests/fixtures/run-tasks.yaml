@@ -1,5 +1,5 @@
 sessions:
-  - match_prompt_contains: "Read your task from the ledger"
+  - match_prompt_contains: "Read your task from the tasks document"
     effects:
       - path: src/greeting.rs
         content: |

@@ -38,7 +38,7 @@ pub use error::{CheckError, CheckWarning, SchemaRangeError};
 pub use refs::check_workflow_refs;
 
 // One home for what every family reads: the workspace types, the
-// shared helpers (the glob heuristic the ledger's own scope rule uses,
+// shared helpers (the glob heuristic the tasks document's own scope rule uses,
 // and the template scanner), and each family's own rule functions, so a
 // family file's `use super::*` sees them all and the two entries below
 // call any rule unqualified.
@@ -64,7 +64,7 @@ pub(crate) static DEFAULTS: NodeId = NodeId::from_static("defaults");
 
 /// Validates a workflow against the full rule set. Every applicable rule is
 /// checked and every violation reported — not just the first one (same
-/// spirit as the ledger: whoever writes this by hand corrects
+/// spirit as the tasks document: whoever writes this by hand corrects
 /// once, not once per `yunta check` run).
 pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     // `context: [{ artifact }]` creates an implicit `depends_on` edge

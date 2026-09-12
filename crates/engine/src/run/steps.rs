@@ -250,11 +250,21 @@ pub(super) async fn gate_exhausted(
             let yaml = yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
                 diagnostic: format!("failed to serialize inherited findings: {e}"),
             })?;
-            let path = ctx.run_dir.join("artifacts/findings-inherited.yaml");
-            std::fs::write(&path, yaml).map_err(|source| RunError::Io {
-                context: format!("write `{}`", path.display()),
-                source,
-            })?;
+            // The run's own artifact, not any node's: it is what this
+            // log adds up to, and the successor inherits it as it does
+            // every other artifact this run holds.
+            crate::artifacts::accept(
+                &ctx.log(),
+                ctx.run_dir,
+                None,
+                crate::artifacts::Declared {
+                    name: crate::findings::INHERITED_FINDINGS,
+                    kind: Some(yunta_core::ArtifactKind::Findings),
+                },
+                yaml.as_bytes(),
+                yunta_core::events::ArtifactOrigin::Derived,
+            )
+            .await?;
         }
         let state = derive(&events_for_close);
         ctx.emit(

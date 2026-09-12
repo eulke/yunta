@@ -127,16 +127,13 @@ nodes:
     depends_on: [review]
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: blocking\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[(
+        "f1",
+        "blocking",
+        "Unchecked error",
+        "src/lib.rs:10",
+        "The Result is discarded.",
+    )]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     match terminal {
@@ -169,16 +166,7 @@ nodes:
     depends_on: [review]
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: minor\n    title: \"Style nit\"\n    location: \"src/lib.rs:10\"\n    detail: \"Naming.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[("f1", "minor", "Style nit", "src/lib.rs:10", "Naming.")]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -225,22 +213,25 @@ nodes:
         - { name: findings.yaml, kind: findings }
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings: []\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
+    // The artifact is named by what it is and by the bytes the run
+    // holds, never by where the file happens to sit.
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
     let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  outcome: reviewed\n  artifact: artifacts/findings.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
+    assert_eq!(
+        progress,
+        format!(
+            "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  \
+             outcome: reviewed\n  artifact: findings · {}\n\n\
+             ## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n",
+            held[0].content_hash.abbreviated()
+        )
+    );
 }
 
 #[tokio::test]
@@ -437,7 +428,6 @@ nodes:
 #[tokio::test]
 async fn a_denied_task_criterion_blocks_the_task_citing_the_rule() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: criterion-violation
@@ -445,10 +435,10 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger."
+    prompt: "Write the tasks document."
     artifacts:
       produces:
-        - { name: plan.yaml, kind: task-ledger }
+        - { name: plan.yaml, kind: tasks }
   - id: implement
     kind: loop
     runner: executor
@@ -457,15 +447,10 @@ nodes:
     prompt: "Do the task."
 "#;
 
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Task\"\n    scope: [\"out.txt\"]\n    criteria:\n      - cmd: \"test -f forbidden-marker\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "Task", "out.txt", "test -f forbidden-marker")
+    ));
 
     let (terminal, _) = bench
         .run_with_config(workflow, &fixture, CONFIG_WITH_DENY)

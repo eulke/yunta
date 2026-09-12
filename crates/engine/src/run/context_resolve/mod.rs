@@ -1,5 +1,5 @@
 //! Context resolution: every `context:` entry is resolved and
-//! materialized under `context/<content_hash>/` *before* the node's
+//! materialized under `objects/<content_hash>` *before* the node's
 //! session opens, then folded into the rendered prompt — so replay can
 //! name exactly what a session saw without re-running anything (the
 //! hash identifies the content, it never substitutes for it).
@@ -73,8 +73,8 @@ use knowledge::resolve_knowledge;
 use mcp::resolve_mcp;
 use shapes::{artifact_shapes, mount_artifact_shapes};
 use sources::{
-    materialize, resolve_artifact, resolve_command, resolve_files, resolve_ledger,
-    resolve_node_output, resolve_run_events,
+    materialize, resolve_artifact, resolve_command, resolve_files, resolve_node_output,
+    resolve_run_events, resolve_tasks,
 };
 
 pub(super) use sources::write_node_output;
@@ -106,7 +106,7 @@ pub(super) async fn resolve_and_assemble(
 /// Resolved content cached across one loop node's task briefs,
 /// for the classes that cannot change within a run — `stable` (repo
 /// files, knowledge) and `run-stable` (frozen artifacts, immutable once
-/// written). Volatile sources (`command`, `run-events`, `ledger`,
+/// written). Volatile sources (`command`, `run-events`, `tasks`,
 /// `node-output`, `mcp`) re-resolve for every brief, which is the whole
 /// reason they're a class of their own.
 #[derive(Default)]
@@ -284,42 +284,6 @@ async fn assembled(
     Ok(assembled.join("\n"))
 }
 
-/// The whole context a repair session gets: the shape of every
-/// interpreted artifact the node declares, and nothing else.
-///
-/// A repair session rewrites a file it already has on disk. The author's
-/// `context:` bought the node its work; buying it again would pay a
-/// second time for the session the node already had, and none of it says
-/// anything about the shape the file was supposed to have. Recorded as
-/// its own `context_assembled` like every other session's, so replay can
-/// name what this one saw.
-///
-/// `None` when the node declares no interpreted artifact — which is also
-/// when no repair is possible, since only an interpreted artifact can
-/// fail on its content.
-pub(super) async fn assemble_shapes(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-) -> Result<Step<Option<String>>, RunError> {
-    let mut blocks = Vec::new();
-    let mut sources = Vec::new();
-    let assembly = mount_artifact_shapes(ctx, node, &mut blocks, &mut sources);
-    if blocks.is_empty() && assembly.is_ok() {
-        return Ok(Step::Value(None));
-    }
-    match assembly {
-        Ok(()) => match assembled(ctx, node, None, sources, blocks, Vec::new(), Vec::new()).await {
-            Ok(text) => Ok(Step::Value(Some(text))),
-            Err(error) => Ok(Step::Ended(
-                fail(ctx, node, error.to_string(), false).await?,
-            )),
-        },
-        Err(error) => Ok(Step::Ended(
-            fail(ctx, node, error.to_string(), false).await?,
-        )),
-    }
-}
-
 async fn resolve_one(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -338,7 +302,7 @@ async fn resolve_one(
         ContextSpec::RunEvents { run_events } => {
             resolve_run_events(ctx, node, source_id, run_events).await
         }
-        ContextSpec::Ledger { .. } => resolve_ledger(ctx, node, source_id).await,
+        ContextSpec::Tasks { .. } => resolve_tasks(ctx, node, source_id).await,
         ContextSpec::Knowledge { knowledge } => {
             resolve_knowledge(ctx, node, source_id, knowledge).await
         }
@@ -386,7 +350,7 @@ enum StabilityClass {
 /// artifact such as a brief or plan — `run-stable` (every artifact is
 /// already immutable once written, so this is the class its own
 /// guarantee already earns); `command`/`run-events`/`node-output`/the
-/// aggregate `ledger` view are `volatile`. `mcp` has no obvious home in
+/// aggregate `tasks` view are `volatile`. `mcp` has no obvious home in
 /// that scheme — classified `volatile` here since a live external
 /// server's response is never something this module can promise is
 /// byte-stable between sessions.
@@ -396,7 +360,7 @@ fn stability_class(spec: &ContextSpec) -> StabilityClass {
         ContextSpec::Artifact { .. } => StabilityClass::RunStable,
         ContextSpec::Command { .. }
         | ContextSpec::RunEvents { .. }
-        | ContextSpec::Ledger { .. }
+        | ContextSpec::Tasks { .. }
         | ContextSpec::NodeOutput { .. }
         | ContextSpec::Mcp { .. } => StabilityClass::Volatile,
     }
@@ -414,7 +378,7 @@ fn source_id_for(spec: &ContextSpec) -> String {
             "run-events:{}",
             run_events.filter.map(|f| f.as_str()).unwrap_or("all")
         ),
-        ContextSpec::Ledger { .. } => "ledger".to_string(),
+        ContextSpec::Tasks { .. } => "tasks".to_string(),
         ContextSpec::Knowledge { knowledge } => {
             if knowledge.layers.is_empty() {
                 "knowledge:all".to_string()
@@ -434,7 +398,7 @@ fn kind_name(spec: &ContextSpec) -> &'static str {
         ContextSpec::Command { .. } => "command",
         ContextSpec::Artifact { .. } => "artifact",
         ContextSpec::RunEvents { .. } => "run-events",
-        ContextSpec::Ledger { .. } => "ledger",
+        ContextSpec::Tasks { .. } => "tasks",
         ContextSpec::Knowledge { .. } => "knowledge",
         ContextSpec::NodeOutput { .. } => "node-output",
         ContextSpec::Mcp { .. } => "mcp",

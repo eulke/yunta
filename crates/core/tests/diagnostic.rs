@@ -4,14 +4,14 @@
 //! reaches either rendering.
 
 use yunta_core::diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Malformation, Named, Problem, Report,
-    RuleCode, Subject, ValueShape,
+    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
+    Subject,
 };
 use yunta_core::events::Failure;
 use yunta_core::{ArtifactKind, NodeId, TaskId};
 
 fn plan() -> DocumentRef {
-    DocumentRef::new(ArtifactKind::TaskLedger, "artifacts/plan.yaml")
+    DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
 }
 
 fn task(id: &str, index: usize) -> Subject {
@@ -104,62 +104,6 @@ fn one_violation_is_reported_in_the_singular() {
 }
 
 #[test]
-fn an_unknown_key_lists_the_keys_that_are_accepted() {
-    let diagnostic = Diagnostic::new(
-        task("t1", 0),
-        Problem::unknown_key("description", ["id", "title", "scope", "criteria"]),
-    );
-    assert_eq!(
-        diagnostic.to_string(),
-        "task `t1`: unknown key `description`; a task declares `id`, `title`, `scope`, `criteria`"
-    );
-}
-
-#[test]
-fn a_retired_key_carries_the_key_that_replaced_it() {
-    let diagnostic = Diagnostic::new(
-        Subject::Document,
-        Problem::unknown_key_instead("role", ["runner"], "a node names its runner with `runner:`"),
-    );
-    assert!(diagnostic
-        .to_string()
-        .ends_with("a node names its runner with `runner:`"));
-}
-
-#[test]
-fn a_wrong_shape_shows_what_was_written_and_what_to_write() {
-    let diagnostic = Diagnostic::new(
-        Subject::Criterion {
-            task: Named::new(TaskId::from("t1"), 0),
-            index: 0,
-        },
-        Problem::wrong_shape(ValueShape::String, "a mapping", "- cmd: \"cargo test\""),
-    );
-    let text = diagnostic.to_string();
-    assert!(text.contains("task `t1`, criterion 1"), "{text}");
-    assert!(text.contains("a mapping"), "{text}");
-    assert!(text.contains("a string"), "{text}");
-    assert!(text.contains("- cmd: \"cargo test\""), "{text}");
-}
-
-#[test]
-fn a_markdown_fence_is_named_as_such_not_as_a_stray_character() {
-    let diagnostic = Diagnostic::new(
-        Subject::Document,
-        Problem::not_yaml(
-            Some(Malformation::MarkdownFence),
-            "found character that cannot start any token",
-        ),
-    );
-    let text = diagnostic.to_string();
-    assert!(text.contains("Markdown code fence"), "{text}");
-    assert!(
-        !text.contains("cannot start any token"),
-        "the parser's own words never reach a reader: {text}"
-    );
-}
-
-#[test]
 fn a_diagnostic_survives_the_event_log_as_data() {
     let diagnostic = broke(RuleCode::EmptyScope, "`scope` is empty");
     let json = serde_json::to_string(&diagnostic).expect("a diagnostic serializes");
@@ -171,17 +115,7 @@ fn a_diagnostic_survives_the_event_log_as_data() {
 #[test]
 fn every_diagnostic_has_a_stable_code_for_counting() {
     let cases = [
-        (Problem::not_yaml(None, ""), "not-yaml"),
-        (
-            Problem::unknown_key("x", Vec::<String>::new()),
-            "unknown-key",
-        ),
-        (Problem::missing_key("id"), "missing-key"),
-        (
-            Problem::wrong_shape(ValueShape::Null, "a mapping", "id: x"),
-            "wrong-shape",
-        ),
-        (Problem::invalid_id("1", "a letter first"), "invalid-id"),
+        (Problem::parse("tasks[0].id", "invalid type"), "parse"),
         (
             Problem::rule(RuleCode::DependencyCycle, ""),
             "dependency-cycle",
@@ -207,8 +141,14 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
         vec![broke(RuleCode::NoCriteria, "no criteria declared")],
     ));
 
-    assert!(!missing.is_repairable(), "nothing in it to correct");
-    assert!(malformed.is_repairable(), "writing it again fixes it");
+    assert!(
+        missing.report().is_none(),
+        "a file nobody wrote names no document"
+    );
+    assert!(
+        malformed.report().is_some(),
+        "a document that did not read names itself"
+    );
     assert_eq!(missing.path(), "artifacts/plan.yaml");
     assert!(missing.report().is_none());
     assert!(malformed.report().is_some());

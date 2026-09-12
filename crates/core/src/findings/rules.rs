@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{FindingId, FindingsFile};
 
-/// Every rule this document is held to — see `crate::ledger::rules` for what
+/// Every rule this document is held to — see `crate::tasks::rules` for what
 /// this list is for and what holds it true.
 pub(super) const RULES: &[Rule] = &[
     Rule {
@@ -30,7 +30,38 @@ pub(super) const RULES: &[Rule] = &[
         code: RuleCode::EmptyDetail,
         demand: "`detail` is non-empty: what goes wrong, and when",
     },
+    Rule {
+        code: RuleCode::UnknownId,
+        demand: "an update or a withdrawal names an id this node posted",
+    },
+    Rule {
+        code: RuleCode::WithdrawnId,
+        demand: "a withdrawn id is final: it is not posted, updated or withdrawn again",
+    },
+    Rule {
+        code: RuleCode::EmptyReason,
+        demand: "a withdrawal says why, in a non-empty `reason`",
+    },
 ];
+
+/// What a withdrawal owes.
+///
+/// The three rules above it — the id is one this node posted, and not one
+/// it already withdrew — need the run's own log to decide, so they are
+/// checked where the log is (the run tool) and published from here, with
+/// the rest of the document's demands.
+pub(super) fn check_withdrawal(withdrawal: &crate::findings::Withdrawal) -> Vec<Diagnostic> {
+    if withdrawal.reason.trim().is_empty() {
+        return vec![Diagnostic::new(
+            Subject::Finding(Named::new(withdrawal.id.clone(), 0)),
+            Problem::rule(
+                RuleCode::EmptyReason,
+                "say why it no longer stands, so the log keeps the reason",
+            ),
+        )];
+    }
+    Vec::new()
+}
 
 fn broke(index: usize, id: &FindingId, code: RuleCode, detail: &str) -> Diagnostic {
     Diagnostic::new(

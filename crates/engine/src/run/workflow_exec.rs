@@ -84,26 +84,55 @@ enum MountError {
         node: yunta_core::NodeId,
     },
     #[error(
-        "mount `{name}` from node `{node}`: `{path}` cannot be read: {source} — the source node \
-         never produced it"
+        "mount `{name}` from node `{node}`: run `{run}` holds no artifact `{name}` — the source \
+         node never produced it"
     )]
+    Unheld {
+        name: String,
+        node: yunta_core::NodeId,
+        run: RunId,
+    },
+    #[error("mount `{name}` from node `{node}`: run `{run}` cannot hand over its bytes")]
     Unreadable {
         name: String,
         node: yunta_core::NodeId,
-        path: PathBuf,
+        run: RunId,
         #[source]
-        source: std::io::Error,
+        source: crate::artifacts::ObjectError,
+    },
+    #[error(
+        "mount `{name}` from node `{node}`: the frozen truth of run `{run}` cannot be read: \
+         {detail}"
+    )]
+    Unfrozen {
+        name: String,
+        node: yunta_core::NodeId,
+        run: RunId,
+        detail: String,
+    },
+    /// Boxed: a storage failure carries far more than any other mount
+    /// problem, and every caller moves this error by value.
+    #[error("mount `{name}` from node `{node}`: the log of run `{run}` cannot be reached")]
+    Unlogged {
+        name: String,
+        node: yunta_core::NodeId,
+        run: RunId,
+        #[source]
+        source: Box<yunta_storage::StorageError>,
     },
 }
 
 /// Resolves every declared mount to bytes, in memory, *before*
 /// the child is linked or born — a missing source fails the parent's
-/// node with nothing dangling. A `kind: workflow` source resolves
-/// through the recorded link (its last `child_run_finished` on this
-/// log) to that child run's `artifacts/`; any other node is the
-/// parent's own `run.dir/artifacts/`. Returns the child's birth
-/// artifacts, or the diagnostic to fail the node with.
-fn resolve_mounts(
+/// node with nothing dangling.
+///
+/// Each mount is answered by the log that holds the artifact and the
+/// store that keeps its bytes. A `kind: workflow` source resolves
+/// through the recorded link (its last `child_run_finished` on this log)
+/// to that child run's own log and store; any other node is this run's,
+/// and the mount reaches that node's artifact alone. Returns the child's
+/// birth artifacts, or the diagnostic to fail the node with.
+async fn resolve_mounts(
     ctx: &RunCtx<'_>,
     events: &[yunta_core::events::StoredEvent],
     mounts: &[MountSpec],
@@ -117,7 +146,7 @@ fn resolve_mounts(
             .nodes
             .iter()
             .find(|candidate| candidate.id == m.node);
-        let source_dir = match target.map(|candidate| &candidate.kind) {
+        let source_run = match target.map(|candidate| &candidate.kind) {
             Some(NodeKind::Workflow { .. }) => {
                 let child = events.iter().rev().find_map(|e| match e.payload() {
                     Some(EventPayload::ChildRunFinished(p))
@@ -128,7 +157,7 @@ fn resolve_mounts(
                     _ => None,
                 });
                 match child {
-                    Some(child_id) => runs_root(ctx).join(child_id.as_str()).join("artifacts"),
+                    Some(child_id) => child_id,
                     None => {
                         return Err(MountError::NoTerminalChild {
                             name: m.name.clone(),
@@ -137,25 +166,65 @@ fn resolve_mounts(
                     }
                 }
             }
-            _ => ctx.run_dir.join("artifacts"),
+            _ => ctx.run_id.clone(),
         };
-        let path = source_dir.join(&m.name);
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                resolved.push(BirthArtifact {
-                    name: m.rename.clone().unwrap_or_else(|| m.name.clone()),
-                    bytes,
-                });
-            }
-            Err(source) => {
-                return Err(MountError::Unreadable {
+        // The source run's own log is what says which artifact the
+        // mounted name is and who produced it there; a mount only
+        // chooses the name the child carries it under. A sibling child
+        // run answers about itself, so its workflow is the one that
+        // reads the name.
+        let source_dir = runs_root(ctx).join(source_run.as_str());
+        let (source_events, source_workflow, producer) = if source_run == *ctx.run_id {
+            (
+                events.to_vec(),
+                ctx.manifest.workflow.clone(),
+                Some(m.node.clone()),
+            )
+        } else {
+            let manifest =
+                super::read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
+                    MountError::Unfrozen {
+                        name: m.name.clone(),
+                        node: m.node.clone(),
+                        run: source_run.clone(),
+                        detail: yunta_core::describe(&source),
+                    }
+                })?;
+            let child_events = ctx
+                .storage
+                .events_for_run(source_run.clone())
+                .await
+                .map_err(|source| MountError::Unlogged {
                     name: m.name.clone(),
                     node: m.node.clone(),
-                    path,
-                    source,
-                });
-            }
-        }
+                    run: source_run.clone(),
+                    source: Box::new(source),
+                })?;
+            (child_events, manifest.workflow, None)
+        };
+        let held = crate::artifacts::RunArtifacts::of(&source_dir, &source_events);
+        let found = held
+            .named(&source_workflow, producer.as_ref(), &m.name)
+            .ok_or_else(|| MountError::Unheld {
+                name: m.name.clone(),
+                node: m.node.clone(),
+                run: source_run.clone(),
+            })?
+            .clone();
+        let bytes = held
+            .bytes(&found)
+            .map_err(|source| MountError::Unreadable {
+                name: m.name.clone(),
+                node: m.node.clone(),
+                run: source_run.clone(),
+                source,
+            })?;
+        resolved.push(super::promote::birth_artifact(
+            m.rename.clone().unwrap_or_else(|| m.name.clone()),
+            bytes,
+            &source_run,
+            &found,
+        ));
     }
     Ok(resolved)
 }
@@ -174,7 +243,6 @@ pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
     call: WorkflowCall<'_>,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let WorkflowCall {
@@ -231,7 +299,7 @@ pub(super) async fn execute_workflow(
             .await?
             .is_empty()
         {
-            return resume_child(ctx, node, open_child, attempt, cancel).await;
+            return resume_child(ctx, node, open_child, cancel).await;
         }
     }
 
@@ -323,7 +391,7 @@ pub(super) async fn execute_workflow(
     // Mounts resolve to bytes here, before anything is linked or
     // born — a missing source is this node's failure, with no dangling
     // child left behind.
-    let mounted = match resolve_mounts(ctx, &events, mounts) {
+    let mounted = match resolve_mounts(ctx, &events, mounts).await {
         Ok(mounted) => mounted,
         Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
@@ -472,7 +540,6 @@ pub(super) async fn execute_workflow(
             run_dir: &child_run_dir,
             tree: &child_tree,
         },
-        attempt,
         cancel,
     )
     .await
@@ -484,7 +551,6 @@ async fn resume_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child_id: &RunId,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
@@ -538,7 +604,6 @@ async fn resume_child(
             run_dir: &child_run_dir,
             tree: &child_tree,
         },
-        attempt,
         cancel,
     )
     .await
@@ -568,7 +633,6 @@ async fn drive_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child: Child<'_>,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Child {
@@ -627,8 +691,6 @@ async fn drive_child(
                     Close::new(
                         format!("child run `{current_id}` finished"),
                         yunta_core::events::TokenUsage::default(),
-                        attempt,
-                        cancel,
                     ),
                 )
                 .await;

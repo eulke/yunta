@@ -37,7 +37,7 @@ pub struct Question {
 }
 
 /// A `kind: questions` artifact's document — sole top-level key
-/// `questions:`, mirroring `Ledger`'s `tasks:`-only shape and
+/// `questions:`, mirroring `TasksFile`'s `tasks:`-only shape and
 /// `FindingsFile`'s `findings:`-only shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -68,7 +68,7 @@ pub struct AnswersFile {
 /// question answered, every answer names a declared question, `choice`
 /// values within the declared list, `boolean` values parseable. All
 /// violations reported together, never just the first (same principle
-/// as the ledger's own registration).
+/// as the tasks document's own registration).
 pub fn validate_answers(file: &QuestionsFile, answers: &[Answer]) -> Vec<String> {
     let mut violations = Vec::new();
     for answer in answers {
@@ -107,7 +107,6 @@ pub fn validate_answers(file: &QuestionsFile, answers: &[Answer]) -> Vec<String>
 }
 
 mod rules;
-pub(crate) mod shape;
 
 /// The shape this document publishes, as the YAML it is.
 ///
@@ -122,10 +121,6 @@ const EXAMPLE: &str = include_str!("shape.yaml");
 impl crate::shape::Document for QuestionsFile {
     const KIND: crate::ArtifactKind = crate::ArtifactKind::Questions;
     const EXAMPLE: &'static str = EXAMPLE;
-
-    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
-        shape::diagnose(value, walk);
-    }
 
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::check(self)

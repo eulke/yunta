@@ -1,6 +1,6 @@
 //! Scope post-check by `git diff`: what a task
 //! actually touched, checked against what its `scope` globs declared it
-//! could touch. Unlike the ledger's overlap heuristic (which
+//! could touch. Unlike the tasks document's overlap heuristic (which
 //! compares two *patterns* to each other with no library that does
 //! that), this checks real *paths* against real globs — exactly what
 //! `globset` is for, so it's used here instead of a hand-rolled
@@ -104,4 +104,22 @@ fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
         .filter(|segment| !segment.is_empty())
         .map(|segment| PathBuf::from(std::ffi::OsStr::from_bytes(segment)))
         .collect()
+}
+
+/// The scope a node's own worktree diff is audited against, or `None`
+/// when the node constrains nothing and no audit is owed.
+///
+/// A node that declares `scope:` is audited against it. A node declared
+/// `read-only` is audited against nothing at all — the word says the
+/// worktree comes back untouched, and the static check already takes it
+/// at that word, exempting such a node from every scope-overlap rule so
+/// it may run beside any other. Auditing it against the empty scope is
+/// what makes that exemption true rather than assumed: whatever the
+/// session's tools happened to permit, a read-only node that wrote the
+/// project fails for it.
+pub fn audited_scope(node: &yunta_core::Node) -> Option<&[String]> {
+    if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
+        return Some(&[]);
+    }
+    (!node.scope.is_empty()).then_some(node.scope.as_slice())
 }

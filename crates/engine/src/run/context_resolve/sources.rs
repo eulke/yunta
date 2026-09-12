@@ -1,13 +1,14 @@
 //! The sources a `context:` entry resolves from: files, a command's
-//! output, an artifact, the run's own events, the ledger, and a node's
+//! output, an artifact, the run's own events, the tasks document, and a node's
 //! captured output — plus writing that output where the next node reads it.
 
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{sha256_hex, ContentHash, Node, NodeId};
+use yunta_core::{ContentHash, Node, NodeId};
 
+use crate::artifacts::store::ObjectStore;
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::render_template;
 
@@ -102,18 +103,50 @@ pub(super) async fn resolve_command(
     Ok(stdout)
 }
 
+/// The bytes of the artifact a `context: [{ artifact }]` source names,
+/// as the run holds them.
+///
+/// A reference that names a node asks for that node's artifact and
+/// reaches nothing else, whatever another node wrote under the same
+/// name; one that names none asks about the run, and gets the acceptance
+/// standing last.
 pub(super) async fn resolve_artifact(
     ctx: &RunCtx<'_>,
     node: &Node,
     source_id: &str,
     artifact: &yunta_core::ArtifactContextRef,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    let path = ctx.run_dir.join("artifacts").join(&artifact.name);
-    std::fs::read(&path).map_err(|_| ContextResolveError::MissingArtifact {
+    let missing = || ContextResolveError::MissingArtifact {
         node: node.id.clone(),
         source_id: source_id.to_string(),
         referenced: artifact.node.clone(),
         name: artifact.name.clone(),
+    };
+    let events = ctx
+        .load_events()
+        .await
+        .map_err(|e| ContextResolveError::Io {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            action: "read the event log".to_string(),
+            source: std::io::Error::other(e.to_string()),
+        })?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    let found = held
+        .named(
+            &ctx.manifest.workflow,
+            artifact.node.as_ref(),
+            &artifact.name,
+        )
+        .ok_or_else(missing)?;
+    held.bytes(found).map_err(|source| ContextResolveError::Io {
+        node: node.id.clone(),
+        source_id: source_id.to_string(),
+        action: format!(
+            "read the artifact `{}` the run holds",
+            crate::artifacts::describe(&ctx.manifest.workflow, found)
+        ),
+        source: std::io::Error::other(source.to_string()),
     })
 }
 
@@ -141,9 +174,22 @@ pub(super) async fn resolve_run_events(
             .into_iter()
             .filter(|e| matches!(e.payload(), Some(EventPayload::NodeFailed(_))))
             .collect(),
+        // History, not state: a session that mounts events wants what
+        // happened, and a finding that was rewritten or taken back is
+        // part of that. A session that wants the set standing now mounts
+        // the findings artifact.
         Some(yunta_core::RunEventsFilter::Findings) => events
             .into_iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .filter(|e| {
+                matches!(
+                    e.payload(),
+                    Some(
+                        EventPayload::FindingPosted(_)
+                            | EventPayload::FindingUpdated(_)
+                            | EventPayload::FindingWithdrawn(_)
+                    )
+                )
+            })
             .collect(),
     };
     let jsonl = crate::events_export::render_events_jsonl(&filtered).map_err(|source| {
@@ -156,12 +202,12 @@ pub(super) async fn resolve_run_events(
     Ok(jsonl.into_bytes())
 }
 
-pub(super) async fn resolve_ledger(
+pub(super) async fn resolve_tasks(
     ctx: &RunCtx<'_>,
     node: &Node,
     source_id: &str,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    // A storage failure is not an empty ledger: handing the agent "no
+    // A storage failure is not an empty tasks document: handing the agent "no
     // tasks" as context would hide the failure behind plausible content,
     // so the read propagates exactly as its sibling `resolve_run_events`
     // already does.
@@ -233,14 +279,19 @@ pub(in crate::run) fn write_node_output(
     })
 }
 
+/// Puts a resolved source's bytes where the run keeps every artifact's
+/// bytes, and answers with the object and its hash.
+///
+/// The same store, not a second one: a context segment and an artifact
+/// are both content the run must be able to hand back exactly as it
+/// recorded it, and one content-addressed store answers for both. What
+/// `context_assembled` carries is that hash.
 pub(super) fn materialize(
     run_dir: &Path,
     content: &[u8],
 ) -> std::io::Result<(PathBuf, ContentHash)> {
-    let hash = sha256_hex(content);
-    let dir = run_dir.join("context").join(hash.as_str());
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("content");
-    std::fs::write(&path, content)?;
+    let store = ObjectStore::at(run_dir);
+    let hash = store.put(content)?;
+    let path = store.path_of(&hash);
     Ok((path, hash))
 }

@@ -9,11 +9,14 @@ use crate::yaml::{self, Mapping, Value, YamlError};
 
 /// Reads a mapping that holds exactly one entry whose key is one of
 /// `keys` — the shape of every value this schema discriminates by a
-/// field name. `what` names the value in the error.
+/// field name. `what` names the value in the error. An entry written
+/// under one of `aliases` comes back under the key it stands for; the
+/// error lists `keys` alone, so an alias is read but never advertised.
 pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
     deserializer: D,
     what: &str,
     keys: &[&str],
+    aliases: &[(&str, &str)],
 ) -> Result<(String, Value), D::Error> {
     use serde::de::Error;
 
@@ -33,6 +36,10 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
             list(keys)
         )));
     };
+    let key = aliases
+        .iter()
+        .find(|(alias, _)| *alias == key)
+        .map_or(key, |(_, canonical)| canonical);
     if !keys.contains(&key) {
         return Err(D::Error::custom(format!(
             "unknown key `{key}` for {what}; one of {}",

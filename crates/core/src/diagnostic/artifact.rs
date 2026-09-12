@@ -1,11 +1,10 @@
 //! Why one declared artifact did not close.
 //!
 //! A file that was never written and a file whose content is wrong are
-//! different failures, and the difference is the whole reason the repair
-//! cycle can exist: writing the document again fixes the second and can
-//! never reach the first. Giving them one type made that distinction a
-//! predicate somebody had to remember to call; giving them two variants
-//! makes it a fact the compiler carries.
+//! different failures, and every surface reads them differently: one
+//! says the node produced nothing, the other says what the document it
+//! produced got wrong. Two variants make that a fact the compiler
+//! carries rather than a predicate somebody has to remember to call.
 
 use std::fmt;
 
@@ -41,17 +40,12 @@ impl ArtifactFailure {
     }
 
     /// The report, when the failure is about content — the form a
-    /// receipt counts and a repair instruction is built from.
+    /// receipt counts and a diagnostic is rendered from.
     pub fn report(&self) -> Option<&Report> {
         match self {
             ArtifactFailure::File { .. } => None,
             ArtifactFailure::Content(report) => Some(report),
         }
-    }
-
-    /// Whether writing the document again could fix this.
-    pub fn is_repairable(&self) -> bool {
-        self.report().is_some_and(|report| !report.is_empty())
     }
 }
 

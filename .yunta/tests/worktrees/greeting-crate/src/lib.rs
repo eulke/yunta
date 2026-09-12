@@ -1,1 +1,1 @@
-//! A library the ledger's one task extends with a greeting module.
+//! A library the tasks document's one task extends with a greeting module.

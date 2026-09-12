@@ -125,9 +125,15 @@ or its content: the path, the kind whose shape it was read against, and every
 problem that document has. Each problem names its subject in the document's own
 words — ``task `t1`, criterion 1`` — which is the whole of where it is: a
 diagnostic carries no line and column, and `events.json` publishes none. Every
-surface renders from that value — `status`, the receipt, and the instruction a
-repair attempt gets — so none of them can disagree about the facts, and nothing
-has to take a sentence apart to recover them.
+surface renders from that value — `status` and the receipt — so none of them can
+disagree about the facts, and nothing has to take a sentence apart to recover them.
+
+A problem is one of two shapes, under the key `problem`. `parse` carries `message`
+and, unless the root itself is at fault, the `path` of the value that stopped the
+read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
+`code` from a closed set and the `detail` a reader acts on. A node fails on an
+artifact with `retryable: false`: there is no second session to instruct, so
+nothing about the failure asks for one.
 
 A log whose `node_failed` events carry `outcome:` on its own — every log written
 before `artifacts:` existed — reads back as exactly that one-sentence failure:
@@ -139,6 +145,37 @@ Because each document travels with its own problems, a count says which document
 each came from: the receipt counts a problem by its code together with the kind of
 document it was found in, and a failure of the file itself, which has no document,
 counts by code alone.
+
+An artifact kind is read under its current name and under the one it had. The
+tasks document is `tasks`; a log — `artifact_accepted`, `artifact_written`,
+`artifact_submitted` — or
+a frozen manifest that spells it `task-ledger` reads as `tasks`, and so does a
+workflow's `kind: task-ledger` or a `ledger: {}` context source. What the binary
+writes is always the current spelling.
+
+## Documents a session hands over, and findings it reports
+
+`artifact_submitted` records a whole document a session offered and what the engine
+answered: `name`, `artifact_kind` (named in full so it does not collide with the
+envelope's own `kind`), and `outcome` — either `accepted` with the `content_hash` of
+the file the engine writes from it, or `refused` with the whole `report`. Both are
+kept: how often a run gets a document wrong is a fact about the run, not something
+only the session saw.
+
+Findings carry three accepted forms and one refusal. `finding_posted` carries the
+whole `finding`; `finding_updated` carries the whole finding again, under the same
+id, as its new state; `finding_withdrawn` carries the `id` and the `reason` its node
+gave. `finding_refused` carries the `operation` (`post`, `update` or `withdraw`), the
+`report`, and the `id` the call named when it named one that parses — the field is
+absent otherwise.
+
+Which findings a run holds is the last state of each `(node, id)` pair, minus the
+withdrawn ones, in the order each was first posted. A log that carries only
+`finding_posted` folds to every finding it posted, in posting order: a fold with no
+update and no withdrawal to apply has nothing to change. The same fold ignores a sequence the engine never writes: an
+update or a withdrawal for an id its node never posted, or a post on an id it
+withdrew. A log that carries one came from somewhere else, and the honest reading of
+it is the state it can account for.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
@@ -172,6 +209,28 @@ the parenthesis so the count lands directly after the heading.
 The `document_shape` tool refuses an unknown kind with the same sentence
 `yunta schema` prints, byte for byte.
 
+A run tool that refuses something a session offered opens with what was not accepted
+and which call to make again, then lists the problems numbered from 1, one per
+paragraph. The heading names the document by the noun of its kind — `tasks document`,
+`findings artifact`, `questions artifact`:
+
+```
+The tasks document `plan.yaml` was not accepted. Fix these and submit again:
+The finding was not accepted. Fix these and post it again:
+The finding update was not accepted. Fix these and update it again:
+The withdrawal was not accepted. Fix these and withdraw it again:
+```
+
+A call the engine cannot read as a call at all is answered by naming what that tool
+takes instead:
+
+```
+invalid submission — requires `name` (one of `plan.yaml`) and `document` (an object): `document` is missing or is not an object
+`review.yaml` is declared by this node with kind `findings`, not the kind this tool submits — use `yunta_post_finding`
+`notes.md` is not an artifact this node declares; it declares `plan.yaml`
+node `plan` declares no artifacts, so there is nothing to check
+```
+
 A run the binary could only interpret in part counts the same way on both surfaces
 that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>, …`,
 and `1 unknown event kind` for one. `yunta status` folds that into its
@@ -196,7 +255,7 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`ledger.json`, `findings.json`, `questions.json` and `events.json`: the JSON
+`tasks.json`, `findings.json`, `questions.json` and `events.json`: the JSON
 Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
 three artifacts the engine interprets, and one event of the log — the shape of a
 line of `events.jsonl`. They are generated from the types that read those
@@ -207,6 +266,10 @@ them, which is also the crate that ships them: the binary embeds those exact
 files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.
+
+`tasks.json` is the schema of the tasks document; `yunta schema task-ledger`
+still answers with it, as an alias of `yunta schema tasks`, and the JSON Schema
+itself lists `tasks` alone as the kind's spelling.
 
 ## Platforms
 

@@ -655,7 +655,7 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
         .find(|t| t.name.as_ref() == "document_shape")
         .expect("document_shape is advertised");
     let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
-    for kind in ["task-ledger", "findings", "questions"] {
+    for kind in ["tasks", "findings", "questions"] {
         assert!(
             advertised.contains(kind),
             "{kind} missing from {advertised}"
@@ -665,7 +665,7 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "task-ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "tasks"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
@@ -677,11 +677,12 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "plan"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
-    assert!(tool_text(&result).contains("task-ledger"));
+    assert!(tool_text(&result).contains("`plan`"));
+    assert!(tool_text(&result).contains("`tasks`"));
 
     client.cancel().await.ok();
 }
@@ -711,14 +712,14 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "plan"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
     let from_control_plane = tool_text(&result).trim().to_string();
     client.cancel().await.ok();
 
-    let output = yunta_in!(&repo, &home, &["schema", "ledger"]);
+    let output = yunta_in!(&repo, &home, &["schema", "plan"]);
     assert!(!output.status.success(), "an unknown kind has no shape");
     let from_shell = stderr(&output);
 
@@ -728,10 +729,10 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
         "the same mistake gets the same sentence at either door"
     );
     assert!(
-        from_control_plane.contains("`ledger`"),
+        from_control_plane.contains("`plan`"),
         "the sentence names what was asked for: {from_control_plane}"
     );
-    for kind in ["`task-ledger`", "`findings`", "`questions`"] {
+    for kind in ["`tasks`", "`findings`", "`questions`"] {
         assert!(
             from_control_plane.contains(kind),
             "the sentence names {kind}, which does exist: {from_control_plane}"
