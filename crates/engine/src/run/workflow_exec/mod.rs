@@ -29,8 +29,13 @@
 //!   tree as manifest `isolation: none` — the child never owns (nor
 //!   cleans up, nor commits) a tree that isn't its own.
 //!
-//! [`mounts`] holds the other side of the same boundary: what the child
-//! is born holding, read out of the log of whichever run holds it.
+//! Artifacts cross that boundary in both directions, and by the log at
+//! each end. [`mounts`] is the way in: what the child is born holding,
+//! read out of the log of whichever run holds it. The way back is this
+//! node's own close — a child that reaches `Done` hands over every
+//! artifact this node declares, taken from the child's log under
+//! `origin: inherited`, so a composition produces what it says it
+//! produces without the parent ever reading the child's directory.
 
 mod mounts;
 
@@ -48,7 +53,7 @@ use crate::template::render_template;
 
 use mounts::resolve_mounts;
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, ChildRun, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{RunCtx, RunError, RunTerminal};
@@ -533,13 +538,23 @@ async fn drive_child(
                     }),
                 )
                 .await?;
+                // Only a child that reached `Done` hands anything over.
+                // A promoted member is not the end of the composition —
+                // its successor inherits everything it held and the loop
+                // goes on — and a failed child fails this node, which
+                // never closes: a run that abandoned its work states no
+                // artifacts for a parent to take over.
                 return close_node(
                     ctx,
                     node,
                     Close::new(
                         format!("child run `{current_id}` finished"),
                         yunta_core::events::TokenUsage::default(),
-                    ),
+                    )
+                    .child(ChildRun {
+                        id: &current_id,
+                        run_dir: &current_run_dir,
+                    }),
                 )
                 .await;
             }

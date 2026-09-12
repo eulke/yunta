@@ -1200,3 +1200,243 @@ nodes:
         "the child holds exactly the bytes the parent's log names"
     );
 }
+
+// --- what a workflow node acquires from its child ---------------------
+
+#[tokio::test]
+async fn a_workflow_node_acquires_the_artifact_its_child_produced() {
+    let bench = Bench::new(&[(
+        "producer",
+        r#"
+name: producer
+nodes:
+  - id: work
+    kind: bash
+    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    artifacts: { produces: [report.md] }
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#;
+    let run_id = RunId::from("run-acquire");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            EMPTY_FIXTURE,
+            &NoInteraction,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert!(
+        matches!(state.nodes.get("feat"), Some(NodeState::Finished { .. })),
+        "a node whose declared artifact its child produced finishes: {:?}",
+        state.nodes.get("feat")
+    );
+
+    let child_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "feat")
+        .map(|(_, id)| id)
+        .expect("the child is linked on the parent's log");
+
+    // The parent holds it as its node's own, stating where it came from.
+    let parent_held = yunta_testkit::accepted(&bench.storage.events_for_run(&run_id).unwrap());
+    assert_eq!(parent_held.len(), 1, "{parent_held:?}");
+    assert_eq!(parent_held[0].producer, Some("feat".into()));
+    assert_eq!(parent_held[0].artifact.to_string(), "report.md");
+    assert_eq!(
+        parent_held[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: child_id.clone(),
+            producer: Some("work".into()),
+        },
+        "the acquisition names the child run and the node that produced it there"
+    );
+
+    // And the bytes are the ones the child's own log names.
+    let child_held = yunta_testkit::accepted(&bench.storage.events_for_run(&child_id).unwrap());
+    assert_eq!(child_held.len(), 1, "{child_held:?}");
+    assert_eq!(
+        parent_held[0].content_hash, child_held[0].content_hash,
+        "the parent holds exactly the bytes the child's log names"
+    );
+    let object = bench
+        .runs_root
+        .join(run_id.as_str())
+        .join("objects")
+        .join(parent_held[0].content_hash.as_str());
+    assert_eq!(
+        std::fs::read_to_string(&object).unwrap().trim(),
+        "the-report"
+    );
+}
+
+#[tokio::test]
+async fn a_workflow_node_declaring_what_its_child_never_produced_fails_naming_both() {
+    let bench = Bench::new(&[(
+        "producer",
+        r#"
+name: producer
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#;
+    let run_id = RunId::from("run-acquire-missing");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            EMPTY_FIXTURE,
+            &NoInteraction,
+        )
+        .await;
+
+    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
+    let child_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "feat")
+        .map(|(_, id)| id)
+        .expect("the child is linked on the parent's log");
+    match state.nodes.get("feat") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let outcome = failure.to_string();
+            assert!(
+                outcome.contains("report.md") && outcome.contains(child_id.as_str()),
+                "the diagnostic must name the artifact and the child run: {outcome}"
+            );
+        }
+        other => panic!("expected feat failed, got {other:?}"),
+    }
+    // Nothing entered the parent: an artifact it could not acquire is
+    // not a fact of the run.
+    assert!(
+        yunta_testkit::accepted(&bench.storage.events_for_run(&run_id).unwrap()).is_empty(),
+        "the parent holds nothing it never acquired"
+    );
+}
+
+#[tokio::test]
+async fn the_findings_of_a_child_run_stand_as_the_workflow_nodes_own() {
+    let bench = Bench::new(&[(
+        "reviewer",
+        r#"
+name: reviewer
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review it."
+    artifacts: { produces: [{ name: review.yaml, kind: findings }] }
+"#,
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: reviewer
+    artifacts: { produces: [{ name: inherited.yaml, kind: findings }] }
+"#;
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: null-deref
+          severity: blocking
+          title: "Resize handler dereferences a null pointer"
+          location: "src/ui/resize.rs:142"
+          detail: "Resizing before the first paint reaches a null surface."
+    outcome: { type: completed, summary: "reviewed" }
+"#;
+    let run_id = RunId::from("run-acquire-findings");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            fixture,
+            &NoInteraction,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert!(matches!(
+        state.nodes.get("feat"),
+        Some(NodeState::Finished { .. })
+    ));
+
+    // The child states the finding twice — once as the posting its
+    // session made, once inside the findings document the engine derived
+    // from it — and the parent learns it from the document alone.
+    let child_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "feat")
+        .map(|(_, id)| id)
+        .expect("the child is linked on the parent's log");
+    let child_events = bench.storage.events_for_run(&child_id).unwrap();
+    assert_eq!(
+        child_events
+            .iter()
+            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .count(),
+        1
+    );
+
+    // The child's findings are on the PARENT's log, as that node's own.
+    let parent_events = bench.storage.events_for_run(&run_id).unwrap();
+    assert_eq!(
+        yunta_testkit::accepted(&parent_events).len(),
+        1,
+        "one acquisition, whatever the child said about it"
+    );
+    let posted: Vec<(Option<String>, String)> = parent_events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::FindingPosted(p)) => Some((
+                e.node_id.as_ref().map(ToString::to_string),
+                p.finding.id.to_string(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        posted,
+        vec![(Some("feat".to_string()), "null-deref".to_string())],
+        "posted once, under the workflow node that acquired them"
+    );
+
+    // And the parent's effective set is what a reader of the parent sees.
+    let effective = yunta_core::events::findings::FindingLedger::of(&parent_events).effective();
+    assert_eq!(effective.len(), 1, "{effective:?}");
+    assert_eq!(effective[0].node, Some("feat".into()));
+    assert_eq!(effective[0].finding.id.to_string(), "null-deref");
+}

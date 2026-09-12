@@ -8,31 +8,43 @@
 //! one place and a new field on the event is a change to one function
 //! rather than to every kind of node.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
 };
-use yunta_core::{HookFailurePolicy, Node};
+use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
-use super::node_artifacts::{derive_findings, pending_questions, record_artifacts};
+use super::node_artifacts::{
+    acquire_from_child, derive_findings, pending_questions, record_artifacts,
+};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
+
+/// The child run a `kind: workflow` node closes on: what it produced is
+/// what that node produced, and the run's log is where that is stated.
+#[derive(Clone, Copy)]
+pub(super) struct ChildRun<'a> {
+    pub(super) id: &'a RunId,
+    pub(super) run_dir: &'a Path,
+}
 
 /// What a node's close needs beyond the node itself.
 ///
 /// Grouped rather than passed loose because every field answers a
-/// question only the caller can: how the node ended, what it spent, and
-/// what the adapter declared it wrote for itself.
+/// question only the caller can: how the node ended, what it spent, what
+/// the adapter declared it wrote for itself, and — for a composition —
+/// which run actually did the work.
 pub(super) struct Close<'a> {
     outcome: String,
     tokens: TokenUsage,
     staged: &'a [PathBuf],
+    child: Option<ChildRun<'a>>,
 }
 
 impl<'a> Close<'a> {
@@ -44,6 +56,7 @@ impl<'a> Close<'a> {
             outcome: outcome.into(),
             tokens,
             staged: &[],
+            child: None,
         }
     }
 
@@ -53,11 +66,23 @@ impl<'a> Close<'a> {
         self.staged = staged;
         self
     }
+
+    /// The child run this node's declared artifacts come from, for a
+    /// `kind: workflow` node whose child reached its end.
+    pub(super) fn child(mut self, child: ChildRun<'a>) -> Self {
+        self.child = Some(child);
+        self
+    }
 }
 
 /// Closes a node: its `after` hooks run, its scope is checked over the
 /// whole diff — hook edits included, staged paths left out — its
 /// declared artifacts are verified, and it finishes.
+///
+/// Where those artifacts come from is the one thing that differs by
+/// kind: every node but a composition wrote files this reads back, and a
+/// `kind: workflow` node's are acquired from the log of the child run
+/// named in [`Close::child`].
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -108,9 +133,27 @@ pub(super) async fn close_node(
     if let Some(end) = derive_findings(ctx, node, ceiling, tokens).await? {
         return Ok(end);
     }
-    let verified = match close_artifacts(node, ctx.run_dir, ceiling) {
-        Ok(verified) => verified,
-        Err(failures) => return fail_artifacts(ctx, node, failures, false, tokens).await,
+    // A `kind: workflow` node writes no file of its own: what it
+    // declares is what its child run produced, so the run takes those
+    // over from that log — here, before the one read the close does.
+    let verified = match close.child {
+        Some(child) => match acquire_from_child(ctx, node, child).await? {
+            Ok(acquired) => acquired,
+            Err(problems) => {
+                return fail_with_tokens(
+                    ctx,
+                    node,
+                    yunta_core::text::problems(format!("child run `{}`", child.id), &problems),
+                    false,
+                    tokens,
+                )
+                .await
+            }
+        },
+        None => match close_artifacts(node, ctx.run_dir, ceiling) {
+            Ok(verified) => verified,
+            Err(failures) => return fail_artifacts(ctx, node, failures, false, tokens).await,
+        },
     };
 
     record_artifacts(ctx, node, &verified).await?;
