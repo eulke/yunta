@@ -43,12 +43,27 @@ impl Scrollback {
     }
 
     /// The nodes among `settled` that have not gone up yet, recorded as
-    /// gone.
+    /// gone — with anything in `working` forgotten first, so a node back
+    /// at work earns a line for how it ends this time.
+    ///
+    /// A node whose re-route succeeds goes back to work after its
+    /// failure has already gone up: the scheduler returns it to ready
+    /// once its corrective node completes. What is above it is the
+    /// failure it had then, and what it earns when it stops again is a
+    /// different line about a different attempt. A history that kept
+    /// only the first would say a node failed when it went on to pass.
     ///
     /// Asking and recording are one step because they are one decision:
     /// split in two, a caller that asked and then did not write leaves a
     /// node that never reaches the history at all.
-    pub(super) fn leaving(&mut self, settled: Vec<&NodeId>) -> HashSet<NodeId> {
+    pub(super) fn leaving(
+        &mut self,
+        settled: Vec<&NodeId>,
+        working: Vec<&NodeId>,
+    ) -> HashSet<NodeId> {
+        for id in working {
+            self.gone.remove(id);
+        }
         let leaving: HashSet<NodeId> = settled
             .into_iter()
             .filter(|id| !self.gone.contains(*id))
@@ -220,9 +235,9 @@ mod tests {
     fn a_promotion_successor_sends_up_the_nodes_its_predecessor_already_did() {
         let mut above = Scrollback::over(&MultiProgress::new(), Box::new(Captured::default()));
         let plan = NodeId::from_static("plan");
-        assert_eq!(above.leaving(vec![&plan]).len(), 1);
+        assert_eq!(above.leaving(vec![&plan], Vec::new()).len(), 1);
         assert!(
-            above.leaving(vec![&plan]).is_empty(),
+            above.leaving(vec![&plan], Vec::new()).is_empty(),
             "a node the history already took"
         );
 
@@ -230,9 +245,33 @@ mod tests {
         // none of them up.
         above.restart();
         assert_eq!(
-            above.leaving(vec![&plan]).len(),
+            above.leaving(vec![&plan], Vec::new()).len(),
             1,
             "the successor's first node never reached the history"
+        );
+    }
+
+    #[test]
+    fn a_node_that_goes_back_to_work_earns_a_line_for_how_it_ends_this_time() {
+        let mut above = Scrollback::over(&MultiProgress::new(), Box::new(Captured::default()));
+        let lint = NodeId::from_static("lint");
+
+        // It failed, and the history took that.
+        assert_eq!(above.leaving(vec![&lint], Vec::new()).len(), 1);
+
+        // Its corrective node completed, so the scheduler put it back to
+        // work. What is above it is the failure it had then.
+        assert!(
+            above.leaving(Vec::new(), vec![&lint]).is_empty(),
+            "a node that is working has not stopped, so nothing goes up for it yet"
+        );
+
+        // This time it passed, and a reader who is told it failed and
+        // never told it passed has been told the wrong thing.
+        assert_eq!(
+            above.leaving(vec![&lint], Vec::new()).len(),
+            1,
+            "the second stop is a different attempt and earns its own line"
         );
     }
 }

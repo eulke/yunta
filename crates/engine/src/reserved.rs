@@ -166,7 +166,8 @@ pub(crate) mod offers {
     pub(crate) fn grant(paths: &str) -> GateOption {
         ReservedOption::Grant.offer(
             format!("Grant access to {paths}"),
-            "The task's final diff is evaluated against its scope plus these paths",
+            "The task's final diff is evaluated against its scope plus these paths; \
+             consumes 1 of max_per_run",
         )
     }
 
@@ -174,7 +175,7 @@ pub(crate) mod offers {
     pub(crate) fn deny() -> GateOption {
         ReservedOption::Deny.offer(
             "Deny the request",
-            "The denial becomes a finding; the task retries within its declared scope",
+            "The denial becomes a finding; the task retries within its original scope",
         )
     }
 

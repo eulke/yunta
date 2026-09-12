@@ -87,8 +87,27 @@ impl Painter {
             written: 0,
             held: Vec::new(),
         };
-        painter.fold(seed);
+        painter.attach_to(seed);
         painter
+    }
+
+    /// Folds the log as it stood when this invocation attached, without
+    /// writing a line for any of it.
+    ///
+    /// Those events are what the frame is derived from, so they are
+    /// folded; they are not what this invocation did, so they earn
+    /// nothing. A `resume` that wrote them would reprint the whole run
+    /// every time it picked one up — on the append-only surface, where
+    /// a reader has no region to see the state in and every line looks
+    /// like something that just happened.
+    fn attach_to(&mut self, seed: Vec<StoredEvent>) {
+        let Self { run_id, folded, .. } = self;
+        for event in seed {
+            if &event.run_id == run_id {
+                folded.fold(event);
+            }
+        }
+        self.written = self.folded.settled().len();
     }
 
     /// Folds the events of the run being drawn and writes the line each

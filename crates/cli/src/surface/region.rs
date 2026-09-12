@@ -156,7 +156,9 @@ impl Region {
     /// Sends every node that stopped working since the last redraw up
     /// into the history above, in the workflow's own declaration order.
     fn graduate(&mut self, frame: &RunFrame) {
-        let leaving = self.above.leaving(view::settled_nodes(frame));
+        let leaving = self
+            .above
+            .leaving(view::settled_nodes(frame), view::working_nodes(frame));
         let lines: Vec<String> = frame
             .nodes
             .iter()

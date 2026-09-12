@@ -314,6 +314,12 @@ pub(super) fn graduation(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> 
     rows
 }
 
+/// The ids of the nodes at work — what the history has to forget,
+/// because a node back at work will stop again and owes a line for it.
+pub(super) fn working_nodes(frame: &RunFrame) -> Vec<&NodeId> {
+    working(frame).into_iter().map(|node| &node.id).collect()
+}
+
 /// Every node that has stopped working, by id — what a surface compares
 /// against to find the ones it has not seen stop yet.
 pub(super) fn settled_nodes(frame: &RunFrame) -> Vec<&NodeId> {

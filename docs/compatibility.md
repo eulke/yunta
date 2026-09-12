@@ -178,8 +178,8 @@ the option left as `<option>`. Two pauses reconstruct one: a node whose
 re-routes are exhausted, and an unresolved internal gate. Every other pause — a
 budget cap, a scope expansion, an unanswered questions artifact, an external
 gate with no reachable forge — carries no `decision` at all, and `summary` says
-what the run is waiting on instead. The field is additive, so the stamp stays
-`2`: a reader that predates it reads the document unchanged.
+what the run is waiting on instead. The `decision` field itself is additive; the
+stamp moved to `3` for the shape of `decision.evidence`, described above.
 
 ## Message wording
 

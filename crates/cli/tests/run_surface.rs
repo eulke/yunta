@@ -243,6 +243,39 @@ fn resume_reports_exactly_what_run_reports() {
 }
 
 #[test]
+fn a_resume_reports_what_it_did_and_not_what_the_log_already_held() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), TWO_NODES);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+    let first = stderr(&run).lines().filter(|l| l.starts_with('[')).count();
+    assert!(
+        first > 1,
+        "the run reported its own events: {}",
+        stderr(&run)
+    );
+
+    // The run already finished, so a resume has nothing to do and
+    // nothing to say. Reporting the log it picked up would tell a
+    // reader of a CI log that a finished run just ran again, and would
+    // do it again on every resume after that.
+    let resumed = yunta_in!(&repo, &home, &["resume", &run_id]);
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+    let replayed: Vec<&str> = stderr(&resumed)
+        .lines()
+        .filter(|line| line.starts_with('['))
+        .map(|line| line.to_string().leak() as &str)
+        .collect();
+    assert!(
+        replayed.is_empty(),
+        "the resume reported {} event(s) it did not produce: {replayed:?}",
+        replayed.len()
+    );
+}
+
+#[test]
 fn resume_json_is_the_document_run_json_prints() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), TWO_NODES);
