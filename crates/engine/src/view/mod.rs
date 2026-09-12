@@ -25,17 +25,17 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{
-    run_mode, ChildRunFinishedPayload, EventPayload, StoredEvent, TaskStatus, TerminalState,
-    TokenUsage,
+    run_mode, ChildRunFinishedPayload, EventPayload, FindingSeverity, StoredEvent, TaskStatus,
+    TerminalState, TokenUsage,
 };
 use yunta_core::{AdapterId, Capability, ModeName, NodeId, RunId, Workflow};
 
 use crate::history::PriorEstimation;
-use crate::live::live_total_tokens;
+use crate::live::live_total_tokens_of;
 use crate::modes::mode_included_nodes;
 use crate::replay::{derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount};
 use crate::runner::ResolvedRunner;
-use crate::stats::compute_run_stats_at;
+use crate::stats::stats_observed_at;
 
 use node::Reading;
 
@@ -104,7 +104,7 @@ pub struct RunFrame {
     /// denominator attributable.
     pub reroutes: usize,
     /// What the run has spent, the work still in flight included and
-    /// counted once ([`live_total_tokens`]). Deliberately *not* the sum
+    /// counted once ([`live_total_tokens`](crate::live_total_tokens)). Deliberately *not* the sum
     /// of [`NodeFrame::tokens`], which covers closed attempts only.
     pub tokens: TokenUsage,
     /// What this workflow's past runs cost, from the caller that read
@@ -122,6 +122,11 @@ pub struct RunFrame {
     /// Events under kinds this binary does not know, by kind. A surface
     /// that hides them misreports a log it half understands.
     pub unknown_kinds: Vec<UnknownKindCount>,
+    /// How many blocking findings the run carries, deduplicated. On the
+    /// frame rather than left to each surface, because counting them
+    /// means replaying the log, and the frame is the one pass every
+    /// surface reads from.
+    pub blocking_findings: usize,
 }
 
 /// A child run this run gave birth to, as a link — never as numbers
@@ -176,7 +181,7 @@ pub fn run_frame(
     now: DateTime<Utc>,
 ) -> RunFrame {
     let state = derive(events);
-    let stats = compute_run_stats_at(workflow, events, now);
+    let stats = stats_observed_at(&state, workflow, events, Some(now));
     let walk = walk_log(events);
     let mode = run_mode(events);
     let reading = Reading {
@@ -205,12 +210,16 @@ pub fn run_frame(
         flow: flow_counter(&nodes, &mode),
         tasks: task_counter(&state),
         reroutes: walk.reroutes,
-        tokens: live_total_tokens(events),
+        tokens: live_total_tokens_of(&state, events),
         prior: prior.cloned(),
         nodes,
         children: walk.children,
         degraded: walk.degraded,
         unknown_kinds: unknown_kind_counts(&state),
+        blocking_findings: crate::dedup_findings(&state.findings)
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Blocking)
+            .count(),
     }
 }
 

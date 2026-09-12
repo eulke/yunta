@@ -43,6 +43,7 @@ pub fn run_frame(run_id: &RunId) -> RunFrame {
         children: Vec::new(),
         degraded: Vec::new(),
         unknown_kinds: Vec::new(),
+        blocking_findings: 0,
     }
 }
 

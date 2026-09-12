@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use yunta_core::text::LINE_WIDTH;
 use yunta_testkit::{git, run_id_from, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG};
 
 /// A node that fails with its one re-route already spent: the run parks
@@ -94,13 +95,6 @@ nodes:
     kind: bash
     run: "touch started.txt; until [ -f go.txt ]; do :; done"
 "#;
-
-/// The width a rendered line stays inside when there is no terminal to
-/// ask, restated here because a test binary cannot reach into the one
-/// place that decides it — `render::width::LINE_WIDTH`, in a crate with
-/// no library target to import. The two must agree; nothing but this
-/// sentence makes them.
-const LINE_WIDTH: usize = 80;
 
 /// A git repo carrying `workflows` as `<name>.yaml`, committed — every
 /// run starts from a clean tree.
@@ -314,6 +308,50 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
         page.contains("assignee:"),
         "the page shows the record it headed: {page}"
     );
+}
+
+/// `summary` says what a run is waiting on inside a sentence that also
+/// carries its counters. A program acting on the pause needs the pause,
+/// so the document carries it apart — tagged, because a node parked on
+/// a person and a run that stopped on its own are different shapes and
+/// only one of them has a node to name. (The node shape needs a node in
+/// `NodeState::Waiting` — an external gate, unanswered questions — and
+/// is covered where it is derived, in the engine's `view` tests.)
+#[test]
+fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(
+        root.path(),
+        &[("hopeless", EXHAUSTED_REROUTE), ("approval", INTERNAL_GATE)],
+    );
+    let home = root.path().join("state");
+
+    for workflow in ["hopeless.yaml", "approval.yaml"] {
+        let run = yunta_in!(&repo, &home, &["run", workflow]);
+        let run_id = run_id_from(&run);
+        let state: serde_json::Value =
+            serde_json::from_slice(&yunta_in!(&repo, &home, &["status", &run_id, "--json"]).stdout)
+                .unwrap();
+        let waiting = &state["waiting_on"];
+
+        assert_eq!(
+            waiting["on"], "run",
+            "the shape is read off a tag, never guessed from which fields are set: {state:#}"
+        );
+        let reason = waiting["reason"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a parked run says what it is parked on: {state:#}"));
+        assert!(
+            !reason.contains("nodes ·"),
+            "the pause alone, not the summary's counters around it: {reason}"
+        );
+        assert!(
+            state["summary"]
+                .as_str()
+                .is_some_and(|s| s.contains(reason)),
+            "and the same words the sentence carries: {state:#}"
+        );
+    }
 }
 
 #[test]

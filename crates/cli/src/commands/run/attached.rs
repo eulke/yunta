@@ -51,7 +51,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
 
     let (manifest, real_adapters) =
         runnable(ctx, workflow_path, raw_inputs, adapter, mock_fixture).await?;
-    let prior = estimate(ctx, storage, &manifest, quiet, json).await;
+    let estimated = estimate(ctx, storage, &manifest, quiet, json).await;
 
     let prepared = create_run_from(ctx, storage, &manifest, mode).await?;
     if !json {
@@ -77,7 +77,8 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         prepared: &prepared,
         adapters,
         adapter_override: adapter.filter(|id| **id != MOCK_ID).cloned(),
-        prior,
+        prior: estimated.prior,
+        budget_warning: estimated.budget_warning,
         quiet,
         json,
     })

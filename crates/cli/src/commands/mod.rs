@@ -32,7 +32,7 @@ use yunta_adapters::{
     Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
     CODEX_ID,
 };
-use yunta_core::{describe, AdapterId, ConfigLayer, RunId, Secret, Workflow};
+use yunta_core::{describe, AdapterId, ConfigLayer, Pid, RunId, Secret, Workflow};
 use yunta_engine::UnknownKindCount;
 
 use crate::error::{warn, CliError};
@@ -110,7 +110,7 @@ pub(crate) async fn spawn_detached_resume(
     run_dir: &Path,
     run_id: &str,
     cwd: &Path,
-) -> std::io::Result<()> {
+) -> std::io::Result<Pid> {
     let log_path = run_dir.join("scratch/detached.log");
     let log = std::fs::File::create(&log_path)?;
     let log_err = log.try_clone()?;
@@ -127,10 +127,17 @@ pub(crate) async fn spawn_detached_resume(
     #[cfg(unix)]
     child_cmd.process_group(0);
     let mut child = child_cmd.spawn()?;
+    // Who the run was handed to. A caller holding a claim on something
+    // the child is about to work in — the checkout's own lock, under
+    // `isolation: none` — has to move it, and cannot without a name.
+    let pid = child
+        .id()
+        .and_then(|id| Pid::try_from(id).ok())
+        .ok_or_else(|| std::io::Error::other("the detached child reported no usable process id"))?;
     tokio::spawn(async move {
         let _ = child.wait().await;
     });
-    Ok(())
+    Ok(pid)
 }
 
 /// The adapters a run executes its sessions on, by the name `runners:`

@@ -157,6 +157,36 @@ pub async fn prepare_worktree(
     }
 }
 
+/// Hands what `prepare_worktree` took to `pid`, which drives the run
+/// from here on: for `None`, the checkout's lock changes holder. For
+/// `Worktree`, a no-op — a run under that isolation works in a tree of
+/// its own and shares no lock with anyone.
+///
+/// What `run --detach` and the control plane's `run_workflow` owe the
+/// checkout they just claimed. Both check it is free, create the run,
+/// and then leave, and the process they leave behind is the one
+/// actually in the tree.
+pub async fn hand_over_worktree(
+    repo: &Path,
+    isolation: Isolation,
+    pid: Pid,
+) -> Result<(), WorktreeError> {
+    match isolation {
+        Isolation::Worktree => Ok(()),
+        Isolation::None => {
+            let lock_path = lock_path(repo).await?;
+            lock::hand_over(&lock_path, pid, &SystemClock).map_err(|source| WorktreeError::Io {
+                action: "hand over the isolation lock".to_string(),
+                path: lock_path,
+                source: match source {
+                    LockError::Io { source, .. } => source,
+                    other => std::io::Error::other(other.to_string()),
+                },
+            })
+        }
+    }
+}
+
 /// Releases what `prepare_worktree` took: for `None`, removes the lock
 /// so a later run may proceed. For `Worktree`, a no-op — the worktree
 /// stays on disk (see module docs).

@@ -1984,6 +1984,77 @@ nodes:
 
 // --- `yunta run --detach` ------------------------------------------------
 
+/// A checkout under `isolation: none` takes one run at a time, and the
+/// lock that says so names whoever is in the tree. `--detach` is the one
+/// shape where the process that takes it is not the process that works:
+/// it creates the run, hands it to a `yunta resume` of its own, and
+/// leaves.
+#[test]
+fn a_detached_run_leaves_the_checkout_locked_by_the_child_that_is_in_it() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    // The node announces itself and then holds, so the assertions run
+    // against a child that is provably still in the tree. Its markers
+    // live beside the checkout rather than in it: `isolation: none`
+    // refuses a dirty tree, and that refusal would answer the second
+    // run before the lock ever did.
+    write(
+        &repo.join("wf.yaml"),
+        "name: holds-open\nnodes:\n  - id: hold\n    kind: bash\n    \
+         run: \"echo in > ../started.txt; until [ -f ../go.txt ]; do sleep 0.05; done\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let detached = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
+    assert!(detached.status.success(), "{}", stderr(&detached));
+    let run_id = run_id_from(&detached);
+    wait_until(
+        || marker_written(&root.path().join("started.txt")),
+        || "the detached child never reached the node".into(),
+    );
+
+    // A second run has to be refused. Before the hand-off the lock named
+    // the parent, which exits the moment it reports the id — so this
+    // took the checkout over from a "dead" holder and ran a second time
+    // in a tree the child was working in.
+    let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let said = stderr(&second);
+    // Released before anything is asserted: the node holds until this
+    // file exists, and an assertion firing first would leave it holding
+    // for as long as the suite runs.
+    write(&root.path().join("go.txt"), "go");
+    assert!(
+        !second.status.success(),
+        "a second run took a checkout the detached child is in: {said}"
+    );
+    assert!(
+        said.contains("already has a run in progress"),
+        "the refusal names what is in the way: {said}"
+    );
+    assert!(
+        !said.contains("dead process"),
+        "the holder is the child, alive, not a process that has exited: {said}"
+    );
+
+    // The child outlives this process by design, so the test waits for
+    // it rather than leaving one behind: a detached run nobody reaps is
+    // a detached run still holding the checkout of a directory the
+    // harness is about to delete.
+    let status = || stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    wait_until(
+        || status().contains("finished"),
+        || format!("the released child never finished: {}", status()),
+    );
+}
+
 /// A fixture scripts the sessions of whoever runs them, and `--detach`
 /// makes that a separate `yunta resume` — which resolves the adapters
 /// `runners:` names and reads no fixture at all. The combination is
@@ -2278,6 +2349,32 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
         );
     };
 
+    // A detached run that parks on its cap stays parked *in this
+    // checkout*, and keeps it: that is what `isolation: none` means and
+    // what its lock is for. So each mode below gets a checkout of its
+    // own, all sharing the one state root the history lives in.
+    let another_checkout = |name: &str| {
+        let other = root.path().join(name);
+        std::fs::create_dir_all(&other).unwrap();
+        init_repo(&other);
+        write(
+            &other.join(".yunta/config.yaml"),
+            &config("limits:\n  max_tokens_per_run: 400\n"),
+        );
+        write(
+            &other.join("wf.yaml"),
+            "name: budgeted\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    \
+             prompt: \"Do the thing.\"\n",
+        );
+        write(
+            &other.join(".claude-stub-lines.jsonl"),
+            &std::fs::read_to_string(repo.join(".claude-stub-lines.jsonl")).unwrap(),
+        );
+        git(&other, &["add", "."]);
+        git(&other, &["commit", "-q", "-m", "budget"]);
+        other
+    };
+
     let loud = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
     assert!(loud.status.success(), "stderr: {}", stderr(&loud));
     let text = stdout(&loud);
@@ -2313,7 +2410,12 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
     );
     settled(&run_id_from(&loud));
 
-    let quiet = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach", "--quiet"]);
+    let quiet_repo = another_checkout("quiet");
+    let quiet = yunta_in!(
+        &quiet_repo,
+        &home,
+        &["run", "wf.yaml", "--detach", "--quiet"]
+    );
     assert!(quiet.status.success(), "stderr: {}", stderr(&quiet));
     assert_eq!(
         stdout(&quiet).lines().count(),
@@ -2328,15 +2430,34 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
     );
     settled(&run_id_from(&quiet));
 
-    let json = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach", "--json"]);
+    let json_repo = another_checkout("json");
+    let json = yunta_in!(&json_repo, &home, &["run", "wf.yaml", "--detach", "--json"]);
     assert!(json.status.success(), "stderr: {}", stderr(&json));
     let document: serde_json::Value = serde_json::from_slice(&json.stdout)
         .unwrap_or_else(|e| panic!("`--json` prints one document and nothing else: {e}"));
     assert_eq!(document["outcome"], "detached");
     assert!(
         stderr(&json).contains("max_tokens_per_run") && stderr(&json).contains("p90"),
-        "the warning is not part of the document, and still reaches the reader: {}",
+        "the warning reaches the person watching: {}",
         stderr(&json)
+    );
+    // And the reader who is watching nothing. A caller that asked for a
+    // document reads stdout; a caution it never sees cannot ask it for
+    // the decision the caution exists to ask for.
+    assert!(
+        document["budget_warning"]
+            .as_str()
+            .is_some_and(
+                |warning| warning.contains("max_tokens_per_run") && warning.contains("p90")
+            ),
+        "the document carries the warning too: {document:#}"
+    );
+    assert!(
+        !document["budget_warning"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("warning:"),
+        "undecorated: how a caution looks is the terminal's word, not the document's: {document:#}"
     );
     let run_id = document["run_id"]
         .as_str()

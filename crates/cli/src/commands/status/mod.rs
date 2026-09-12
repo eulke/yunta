@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use yunta_core::events::{EventPayload, Failure, StoredEvent, TaskStatus};
 use yunta_core::{ArtifactFailure, ArtifactKind, Clock, Diagnostic, FileProblem};
 use yunta_core::{Manifest, NodeId, RunId};
-use yunta_engine::{NodeState, RunPhase};
+use yunta_engine::{NodeState, RunPhase, WaitingOn};
 
 use crate::commands::advice;
 use crate::context::Context;
@@ -183,7 +183,61 @@ pub(crate) struct StatusJson {
     /// `summary` carries what the run is waiting on.
     #[serde(skip_serializing_if = "Option::is_none")]
     decision: Option<decision::DecisionJson>,
+    /// What the run is parked on, for every parked run — including the
+    /// pauses `decision` is absent for. `summary` says it in a sentence;
+    /// this says it in a shape a program acts on without parsing one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_on: Option<WaitingOnJson>,
     tokens: TokensJson,
+}
+
+/// What a waiting run is waiting on.
+///
+/// Tagged by `on`, so a reader matches on the shape instead of
+/// inferring it from which fields are set: a node parked on a person is
+/// a different thing from the run itself stopping, and only one of them
+/// has a node to name.
+#[derive(serde::Serialize)]
+#[serde(tag = "on", rename_all = "snake_case")]
+pub(crate) enum WaitingOnJson {
+    /// A node is parked on a person. With several parked at once this
+    /// is the first in the workflow's declaration order.
+    Node {
+        node: String,
+        /// The forge's own handle for a published gate.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        external_ref: Option<String>,
+        /// What the run's standing pause recorded, absent for a node
+        /// parked while the run itself keeps moving.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    /// The run itself paused, with the reason it recorded.
+    Run { reason: String },
+}
+
+impl WaitingOnJson {
+    /// The frame's own answer, in the document's shape. `None` for a run
+    /// that is not waiting on anything.
+    fn of(phase: &RunPhase) -> Option<Self> {
+        let RunPhase::Waiting { on } = phase else {
+            return None;
+        };
+        Some(match on {
+            WaitingOn::Node {
+                node,
+                external_ref,
+                reason,
+            } => WaitingOnJson::Node {
+                node: node.to_string(),
+                external_ref: external_ref.clone(),
+                reason: reason.clone(),
+            },
+            WaitingOn::Run { reason } => WaitingOnJson::Run {
+                reason: reason.clone(),
+            },
+        })
+    }
 }
 
 /// One document a node's failure names, with the problems that belong
@@ -263,6 +317,7 @@ pub(crate) fn status_json(
             .collect(),
         diagnostics: node_diagnostics(events),
         decision: parked_decision(run_id, manifest, events, &frame.phase),
+        waiting_on: WaitingOnJson::of(&frame.phase),
         tokens: TokensJson {
             input: state.total_tokens.input,
             output: state.total_tokens.output,

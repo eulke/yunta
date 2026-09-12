@@ -55,10 +55,13 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     // No fixture ever reaches here: a detached child resolves the
     // adapters `runners:` names and reads none.
     let (manifest, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
-    estimate(ctx, storage, &manifest, quiet, json).await;
+    let estimated = estimate(ctx, storage, &manifest, quiet, json).await;
     let run_id = create_and_detach(ctx, storage, &manifest, mode).await?;
     if json {
-        return crate::json::print_json(&RunJson::detached(&run_id));
+        return crate::json::print_json(&RunJson::detached(
+            &run_id,
+            estimated.budget_warning.clone(),
+        ));
     }
     println!("run {run_id}: detached, driving forward independently");
     Ok(Outcome::Success)
@@ -81,9 +84,28 @@ pub(crate) async fn start_detached(
     raw_inputs: &[String],
     adapter: Option<&AdapterId>,
     mode: Option<&ModeName>,
-) -> Result<RunId, CliError> {
+) -> Result<Started, CliError> {
     let (manifest, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
-    create_and_detach(ctx, storage, &manifest, mode).await
+    // Quiet, because stdout here *is* the control plane's JSON-RPC
+    // stream: the distribution line the estimation prints for a person
+    // would land in the middle of a response. What it has to say
+    // travels in the answer instead.
+    let estimated = estimate(ctx, storage, &manifest, true, false).await;
+    let run_id = create_and_detach(ctx, storage, &manifest, mode).await?;
+    Ok(Started {
+        run_id,
+        budget_warning: estimated.budget_warning,
+    })
+}
+
+/// A run that was created and handed off, and what the caller owes its
+/// reader about it.
+pub(crate) struct Started {
+    pub(crate) run_id: RunId,
+    /// §8.6's warning, when this workflow's history has one to give. A
+    /// client that starts runs is the one deciding whether a cap is
+    /// worth starting under, and it never sees stderr.
+    pub(crate) budget_warning: Option<String>,
 }
 
 /// Creates the run and hands it to a detached `yunta resume`, returning
@@ -96,8 +118,20 @@ async fn create_and_detach(
     mode: Option<&ModeName>,
 ) -> Result<RunId, CliError> {
     let prepared = create_run_from(ctx, storage, manifest, mode).await?;
-    spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd)
-        .await
-        .map_err(|source| DetachedResumeError::new(&prepared.run_id, source))?;
-    Ok(prepared.run_id)
+    // `create_run_from` claimed the checkout for *this* process, which is
+    // about to leave. Whichever way the hand-off goes, the claim stops
+    // describing who is in the tree: the child takes it over, or nobody
+    // is in there and it is dropped. Left as it is, it names a dead
+    // process the moment this one exits, and the next run takes over a
+    // checkout the child is still working in.
+    match spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).await {
+        Ok(child) => {
+            yunta_engine::hand_over_worktree(&ctx.cwd, manifest.isolation, child).await?;
+            Ok(prepared.run_id)
+        }
+        Err(source) => {
+            yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
+            Err(DetachedResumeError::new(&prepared.run_id, source).into())
+        }
+    }
 }

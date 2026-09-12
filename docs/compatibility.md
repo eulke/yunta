@@ -155,6 +155,18 @@ that group is ordered by run id alone.
 three share one stamp, so all of them carry the new number even though only
 `status --json` changed shape.
 
+`run --json` carries `budget_warning` when the declared cap sits under the
+workflow's historical p90 — the same sentence that goes to stderr, undecorated,
+because how a caution looks is the terminal's word and not the document's.
+Absent otherwise, and always absent from `resume --json`: the estimation belongs
+to whoever *creates* a run.
+
+`status --json` carries `waiting_on` for a parked run, tagged by `on`:
+`{"on": "node", "node", "external_ref"?, "reason"?}` when a node is parked on a
+person, `{"on": "run", "reason"}` when the run itself stopped. `summary` says the
+same thing inside a sentence that also carries the run's counters; this is the
+pause on its own.
+
 A parked run's `decision.evidence` is a list of the facts the engine attached,
 each `{label?, value}` — the escalation as the log holds it, not the lines a
 reader was shown. A fact that names itself, like a failing command's `exit 1`,

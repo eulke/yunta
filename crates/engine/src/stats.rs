@@ -183,7 +183,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
 /// been running is unknown, never zero. [`compute_run_stats_at`] is this
 /// same derivation given one.
 pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStats {
-    stats_observed_at(workflow, events, None)
+    stats_observed_at(&derive(events), workflow, events, None)
 }
 
 /// Derives one run's stats as they stand at `now` — what a run in
@@ -198,18 +198,23 @@ pub fn compute_run_stats_at(
     events: &[StoredEvent],
     now: DateTime<Utc>,
 ) -> RunStats {
-    stats_observed_at(workflow, events, Some(now))
+    stats_observed_at(&derive(events), workflow, events, Some(now))
 }
 
 /// The one derivation behind [`compute_run_stats`] and
 /// [`compute_run_stats_at`]: `observed_at` is the instant the run is
 /// looked at, or `None` to look at it as of its own last event.
-fn stats_observed_at(
+///
+/// `state` is the log already replayed. A caller that reads several
+/// things off one log — a frame reads its stats, its phase and its
+/// tokens — replays it once and hands the answer down, rather than
+/// paying for the same fold again per reader.
+pub(crate) fn stats_observed_at(
+    state: &RunState,
     workflow: &Workflow,
     events: &[StoredEvent],
     observed_at: Option<DateTime<Utc>>,
 ) -> RunStats {
-    let state = derive(events);
     let flat: Vec<&Node> = workflow.iter_nodes().collect();
     let run_start = events.first().map(|e| e.timestamp);
     let walk = walk_attempts(events);
@@ -232,8 +237,8 @@ fn stats_observed_at(
     };
 
     RunStats {
-        unknown_kinds: unknown_kind_counts(&state),
-        cptv: cptv(&state),
+        unknown_kinds: unknown_kind_counts(state),
+        cptv: cptv(state),
         rework_rate,
         cache_rate,
         total_tokens: state.total_tokens,

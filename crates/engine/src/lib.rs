@@ -138,6 +138,6 @@ pub use view::{
     RunPhase, WaitingOn,
 };
 pub use worktree::{
-    cleanup_worktree, prepare_worktree, release_worktree, WorktreeCleanup, WorktreeError,
-    WorktreePrepared,
+    cleanup_worktree, hand_over_worktree, prepare_worktree, release_worktree, WorktreeCleanup,
+    WorktreeError, WorktreePrepared,
 };

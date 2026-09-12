@@ -221,6 +221,18 @@ async fn runnable_adapters(
     Ok(adapters)
 }
 
+/// What reading a workflow's history said before its run started.
+///
+/// The warning is kept rather than only printed: stderr reaches the
+/// person watching, and §8.6 of the run contract makes this the one
+/// piece of the estimation that is actionable — so it also reaches the
+/// reader who has only a document, which is the reader most likely to
+/// be automating the spend.
+pub(super) struct Estimated {
+    pub(super) prior: Option<PriorEstimation>,
+    pub(super) budget_warning: Option<String>,
+}
+
 /// What this workflow's past runs cost, shown before anything is spent
 /// and returned for the closing block's own comparison when the
 /// invocation stays to draw one.
@@ -237,7 +249,7 @@ async fn estimate(
     manifest: &Manifest,
     quiet: bool,
     json: bool,
-) -> Option<PriorEstimation> {
+) -> Estimated {
     let history = {
         let runs_root = ctx.project.runs_root.clone();
         let workflow_name = manifest.workflow.name.clone();
@@ -258,17 +270,21 @@ async fn estimate(
             println!("{}", super::stats::format_estimation_line(estimation));
         }
     }
-    if let Some(warning) = yunta_engine::budget_p90_warning(
+    let budget_warning = yunta_engine::budget_p90_warning(
         manifest
             .config
             .limits
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run),
         estimation.as_ref(),
-    ) {
+    );
+    if let Some(warning) = &budget_warning {
         warn(warning);
     }
-    estimation
+    Estimated {
+        prior: estimation,
+        budget_warning,
+    }
 }
 
 /// A workflow reference resolved to its file and loaded, refused if it

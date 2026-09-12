@@ -331,7 +331,7 @@ async fn tool_run_workflow(
     // calls.
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
     let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
-    let run_id = super::run::start_detached(
+    let started = super::run::start_detached(
         &ctx,
         &storage,
         Path::new(name),
@@ -341,7 +341,15 @@ async fn tool_run_workflow(
     )
     .await
     .map_err(|e| e.to_string())?;
-    Ok(format!("run_id: {run_id}"))
+    // The run id first, so a client that reads one line still reads the
+    // thing it asked for, and §8.6's warning under it when this
+    // workflow's history has one: a client that starts runs is the one
+    // deciding whether a cap is worth starting under, and stderr never
+    // reaches it.
+    Ok(match started.budget_warning {
+        Some(warning) => format!("run_id: {}\n{warning}", started.run_id),
+        None => format!("run_id: {}", started.run_id),
+    })
 }
 
 async fn tool_resume_run(

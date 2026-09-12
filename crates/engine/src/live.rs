@@ -29,7 +29,7 @@ use yunta_core::events::{
 };
 use yunta_core::{AgentName, ModelName, NodeId, SessionId};
 
-use crate::replay::derive;
+use crate::replay::{derive, RunState};
 
 /// When the attempt a node is running now began: the timestamp of its
 /// last `node_started` with no `node_finished`/`node_failed` after it.
@@ -176,7 +176,13 @@ fn since_last_terminal<'a>(
 /// terminal event belongs to a node — so adding it would inflate the
 /// run's total for the rest of its life.
 pub fn live_total_tokens(events: &[StoredEvent]) -> TokenUsage {
-    derive(events).total_tokens + in_flight_tokens(events)
+    live_total_tokens_of(&derive(events), events)
+}
+
+/// [`live_total_tokens`] for a caller that has already replayed the
+/// log — a frame derives once and reads everything off that one pass.
+pub(crate) fn live_total_tokens_of(state: &RunState, events: &[StoredEvent]) -> TokenUsage {
+    state.total_tokens + in_flight_tokens(events)
 }
 
 /// The usage reported by nodes whose current attempt has not closed,

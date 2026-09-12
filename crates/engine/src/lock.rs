@@ -101,6 +101,39 @@ pub enum LockError {
     },
 }
 
+/// Hands the lock at `lock_path` to `pid`, which takes over as its
+/// holder from here on.
+///
+/// A lock is a claim on a checkout by whoever is working in it, and
+/// there is one shape of command where those stop being the same
+/// process: one that checks the checkout is free, creates a run, and
+/// hands it to a process of its own to drive. The claim moves with the
+/// work. A lock left naming the process that did the checking reads as
+/// a dead holder the moment it exits, and the next run steals a
+/// checkout somebody is working in.
+///
+/// Written over rather than re-created, because this process holds the
+/// lock while it writes: the remove-then-`create_new` dance in
+/// [`acquire`] is how a *stealer* avoids racing another stealer, and a
+/// holder handing its own lock on races nobody. The time recorded is
+/// the clock's, as [`acquire`] records it — `pid` started before now,
+/// so it still reads as the holder, while a later process that reuses
+/// the number reads as the stranger it is.
+pub fn hand_over(lock_path: &Path, pid: Pid, clock: &dyn Clock) -> Result<(), LockError> {
+    let io = |action: &'static str, source| LockError::Io {
+        action,
+        lock_path: lock_path.to_path_buf(),
+        source,
+    };
+    let record = LockOwner {
+        pid,
+        started_at: clock.now(),
+    };
+    let json = serde_json::to_string(&record)
+        .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
+    std::fs::write(lock_path, json).map_err(|source| io("write the holder of", source))
+}
+
 /// Takes the lock at `lock_path` for this process, recording it as the
 /// holder with the clock's time. A gone holder (dead, or a live process
 /// that started after the lock was taken and so merely reuses the pid)

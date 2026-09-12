@@ -48,6 +48,10 @@ pub(crate) struct Driving<'a> {
     /// adapter, and the log records each candidate passed over.
     pub(crate) adapter_override: Option<AdapterId>,
     pub(crate) prior: Option<PriorEstimation>,
+    /// The warning the pre-run estimation raised, carried so the
+    /// document this invocation prints says it too — stderr reaches the
+    /// person watching, and a `--json` reader is watching nothing.
+    pub(crate) budget_warning: Option<String>,
     /// `--quiet`: the run id and nothing else, with the verdict in the
     /// exit code.
     pub(crate) quiet: bool,
@@ -224,6 +228,7 @@ async fn finish(
         report,
         cancelled: cancel.is_cancelled(),
         prior: env.prior.as_ref(),
+        budget_warning: env.budget_warning.clone(),
         glyphs: shown.glyphs,
         quiet: env.quiet,
         json: env.json,
@@ -254,6 +259,10 @@ pub(crate) struct Settling<'a> {
     /// Whether a person interrupted this invocation.
     pub(crate) cancelled: bool,
     pub(crate) prior: Option<&'a PriorEstimation>,
+    /// The pre-run warning, for the document this invocation prints.
+    /// `None` on a `resume`: §8.6 gives the estimation to whoever
+    /// *creates* a run, and a resume picks one up.
+    pub(crate) budget_warning: Option<String>,
     pub(crate) glyphs: Glyphs,
     pub(crate) quiet: bool,
     pub(crate) json: bool,
@@ -276,7 +285,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
         yunta_engine::release_worktree(&settling.ctx.cwd, settling.manifest.isolation).await?;
     }
     if settling.json {
-        return print_run_json(&settling.run_id, &settling.report);
+        return print_run_json(&settling.run_id, &settling.report, settling.budget_warning);
     }
     if settling.quiet {
         // The run id already went out when the invocation opened, and the
@@ -353,8 +362,12 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
 
 /// Prints the run's outcome as the one versioned document `run --json`
 /// and `resume --json` both emit, and reports its verdict.
-pub(crate) fn print_run_json(run_id: &RunId, report: &RunReport) -> Result<Outcome, CliError> {
-    crate::json::print_json(&RunJson::from_report(run_id, report))?;
+pub(crate) fn print_run_json(
+    run_id: &RunId,
+    report: &RunReport,
+    budget_warning: Option<String>,
+) -> Result<Outcome, CliError> {
+    crate::json::print_json(&RunJson::from_report(run_id, report, budget_warning))?;
     Ok(verdict(report))
 }
 
@@ -375,6 +388,13 @@ pub(crate) fn verdict(report: &RunReport) -> Outcome {
 pub(crate) struct RunJson {
     schema_version: u32,
     run_id: String,
+    /// The one piece of the pre-run estimation §8.6 of the run contract
+    /// makes actionable: the declared cap sits under what this workflow
+    /// has historically spent. It goes to stderr for the person
+    /// watching, and here for the reader that has only this document —
+    /// which is the reader most likely to be automating the spend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    budget_warning: Option<String>,
     /// `detached`, or the run's terminal: `finished`, `paused`,
     /// `failed`, `promoted`.
     outcome: &'static str,
@@ -386,16 +406,17 @@ pub(crate) struct RunJson {
 }
 
 impl RunJson {
-    pub(crate) fn detached(run_id: &RunId) -> Self {
+    pub(crate) fn detached(run_id: &RunId, budget_warning: Option<String>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
+            budget_warning,
             outcome: "detached",
             reason: None,
         }
     }
 
-    fn from_report(run_id: &RunId, report: &RunReport) -> Self {
+    fn from_report(run_id: &RunId, report: &RunReport, budget_warning: Option<String>) -> Self {
         let (outcome, reason) = match &report.terminal {
             RunTerminal::Finished => ("finished", None),
             RunTerminal::Paused { reason } => ("paused", Some(reason.clone())),
@@ -405,6 +426,7 @@ impl RunJson {
         Self {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
+            budget_warning,
             outcome,
             reason,
         }

@@ -75,15 +75,12 @@ impl Closing {
     /// happened, read once after the run stops rather than carried along
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
-        let state = yunta_engine::derive(env.events);
+        let frame = run_frame(env.run_id, env.workflow, env.events, env.prior, env.now);
         Self {
             run_id: env.run_id.clone(),
-            frame: run_frame(env.run_id, env.workflow, env.events, env.prior, env.now),
+            blocking: frame.blocking_findings,
+            frame,
             decision: env.decision,
-            blocking: yunta_engine::dedup_findings(&state.findings)
-                .iter()
-                .filter(|finding| finding.severity == yunta_core::events::FindingSeverity::Blocking)
-                .count(),
             run_dir: env.outline.run_dir.to_path_buf(),
             worktree: env.outline.worktree.to_path_buf(),
             base_branch: env.outline.base_branch.to_string(),

@@ -9,6 +9,22 @@
 
 use std::fmt;
 
+/// The width a rendered line stays inside.
+///
+/// Eighty cells is the floor a terminal is taken to have, and the width
+/// a line still has to survive once it leaves the terminal — pasted
+/// into a review, an issue, a log. A surface sizes its columns against
+/// this and cuts what does not fit, because a wrap costs more than the
+/// characters it would have dropped: it lands mid-column, and the table
+/// a reader was scanning down stops being one.
+///
+/// Here rather than in the surface that draws, for the reason this
+/// module exists: how wide a line may be is not a property of what is
+/// being said, and a second surface deciding it again is a second
+/// answer. That includes a test, which reads what a surface drew and
+/// has to check it against the same number the surface used.
+pub const LINE_WIDTH: usize = 80;
+
 /// Whitespace collapsed to one line, for a place with room for exactly
 /// one: a graph label, a row in a listing, a summary.
 pub fn one_line(text: &str) -> String {

@@ -4,15 +4,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::glyphs::Glyphs;
 
-/// The width a rendered line stays inside.
-///
-/// Eighty cells is the floor a terminal is taken to have, and the width
-/// a line still has to survive once it leaves the terminal — pasted into
-/// a review, an issue, a log. A surface sizes its columns against this
-/// and cuts what does not fit, because a wrap costs more than the
-/// characters it would have dropped: it lands mid-column, and the table
-/// a reader was scanning down stops being one.
-pub(crate) const LINE_WIDTH: usize = 80;
+pub(crate) use yunta_core::text::LINE_WIDTH;
 
 /// The cells a name gets in a column of names — a node id, a runner, a
 /// mode. Twelve is what [`LINE_WIDTH`] has left for a name once the bar
