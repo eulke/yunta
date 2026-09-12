@@ -89,35 +89,7 @@ impl CodexAdapter {
             .and_then(|settings| settings.sandbox)
             .unwrap_or_default();
         args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
-        // `workspace-write` confines writes to the workspace, and a
-        // declared artifact lands in the run directory, which is never
-        // inside it. Without this the session is told to write a file
-        // the sandbox then refuses it.
-        if let Some(dir) = &req.artifact_dir {
-            args.extend(
-                ConfigOverride::list(
-                    "sandbox_workspace_write.writable_roots",
-                    [dir.display().to_string()],
-                )
-                .into_args(),
-            );
-        }
-        if let Some(endpoint) = &req.run_tools_endpoint {
-            let server = RunToolsEndpoint::SERVER_NAME;
-            // The per-run server reaches the CLI as an external MCP
-            // server over streamable HTTP: `url` is the key that selects
-            // that transport, and the credential travels as the name of
-            // the variable the CLI reads it from.
-            for setting in [
-                ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
-                ConfigOverride::string(
-                    format!("mcp_servers.{server}.bearer_token_env_var"),
-                    TOKEN_VAR,
-                ),
-            ] {
-                args.extend(setting.into_args());
-            }
-        }
+        args.extend(config_overrides(req));
         // `exec`'s own options are declared on the parent command and
         // are not `global`, so clap reads one that follows `resume` as
         // an unexpected argument and the invocation dies before a
@@ -160,6 +132,46 @@ impl CodexAdapter {
         })
         .await
     }
+}
+
+/// The `-c` overrides one request needs, in the order they are written.
+///
+/// What a session may reach beyond its working directory, and how it
+/// reaches the run's own tools: both are settings of the CLI's config
+/// file, which `-c` overrides for this invocation alone rather than
+/// writing to the user's own `~/.codex/config.toml`.
+fn config_overrides(req: &SessionRequest) -> Vec<String> {
+    let mut args = Vec::new();
+    // `workspace-write` confines writes to the workspace, and a
+    // declared artifact lands in the run directory, which is never
+    // inside it. Without this the session is told to write a file
+    // the sandbox then refuses it.
+    if let Some(dir) = &req.artifact_dir {
+        args.extend(
+            ConfigOverride::list(
+                "sandbox_workspace_write.writable_roots",
+                [dir.display().to_string()],
+            )
+            .into_args(),
+        );
+    }
+    if let Some(endpoint) = &req.run_tools_endpoint {
+        let server = RunToolsEndpoint::SERVER_NAME;
+        // The per-run server reaches the CLI as an external MCP server
+        // over streamable HTTP: `url` is the key that selects that
+        // transport, and the credential travels as the name of the
+        // variable the CLI reads it from.
+        for setting in [
+            ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
+            ConfigOverride::string(
+                format!("mcp_servers.{server}.bearer_token_env_var"),
+                TOKEN_VAR,
+            ),
+        ] {
+            args.extend(setting.into_args());
+        }
+    }
+    args
 }
 
 /// The CLI's JSONL, one event list per line. The last note seen is
