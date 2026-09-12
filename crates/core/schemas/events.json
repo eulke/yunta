@@ -1979,7 +1979,7 @@
       ]
     },
     "RuleCode": {
-      "description": "The stable name of a rule that only holds across a whole document.\n\nExhaustive, so a rule cannot be minted by typing a new string, and\ncountable, so a receipt reports what a run keeps getting wrong\nwithout reading prose. A code says which rule broke and nothing\nabout which document it broke in: `DuplicateId` is one rule asked of\nledgers, findings and questions alike, and what separates the three\nis the [`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind and code\ndoes not.",
+      "description": "The stable name of a rule that only holds across a whole\ndocument.\n\nExhaustive, so a rule cannot be minted by typing a new string,\nand countable, so a receipt reports what a run keeps getting\nwrong without reading prose. A code says which rule broke and\nnothing about which document it broke in: `DuplicateId` is one\nrule asked of ledgers, findings and questions alike, and what\nseparates the three is the\n[`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind\nand code does not.\n\nEvery variant belongs to some document's\n[`RULES`](crate::shape::Document::RULES), so a rule the engine\nenforces is a rule the writer was told about before writing.",
       "oneOf": [
         {
           "type": "string",

@@ -34,10 +34,16 @@ fn a_kind_prints_the_shape_a_writer_copies() {
     for needle in ["tasks:", "id:", "title:", "scope:", "criteria:", "cmd:"] {
         assert!(text.contains(needle), "{needle} missing from {text}");
     }
-    assert!(
-        text.contains("must not be a guard"),
-        "the rules travel with the shape: {text}"
-    );
+    // And every rule the engine holds a ledger to — asserted against the
+    // list that enforces them, so this cannot pass on wording that drifted.
+    for rule in yunta_core::shape::rules(yunta_core::ArtifactKind::TaskLedger) {
+        let demand = yunta_core::text::one_line(rule.demand);
+        assert!(
+            text.contains(&demand),
+            "`{}` never reaches the writer: {text}",
+            rule.code
+        );
+    }
 }
 
 #[test]

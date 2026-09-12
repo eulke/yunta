@@ -30,10 +30,7 @@ pub struct SessionSetup {
     /// gates on the capability — this module never re-checks it). Each
     /// task attempt opens its own fresh listener+credential from it —
     /// per session, never reused.
-    pub run_tools: Option<(
-        std::sync::Arc<crate::run_tools::RunToolsHost>,
-        yunta_core::NodeId,
-    )>,
+    pub run_tools: Option<crate::run_tools::RunToolsAccess>,
 }
 
 impl SessionSetup {

@@ -48,6 +48,26 @@ impl<'de> Deserialize<'de> for ArtifactSpec {
     }
 }
 
+impl ArtifactSpec {
+    /// The file name under the run's `artifacts/`, whichever form the
+    /// author used to declare it.
+    pub fn name(&self) -> &str {
+        match self {
+            ArtifactSpec::Plain(name) => name,
+            ArtifactSpec::Typed { name, .. } => name,
+        }
+    }
+
+    /// The kind the engine interprets it as, absent for an opaque
+    /// artifact.
+    pub fn kind(&self) -> Option<ArtifactKind> {
+        match self {
+            ArtifactSpec::Plain(_) => None,
+            ArtifactSpec::Typed { kind, .. } => Some(*kind),
+        }
+    }
+}
+
 /// A document the engine reads and validates, as opposed to an artifact
 /// it only checks for existence. The kind fixes the document's shape, so
 /// it is what every door — the workflow's own `kind:`, `yunta schema`,

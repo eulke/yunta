@@ -15,9 +15,58 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::events::CriterionType;
 use crate::{Ledger, Task, TaskId};
+
+/// Every rule this document is held to, in the order a writer meets them.
+///
+/// The list is what the shape publishes before a ledger is written and what
+/// the functions below enforce after. A rule that is not here is a rule no
+/// writer was told about, and the tests hold the two ends together: every
+/// `RuleCode` belongs to some document's list, and every entry here is
+/// reachable by a document that breaks it.
+pub(super) const RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::DuplicateId,
+        demand: "each `id` is declared once in the file",
+    },
+    Rule {
+        code: RuleCode::EmptyTitle,
+        demand: "`title` says what the task does, in one non-empty line",
+    },
+    Rule {
+        code: RuleCode::EmptyScope,
+        demand: "`scope` lists at least one glob: the only paths the task may touch",
+    },
+    Rule {
+        code: RuleCode::NoCriteria,
+        demand: "every task declares at least one criterion",
+    },
+    Rule {
+        code: RuleCode::AllCriteriaAreGuards,
+        demand: "at least one criterion is not a `guard`, so something has to fail before the \
+                 work and pass after it",
+    },
+    Rule {
+        code: RuleCode::UnknownDependency,
+        demand: "`depends_on` names only ids this file declares",
+    },
+    Rule {
+        code: RuleCode::DependencyCycle,
+        demand: "`depends_on` forms no cycle",
+    },
+    Rule {
+        code: RuleCode::OverlappingScope,
+        demand: "two tasks with no dependency between them declare no overlapping scope, so \
+                 either give them disjoint scopes or declare the dependency",
+    },
+    Rule {
+        code: RuleCode::ManualReviewWithoutJustification,
+        demand: "`manual_review: true` carries a non-empty `justification` — and the task's \
+                 criteria still apply",
+    },
+];
 
 fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
     Diagnostic::new(

@@ -77,7 +77,12 @@ fn task(walk: &mut Walk, index: usize, item: &Value) {
             "a list of task ids",
             "depends_on: [add-dark-mode]",
         )
-        .boolean(map, "manual_review", "manual_review: true");
+        .boolean(map, "manual_review", "manual_review: true")
+        .string(
+            map,
+            "justification",
+            "justification: \"No command can settle this.\"",
+        );
     criteria(walk, map, &named);
 }
 

@@ -79,66 +79,101 @@ impl Malformation {
 /// is the [`ArtifactKind`](crate::ArtifactKind) on the report carrying
 /// it. Counting by code alone conflates them; counting by kind and code
 /// does not.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum RuleCode {
-    /// A second entry already carries this id.
-    DuplicateId,
-    EmptyTitle,
-    EmptyScope,
-    NoCriteria,
-    /// Every criterion is a guard, so nothing in the task proves work
-    /// happened.
-    AllCriteriaAreGuards,
-    /// `depends_on` names a task nobody declared.
-    UnknownDependency,
-    DependencyCycle,
-    /// Two independent tasks reach for the same files.
-    OverlappingScope,
-    ManualReviewWithoutJustification,
-    EmptyText,
-    EmptyLocation,
-    EmptyDetail,
-    /// `answer_type` is `choice` and `values` is empty.
-    MissingValues,
+/// Declares the rule vocabulary once: the variant, the name it serializes
+/// and is grepped by, and the doc a maintainer reads. `ALL` comes from the
+/// same list, so a rule cannot be added to the enum without joining the
+/// inventory the published contract is built from.
+macro_rules! rule_codes {
+    ($( $(#[doc = $doc:expr])* $variant:ident => $name:literal ),+ $(,)?) => {
+        /// The stable name of a rule that only holds across a whole
+        /// document.
+        ///
+        /// Exhaustive, so a rule cannot be minted by typing a new string,
+        /// and countable, so a receipt reports what a run keeps getting
+        /// wrong without reading prose. A code says which rule broke and
+        /// nothing about which document it broke in: `DuplicateId` is one
+        /// rule asked of ledgers, findings and questions alike, and what
+        /// separates the three is the
+        /// [`ArtifactKind`](crate::ArtifactKind) on the report carrying
+        /// it. Counting by code alone conflates them; counting by kind
+        /// and code does not.
+        ///
+        /// Every variant belongs to some document's
+        /// [`RULES`](crate::shape::Document::RULES), so a rule the engine
+        /// enforces is a rule the writer was told about before writing.
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            Serialize,
+            Deserialize,
+            schemars::JsonSchema,
+        )]
+        #[serde(rename_all = "kebab-case")]
+        pub enum RuleCode {
+            $( $(#[doc = $doc])* $variant ),+
+        }
+
+        impl RuleCode {
+            /// Every rule this system can hold a document to.
+            pub const ALL: &'static [RuleCode] = &[ $( RuleCode::$variant ),+ ];
+
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $( RuleCode::$variant => $name ),+
+                }
+            }
+        }
+    };
 }
 
-impl RuleCode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RuleCode::DuplicateId => "duplicate-id",
-            RuleCode::EmptyTitle => "empty-title",
-            RuleCode::EmptyScope => "empty-scope",
-            RuleCode::NoCriteria => "no-criteria",
-            RuleCode::AllCriteriaAreGuards => "all-criteria-are-guards",
-            RuleCode::UnknownDependency => "unknown-dependency",
-            RuleCode::DependencyCycle => "dependency-cycle",
-            RuleCode::OverlappingScope => "overlapping-scope",
-            RuleCode::ManualReviewWithoutJustification => "manual-review-without-justification",
-            RuleCode::EmptyText => "empty-text",
-            RuleCode::EmptyLocation => "empty-location",
-            RuleCode::EmptyDetail => "empty-detail",
-            RuleCode::MissingValues => "missing-values",
-        }
-    }
+rule_codes! {
+    /// A second entry already carries this id.
+    DuplicateId => "duplicate-id",
+    EmptyTitle => "empty-title",
+    EmptyScope => "empty-scope",
+    NoCriteria => "no-criteria",
+    /// Every criterion is a guard, so nothing in the task proves work
+    /// happened.
+    AllCriteriaAreGuards => "all-criteria-are-guards",
+    /// `depends_on` names a task nobody declared.
+    UnknownDependency => "unknown-dependency",
+    DependencyCycle => "dependency-cycle",
+    /// Two independent tasks reach for the same files.
+    OverlappingScope => "overlapping-scope",
+    ManualReviewWithoutJustification => "manual-review-without-justification",
+    EmptyText => "empty-text",
+    EmptyLocation => "empty-location",
+    EmptyDetail => "empty-detail",
+    /// `answer_type` is `choice` and `values` is empty.
+    MissingValues => "missing-values",
 }
 
 impl std::fmt::Display for RuleCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+/// One rule a document must satisfy, stated where it is enforced.
+///
+/// A rule has two readings and one statement. Before anything is written it
+/// is what the document must satisfy, published with the shape; after, it is
+/// the diagnostic naming what was broken. Keeping the statement next to the
+/// code that enforces it is what stops the two readings drifting — a rule a
+/// writer never heard of is a whole repair attempt spent on something the
+/// system already knew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rule {
+    pub code: RuleCode,
+    /// What it demands, in the vocabulary of whoever writes the document.
+    /// One clause, no leading dash, no trailing period.
+    pub demand: &'static str,
 }
 
 /// What is wrong. Every variant carries what a correction needs, so

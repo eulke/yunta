@@ -23,7 +23,7 @@ mod problem;
 mod subject;
 
 pub use artifact::{ArtifactFailure, FileProblem};
-pub use problem::{Malformation, Problem, RuleCode, ValueShape};
+pub use problem::{Malformation, Problem, Rule, RuleCode, ValueShape};
 pub use subject::{Named, Subject};
 
 use crate::ArtifactKind;

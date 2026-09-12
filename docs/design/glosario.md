@@ -126,3 +126,31 @@ se reabre con los problemas de lo que falló, contra un tope propio. Es la
 contraparte del ciclo de tarea — aquél reintenta trabajo, éste reintenta una
 declaración.
 _Evitar_: retry, segunda pasada.
+
+## Reglas y contrato
+
+**Regla** — una condición que solo se sostiene sobre el documento entero: un `id`
+repetido, una dependencia a una tarea que nadie declaró, dos tareas que se pisan.
+Se enuncia una sola vez, en la lista `RULES` del kind, al lado de las funciones que
+la aplican (D143).
+
+**Exigencia** (`demand`) — lo que una regla pide, en el vocabulario de quien escribe
+el documento. Es la lectura *previa* de la regla: viaja en el contrato antes de que
+se escriba nada. La lectura *posterior* es el diagnóstico, con el valor concreto.
+
+**Contrato** — lo que una puerta le entrega a quien tiene que escribir un documento:
+el ejemplo publicado más las exigencias de todas sus reglas. `shape::contract(kind)`
+es el único lugar donde un kind se vuelve texto, así que ninguna puerta puede
+entregar un contrato distinto.
+
+**Cobertura** — el invariante de que el ejemplo publicado escribe cada clave que el
+tipo acepta, y de que cada clave que el ejemplo escribe tiene su propio diagnóstico
+en el recorrido (D144).
+
+_Evitar_: «el esquema» para el contrato — el JSON Schema es otra cosa, y dice menos.
+
+**Verificación en sesión** — el veredicto que una sesión pide con
+`yunta_check_artifact` antes de terminar. Corre la misma verificación que el cierre,
+así que su respuesta y la del nodo no pueden diferir (D146). Es consultiva: el cierre
+sigue siendo el único juez.
+
