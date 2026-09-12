@@ -79,12 +79,16 @@ pub struct SessionRequest {
     /// `capabilities().run_tools` (same rule: never claim more than is
     /// actually built).
     pub run_tools_endpoint: Option<RunToolsEndpoint>,
-    /// Where this node's declared artifacts land. It is never inside
-    /// `cwd`: the worktree is the work, the run directory is the
-    /// record. An adapter whose CLI confines writes to the working
-    /// directory has to widen it to this path, or a node that declares
-    /// an artifact can never produce one. `None` when the node
-    /// declares no artifacts.
+    /// The one directory outside `cwd` this session may write, and where
+    /// the files this node declares belong. It is never inside `cwd`:
+    /// the worktree is the work, the run directory is the record. It
+    /// belongs to this node alone, so a file written here is never a
+    /// file another node produced. An adapter whose CLI confines writes
+    /// to the working directory has to widen it to this path, or a node
+    /// that declares a file can never produce one. `None` whenever the
+    /// node has no file of its own to write — every document the engine
+    /// itself writes from what the session hands over — and a session
+    /// then reaches nothing outside its worktree.
     pub artifact_dir: Option<PathBuf>,
     /// This session's own scratch directory, for scaffolding it needs on
     /// disk — an MCP config file, say. It sits outside `cwd` because the

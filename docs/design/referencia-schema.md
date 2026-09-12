@@ -196,7 +196,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios; hallazgos a {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    prompt: "Auditá los cambios y reportá cada hallazgo."
     artifacts:
       produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
 
@@ -300,6 +300,14 @@ que siempre está al día.
   segunda clave que la pida. Qué implica declararlo — parser, reglas, corrección de
   un archivo ilegible — está en el Contrato §4.1; la forma de cada kind se lee con
   `yunta schema <kind>`, y su JSON Schema con `--json`.
+- **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
+  prompt, su `run:`, sus hooks y sus patrones de `context:` — `{{run.dir}}`,
+  `{{run.worktree}}`, `{{run.branch}}`, `{{node.artifacts}}` (el directorio propio
+  del nodo, donde escribe lo que declara), `{{runner.role}}` cuando el nodo declara
+  un runner, `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}`
+  según lo que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado.
+  Una variable que no está definida ahí falla el nodo nombrándola; `yunta check`
+  además rechaza estáticamente todo `{{inputs.x}}` que `inputs:` no declare.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis

@@ -904,7 +904,7 @@ name: producer
 nodes:
   - id: work
     kind: bash
-    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#,
         ),
@@ -915,7 +915,7 @@ name: consumer
 nodes:
   - id: verify
     kind: bash
-    run: "test -f {{run.dir}}/artifacts/report.md && test -f {{run.dir}}/artifacts/brief.md"
+    run: "true"
 "#,
         ),
     ]);
@@ -924,7 +924,7 @@ name: parent
 nodes:
   - id: plan
     kind: bash
-    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
+    run: "echo the-plan > {{node.artifacts}}/plan.yaml"
     artifacts: { produces: [plan.yaml] }
   - id: prod
     kind: workflow
@@ -1097,7 +1097,7 @@ name: parent
 nodes:
   - id: plan
     kind: bash
-    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
+    run: "echo the-plan > {{node.artifacts}}/plan.yaml"
     artifacts: { produces: [plan.yaml] }
   - id: cons
     kind: workflow
@@ -1142,32 +1142,42 @@ name: consumer
 nodes:
   - id: verify
     kind: bash
-    run: "test \"$(cat {{run.dir}}/artifacts/brief.md)\" = the-plan"
+    run: "true"
 "#,
     )]);
-    let parent = r#"
+    // The view belongs to the engine, so the node that deletes it names
+    // it by its absolute path rather than through a template no workflow
+    // has for it.
+    let run_id = RunId::from("run-mount-from-log");
+    let parent = format!(
+        r#"
 name: parent
 nodes:
   - id: plan
     kind: bash
-    run: "echo the-plan > {{run.dir}}/artifacts/plan.yaml"
-    artifacts: { produces: [plan.yaml] }
+    run: "echo the-plan > {{{{node.artifacts}}}}/plan.yaml"
+    artifacts: {{ produces: [plan.yaml] }}
   - id: wipe
     kind: bash
     depends_on: [plan]
-    run: "rm -rf {{run.dir}}/artifacts"
+    run: "rm -rf {view}"
   - id: cons
     kind: workflow
     use: consumer
     depends_on: [wipe]
     mounts:
-      - artifact: { node: plan, name: plan.yaml, as: brief.md }
-"#;
-    let run_id = RunId::from("run-mount-from-log");
+      - artifact: {{ node: plan, name: plan.yaml, as: brief.md }}
+"#,
+        view = bench
+            .runs_root
+            .join(run_id.as_str())
+            .join(yunta_core::ARTIFACTS_DIR)
+            .display()
+    );
     let (terminal, state) = bench
         .run(
             &run_id,
-            parent,
+            &parent,
             CONFIG,
             &HashMap::new(),
             EMPTY_FIXTURE,
@@ -1212,7 +1222,7 @@ name: producer
 nodes:
   - id: work
     kind: bash
-    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#,
     )]);

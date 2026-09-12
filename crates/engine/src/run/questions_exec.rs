@@ -3,13 +3,13 @@
 //! human through `HumanInteraction::ask` — the ONE ask site, serving the
 //! first invocation (right after the node closes waiting) and every
 //! later `yunta resume` through the identical path, with zero
-//! conversational state: the questions are re-read from the artifact on
-//! disk, never from memory.
+//! conversational state: the questions are re-read from the artifact the
+//! run holds, never from memory.
 
 use yunta_core::events::{ArtifactOrigin, EventPayload};
 use yunta_core::{ArtifactKind, ArtifactSpec, Node};
 
-use crate::artifacts::{accept, Declared, ANSWERS_SUFFIX};
+use crate::artifacts::{accept, describe, Declared, RunArtifacts, ANSWERS_SUFFIX};
 
 use super::node_close::write_progress;
 use super::{RunCtx, RunError};
@@ -24,9 +24,12 @@ pub(super) enum AskOutcome {
 }
 
 pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutcome, RunError> {
-    // The declared questions artifacts, re-read from the frozen run.dir
-    // — artifacts are immutable once written — the node produced them
-    // before it closed waiting.
+    // The declared questions artifacts, as the run holds them: the node
+    // accepted each one before it closed waiting, so the acceptance on
+    // the log and the bytes in the store are what the round re-reads —
+    // no file to find, and nothing a later write could have changed.
+    let events = ctx.load_events().await?;
+    let held = RunArtifacts::of(ctx.run_dir, &events);
     let mut question_files: Vec<(String, yunta_core::QuestionsFile)> = Vec::new();
     if let Some(artifacts) = &node.artifacts {
         for spec in &artifacts.produces {
@@ -36,18 +39,24 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             if !matches!(kind, ArtifactKind::Questions) {
                 continue;
             }
-            let relative = std::path::Path::new(yunta_core::ARTIFACTS_DIR).join(name);
-            let bytes =
-                std::fs::read(ctx.run_dir.join(&relative)).map_err(|source| RunError::Io {
-                    context: format!("read questions artifact `{}`", relative.display()),
-                    source,
-                })?;
+            let Some(found) = held.named(&ctx.manifest.workflow, Some(&node.id), name) else {
+                return Err(RunError::Broken {
+                    diagnostic: format!(
+                        "node `{}` waits on questions the run does not hold — `{name}` has \
+                         no acceptance on this log, so there is nothing to ask",
+                        node.id
+                    ),
+                });
+            };
+            let bytes = held.bytes(found).map_err(|source| RunError::Broken {
+                diagnostic: format!("cannot read the questions of node `{}`: {source}", node.id),
+            })?;
             // The same door `close_artifacts` reads a questions file
             // through: the ask round names what is wrong with the
             // document, never what a deserializer made of it.
             let file = yunta_core::shape::read::<yunta_core::QuestionsFile>(
                 &bytes,
-                relative.display().to_string(),
+                describe(&ctx.manifest.workflow, found),
             )?;
             question_files.push((name.clone(), file));
         }
@@ -110,26 +119,23 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     )
     .await?;
     for (name, reply) in replies {
+        // The answers are an artifact of this node like any other: the
+        // acceptance is what makes them a fact of the run, and the file
+        // beside the questions they answer is the view that acceptance
+        // projects. Nothing writes into `artifacts/` but that projection.
         let answers_name = format!("{name}{ANSWERS_SUFFIX}");
-        let answers_abs = ctx
-            .run_dir
-            .join(yunta_core::ARTIFACTS_DIR)
-            .join(&answers_name);
         let answers_file = yunta_core::AnswersFile {
             answers: reply.answers,
         };
         let bytes = yunta_core::yaml::to_string(&answers_file)
             .map_err(|e| RunError::ManifestWrite {
-                path: answers_abs.clone(),
+                path: ctx.run_dir.join(crate::artifacts::store::view_path(
+                    Some(&node.id),
+                    &answers_name,
+                )),
                 detail: e.to_string(),
             })?
             .into_bytes();
-        // The answers sit beside the questions they answer, which is
-        // where the next node's `artifact:` context source reads them.
-        std::fs::write(&answers_abs, &bytes).map_err(|source| RunError::Io {
-            context: format!("write `{}`", answers_abs.display()),
-            source,
-        })?;
         let accepted = accept(
             &ctx.log(),
             ctx.run_dir,

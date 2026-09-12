@@ -335,9 +335,14 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
 }
 
 /// Reads a mock fixture, renders it with the run's own paths
-/// (`{{run.dir}}`, `{{worktree}}`) and parses it — the one way a
-/// scripted session comes to exist, for `yunta test` and for
+/// (`{{run.dir}}`, `{{worktree}}`, `{{staging}}`) and parses it — the one
+/// way a scripted session comes to exist, for `yunta test` and for
 /// `yunta run --adapter mock --fixture` alike.
+///
+/// `{{staging}}` is where nodes write the files they declare, one
+/// directory per node id: a session scripted to produce an opaque
+/// artifact of node `grill` writes `{{staging}}/grill/<name>`, which is
+/// exactly the directory that session is granted.
 pub(crate) fn load_mock_fixture(
     fixture_path: &Path,
     run_dir: &Path,
@@ -348,6 +353,12 @@ pub(crate) fn load_mock_fixture(
     let vars = BTreeMap::from([
         ("run.dir".to_string(), run_dir.display().to_string()),
         ("worktree".to_string(), worktree.display().to_string()),
+        (
+            "staging".to_string(),
+            yunta_engine::run_dir::staging_root(run_dir)
+                .display()
+                .to_string(),
+        ),
     ]);
     let rendered = yunta_engine::render_template(&fixture_text, &vars)
         .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?;

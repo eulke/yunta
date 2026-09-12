@@ -1837,7 +1837,7 @@ fn every_node_kind_may_declare_an_interpreted_artifact() {
     for node_kind in [
         "    kind: prompt\n    prompt: \"plan it\"",
         "    kind: workflow\n    use: planner",
-        "    kind: bash\n    run: \"cp tasks.yaml {{run.dir}}/artifacts/plan.yaml\"",
+        "    kind: bash\n    run: \"cp tasks.yaml {{node.artifacts}}/plan.yaml\"",
     ] {
         assert_eq!(
             check(&producing_tasks(node_kind), &ConfigLayer::default()),

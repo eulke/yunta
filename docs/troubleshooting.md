@@ -78,7 +78,8 @@ fails once, and the failure is not retryable.
 
 For a `bash`, `check`, `gate` or `executor` node, the command writes the file
 itself. Check that it writes the name the node declared, under
-`{{run.dir}}/artifacts/`.
+`{{node.artifacts}}` — the node's own directory, which the engine empties at the
+start of every attempt.
 
 A file that was never written, is empty, is past `limits.max_artifact_bytes`, or
 that the filesystem refuses is reported as a failure of the file rather than of the

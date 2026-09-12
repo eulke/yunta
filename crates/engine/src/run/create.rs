@@ -135,7 +135,10 @@ pub async fn create_run(
             });
         }
     }
-    for dir in [run_dir.join(ARTIFACTS_DIR), run_dir.join("scratch")] {
+    for dir in [
+        run_dir.join(ARTIFACTS_DIR),
+        run_dir.join(crate::run_dir::SCRATCH_DIR),
+    ] {
         tokio::fs::create_dir(&dir)
             .await
             .map_err(|source| RunError::Io {

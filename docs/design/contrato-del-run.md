@@ -11,13 +11,15 @@ Un run es la ejecución de un workflow con inputs concretos, identificado por un
 ├── manifest.yaml                # inmutable tras la creación (§2.1)
 ├── [progress.md](http://progress.md)                  # generado por el engine tras cada nodo (§8.2)
 ├── objects/                     # los bytes de todo lo que el run tiene, por sha256 (§4, §9)
-├── artifacts/                   # vista de los artifacts que el run tiene (§4)
+├── artifacts/                   # vista que el engine escribe de lo que el run tiene (§4)
 ├── baseline/                    # snapshot de suite al abrir el run (§7)
-└── scratch/                     # espacio libre de los agentes; sin garantías
+└── scratch/                     # espacio de trabajo del run; sin garantías
+    └── staging/<node_id>/       # donde ese nodo escribe lo que declara (§4)
 ~/.yunta/worktrees/<run_id>/     # \{\{run.worktree\}\} — el código
 ```
 Las rutas mostradas son los **defaults**; su ubicación es configurable (§2.2) y queda congelada en el manifest de cada run.
 El worktree vive en un árbol paralelo, nunca dentro del run.dir: las operaciones de git de un agente (clean, reset) no pueden alcanzar el estado del run.
+`artifacts/` es del engine: la escribe la proyección de cada aceptación y ningún lector la abre (§4). Lo que un nodo escribe va a `scratch/staging/<node_id>/`, un directorio por nodo — lo que el nodo recibe como raíz escribible cuando declara un artifact opaco, y de donde el cierre lee lo que el nodo declaró. El engine lo vacía al abrir cada intento: lo que dejó un intento fallido no es obra del siguiente.
 ## 2.1 Manifest
 `manifest.yaml` congela todo lo necesario para interpretar el run: el workflow resuelto (las tres capas de config ya mergeadas), los inputs, el modo (§10), las versiones (yunta, hash del workflow, hash de config, **`yunta_schema`** resuelto) y la rama y commit base. `yunta_schema` es un campo opcional de cabecera del workflow (`yunta_schema: ">=1 <2"`, sintaxis semver-range); si el workflow no lo declara, se infiere la versión de schema del binario que crea el run. Es la misma política de compatibilidad N/N-1 de RFC-0004 §4.4, aplicada por workflow en vez de por pack. El engine nunca relee `.yunta/workflows/` durante un run: si el equipo edita el workflow a mitad de ejecución, los runs en curso conservan sus reglas. Corolario: un run tampoco cambia de modo — se promueve creando un run sucesor (§10.2).
 ## 2.2 Layout y potestad: qué vive dónde y quién lo decide
@@ -449,7 +451,7 @@ Sintaxis por nodo — cada entrada de `context:` es una fuente con sus parámetr
 ```
 - id: plan
 	context:
-		- files: \["docs/[architecture.md](http://architecture.md)", "\{\{run.dir\}\}/artifacts/[brief.md](http://brief.md)"\]
+		- files: \["docs/[architecture.md](http://architecture.md)"\]
 		- command: "git log --oneline -20"           # stdout → contexto, con timeout
 		- mcp: \{ server: internal-docs, query: "\{\{inputs.idea\}\}" \}  # server declarado en config (mcp_servers)
 		- artifact: \{ node: grill, name: [brief.md](http://brief.md) \}   # crea dependencia implícita grill → plan

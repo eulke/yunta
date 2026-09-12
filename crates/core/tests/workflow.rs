@@ -647,7 +647,7 @@ id: plan
 kind: prompt
 prompt: "plan it"
 context:
-  - files: ["docs/architecture.md", "{{run.dir}}/artifacts/brief.md"]
+  - files: ["docs/architecture.md"]
   - command: "git log --oneline -20"
   - artifact: { node: grill, name: brief.md }
   - tasks: {}
@@ -661,13 +661,9 @@ context:
 
     use yunta_core::ContextSpec;
     match &node.context[0] {
-        ContextSpec::Files { files } => assert_eq!(
-            files,
-            &vec![
-                "docs/architecture.md".to_string(),
-                "{{run.dir}}/artifacts/brief.md".to_string()
-            ]
-        ),
+        ContextSpec::Files { files } => {
+            assert_eq!(files, &vec!["docs/architecture.md".to_string()])
+        }
         other => panic!("expected Files, got {other:?}"),
     }
     match &node.context[1] {

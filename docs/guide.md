@@ -153,8 +153,8 @@ shape to demand.
 The tool answers in the same call, with the verdict the node's close reaches: the
 engine reads the object into the same type and runs the same rules. An acceptance
 reports what the engine understood — `plan.yaml — accepted. 6 task(s)
-registered: ...` — and writes the canonical YAML at `<run.dir>/artifacts/<name>`
-itself. A refusal lists every rule the document breaks, all at once — or, when the
+registered: ...` — and writes the canonical document itself. A refusal lists every
+rule the document breaks, all at once — or, when the
 object does not read into its kind at all, that one problem and the path where it
 sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
 before any rule can hold. Either way the session fixes it and submits again: a
@@ -179,18 +179,24 @@ mounts no run tools fails a node that declares an interpreted artifact before th
 session is dispatched — the document has no way in.
 
 A `bash`, `check`, `gate` or `executor` node can declare an interpreted artifact
-too. It writes the file itself, and the close reads it with the same code and holds
-it to the same rules. When such a file does not read back, the node fails with every
+too. It writes the file itself, under `{{node.artifacts}}`, and the close reads it
+with the same code and holds it to the same rules. When such a file does not read
+back, the node fails with every
 rule problem in it named at once — by task and field, in the document's own words —
 and a node that declares several interpreted artifacts gets each file reported under
 its own path.
 
-An opaque artifact is a file its session writes: a node that declares one gets
-`<run.dir>/artifacts` added to what its session may write, and can call
-`yunta_check_artifact` to confirm the file is there before the session ends. A node
-that declares only interpreted artifacts is granted nothing outside its worktree.
-`yunta_check_artifact` also reads back what the engine wrote from a submitted
-document, so a session can see its meaning survived the parse.
+An opaque artifact is a file its session writes: a node that declares one gets a
+directory of its own added to what its session may write, and can call
+`yunta_check_artifact` to confirm the file is there before the session ends. That
+directory is `{{node.artifacts}}` in the node's own templates — which is how a
+`bash`, `check` or `executor` node names it too. It belongs to that node alone, so
+two nodes that declare the same name never write over each other, and the engine
+empties it at the start of every attempt: a file a failed attempt left is not the
+next attempt's work. A node that declares only interpreted artifacts is granted
+nothing outside its worktree. `yunta_check_artifact` also reads back what the engine
+wrote from a submitted document, so a session can see its meaning survived the
+parse.
 
 The same shape is available anywhere else you need it:
 

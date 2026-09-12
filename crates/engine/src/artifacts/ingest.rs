@@ -2,8 +2,8 @@
 //! by a session, or derived by the engine from the log.
 //!
 //! When a node finishes, everything it declared under
-//! `artifacts.produces` must exist and be non-empty under the run's
-//! `artifacts/` directory — no matter what the agent reported. Opaque
+//! `artifacts.produces` must exist and be non-empty under that node's
+//! own staging directory — no matter what the agent reported. Opaque
 //! artifacts are verified by existence and content hash only, never by
 //! format. `tasks`, `findings` and `questions` are the interpreted
 //! kinds: each is read through the one door that names every problem at
@@ -39,7 +39,6 @@ use yunta_core::FindingsFile;
 use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Node, Question, QuestionsFile, TasksFile,
-    ARTIFACTS_DIR,
 };
 
 /// One declared artifact that passed verification: the name it was
@@ -48,7 +47,9 @@ use yunta_core::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedArtifact {
     pub name: String,
-    /// Relative to the run directory (`artifacts/<name>`).
+    /// Relative to the run directory: where the artifact was read from
+    /// or written to — a node's own staging for a file on its way in,
+    /// the `artifacts/` view for one the run already holds.
     pub path: PathBuf,
     /// The bytes as they were read or written, which is what
     /// `content_hash` is the hash of. What the run stores is their
@@ -113,8 +114,6 @@ pub fn close_artifacts(
     }
 }
 
-/// One declared artifact's whole story: the file, its size, and — when
-/// the node declared a `kind:` — what it says.
 /// One declared artifact's whole story: the file, its size, and — when the
 /// node declared a `kind:` — what it says.
 ///
@@ -133,7 +132,7 @@ pub(crate) fn verify_one(
         ArtifactSpec::Typed { name, kind } => (name, Some(*kind)),
     };
 
-    let relative = Path::new(ARTIFACTS_DIR).join(name);
+    let relative = crate::run_dir::staged_path(node, name);
     let path = relative.display().to_string();
 
     let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes)?;
@@ -288,6 +287,7 @@ impl std::fmt::Display for SubmitError {
 /// file — so a session hears its verdict while it can still act, instead
 /// of after it has ended.
 pub(crate) fn submit(
+    node: &NodeId,
     spec: &ArtifactSpec,
     run_dir: &Path,
     document: serde_json::Value,
@@ -298,7 +298,9 @@ pub(crate) fn submit(
             name: spec.name().to_string(),
         });
     };
-    let path = Path::new(ARTIFACTS_DIR).join(name).display().to_string();
+    let path = crate::run_dir::staged_path(node, name)
+        .display()
+        .to_string();
 
     let (content, yaml) = match kind {
         ArtifactKind::Tasks => {
@@ -332,6 +334,7 @@ pub(crate) fn submit(
 /// that dies after reporting it. A node that reported nothing gets a
 /// file with an empty list: a review that found nothing is a review.
 pub(crate) fn derive_findings(
+    node: &NodeId,
     spec: &ArtifactSpec,
     run_dir: &Path,
     posted: Vec<Finding>,
@@ -346,7 +349,9 @@ pub(crate) fn derive_findings(
             name: spec.name().to_string(),
         });
     };
-    let path = Path::new(ARTIFACTS_DIR).join(name).display().to_string();
+    let path = crate::run_dir::staged_path(node, name)
+        .display()
+        .to_string();
     let file = FindingsFile::from_findings(posted.clone());
     let yaml = render(&file, &path)?;
     let verified = write_canonical(name, &path, run_dir, yaml, max_bytes)?;
@@ -363,12 +368,13 @@ fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<St
     })
 }
 
-/// Writes `yaml` at `artifacts/<name>` and reports it as the close will
-/// read it back.
+/// Writes `yaml` where the close reads it back — the producing node's
+/// own staging, the same place a file that node wrote itself would sit,
+/// so one read answers for both.
 ///
 /// Through the run's own `scratch/` and a rename, which is atomic on one
 /// filesystem: a reader never meets half a document, and the directory
-/// the close audits never holds a temporary file nobody declared.
+/// never holds a temporary file nobody declared.
 fn write_canonical(
     name: &str,
     path: &str,
@@ -389,14 +395,17 @@ fn write_canonical(
         }
     }
     let io = |context: String| move |source| SubmitError::Io { context, source };
-    let mut file = tempfile::NamedTempFile::new_in(run_dir.join("scratch"))
+    let destination = run_dir.join(path);
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(io(format!("create `{}`", parent.display())))?;
+    }
+    let mut file = tempfile::NamedTempFile::new_in(run_dir.join(crate::run_dir::SCRATCH_DIR))
         .map_err(io(format!("open a temporary file for `{path}`")))?;
     std::io::Write::write_all(&mut file, &bytes).map_err(io(format!("write `{path}`")))?;
-    file.persist(run_dir.join(path))
-        .map_err(|e| SubmitError::Io {
-            context: format!("place `{path}`"),
-            source: e.error,
-        })?;
+    file.persist(destination).map_err(|e| SubmitError::Io {
+        context: format!("place `{path}`"),
+        source: e.error,
+    })?;
     Ok(VerifiedArtifact {
         name: name.to_string(),
         path: PathBuf::from(path),

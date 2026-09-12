@@ -76,7 +76,7 @@ impl<'a> ObjectStore<'a> {
         if path.exists() {
             return Ok(hash);
         }
-        let scratch = self.run_dir.join("scratch");
+        let scratch = self.run_dir.join(crate::run_dir::SCRATCH_DIR);
         std::fs::create_dir_all(&scratch)?;
         std::fs::create_dir_all(path.parent().unwrap_or(self.run_dir))?;
         let mut file = tempfile::NamedTempFile::new_in(&scratch)?;

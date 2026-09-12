@@ -96,7 +96,7 @@ nodes:
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios; hallazgos a {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    prompt: "Auditá los cambios y reportá cada hallazgo."
     artifacts:
       produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
 

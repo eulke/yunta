@@ -116,6 +116,7 @@ impl SessionTools {
         };
         let name = spec.name().to_string();
         let written = crate::artifacts::submit(
+            &self.node,
             spec,
             &self.host.run_dir,
             document.clone(),

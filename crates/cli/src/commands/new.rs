@@ -104,18 +104,19 @@ nodes:
 
 const TASKS_TEMPLATE: &str = "\
 name: {{workflow-name}}
-# A tasks cycle, empty to start: `plan` opens an agent session
-# that writes a tasks document artifact; `implement` loops
-# over it, dispatching one mechanically-verified session per ready
-# task, until every task is `done`.
+# A tasks cycle, empty to start: `plan` opens an agent session that
+# declares a tasks document and hands it over through the run tool the
+# engine mounts for that kind; `implement` loops over it, dispatching
+# one mechanically-verified session per ready task, until every task is
+# `done`.
 nodes:
   - id: plan
     kind: prompt
     # runner: planner  # uncomment once runners: defines this role
-    prompt: \"Write a tasks document to {{run.dir}}/artifacts/ledger.yaml.\"
+    prompt: \"Plan the work and hand over the tasks document.\"
     artifacts:
       produces:
-        - { name: ledger.yaml, kind: tasks }
+        - { name: tasks.yaml, kind: tasks }
   - id: implement
     kind: loop
     # runner: implementer  # uncomment once runners: defines this role

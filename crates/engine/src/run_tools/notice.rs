@@ -97,8 +97,8 @@ fn findings_to_report(declared: &[ArtifactSpec]) -> Option<String> {
     ))
 }
 
-/// The plain files this node declares, and where they go — told only
-/// when the session was granted the directory they belong in, since a
+/// The plain files this node declares, and where they go — this node's
+/// own directory, told only when the session was granted it, since a
 /// session that cannot reach it has nothing to act on.
 fn files_to_write(
     declared: &[ArtifactSpec],
@@ -116,7 +116,8 @@ fn files_to_write(
     }
     let dir = artifact_dir?;
     let mut text = format!(
-        "\n\nWrite each file this node declares under {}:",
+        "\n\nWrite each file this node declares under {} — this node's own \
+         directory, which nothing else writes:",
         dir.display()
     );
     for name in written {

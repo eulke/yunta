@@ -144,7 +144,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the tasks document to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
       produces:
         - { name: plan.yaml, kind: tasks }
@@ -1631,7 +1631,7 @@ name: distill-none
 nodes:
   - id: plan
     kind: bash
-    run: "echo durable > {{run.dir}}/artifacts/plan.md"
+    run: "echo durable > {{node.artifacts}}/plan.md"
     artifacts:
       produces: [plan.md]
 on_finish:
@@ -2135,7 +2135,7 @@ fn adapter_mock_with_fixture_runs() {
     );
     write(
         &repo.join("fixture.yaml"),
-        "sessions:\n  - effects:\n      - { path: \"{{run.dir}}/artifacts/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
+        "sessions:\n  - effects:\n      - { path: \"{{staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
     );
 
     let refused = yunta_in!(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);

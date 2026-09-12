@@ -55,6 +55,7 @@ mod receipt;
 mod replay;
 mod reserved;
 mod run;
+pub mod run_dir;
 mod run_log;
 mod run_tools;
 mod runner;

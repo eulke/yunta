@@ -157,7 +157,7 @@ modes:
 nodes:
   - id: plan
     kind: bash
-    run: "printf 'tasks: []\n' > {{run.dir}}/artifacts/plan.yaml"
+    run: "printf 'tasks: []\n' > {{node.artifacts}}/plan.yaml"
     artifacts: { produces: [plan.yaml] }
   - id: lint
     kind: bash

@@ -136,10 +136,11 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     // things being exercised, exactly as they would be in production).
     // The two interpreted documents go over the run tools, so the
     // sessions name them by the name the node declares; `brief.md` is
-    // the session's own file, and needs the absolute run.dir path the
-    // same way a real agent reads it from its rendered prompt, since a
-    // session's cwd is the worktree.
-    let artifacts = run_dir.join("artifacts");
+    // the session's own file, and lands in `grill`'s own directory —
+    // the absolute path that session is granted, the same way a real
+    // agent reads it from its rendered prompt, since a session's cwd is
+    // the worktree.
+    let grill_staging = yunta_engine::run_dir::staging(&run_dir, &"grill".into());
     let fixture = format!(
         r##"
 capabilities: {{ run_tools: true }}
@@ -177,7 +178,7 @@ sessions:
           }}
     outcome: {{ type: completed, summary: "did T001" }}
 "##,
-        brief = artifacts.join("brief.md"),
+        brief = grill_staging.join("brief.md"),
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();

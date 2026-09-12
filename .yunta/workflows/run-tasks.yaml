@@ -8,7 +8,7 @@ inputs:
 nodes:
   - id: register
     kind: bash
-    run: "mkdir -p {{run.dir}}/artifacts && cp {{inputs.tasks}} {{run.dir}}/artifacts/plan.yaml"
+    run: "cp {{inputs.tasks}} {{node.artifacts}}/plan.yaml"
     artifacts:
       produces: [{ name: plan.yaml, kind: tasks }]
 

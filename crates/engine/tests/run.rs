@@ -314,7 +314,7 @@ sessions:
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
-                "artifacts/plan.yaml: 1 error\n  \
+                "scratch/staging/plan/plan.yaml: 1 error\n  \
          the document was declared by node `plan` and never produced"
             );
         }
@@ -665,7 +665,7 @@ name: ingest
 nodes:
   - id: report
     kind: bash
-    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#;
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
@@ -705,7 +705,7 @@ name: ingest-typed
 nodes:
   - id: plan
     kind: bash
-    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{run.dir}}/artifacts/plan.yaml"
+    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{node.artifacts}}/plan.yaml"
     artifacts:
       produces: [{ name: plan.yaml, kind: tasks }]
 "#;
@@ -725,9 +725,8 @@ nodes:
     // What the run stores is the document, rendered the way the engine
     // renders every document of that kind — not the spelling the node
     // happened to write.
-    let written = bench
-        .projection(None, "plan.yaml")
-        .expect("the node wrote it");
+    let written =
+        std::fs::read(bench.staging("plan").join("plan.yaml")).expect("the node wrote it");
     let stored = bench.object(&held[0].content_hash).expect("the object");
     assert_ne!(stored, written, "the file was not canonical to begin with");
     let parsed: yunta_core::TasksFile =
@@ -1049,25 +1048,31 @@ async fn the_loop_finds_its_tasks_after_the_view_of_them_is_deleted() {
     // Deleting the whole `artifacts/` view leaves both untouched, so the
     // loop still has its tasks.
     let bench = Bench::new();
-    let workflow = r#"
+    // The view is the engine's own directory, so the node that deletes
+    // it names it by its absolute path rather than through a template no
+    // workflow has for it.
+    let workflow = format!(
+        r#"
 name: tasks-from-the-log
 nodes:
   - id: plan
     kind: bash
-    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{run.dir}}/artifacts/plan.yaml"
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{{{node.artifacts}}}}/plan.yaml"
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [{{ name: plan.yaml, kind: tasks }}]
   - id: wipe
     kind: bash
     depends_on: [plan]
-    run: "rm -rf {{run.dir}}/artifacts"
+    run: "rm -rf {view}"
   - id: implement
     kind: loop
     runner: executor
     depends_on: [wipe]
     until: all_tasks_complete
     prompt: "Read your task from the tasks document and implement it."
-"#;
+"#,
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+    );
     let fixture = r#"
 sessions:
   - effects:
@@ -1075,10 +1080,45 @@ sessions:
     outcome: { type: completed, summary: "did T001" }
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let (terminal, state) = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(
         state.tasks.get("T001"),
         Some(&yunta_core::events::TaskStatus::Done)
+    );
+}
+
+#[tokio::test]
+async fn a_file_left_by_a_failed_attempt_is_not_ingested_by_the_next_one() {
+    // `report` writes its artifact and fails; the re-route fixes what
+    // made it fail and `report` runs again, this time writing nothing.
+    // The second attempt owes an artifact it never produced, because it
+    // opened on an empty directory — what the first attempt left behind
+    // is not this attempt's work.
+    let bench = Bench::new();
+    let workflow = r#"
+name: stale-staging
+nodes:
+  - id: report
+    kind: bash
+    run: "test -f marker || (echo the-report > {{node.artifacts}}/report.md; false)"
+    artifacts: { produces: [report.md] }
+    on_failure: { goto: fix, max_reroutes: 1 }
+  - id: fix
+    kind: bash
+    run: "touch marker"
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("the second attempt owes an artifact it never wrote: {terminal:?} {state:?}");
+    };
+    assert!(
+        reason.contains("report.md") && reason.contains("never produced"),
+        "the second attempt is judged on what it produced: {reason}"
+    );
+    assert_eq!(
+        bench.accepted(),
+        vec![],
+        "nothing a failed attempt left behind becomes the next attempt's artifact"
     );
 }

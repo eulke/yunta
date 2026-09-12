@@ -142,10 +142,10 @@ impl CodexAdapter {
 /// writing to the user's own `~/.codex/config.toml`.
 fn config_overrides(req: &SessionRequest) -> Vec<String> {
     let mut args = Vec::new();
-    // `workspace-write` confines writes to the workspace, and a
-    // declared artifact lands in the run directory, which is never
-    // inside it. Without this the session is told to write a file
-    // the sandbox then refuses it.
+    // `workspace-write` confines writes to the workspace, and the
+    // directory a declared file belongs in sits in the run directory,
+    // which is never inside it. Without this the session is told to
+    // write a file the sandbox then refuses it.
     if let Some(dir) = &req.artifact_dir {
         args.extend(
             ConfigOverride::list(

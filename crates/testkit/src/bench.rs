@@ -103,6 +103,13 @@ impl Bench {
         self.runs_root.join(self.run_id.as_str())
     }
 
+    /// The directory one node writes the files it declares into — known
+    /// before the run exists, so a fixture can embed the absolute paths a
+    /// session is granted and writes to.
+    pub fn staging(&self, node: &str) -> std::path::PathBuf {
+        yunta_engine::run_dir::staging(&self.run_dir(), &node.into())
+    }
+
     /// The bytes the run holds for one artifact, by the name a node
     /// declares it under.
     ///

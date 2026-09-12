@@ -124,11 +124,12 @@ impl ClaudeCodeAdapter {
             args.push(agent.to_string());
         }
         args.extend(permissions::permission_args(req.permissions));
-        // The CLI confines file writes to its working directory. A
-        // declared artifact lands in the run directory, which is never
-        // inside it, so without this the session is told to write a
-        // file it is then refused permission to create — and the node
-        // fails at close for a document that was never producible.
+        // The CLI confines file writes to its working directory. The
+        // directory a declared file belongs in sits in the run
+        // directory, which is never inside it, so without this the
+        // session is told to write a file it is then refused permission
+        // to create — and the node fails at close for a document that
+        // was never producible.
         if let Some(dir) = &req.artifact_dir {
             args.push("--add-dir".to_string());
             args.push(dir.display().to_string());

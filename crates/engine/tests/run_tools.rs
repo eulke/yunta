@@ -90,9 +90,12 @@ impl Bench {
             )
             .unwrap();
         let run_dir = root.path().join("run");
-        // The directories `create_run` gives every run: what a session
-        // writes into, and what the engine writes through.
-        for dir in ["artifacts", "scratch"] {
+        // The directories `create_run` gives every run: the view the
+        // engine writes, and the working space every node stages in.
+        for dir in [
+            yunta_core::ARTIFACTS_DIR,
+            yunta_engine::run_dir::SCRATCH_DIR,
+        ] {
             std::fs::create_dir_all(run_dir.join(dir)).unwrap();
         }
         let host = Arc::new(RunToolsHost::new(
@@ -110,6 +113,14 @@ impl Bench {
             run_id,
             host,
         }
+    }
+
+    /// Where `node` writes what it declares, created as an attempt of
+    /// that node would create it.
+    fn staging(&self, node: &str) -> std::path::PathBuf {
+        let dir = yunta_engine::run_dir::staging(&self.run_dir, &node.into());
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     async fn listener(&self, node: &str, task: Option<&str>) -> RunToolsSession {
@@ -559,7 +570,7 @@ fn tasks_spec() -> yunta_core::ArtifactSpec {
 async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
     let bench = Bench::new();
     std::fs::write(
-        bench.run_dir.join("artifacts").join("plan.yaml"),
+        bench.staging("plan").join("plan.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
@@ -582,7 +593,7 @@ async fn a_check_names_the_same_problems_the_close_would() {
     // boolean belongs. The check reads the file through the same code the
     // close does, so it locates the value and says what was expected.
     std::fs::write(
-        bench.run_dir.join("artifacts").join("plan.yaml"),
+        bench.staging("plan").join("plan.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
@@ -633,7 +644,7 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     assert!(!is_error, "got: {text}");
 
     std::fs::write(
-        bench.run_dir.join("artifacts").join("plan.yaml"),
+        bench.staging("plan").join("plan.yaml"),
         "not a tasks document at all\n",
     )
     .unwrap();

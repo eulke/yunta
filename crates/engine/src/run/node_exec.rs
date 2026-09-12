@@ -76,6 +76,22 @@ pub(super) async fn execute_node(
     )
     .await?;
 
+    // An attempt opens on an empty directory of its own. `node_started`
+    // is where every kind of node begins an attempt — a session, a
+    // command, a check, a composition — so it is the one place that can
+    // state it for all of them. A file an earlier attempt left would
+    // otherwise close this one as work it never did, and the run's own
+    // history says which attempt produced what.
+    crate::run_dir::open_staging(ctx.run_dir, &node.id)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!(
+                "open the staging directory of node `{}` for attempt {attempt}",
+                node.id
+            ),
+            source,
+        })?;
+
     // hooks.before: a failing before aborts without spending a
     // token; a failing after fails the node before verification. Either
     // phase's step can opt into `on_failure: warn` instead of the default
@@ -194,7 +210,8 @@ pub(super) async fn execute_node(
 }
 
 /// Template variables for one node's own rendering: `run.*`
-/// is always present; `runner.role` is the node's own declared `runner:`
+/// and `node.artifacts` — this node's own writable directory — are
+/// always present; `runner.role` is the node's own declared `runner:`
 /// (the role name itself, known statically from the workflow — never the
 /// adapter/model a later resolution step picks, so no ordering
 /// dependency on `resolve_node_runner`); `project.*` mirrors whatever
@@ -215,6 +232,15 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
         ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
+        // Where this node's own files go. A command node has no run tool
+        // to be told through, so the one way it can write what it
+        // declares is to render this.
+        (
+            "node.artifacts".to_string(),
+            crate::run_dir::staging(ctx.run_dir, &node.id)
+                .display()
+                .to_string(),
+        ),
     ]);
     if let Some(role) = &node.runner {
         vars.insert("runner.role".to_string(), role.to_string());
@@ -281,17 +307,20 @@ pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_cor
 
 /// Where this node's own files land, when it declares any.
 ///
-/// The run directory, never the worktree: the worktree is the work and
-/// its diff is what the scope check reads. Only an artifact the session
-/// writes itself needs this — an interpreted one the engine writes from
-/// what the session submits — so a node that declares none needs no
-/// write access outside the worktree at all, and saying so keeps an
-/// adapter from widening a sandbox for nothing.
+/// This node's staging, never the worktree and never the run's
+/// `artifacts/`: the worktree is the work and its diff is what the scope
+/// check reads, and `artifacts/` is the view the run writes from what it
+/// already holds. A directory of its own is what keeps two nodes that
+/// declare the same name out of each other's way. Only an artifact the
+/// session writes itself needs this — an interpreted one the engine
+/// writes from what the session submits — so a node that declares none
+/// needs no write access outside the worktree at all, and saying so
+/// keeps an adapter from widening a sandbox for nothing.
 pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::PathBuf> {
     declared_artifacts(ctx, node)
         .iter()
         .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Plain(_)))
-        .then(|| ctx.run_dir.join(yunta_core::ARTIFACTS_DIR))
+        .then(|| crate::run_dir::staging(ctx.run_dir, &node.id))
 }
 
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {

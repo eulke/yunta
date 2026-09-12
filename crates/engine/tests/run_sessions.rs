@@ -189,7 +189,7 @@ sessions:
 #[tokio::test]
 async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let bench = Bench::new();
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -240,7 +240,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
     artifacts:
       produces: [plan.md]
   - id: notes
@@ -266,7 +266,6 @@ on_finish:
         "on_finish:",
         "modes:\n  quick: { include: [plan] }\n  full: { include: all }\non_finish:",
     );
-    let artifacts = bench.run_dir().join("artifacts");
     let fixture = format!(
         r#"
 sessions:
@@ -274,7 +273,7 @@ sessions:
       - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
     outcome: {{ type: completed, summary: "planned" }}
 "#,
-        artifacts = artifacts.display()
+        artifacts = bench.staging("plan").display()
     );
     // Run in `quick` mode: `notes` never runs, its artifact never
     // exists, but distill declares it.
@@ -365,7 +364,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
     artifacts:
       produces: [plan.md]
   - id: boom
@@ -375,7 +374,7 @@ nodes:
 on_finish:
   - distill: [plan.md]
 "#;
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
@@ -387,7 +386,7 @@ on_finish:
 #[tokio::test]
 async fn a_later_run_mounts_the_distilled_knowledge() {
     let bench = Bench::new();
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -472,7 +471,7 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}}; write {{run.dir}}/artifacts/findings-{{runner.role}}.md"
+    prompt: "Audit as {{runner.role}}; write {{node.artifacts}}/findings-{{runner.role}}.md"
     artifacts:
       produces: ["findings-{{runner.role}}.md"]
 "#;
@@ -483,20 +482,22 @@ runners:
   reviewer-alt:
     - { adapter: mock, model: mock-model }
 "#;
-    let artifacts = bench.run_dir().join("artifacts");
+    // Each fan-out sibling is a node of its own, so each writes in a
+    // directory of its own.
     let fixture = format!(
         r#"
 sessions:
   - match_prompt_contains: "Audit as reviewer;"
     effects:
-      - {{ path: "{artifacts}/findings-reviewer.md", content: "r1\n" }}
+      - {{ path: "{reviewer}/findings-reviewer.md", content: "r1\n" }}
     outcome: {{ type: completed, summary: "reviewed" }}
   - match_prompt_contains: "Audit as reviewer-alt"
     effects:
-      - {{ path: "{artifacts}/findings-reviewer-alt.md", content: "r2\n" }}
+      - {{ path: "{alt}/findings-reviewer-alt.md", content: "r2\n" }}
     outcome: {{ type: completed, summary: "reviewed-alt" }}
 "#,
-        artifacts = artifacts.display()
+        reviewer = bench.staging("review@reviewer").display(),
+        alt = bench.staging("review@reviewer-alt").display()
     );
 
     let (terminal, state) = bench.run_with_config(workflow, &fixture, config).await;
@@ -508,9 +509,19 @@ sessions:
             state.nodes.get(node)
         );
     }
-    // The templated artifact names rendered per expanded node.
-    assert!(artifacts.join("findings-reviewer.md").exists());
-    assert!(artifacts.join("findings-reviewer-alt.md").exists());
+    // The templated artifact names rendered per expanded node, each
+    // held by the sibling that produced it.
+    for role in ["reviewer", "reviewer-alt"] {
+        assert!(
+            bench
+                .projection(
+                    Some(&format!("review@{role}")),
+                    &format!("findings-{role}.md")
+                )
+                .is_ok(),
+            "`review@{role}` holds its own rendered artifact"
+        );
+    }
 }
 
 #[tokio::test]
@@ -919,24 +930,30 @@ async fn distill_carries_the_hash_the_log_names_never_a_rehash_of_the_view() {
     // no fact of the run: what distill copies and what it records as the
     // content hash both come from the artifact the log holds.
     let bench = Bench::new();
-    let workflow = r#"
+    // The view belongs to the engine, so the node that overwrites one
+    // names it by its absolute path rather than through a template no
+    // workflow has for it.
+    let workflow = format!(
+        r#"
 name: distiller
 nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{{{node.artifacts}}}}/plan.md."
     artifacts:
       produces: [plan.md]
   - id: tamper
     kind: bash
     depends_on: [plan]
-    run: "echo TAMPERED-VIEW > {{run.dir}}/artifacts/plan.md"
+    run: "echo TAMPERED-VIEW > {view}/plan/plan.md"
 on_finish:
   - distill: [plan.md]
-"#;
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+"#,
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+    );
+    let fixture = distill_fixture(&bench);
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let dest = bench
@@ -958,5 +975,45 @@ on_finish:
         provenance["artifacts"][0]["content_hash"].as_str(),
         Some(format!("sha256:{}", held[0].content_hash).as_str()),
         "the recorded hash is the one on the log, never a rehash"
+    );
+}
+
+// --- where a session writes --------------------------------------------
+
+#[tokio::test]
+async fn a_node_that_declares_an_opaque_artifact_writes_in_its_own_staging_directory() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: staged
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
+    artifacts:
+      produces: [plan.md]
+"#;
+    let staging = bench.staging("plan");
+    let fixture = format!(
+        r#"
+sessions:
+  - match_prompt_contains: "{staging}/plan.md"
+    effects:
+      - {{ path: "{staging}/plan.md", content: "the plan\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+"#,
+        staging = staging.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        bench.mock().artifact_dirs_seen(),
+        vec![Some(staging)],
+        "the writable root a session is granted is this node's own, never the run's view"
+    );
+    assert_eq!(
+        bench.artifact("plan.md").expect("the run holds it"),
+        b"the plan\n"
     );
 }

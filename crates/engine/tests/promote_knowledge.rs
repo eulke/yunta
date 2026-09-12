@@ -107,7 +107,8 @@ async fn an_approved_gate_publishes_the_new_version() {
     .await
     .unwrap();
 
-    let notes_path = run_dir.join("artifacts/promotion-notes.md");
+    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
+        .join("promotion-notes.md");
     let fixture = format!(
         r##"
 sessions:
@@ -194,7 +195,8 @@ async fn an_unresolved_gate_never_publishes_anything() {
     .await
     .unwrap();
 
-    let notes_path = run_dir.join("artifacts/promotion-notes.md");
+    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
+        .join("promotion-notes.md");
     let fixture = format!(
         r##"
 sessions:

@@ -459,10 +459,9 @@ pub async fn run_stable_first(
     BTreeMap<String, yunta_core::ContentHash>,
 ) {
     std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let fixture = format!(
         "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
+        bench.staging("grill").display(),
     );
     let workflow = stable_first_workflow(volatile_command_output);
 
@@ -829,14 +828,16 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
     artifacts:
       produces: [plan.md]
 on_finish:
   - distill: [plan.md]
 "#;
 
-pub fn distill_fixture(artifacts_dir: &std::path::Path) -> String {
+/// The session `distiller`'s `plan` node runs: it writes the file that
+/// node declares, where that node writes.
+pub fn distill_fixture(bench: &Bench) -> String {
     format!(
         r#"
 sessions:
@@ -844,7 +845,7 @@ sessions:
       - {{ path: "{artifacts}/plan.md", content: "DISTILLED-MARKER: the durable decision\n" }}
     outcome: {{ type: completed, summary: "planned" }}
 "#,
-        artifacts = artifacts_dir.display()
+        artifacts = bench.staging("plan").display()
     )
 }
 

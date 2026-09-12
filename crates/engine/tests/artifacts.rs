@@ -33,10 +33,17 @@ fn node(yaml: &str) -> Node {
     serde_norway::from_str(yaml).unwrap()
 }
 
-fn write_artifact(run_dir: &Path, name: &str, content: &str) {
-    let dir = run_dir.join("artifacts");
+/// Puts a file where `node` writes what it declares, which is where the
+/// close reads it back from.
+fn write_artifact(run_dir: &Path, node: &str, name: &str, content: &str) {
+    let dir = yunta_engine::run_dir::staging(run_dir, &node.into());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(name), content).unwrap();
+}
+
+/// How a diagnostic names one of `node`'s declared files.
+fn staged(node: &str, name: &str) -> String {
+    format!("scratch/staging/{node}/{name}")
 }
 
 const REPORT_NODE: &str = r#"
@@ -83,18 +90,18 @@ fn a_missing_declared_artifact_fails_the_node_no_matter_what_the_agent_said() {
             path,
             problem: FileProblem::Missing { node },
         }] => {
-            assert_eq!(path, "artifacts/report.md");
+            assert_eq!(*path, staged("report", "report.md"));
             assert_eq!(node.as_str(), "report");
         }
         other => panic!("a missing file, named: {other:?}"),
     }
-    assert!(rendered(&failures).contains("artifacts/report.md"));
+    assert!(rendered(&failures).contains(&staged("report", "report.md")));
 }
 
 #[test]
 fn an_empty_artifact_is_as_bad_as_a_missing_one() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "report.md", "");
+    write_artifact(run_dir.path(), "report", "report.md", "");
 
     let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), None).unwrap_err();
     assert_eq!(codes(&failures), ["artifact-empty"]);
@@ -122,7 +129,12 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
     let run_dir = tempfile::tempdir().unwrap();
     // Content that is not valid YAML/JSON/anything — the engine
     // assumes no format for opaque artifacts.
-    write_artifact(run_dir.path(), "report.md", "{{{ not : parseable ][");
+    write_artifact(
+        run_dir.path(),
+        "report",
+        "report.md",
+        "{{{ not : parseable ][",
+    );
 
     let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), None).unwrap();
     assert_eq!(verified.len(), 1);
@@ -138,7 +150,7 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
 #[test]
 fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "plan.yaml", VALID_TASKS);
+    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
 
     let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
@@ -159,6 +171,7 @@ fn an_invalid_tasks_document_reports_every_violation_together() {
     // empty scope. Both must surface in one pass.
     write_artifact(
         run_dir.path(),
+        "plan",
         "plan.yaml",
         r#"
 tasks:
@@ -179,7 +192,10 @@ tasks:
     // document order: someone correcting a file works top to bottom.
     assert_eq!(codes(&failures), ["no-criteria", "empty-scope"]);
     let text = rendered(&failures);
-    assert!(text.contains("artifacts/plan.yaml: 2 errors"), "{text}");
+    assert!(
+        text.contains(&format!("{}: 2 errors", staged("plan", "plan.yaml"))),
+        "{text}"
+    );
     assert!(text.contains("task `T001`: no criteria declared"), "{text}");
     assert!(text.contains("task `T002`: `scope` is empty"), "{text}");
 }
@@ -187,7 +203,12 @@ tasks:
 #[test]
 fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "plan.yaml", "tasks: [not, a, document");
+    write_artifact(
+        run_dir.path(),
+        "plan",
+        "plan.yaml",
+        "tasks: [not, a, document",
+    );
 
     let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
     // Not a flat list of diagnostics: each one is reachable through the
@@ -195,7 +216,7 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     // and which kind's rules were asked.
     let report = failures[0].report().expect("a problem with the content");
     assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks);
-    assert_eq!(report.document.path, "artifacts/plan.yaml");
+    assert_eq!(report.document.path, staged("plan", "plan.yaml"));
     assert_eq!(codes(&failures), ["parse"]);
 }
 
@@ -207,7 +228,7 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     // A tasks document that was never written has no content whose kind could
     // be wrong — which is exactly why a rewrite cannot fix it.
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
-    assert_eq!(failures[0].path(), "artifacts/plan.yaml");
+    assert_eq!(failures[0].path(), staged("plan", "plan.yaml"));
 }
 
 const REVIEW_NODE: &str = r#"
@@ -236,7 +257,7 @@ findings:
 #[test]
 fn a_valid_findings_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "findings.yaml", VALID_FINDINGS);
+    write_artifact(run_dir.path(), "review", "findings.yaml", VALID_FINDINGS);
 
     let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap();
     let ArtifactContent::Findings(findings) = &verified[0].content else {
@@ -251,6 +272,7 @@ fn duplicate_finding_ids_report_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
+        "review",
         "findings.yaml",
         r#"
 findings:
@@ -270,13 +292,21 @@ findings:
     let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
     assert_eq!(codes(&failures), ["duplicate-id", "empty-title"]);
     let text = rendered(&failures);
-    assert!(text.contains("artifacts/findings.yaml: 2 errors"), "{text}");
+    assert!(
+        text.contains(&format!("{}: 2 errors", staged("review", "findings.yaml"))),
+        "{text}"
+    );
 }
 
 #[test]
 fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "findings.yaml", "findings: [not, valid");
+    write_artifact(
+        run_dir.path(),
+        "review",
+        "findings.yaml",
+        "findings: [not, valid",
+    );
 
     let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
@@ -307,7 +337,7 @@ questions:
 #[test]
 fn a_valid_questions_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "questions.yaml", VALID_QUESTIONS);
+    write_artifact(run_dir.path(), "ask", "questions.yaml", VALID_QUESTIONS);
 
     let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap();
     let ArtifactContent::Questions(questions) = &verified[0].content else {
@@ -322,6 +352,7 @@ fn a_choice_question_with_no_values_is_a_reported_violation() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
+        "ask",
         "questions.yaml",
         r#"
 questions:
@@ -335,7 +366,7 @@ questions:
     let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
     assert_eq!(codes(&failures).len(), 1);
     let text = rendered(&failures);
-    assert!(text.contains("artifacts/questions.yaml"), "{text}");
+    assert!(text.contains(&staged("ask", "questions.yaml")), "{text}");
 }
 
 #[test]
@@ -343,6 +374,7 @@ fn duplicate_question_ids_report_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
+        "ask",
         "questions.yaml",
         r#"
 questions:
@@ -361,7 +393,7 @@ questions:
     assert_eq!(codes(&failures), ["duplicate-id", "empty-text"]);
     let text = rendered(&failures);
     assert!(
-        text.contains("artifacts/questions.yaml: 2 errors"),
+        text.contains(&format!("{}: 2 errors", staged("ask", "questions.yaml"))),
         "{text}"
     );
 }
@@ -369,7 +401,12 @@ questions:
 #[test]
 fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "questions.yaml", "questions: [not, valid");
+    write_artifact(
+        run_dir.path(),
+        "ask",
+        "questions.yaml",
+        "questions: [not, valid",
+    );
 
     let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
@@ -395,7 +432,7 @@ run: "true"
 #[test]
 fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "report.md", "0123456789");
+    write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
     let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), Some(5)).unwrap_err();
     // Both numbers on the table as data, never a truncation, so whoever
@@ -408,14 +445,17 @@ fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
         other => panic!("an oversized file, with both numbers: {other:?}"),
     }
     let text = rendered(&failures);
-    assert!(text.contains("artifacts/report.md: 1 error"), "{text}");
+    assert!(
+        text.contains(&format!("{}: 1 error", staged("report", "report.md"))),
+        "{text}"
+    );
     assert!(text.contains("10") && text.contains('5'), "{text}");
 }
 
 #[test]
 fn an_artifact_at_the_cap_or_with_no_cap_passes() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "report.md", "0123456789");
+    write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
     assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), Some(10)).is_ok());
     assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), None).is_ok());

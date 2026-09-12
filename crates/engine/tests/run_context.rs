@@ -42,7 +42,6 @@ async fn a_command_source_resolves_stdout_and_is_replayable() {
 #[tokio::test]
 async fn an_artifact_source_creates_an_implicit_dependency_and_resolves_the_content() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     // No explicit `depends_on` on `plan` — the ordering must come purely
     // from `context: [{ artifact: { node: grill } }]`.
@@ -64,7 +63,7 @@ nodes:
 "#;
     let fixture = format!(
         "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display()
+        bench.staging("grill").display()
     );
 
     let (terminal, _state) = bench.run(workflow, &fixture).await;
@@ -781,7 +780,7 @@ nodes:
 "#;
     let fixture = format!(
         "sessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
-        bench.run_dir().join("artifacts").display()
+        bench.staging("write").display()
     );
 
     let (terminal, _state) = bench.run(workflow, &fixture).await;
@@ -807,7 +806,6 @@ async fn an_artifact_reference_reaches_only_the_node_it_names() {
     // nothing — and `alpha`'s file of the same name is not an answer to
     // a question about `bare`.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow = r#"
 name: ctx-wrong-producer
 nodes:
@@ -836,7 +834,7 @@ sessions:
     outcome: {{ type: completed, summary: reported }}
   - outcome: {{ type: completed, summary: planned }}
 "#,
-        dir = artifacts_dir.display()
+        dir = bench.staging("alpha").display()
     );
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
@@ -865,8 +863,11 @@ async fn an_artifact_reference_without_a_node_resolves_the_last_acceptance_not_t
     // and its bytes come from the store — the directory is not the
     // answer to anything.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let workflow = r#"
+    // The view belongs to the engine, so the node that deletes it names
+    // it by its absolute path rather than through a template no workflow
+    // has for it.
+    let workflow = format!(
+        r#"
 name: ctx-latest-acceptance
 nodes:
   - id: alpha
@@ -885,30 +886,33 @@ nodes:
   - id: wipe
     kind: bash
     depends_on: [beta]
-    run: "rm -rf {{run.dir}}/artifacts"
+    run: "rm -rf {view}"
   - id: plan
     kind: prompt
     runner: executor
     depends_on: [wipe]
     prompt: "Plan from the report."
     context:
-      - artifact: { name: report.md }
-"#;
+      - artifact: {{ name: report.md }}
+"#,
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+    );
     let fixture = format!(
         r#"
 sessions:
   - effects:
-      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+      - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
     outcome: {{ type: completed, summary: first }}
   - effects:
-      - {{ path: "{dir}/report.md", content: "BETA-REPORT" }}
+      - {{ path: "{beta}/report.md", content: "BETA-REPORT" }}
     outcome: {{ type: completed, summary: second }}
   - match_prompt_contains: "BETA-REPORT"
     outcome: {{ type: completed, summary: planned }}
 "#,
-        dir = artifacts_dir.display()
+        alpha = bench.staging("alpha").display(),
+        beta = bench.staging("beta").display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 }

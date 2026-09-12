@@ -1,12 +1,11 @@
 //! One node's artifacts are out of every other node's reach.
 //!
-//! A session writes files under the run's `artifacts/` and a CLI grants
-//! writes by directory rather than by file, so nothing stops a node from
-//! writing under a name another node produces. It reaches nothing by
-//! doing so: an artifact is what the run accepted — an identity, a
-//! producer and a hash on the log, with the bytes in the run's object
-//! store — and every reader resolves it there. The directory is the view
-//! the run writes from what it holds.
+//! Each node writes into a directory of its own, so two nodes that
+//! declare the same name never meet: the writable root a session is
+//! granted is that node's staging, and `artifacts/` is the view the run
+//! writes from what it holds. What a node produced is what the run
+//! accepted — an identity, a producer and a hash on the log, with the
+//! bytes in the run's object store — and every reader resolves it there.
 
 use yunta_core::events::ArtifactId;
 use yunta_engine::RunTerminal;
@@ -42,21 +41,23 @@ nodes:
 #[tokio::test]
 async fn a_node_that_writes_over_another_nodes_name_reaches_nothing() {
     let bench = Bench::new();
-    let dir = bench.run_dir().join("artifacts");
+    let alpha = bench.staging("alpha");
+    let beta = bench.staging("beta");
     let fixture = format!(
         r#"
 sessions:
   - effects:
-      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+      - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
     outcome: {{ type: completed, summary: reported }}
   - effects:
-      - {{ path: "{dir}/notes.md", content: "BETA-NOTES" }}
-      - {{ path: "{dir}/report.md", content: "BETA-OVERWRITE" }}
+      - {{ path: "{beta}/notes.md", content: "BETA-NOTES" }}
+      - {{ path: "{beta}/report.md", content: "BETA-OVERWRITE" }}
     outcome: {{ type: completed, summary: noted }}
   - match_prompt_contains: "ALPHA-REPORT"
     outcome: {{ type: completed, summary: read }}
 "#,
-        dir = dir.display()
+        alpha = alpha.display(),
+        beta = beta.display()
     );
 
     let (terminal, state) = bench.run(THREE_NODES, &fixture).await;
@@ -64,6 +65,14 @@ sessions:
         terminal,
         RunTerminal::Finished,
         "`reader` is served `alpha`'s report, whatever `beta` wrote: {state:?}"
+    );
+
+    // `beta` never reached `alpha`'s file to begin with: each wrote in
+    // its own directory, and `alpha`'s still holds what `alpha` wrote.
+    assert_eq!(
+        std::fs::read(alpha.join("report.md")).expect("alpha's own file"),
+        b"ALPHA-REPORT",
+        "a name another node wrote is a file in that node's own directory"
     );
 
     // The run holds one artifact per producer, and `beta`'s write under
@@ -99,7 +108,6 @@ sessions:
 #[tokio::test]
 async fn two_producers_of_one_name_hold_two_artifacts() {
     let bench = Bench::new();
-    let dir = bench.run_dir().join("artifacts");
     let workflow = r#"
 name: one-name-two-producers
 nodes:
@@ -128,15 +136,16 @@ nodes:
         r#"
 sessions:
   - effects:
-      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+      - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
     outcome: {{ type: completed, summary: reported }}
   - effects:
-      - {{ path: "{dir}/report.md", content: "BETA-REPORT" }}
+      - {{ path: "{beta}/report.md", content: "BETA-REPORT" }}
     outcome: {{ type: completed, summary: reported }}
   - match_prompt_contains: "ALPHA-REPORT"
     outcome: {{ type: completed, summary: read }}
 "#,
-        dir = dir.display()
+        alpha = bench.staging("alpha").display(),
+        beta = bench.staging("beta").display()
     );
 
     let (terminal, state) = bench.run(workflow, &fixture).await;

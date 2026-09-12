@@ -22,6 +22,16 @@ use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 
+/// The `findings` artifacts `node` declares — the ones whose file is the
+/// projection of what that node posted rather than anything it wrote.
+fn declared_findings(node: &Node) -> Vec<&ArtifactSpec> {
+    node.artifacts
+        .iter()
+        .flat_map(|artifacts| artifacts.produces.iter())
+        .filter(|spec| spec.kind() == Some(yunta_core::ArtifactKind::Findings))
+        .collect()
+}
+
 /// Writes the findings file of every `findings` artifact a session node
 /// declares, from what that node reported.
 ///
@@ -38,35 +48,27 @@ pub(super) async fn derive_findings(
     if !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. }) {
         return Ok(None);
     }
-    let declared: Vec<&ArtifactSpec> = node
-        .artifacts
-        .iter()
-        .flat_map(|artifacts| artifacts.produces.iter())
-        .filter(|spec| {
-            matches!(
-                spec,
-                ArtifactSpec::Typed {
-                    kind: yunta_core::ArtifactKind::Findings,
-                    ..
-                }
-            )
-        })
-        .collect();
+    let declared = declared_findings(node);
     if declared.is_empty() {
         return Ok(None);
     }
     let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
         .effective_of(&node.id);
     for spec in declared {
-        let derived =
-            match crate::artifacts::derive_findings(spec, ctx.run_dir, posted.clone(), ceiling) {
-                Ok(derived) => derived,
-                Err(error) => {
-                    return Ok(Some(
-                        fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
-                    ))
-                }
-            };
+        let derived = match crate::artifacts::derive_findings(
+            &node.id,
+            spec,
+            ctx.run_dir,
+            posted.clone(),
+            ceiling,
+        ) {
+            Ok(derived) => derived,
+            Err(error) => {
+                return Ok(Some(
+                    fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
+                ))
+            }
+        };
         accept(
             &ctx.log(),
             ctx.run_dir,
