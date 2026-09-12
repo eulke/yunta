@@ -1,18 +1,21 @@
 //! Creating a promotion successor: a run that closed
 //! `run_finished: promoted` gets a fresh run in `suggested_mode`,
-//! `promoted_from` it, inheriting its `artifacts/` wholesale at birth
-//! (the successor's initial context automatically includes the
-//! predecessor's artifacts, tasks document, and findings — all three are files
-//! under `artifacts/`, so one directory covers them). Lives in the
-//! engine so both drivers of a chain use the identical mechanics: the
+//! `promoted_from` it, inheriting every artifact the predecessor's log
+//! holds at birth (the successor's initial context automatically
+//! includes the predecessor's artifacts, tasks document and findings —
+//! all three are artifacts of that run, so one rule covers them). Lives
+//! in the engine so both drivers of a chain use the identical mechanics: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin, StoredEvent};
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId, ARTIFACTS_DIR};
+use yunta_core::events::artifacts::ArtifactRef;
+use yunta_core::events::{ArtifactOrigin, StoredEvent};
+use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId, Workflow};
 use yunta_storage::AsyncStorage;
+
+use crate::artifacts::ObjectError;
 
 use super::{create_run, BirthArtifact, CreateRunParams, RunError};
 use yunta_core::{CommitSha, InvalidId};
@@ -93,12 +96,12 @@ pub async fn create_promotion_successor(
     // What the predecessor's own log says it held, so each inherited
     // artifact keeps the identity and the producer it had there.
     let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
-    let inherited =
-        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)
-            .map_err(|source| RunError::Io {
-                context: format!("inherit artifacts from `{predecessor_id}`"),
-                source,
-            })?;
+    let inherited = read_inherited_artifacts(
+        predecessor_run_dir,
+        predecessor_id,
+        &predecessor_manifest.workflow,
+        &predecessor_events,
+    )?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -121,63 +124,55 @@ pub async fn create_promotion_successor(
     })
 }
 
-/// Automatic inheritance: every file directly under the predecessor's
-/// `artifacts/` is carried into the successor at birth. Deliberately
-/// narrower than the general linked-run mounting a composed workflow
-/// run uses.
+/// Automatic inheritance: every artifact the predecessor's log holds is
+/// carried into the successor at birth. Deliberately narrower than the
+/// general linked-run mounting a composed workflow run uses.
 ///
-/// Each file is looked up in `from_events` by what its bytes hash to,
-/// which is what gives the successor the identity and the producer the
-/// predecessor held it under. A file that log never accepted is
-/// inherited as opaque under its own name, with no producer: that is
-/// everything the predecessor's log knows about it.
+/// What the predecessor holds is what its log accepted — the standing
+/// acceptance of each identity, with the bytes out of its object store —
+/// so a file lying under its `artifacts/` that no acceptance accounts
+/// for is not an artifact and reaches no successor. Each inherited
+/// artifact keeps the identity and the producer the predecessor held it
+/// under, and travels under the name that run named it by; an
+/// interpreted artifact the predecessor's own workflow names nowhere has
+/// no name to travel under and stays behind.
 fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
+    from_workflow: &Workflow,
     from_events: &[StoredEvent],
-) -> std::io::Result<Vec<BirthArtifact>> {
-    let from = from_run_dir.join(ARTIFACTS_DIR);
-    if !from.exists() {
-        return Ok(Vec::new());
-    }
+) -> Result<Vec<BirthArtifact>, ObjectError> {
+    let held = crate::artifacts::RunArtifacts::of(from_run_dir, from_events);
     let mut inherited = Vec::new();
-    for entry in std::fs::read_dir(&from)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
+    for artifact in held.ledger().every() {
+        let Some(name) = crate::artifacts::view_name(from_workflow, artifact) else {
             continue;
-        }
-        let name = entry.file_name().into_string().map_err(|name| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("artifact name `{}` is not UTF-8", name.to_string_lossy()),
-            )
-        })?;
-        let bytes = std::fs::read(entry.path())?;
-        inherited.push(birth_artifact(name, bytes, from_run, from_events));
+        };
+        inherited.push(birth_artifact(
+            name,
+            held.bytes(artifact)?,
+            from_run,
+            artifact,
+        ));
     }
     Ok(inherited)
 }
 
 /// One artifact as the run receiving it holds it: the name it carries,
-/// and the identity and producer the handing-over log states for exactly
-/// these bytes.
+/// and the identity and producer the handing-over log states for it.
 pub(super) fn birth_artifact(
     name: String,
     bytes: Vec<u8>,
     from_run: &RunId,
-    from_events: &[StoredEvent],
+    held: &ArtifactRef,
 ) -> BirthArtifact {
-    let held = crate::artifacts::handed_over(from_events, &yunta_core::sha256_hex(&bytes));
     BirthArtifact {
-        artifact: held
-            .as_ref()
-            .map(|held| held.artifact.clone())
-            .unwrap_or_else(|| ArtifactId::Opaque { name: name.clone() }),
+        name,
+        artifact: held.artifact.clone(),
         origin: ArtifactOrigin::Inherited {
             run: from_run.clone(),
-            producer: held.and_then(|held| held.producer),
+            producer: held.producer.clone(),
         },
-        name,
         bytes,
     }
 }

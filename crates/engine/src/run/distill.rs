@@ -31,7 +31,7 @@
 use serde::Serialize;
 use yunta_core::events::findings::effective;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
-use yunta_core::{sha256_hex, Isolation, ModeName, OnFinishStep};
+use yunta_core::{Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
 
@@ -152,11 +152,16 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         source,
     })?;
 
+    // What the run holds, so the distillate is the bytes the log names
+    // and its provenance carries that same hash — never a second reading
+    // of a view somebody may have replaced.
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
     for name in &declared {
-        let source = ctx.run_dir.join("artifacts").join(name.as_str());
-        match std::fs::read(&source) {
-            Ok(bytes) => {
+        match held.named(&ctx.manifest.workflow, None, name) {
+            Some(artifact) => {
+                let bytes = held.bytes(artifact)?;
                 let dest = dest_dir.join(name.as_str());
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
@@ -170,11 +175,11 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                 })?;
                 artifacts.push(ProvenanceArtifact {
                     name: name.to_string(),
-                    content_hash: Some(format!("sha256:{}", sha256_hex(&bytes))),
+                    content_hash: Some(format!("sha256:{}", artifact.content_hash)),
                     missing: false,
                 });
             }
-            Err(_) => {
+            None => {
                 // Declared durable, never produced (a mode excluded its
                 // node, a reroute never reached it): registered, never
                 // lost — reported as a finding — and the rest distills

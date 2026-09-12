@@ -16,13 +16,11 @@ use yunta_core::events::{
 };
 use yunta_core::{HookFailurePolicy, Node};
 
-use crate::artifacts::{close_artifacts, ArtifactsSnapshot};
+use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
-use super::node_artifacts::{
-    artifacts_violation, derive_findings, pending_questions, record_artifacts,
-};
+use super::node_artifacts::{derive_findings, pending_questions, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
 
@@ -35,7 +33,6 @@ pub(super) struct Close<'a> {
     outcome: String,
     tokens: TokenUsage,
     staged: &'a [PathBuf],
-    pub(super) artifacts_before: Option<&'a ArtifactsSnapshot>,
 }
 
 impl<'a> Close<'a> {
@@ -47,7 +44,6 @@ impl<'a> Close<'a> {
             outcome: outcome.into(),
             tokens,
             staged: &[],
-            artifacts_before: None,
         }
     }
 
@@ -55,14 +51,6 @@ impl<'a> Close<'a> {
     /// the scope diff.
     pub(super) fn staged(mut self, staged: &'a [PathBuf]) -> Self {
         self.staged = staged;
-        self
-    }
-
-    /// What the run's `artifacts/` held before this node's session ran,
-    /// which is what makes the files it wrote there tellable from the
-    /// files every other node of the run already owns.
-    pub(super) fn artifacts_before(mut self, before: &'a ArtifactsSnapshot) -> Self {
-        self.artifacts_before = Some(before);
         self
     }
 }
@@ -107,10 +95,6 @@ pub(super) async fn close_node(
         Err(error) => return fail_with_tokens(ctx, node, error.to_string(), false, tokens).await,
     };
     let node = &node_rendered;
-
-    if let Some(end) = artifacts_violation(ctx, node, close.artifacts_before, tokens).await? {
-        return Ok(end);
-    }
 
     let ceiling = ctx
         .manifest

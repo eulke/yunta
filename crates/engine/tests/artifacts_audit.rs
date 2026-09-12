@@ -1,111 +1,162 @@
-//! The run's `artifacts/` directory, audited at node close.
+//! One node's artifacts are out of every other node's reach.
 //!
-//! Every node of a run writes into one shared directory, and a CLI
-//! grants writes by directory rather than by file — so a node that
-//! declares an artifact can reach every other node's. The worktree has
-//! the same shape and the run answers it the same way: the session may
-//! write, and the close audits what it wrote against what the node
-//! declared.
+//! A session writes files under the run's `artifacts/` and a CLI grants
+//! writes by directory rather than by file, so nothing stops a node from
+//! writing under a name another node produces. It reaches nothing by
+//! doing so: an artifact is what the run accepted — an identity, a
+//! producer and a hash on the log, with the bytes in the run's object
+//! store — and every reader resolves it there. The directory is the view
+//! the run writes from what it holds.
 
-use yunta_core::events::EventPayload;
+use yunta_core::events::ArtifactId;
 use yunta_engine::RunTerminal;
 use yunta_testkit::Bench;
 
-/// A node with both kinds of artifact: the tasks document it hands over through
-/// the run tools, and a file of its own the session writes. The opaque
-/// one is what earns the session its reach into `artifacts/` — a node
-/// that only submits needs none, so it never gets one, and there would
-/// be nothing for this audit to catch.
-const PLAN_AND_NOTES: &str = r#"
-name: plan-and-notes
+/// `alpha` produces `report.md`; `beta` declares `notes.md` of its own and
+/// writes `report.md` besides; `reader` asks for `alpha`'s.
+const THREE_NODES: &str = r#"
+name: out-of-reach
 nodes:
-  - id: plan
+  - id: alpha
     kind: prompt
     runner: executor
-    prompt: "Write a tasks document and leave your notes."
+    prompt: "Write the report."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
-        - notes.md
+      produces: [report.md]
+  - id: beta
+    kind: prompt
+    runner: executor
+    depends_on: [alpha]
+    prompt: "Write your notes."
+    artifacts:
+      produces: [notes.md]
+  - id: reader
+    kind: prompt
+    runner: executor
+    depends_on: [beta]
+    prompt: "Read the report."
+    context:
+      - artifact: { node: alpha, name: report.md }
 "#;
 
-/// A session that submits its tasks document and writes `effects` besides — one
-/// `path: content` pair per line, already indented for the script.
-fn fixture(effects: &str) -> String {
-    format!(
+#[tokio::test]
+async fn a_node_that_writes_over_another_nodes_name_reaches_nothing() {
+    let bench = Bench::new();
+    let dir = bench.run_dir().join("artifacts");
+    let fixture = format!(
         r#"
-capabilities: {{ run_tools: true }}
 sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        arguments:
-          name: plan.yaml
-          document:
-            tasks:
-              - id: t1
-                title: "Work"
-                scope: ["src/**"]
-                criteria:
-                  - cmd: "cargo test"
-    effects:
-{effects}
-    outcome: {{ type: completed, summary: planned }}
-"#
-    )
-}
-
-/// One `effects` entry, at the indentation [`fixture`] splices it into.
-fn effect(bench: &Bench, name: &str, content: &str) -> String {
-    let path = bench.run_dir().join("artifacts").join(name);
-    format!(
-        "      - {{ path: \"{}\", content: \"{content}\" }}",
-        path.display()
-    )
-}
-
-fn last_failure(events: &[yunta_core::events::StoredEvent]) -> String {
-    events
-        .iter()
-        .rev()
-        .find_map(|e| match e.payload() {
-            Some(EventPayload::NodeFailed(p)) => Some(p.failure.to_string()),
-            _ => None,
-        })
-        .expect("the node failed")
-}
-
-#[tokio::test]
-async fn a_node_that_writes_an_artifact_it_never_declared_fails() {
-    let bench = Bench::new();
-    let effects = format!(
-        "{}\n{}",
-        effect(&bench, "notes.md", "what I did\\n"),
-        effect(&bench, "findings-reviewer.yaml", "findings: []\\n"),
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: reported }}
+  - effects:
+      - {{ path: "{dir}/notes.md", content: "BETA-NOTES" }}
+      - {{ path: "{dir}/report.md", content: "BETA-OVERWRITE" }}
+    outcome: {{ type: completed, summary: noted }}
+  - match_prompt_contains: "ALPHA-REPORT"
+    outcome: {{ type: completed, summary: read }}
+"#,
+        dir = dir.display()
     );
 
-    let (terminal, _state) = bench.run(PLAN_AND_NOTES, &fixture(&effects)).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "a node does not get to write another node's artifact: {terminal:?}"
+    let (terminal, state) = bench.run(THREE_NODES, &fixture).await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "`reader` is served `alpha`'s report, whatever `beta` wrote: {state:?}"
     );
 
-    let failure = last_failure(&bench.storage.events_for_run(&bench.run_id).unwrap());
-    assert!(
-        failure.contains("findings-reviewer.yaml"),
-        "the failure names the file that was not declared: {failure}"
+    // The run holds one artifact per producer, and `beta`'s write under
+    // `alpha`'s name is none of them: no acceptance accounts for it.
+    let held = bench.accepted();
+    assert_eq!(
+        held.iter()
+            .map(|a| (
+                a.producer.as_ref().map(|n| n.to_string()),
+                a.artifact.to_string()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("alpha".to_string()), "report.md".to_string()),
+            (Some("beta".to_string()), "notes.md".to_string()),
+        ],
+        "{held:?}"
     );
-    assert!(
-        !failure.contains("notes.md") && !failure.contains("plan.yaml"),
-        "the node's own artifacts are the node doing its job: {failure}"
+    assert_eq!(
+        bench.object(&held[0].content_hash).expect("the object"),
+        b"ALPHA-REPORT",
+        "the bytes `alpha` produced are the bytes the run keeps for it"
+    );
+    assert_eq!(
+        bench
+            .projection(Some("alpha"), "report.md")
+            .expect("alpha's view"),
+        b"ALPHA-REPORT",
+        "the view under the producer is written from what the run holds"
     );
 }
 
 #[tokio::test]
-async fn a_node_that_writes_only_what_it_declared_finishes() {
+async fn two_producers_of_one_name_hold_two_artifacts() {
     let bench = Bench::new();
-    let effects = effect(&bench, "notes.md", "what I did\\n");
+    let dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: one-name-two-producers
+nodes:
+  - id: alpha
+    kind: prompt
+    runner: executor
+    prompt: "Write the report."
+    artifacts:
+      produces: [report.md]
+  - id: beta
+    kind: prompt
+    runner: executor
+    depends_on: [alpha]
+    prompt: "Write the report."
+    artifacts:
+      produces: [report.md]
+  - id: reader
+    kind: prompt
+    runner: executor
+    depends_on: [beta]
+    prompt: "Read the first report."
+    context:
+      - artifact: { node: alpha, name: report.md }
+"#;
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: reported }}
+  - effects:
+      - {{ path: "{dir}/report.md", content: "BETA-REPORT" }}
+    outcome: {{ type: completed, summary: reported }}
+  - match_prompt_contains: "ALPHA-REPORT"
+    outcome: {{ type: completed, summary: read }}
+"#,
+        dir = dir.display()
+    );
 
-    let (terminal, _state) = bench.run(PLAN_AND_NOTES, &fixture(&effects)).await;
-    assert_eq!(terminal, RunTerminal::Finished);
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 2, "one identity per producer: {held:?}");
+    assert!(held.iter().all(|a| a.artifact
+        == ArtifactId::Opaque {
+            name: "report.md".to_string()
+        }));
+    assert_ne!(
+        held[0].content_hash, held[1].content_hash,
+        "each producer's own bytes, side by side"
+    );
+    assert_eq!(
+        bench
+            .projection(Some("beta"), "report.md")
+            .expect("beta's view"),
+        b"BETA-REPORT",
+        "each producer's view sits under its own node"
+    );
 }

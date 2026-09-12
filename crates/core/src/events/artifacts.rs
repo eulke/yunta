@@ -23,7 +23,7 @@ use std::path::Path;
 use super::{ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventPayload, StoredEvent};
 use crate::hash::ContentHash;
 use crate::ids::{NodeId, Seq};
-use crate::workflow::{ArtifactKind, ARTIFACTS_DIR};
+use crate::workflow::{ArtifactKind, ArtifactSpec, Workflow, ARTIFACTS_DIR};
 
 /// What identifies one artifact within a run: what it is, and which node
 /// produced it — `None` for what the run acquired without one.
@@ -150,6 +150,51 @@ impl ArtifactLedger {
             .iter()
             .filter_map(|held| self.current.get(held))
     }
+}
+
+/// What artifact a workflow refers to by `name`.
+///
+/// A declared `kind:` is the identity and the name belongs to the view
+/// alone, so every surface that speaks in names — a context source, a
+/// mount, a distilled path, a gate's attachment — turns one into the
+/// question a log can answer through here. `producer` narrows the search
+/// to that node's declarations; without one every node's count, which is
+/// what a reference naming no producer means. A name no declaration
+/// covers is opaque, because that name is all that identifies it.
+pub fn declared_identity(workflow: &Workflow, producer: Option<&NodeId>, name: &str) -> ArtifactId {
+    let kind = declarations(workflow, producer)
+        .find(|spec| spec.name() == name)
+        .and_then(ArtifactSpec::kind);
+    ArtifactId::of(name, kind)
+}
+
+/// The name `producer` declares the artifact `id` under.
+///
+/// The inverse of [`declared_identity`], for a reader that has to hand an
+/// artifact on under a name: an opaque artifact is named by its identity,
+/// an interpreted one by the `artifacts.produces` entry declaring its
+/// kind. `None` when that node declares nothing of the kind — which the
+/// reader has to know rather than invent a name.
+pub fn declared_name(workflow: &Workflow, producer: &NodeId, id: &ArtifactId) -> Option<String> {
+    match id {
+        ArtifactId::Opaque { name } => Some(name.clone()),
+        ArtifactId::Interpreted { kind } => declarations(workflow, Some(producer))
+            .find(|spec| spec.kind() == Some(*kind))
+            .map(|spec| spec.name().to_string()),
+    }
+}
+
+/// Every artifact declaration in play: one node's when `producer` names
+/// it, every node's otherwise.
+fn declarations<'a>(
+    workflow: &'a Workflow,
+    producer: Option<&'a NodeId>,
+) -> impl Iterator<Item = &'a ArtifactSpec> {
+    workflow
+        .iter_nodes()
+        .filter(move |node| producer.is_none_or(|id| &node.id == id))
+        .filter_map(|node| node.artifacts.as_ref())
+        .flat_map(|artifacts| artifacts.produces.iter())
 }
 
 /// The identity an `artifact_written` states. A declared `artifact_kind`

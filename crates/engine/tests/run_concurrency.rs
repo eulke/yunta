@@ -864,6 +864,11 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     );
     std::fs::create_dir_all(&artifacts_dir).unwrap();
     std::fs::write(artifacts_dir.join("plan.yaml"), &tasks).unwrap();
+    // The bytes the crashed run accepted, where it kept them: the loop
+    // reads its tasks from the run's own store, not from the view.
+    let tasks_hash = yunta_core::sha256_hex(tasks.as_bytes());
+    std::fs::create_dir_all(run_dir.join("objects")).unwrap();
+    std::fs::write(run_dir.join("objects").join(tasks_hash.as_str()), &tasks).unwrap();
 
     // Simulate the crash by hand-writing the log up through: plan already
     // registered, the loop started, task-p already Done and committed,
@@ -889,11 +894,13 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("plan".into()),
+            // A log written before `artifact_accepted` existed: the
+            // fold reads it as the same artifact under the same hash.
             payload: yunta_core::events::EventPayload::ArtifactWritten(
                 yunta_core::events::ArtifactWrittenPayload {
                     path: "artifacts/plan.yaml".into(),
-                    content_hash: yunta_core::sha256_hex(b"irrelevant"),
-                    artifact_kind: None,
+                    content_hash: tasks_hash.clone(),
+                    artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
                 },
             ),
         },

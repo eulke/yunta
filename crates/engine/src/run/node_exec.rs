@@ -291,7 +291,7 @@ pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::P
     declared_artifacts(ctx, node)
         .iter()
         .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Plain(_)))
-        .then(|| ctx.run_dir.join("artifacts"))
+        .then(|| ctx.run_dir.join(yunta_core::ARTIFACTS_DIR))
 }
 
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {

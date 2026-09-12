@@ -61,14 +61,14 @@ pub(super) enum ContextResolveError {
     },
     #[error(
         "context `{source_id}` on node `{node}`: artifact `{name}`{} was never produced — \
-         nothing wrote it into this run's `artifacts/`",
+         this run's log holds no such artifact",
         .referenced.as_ref().map(|r| format!(" (declared by node `{r}`)")).unwrap_or_default()
     )]
     MissingArtifact {
         node: NodeId,
         source_id: String,
-        /// `None` for the node-less form: the read is against
-        /// this run's own `artifacts/`, producer unnamed on purpose.
+        /// `None` for the node-less form: the question is about the run
+        /// rather than about one node, producer unnamed on purpose.
         referenced: Option<NodeId>,
         name: String,
     },

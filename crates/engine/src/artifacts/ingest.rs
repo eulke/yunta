@@ -148,6 +148,30 @@ pub(crate) fn verify_one(
     })
 }
 
+/// One artifact the run already holds, read as the kind its declaration
+/// gives it.
+///
+/// The bytes come from the object store, so there is no file to find, no
+/// emptiness to catch and no ceiling to enforce: those are questions
+/// about a file on its way in, already answered before the run accepted
+/// it. What is left is the reading, and it is the reading the close does.
+pub(crate) fn interpreted(
+    node: Option<&NodeId>,
+    spec: &ArtifactSpec,
+    bytes: &[u8],
+) -> Result<VerifiedArtifact, ArtifactFailure> {
+    let path = super::store::view_path(node, spec.name());
+    let content = interpret(spec.kind(), bytes, &path.display().to_string())
+        .map_err(ArtifactFailure::Content)?;
+    Ok(VerifiedArtifact {
+        name: spec.name().to_string(),
+        path,
+        content_hash: sha256_hex(bytes),
+        bytes: bytes.to_vec(),
+        content,
+    })
+}
+
 /// The file itself, before anything inside it is read: it exists, it has
 /// content, and it is within the declared guard. Nothing a rewrite of
 /// the content reaches, which is why each answer here is a

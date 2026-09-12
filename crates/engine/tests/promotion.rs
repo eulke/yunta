@@ -382,3 +382,56 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
         std::fs::read(closed.run_dir.join("artifacts/findings-inherited.yaml")).unwrap()
     );
 }
+
+#[tokio::test]
+async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
+    // A file nobody declared is not an artifact: no acceptance accounts
+    // for it, so the predecessor does not hold it and the successor is
+    // not born with it.
+    let interaction = ScriptedInteraction::choose("promote");
+    let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
+    let closed =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    std::fs::write(
+        closed.run_dir.join("artifacts/stray.md"),
+        "nobody declared this\n",
+    )
+    .unwrap();
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let inherited = yunta_testkit::accepted(&events);
+    assert_eq!(
+        inherited
+            .iter()
+            .map(|held| held.artifact.to_string())
+            .collect::<Vec<_>>(),
+        vec!["findings".to_string()],
+        "only what the predecessor's log holds is inherited: {inherited:?}"
+    );
+    assert!(
+        !successor.run_dir.join("artifacts/stray.md").exists(),
+        "a stray file is not a fact of the predecessor, so it reaches no successor"
+    );
+}

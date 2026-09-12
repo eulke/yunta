@@ -90,7 +90,11 @@ impl Bench {
             )
             .unwrap();
         let run_dir = root.path().join("run");
-        std::fs::create_dir_all(run_dir.join("artifacts")).unwrap();
+        // The directories `create_run` gives every run: what a session
+        // writes into, and what the engine writes through.
+        for dir in ["artifacts", "scratch"] {
+            std::fs::create_dir_all(run_dir.join(dir)).unwrap();
+        }
         let host = Arc::new(RunToolsHost::new(
             storage.async_handle(),
             run_id.clone(),
@@ -599,6 +603,46 @@ async fn a_check_names_the_same_problems_the_close_would() {
     assert!(
         text.contains("expected a boolean"),
         "the same diagnostic the close produces: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() {
+    // Once a document is handed over it is a fact of the run. The verdict
+    // is about that document, so a file somebody wrote over afterwards
+    // does not change what the session is told.
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(
+        &client,
+        "yunta_submit_tasks",
+        json!({
+            "name": "plan.yaml",
+            "document": {
+                "tasks": [{
+                    "id": "t1",
+                    "title": "Work",
+                    "scope": ["src/**"],
+                    "criteria": [{"cmd": "cargo test"}],
+                }],
+            },
+        }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+
+    std::fs::write(
+        bench.run_dir.join("artifacts").join("plan.yaml"),
+        "not a tasks document at all\n",
+    )
+    .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(
+        text.contains("1 task(s) registered: `t1`"),
+        "the verdict is about the document the run holds: {text}"
     );
 }
 

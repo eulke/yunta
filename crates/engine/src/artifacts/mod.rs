@@ -10,23 +10,30 @@
 //! run's artifacts are therefore exactly what its log says, and the
 //! directory is a projection of that rather than the answer to it.
 //!
+//! [`RunArtifacts`] is the one door out. Every reader — a context
+//! source, a loop looking for its tasks, a mount, a promotion, a
+//! distillation, a gate's attachment — resolves an artifact against the
+//! log and takes its bytes from the store, so nothing in the engine
+//! opens an artifact by file name.
+//!
 //! [`store`] holds the bytes and writes the view; [`ingest`] judges what
 //! a node produced and renders what the engine writes.
 
 mod ingest;
 pub mod store;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
-use yunta_core::events::{ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload};
-use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId, ARTIFACTS_DIR};
+use yunta_core::events::artifacts::{declared_name, ArtifactLedger, ArtifactRef};
+use yunta_core::events::{
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload, StoredEvent,
+};
+use yunta_core::{ArtifactKind, NodeId, Workflow, ARTIFACTS_DIR};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
 
-pub(crate) use ingest::{canonical, derive_findings, submit, verify_one, SubmitError};
+pub(crate) use ingest::{canonical, derive_findings, interpreted, submit, verify_one, SubmitError};
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
 pub use store::ObjectError;
 
@@ -117,119 +124,88 @@ pub(crate) async fn accept(
     })
 }
 
-/// What a run already holds for the exact bytes `hash` names, read from
-/// that run's own log.
+/// What one run holds, as its own log states it: the artifacts it has
+/// accepted, and the bytes behind each.
 ///
-/// This is where an artifact one run hands to another gets its identity
-/// and its producer: the same bytes are the same artifact, whatever file
-/// name they were handed over under, and an interpreted document's name
-/// is deliberately not on the log to be matched against. `None` when
-/// that log accepted no such bytes — a file under its `artifacts/` that
-/// no acceptance accounts for, which the receiving run then holds as
-/// opaque under the name it mounted it as.
-pub(crate) fn handed_over(
-    source: &[yunta_core::events::StoredEvent],
-    hash: &ContentHash,
-) -> Option<ArtifactRef> {
-    ArtifactLedger::of(source)
-        .every()
-        .filter(|held| held.content_hash == *hash)
-        .max_by_key(|held| held.seq)
-        .cloned()
+/// The one way anything reads an artifact. Resolution is by the log — the
+/// acceptance standing now for an identity — and the bytes come from the
+/// object store by hash, so no reader can disagree with the run's own
+/// history and a file somebody replaced under `artifacts/` changes
+/// nothing. That directory is the view; this is the answer.
+pub(crate) struct RunArtifacts<'a> {
+    ledger: ArtifactLedger,
+    store: ObjectStore<'a>,
 }
 
-/// What the run's `artifacts/` directory held before a node's session
-/// ran, so the node's close can tell what that session wrote there.
-///
-/// Every node of a run writes into that one directory, and a CLI grants
-/// writes by directory rather than by file — so a node that declares an
-/// artifact can reach every other node's. The worktree has the same
-/// shape and the run answers it the same way: the session may write,
-/// and the close audits what it wrote against what the node declared.
-pub(crate) struct ArtifactsSnapshot(BTreeMap<PathBuf, ContentHash>);
-
-impl ArtifactsSnapshot {
-    /// Reads the directory as it stands. A run whose `artifacts/` has
-    /// not been created yet snapshots as empty rather than failing:
-    /// nothing there is nothing to protect.
-    pub(crate) fn take(run_dir: &Path) -> std::io::Result<Self> {
-        let mut held = BTreeMap::new();
-        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
-            held.insert(path, sha256_hex(bytes));
-        })?;
-        Ok(Self(held))
-    }
-
-    /// The files under `artifacts/` this node changed, added or removed
-    /// that it never declared it produces, each relative to the run
-    /// directory and named the way the log names an artifact.
-    ///
-    /// `declared` is the node's rendered artifact names: writing those
-    /// is the node doing its job, and writing one twice is a session
-    /// that corrected itself. `producers` is every node the workflow
-    /// declares, which is what tells the engine's own view apart from a
-    /// session's write.
-    pub(crate) fn undeclared_writes(
-        &self,
-        run_dir: &Path,
-        declared: &[String],
-        producers: &[&NodeId],
-    ) -> std::io::Result<Vec<PathBuf>> {
-        let owned: BTreeSet<PathBuf> = declared
-            .iter()
-            .map(|name| Path::new(ARTIFACTS_DIR).join(name))
-            .collect();
-        // Two things under `artifacts/` are the engine's own and can
-        // land while any session is open, so neither is ever a
-        // session's write: the answers it records beside a `questions`
-        // artifact, and the view it projects under each producer.
-        let engine_written = |path: &Path| {
-            path.to_string_lossy().ends_with(ANSWERS_SUFFIX) || store::is_view(path, producers)
-        };
-        let mut now = BTreeMap::new();
-        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
-            now.insert(path, sha256_hex(bytes));
-        })?;
-        let touched = now
-            .iter()
-            .filter(|(path, hash)| self.0.get(*path) != Some(*hash))
-            .map(|(path, _)| path.clone());
-        let removed = self.0.keys().filter(|path| !now.contains_key(*path));
-        Ok(touched
-            .chain(removed.cloned())
-            .filter(|path| !owned.contains(path) && !engine_written(path))
-            .collect())
-    }
-}
-
-/// Hands every file under `dir` to `visit`, by its path relative to
-/// `dir`'s parent — `artifacts/<name>`, the shape the log and every
-/// diagnostic already use. An artifact name may nest, so this walks.
-fn collect(dir: &Path, visit: &mut impl FnMut(PathBuf, &[u8])) -> std::io::Result<()> {
-    fn walk(
-        root: &Path,
-        dir: &Path,
-        visit: &mut impl FnMut(PathBuf, &[u8]),
-    ) -> std::io::Result<()> {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(err),
-        };
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_type()?.is_dir() {
-                walk(root, &path, visit)?;
-                continue;
-            }
-            let relative = match path.strip_prefix(root) {
-                Ok(relative) => Path::new(ARTIFACTS_DIR).join(relative),
-                Err(_) => continue,
-            };
-            visit(relative, &std::fs::read(&path)?);
+impl<'a> RunArtifacts<'a> {
+    /// What the run rooted at `run_dir` holds, folded from `events` —
+    /// that run's own log.
+    pub(crate) fn of(run_dir: &'a Path, events: &[StoredEvent]) -> Self {
+        RunArtifacts {
+            ledger: ArtifactLedger::of(events),
+            store: ObjectStore::at(run_dir),
         }
-        Ok(())
     }
-    walk(dir, dir, visit)
+
+    /// Every artifact the run holds, to ask by kind, by producer or in
+    /// full.
+    pub(crate) fn ledger(&self) -> &ArtifactLedger {
+        &self.ledger
+    }
+
+    /// The artifact `workflow` calls `name`, as `producer` holds it —
+    /// without a producer, the last acceptance of that identity by
+    /// anyone. `None` when the run holds none.
+    pub(crate) fn named(
+        &self,
+        workflow: &Workflow,
+        producer: Option<&NodeId>,
+        name: &str,
+    ) -> Option<&ArtifactRef> {
+        let id = yunta_core::events::artifacts::declared_identity(workflow, producer, name);
+        self.ledger.latest(&id, producer)
+    }
+
+    /// The bytes `held` names, verified against its hash.
+    pub(crate) fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
+        self.store.get(&held.content_hash)
+    }
+}
+
+/// How a diagnostic names one artifact the run holds: where its view
+/// sits when the workflow names it, and its identity when nothing does.
+///
+/// A reader that reports a problem with a document says which document,
+/// in the terms the workflow author wrote it in.
+pub(crate) fn describe(workflow: &Workflow, held: &ArtifactRef) -> String {
+    match view_name(workflow, held) {
+        Some(name) => store::view_path(held.producer.as_ref(), &name)
+            .display()
+            .to_string(),
+        None => held.artifact.to_string(),
+    }
+}
+
+/// The name a run's `artifacts/` view carries one held artifact under.
+///
+/// An opaque artifact is named by its identity. An interpreted one is
+/// named by the declaration it answers — its producer's
+/// `artifacts.produces` entry of that kind — and the one document a run
+/// derives for itself rather than for a node by the name a successor
+/// mounts it as. `None` for an interpreted artifact a run holds with no
+/// node behind it and no declaration covering it: nothing in the run
+/// names it, which a reader handing it on has to know rather than invent
+/// a name.
+pub(crate) fn view_name(workflow: &Workflow, held: &ArtifactRef) -> Option<String> {
+    match (&held.artifact, &held.producer) {
+        (ArtifactId::Opaque { name }, _) => Some(name.clone()),
+        (id, Some(node)) => declared_name(workflow, node, id),
+        (
+            ArtifactId::Interpreted {
+                kind: ArtifactKind::Findings,
+            },
+            None,
+        ) => Some(crate::findings::INHERITED_FINDINGS.to_string()),
+        (ArtifactId::Interpreted { .. }, None) => None,
+    }
 }

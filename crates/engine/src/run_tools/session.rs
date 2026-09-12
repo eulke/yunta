@@ -176,7 +176,7 @@ impl ServerHandler for SessionTools {
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
         let outcome = match request.name.as_ref() {
-            "yunta_check_artifact" => self.check_artifact(&args),
+            "yunta_check_artifact" => self.check_artifact(&args).await,
             "yunta_post_finding" => self.post_finding(args).await,
             name if name == ArtifactKind::UPDATE_FINDING_TOOL => self.update_finding(args).await,
             name if name == ArtifactKind::WITHDRAW_FINDING_TOOL => {

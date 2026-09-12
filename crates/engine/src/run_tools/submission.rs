@@ -2,10 +2,10 @@
 //! will make of it.
 //!
 //! A typed artifact is never a file the session writes: it is submitted
-//! as an object, validated by the code the node's close runs, and written
-//! by the engine once it is accepted. Both calls here go through that one
-//! verification for the same reason — a verdict a session can ask for
-//! while it can still act has to be the verdict that decides the node, or
+//! as an object, validated by the code the node's close runs, and taken
+//! into the run once it is accepted. The verdict a session asks for
+//! reads that same document back out of the run — a verdict it can act
+//! on while it still can has to be the verdict that decides the node, or
 //! the first one teaches false confidence.
 //!
 //! What a session may submit is bounded by what its node declares: the
@@ -13,12 +13,13 @@
 //! document the close would never look for has no way in.
 
 use serde_json::Value;
+use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
-use crate::artifacts::{accept, Declared};
+use crate::artifacts::{accept, Declared, VerifiedArtifact};
 
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::{backticked, failure_heading, numbered, read_as, submission_refusal};
@@ -27,45 +28,63 @@ impl SessionTools {
     /// The verdict this node's close will reach, while the session can
     /// still act on it.
     ///
-    /// Runs `verify_one` — the close's own verification, not a second
-    /// reading of it. What comes back on success is what the engine
-    /// understood, not just that the file parsed: a tasks document that reads as
-    /// six tasks when the session meant seven is a failure nothing else
+    /// What comes back on success is what the engine understood, not
+    /// just that the document parsed: a tasks document that reads as six
+    /// tasks when the session meant seven is a failure nothing else
     /// catches.
-    pub(super) fn check_artifact(
+    pub(super) async fn check_artifact(
         &self,
         args: &serde_json::Map<String, Value>,
     ) -> Result<String, RunToolError> {
         let wanted = args.get("name").and_then(Value::as_str);
-        let specs: Vec<&ArtifactSpec> = self
+        let specs: Vec<ArtifactSpec> = self
             .declared
             .iter()
             .filter(|spec| wanted.is_none_or(|name| spec.name() == name))
+            .cloned()
             .collect();
         if specs.is_empty() {
             return Err(self.nothing_to_check(wanted));
         }
-        let verdicts: Vec<String> = specs.into_iter().map(|spec| self.verdict(spec)).collect();
+        let events = self.events().await?;
+        let held = crate::artifacts::RunArtifacts::of(&self.host.run_dir, &events);
+        let verdicts: Vec<String> = specs.iter().map(|spec| self.verdict(spec, &held)).collect();
         Ok(verdicts.join("\n\n"))
     }
 
     /// What this node's close would say about one declared artifact right
     /// now.
-    fn verdict(&self, spec: &ArtifactSpec) -> String {
-        match crate::artifacts::verify_one(
-            &self.node,
-            spec,
-            &self.host.run_dir,
-            self.host.max_artifact_bytes,
-        ) {
-            Ok(verified) => format!("{} — ok. {}", spec.name(), read_as(&verified)),
-            Err(failure) => match failure.report() {
-                Some(report) => numbered(
-                    format!("{} — {}", spec.name(), failure_heading(report)),
-                    report,
+    ///
+    /// A document this node already handed over is a fact of the run, so
+    /// the verdict reads what the run holds — the acceptance on its log
+    /// and the bytes behind it — and says what the engine understood of
+    /// it. Anything else is a file on its way in: an artifact with no
+    /// kind, which the session writes itself, or a document not yet
+    /// submitted. That is what the close reads, and reading it here is
+    /// what keeps the two answers the same one.
+    fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
+        let name = spec.name();
+        let accepted = spec.kind().and_then(|kind| {
+            held.ledger()
+                .latest(&ArtifactId::Interpreted { kind }, Some(&self.node))
+        });
+        match accepted {
+            Some(accepted) => match held.bytes(accepted) {
+                Ok(bytes) => render_verdict(
+                    name,
+                    crate::artifacts::interpreted(Some(&self.node), spec, &bytes),
                 ),
-                None => format!("{} — {failure}", spec.name()),
+                Err(source) => format!("{name} — {source}"),
             },
+            None => render_verdict(
+                name,
+                crate::artifacts::verify_one(
+                    &self.node,
+                    spec,
+                    &self.host.run_dir,
+                    self.host.max_artifact_bytes,
+                ),
+            ),
         }
     }
 
@@ -242,5 +261,17 @@ impl SessionTools {
             .map(|spec| format!("`{}`", spec.name()))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// One artifact's verdict as the session reads it: what the engine
+/// understood, or the numbered problems standing in the way.
+fn render_verdict(name: &str, verified: Result<VerifiedArtifact, ArtifactFailure>) -> String {
+    match verified {
+        Ok(verified) => format!("{name} — ok. {}", read_as(&verified)),
+        Err(failure) => match failure.report() {
+            Some(report) => numbered(format!("{name} — {}", failure_heading(report)), report),
+            None => format!("{name} — {failure}"),
+        },
     }
 }

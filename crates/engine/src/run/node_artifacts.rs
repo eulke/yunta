@@ -1,7 +1,6 @@
-//! The artifact half of a node's close: what its session wrote into the
-//! run's shared `artifacts/`, the findings file the engine derives from
-//! what the node posted, and the acceptance of everything the close
-//! verified.
+//! The artifact half of a node's close: the findings file the engine
+//! derives from what the node posted, and the acceptance of everything
+//! the close verified.
 //!
 //! Split from `node_close` because these answer a different question
 //! than the lifecycle around them: not how a node ends, but what the run
@@ -14,71 +13,11 @@ use yunta_core::events::{
 };
 use yunta_core::{ArtifactSpec, Node, NodeKind};
 
-use crate::artifacts::{
-    accept, canonical, ArtifactContent, ArtifactsSnapshot, Declared, VerifiedArtifact,
-};
+use crate::artifacts::{accept, canonical, ArtifactContent, Declared, VerifiedArtifact};
 
 use super::node_close::fail_with_tokens;
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
-
-/// What the node's session wrote into the run's shared `artifacts/`,
-/// audited against the artifacts the node declares it produces.
-///
-/// The worktree and that directory are the two surfaces a session can
-/// write and neither is confined by the CLI: a scope is a promise, and
-/// `artifacts/` is one directory every node of the run shares. So both
-/// are audited the same way — the session writes, and the close holds
-/// what it wrote against what it was allowed to write.
-///
-/// `None` when the node owes no audit — a close with no session behind
-/// it — or when everything that changed is the node's own to write.
-pub(super) async fn artifacts_violation(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    before: Option<&ArtifactsSnapshot>,
-    tokens: TokenUsage,
-) -> Result<Option<NodeEnd>, RunError> {
-    let Some(before) = before else {
-        return Ok(None);
-    };
-    let declared: Vec<String> = node
-        .artifacts
-        .iter()
-        .flat_map(|artifacts| artifacts.produces.iter())
-        .map(|spec| spec.name().to_string())
-        .collect();
-    let producers: Vec<&yunta_core::NodeId> =
-        ctx.manifest.workflow.iter_nodes().map(|n| &n.id).collect();
-    let undeclared = before
-        .undeclared_writes(ctx.run_dir, &declared, &producers)
-        .map_err(|source| RunError::Io {
-            context: format!("audit what node `{}` wrote under `artifacts/`", node.id),
-            source,
-        })?;
-    if undeclared.is_empty() {
-        return Ok(None);
-    }
-    let names = undeclared
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Ok(Some(
-        fail_with_tokens(
-            ctx,
-            node,
-            format!(
-                "wrote {} file(s) under `artifacts/` this node never declared: {names} — \
-                 declare them under `artifacts.produces`, or leave them to the node that does",
-                undeclared.len()
-            ),
-            false,
-            tokens,
-        )
-        .await?,
-    ))
-}
 
 /// Writes the findings file of every `findings` artifact a session node
 /// declares, from what that node reported.

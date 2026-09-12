@@ -200,6 +200,12 @@ pub enum RunError {
     /// run: its bytes, its acceptance or its view did not land.
     #[error(transparent)]
     Artifact(#[from] crate::artifacts::AcceptError),
+
+    /// An artifact the run's log holds whose bytes the run cannot hand
+    /// over — the object is gone, or no longer hashes to what was
+    /// accepted.
+    #[error(transparent)]
+    Object(#[from] crate::artifacts::ObjectError),
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or

@@ -115,7 +115,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — nothing wrote it into this run's `artifacts/`");
+            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -799,4 +799,116 @@ nodes:
         !assembled_anything,
         "an opaque artifact has no shape, so nothing is mounted at all"
     );
+}
+
+#[tokio::test]
+async fn an_artifact_reference_reaches_only_the_node_it_names() {
+    // Two nodes, one name. The reference names `bare`, which produced
+    // nothing — and `alpha`'s file of the same name is not an answer to
+    // a question about `bare`.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: ctx-wrong-producer
+nodes:
+  - id: alpha
+    kind: prompt
+    runner: executor
+    prompt: "Write the report."
+    artifacts:
+      produces: [report.md]
+  - id: bare
+    kind: bash
+    depends_on: [alpha]
+    run: "true"
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Plan from the report."
+    context:
+      - artifact: { node: bare, name: report.md }
+"#;
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: reported }}
+  - outcome: {{ type: completed, summary: planned }}
+"#,
+        dir = artifacts_dir.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    match state.nodes.get("plan") {
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            let text = failure.to_string();
+            assert!(
+                text.contains("report.md") && text.contains("bare"),
+                "the failure names the artifact and the node that did not produce it: {text}"
+            );
+        }
+        other => {
+            panic!("expected plan to fail on an artifact `bare` never produced, got {other:?}")
+        }
+    }
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_artifact_reference_without_a_node_resolves_the_last_acceptance_not_the_file() {
+    // Two producers of one name, then the view is deleted outright. What
+    // the reference resolves is the acceptance standing last on the log,
+    // and its bytes come from the store — the directory is not the
+    // answer to anything.
+    let bench = Bench::new();
+    let artifacts_dir = bench.run_dir().join("artifacts");
+    let workflow = r#"
+name: ctx-latest-acceptance
+nodes:
+  - id: alpha
+    kind: prompt
+    runner: executor
+    prompt: "Write the first report."
+    artifacts:
+      produces: [report.md]
+  - id: beta
+    kind: prompt
+    runner: executor
+    depends_on: [alpha]
+    prompt: "Write the second report."
+    artifacts:
+      produces: [report.md]
+  - id: wipe
+    kind: bash
+    depends_on: [beta]
+    run: "rm -rf {{run.dir}}/artifacts"
+  - id: plan
+    kind: prompt
+    runner: executor
+    depends_on: [wipe]
+    prompt: "Plan from the report."
+    context:
+      - artifact: { name: report.md }
+"#;
+    let fixture = format!(
+        r#"
+sessions:
+  - effects:
+      - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
+    outcome: {{ type: completed, summary: first }}
+  - effects:
+      - {{ path: "{dir}/report.md", content: "BETA-REPORT" }}
+    outcome: {{ type: completed, summary: second }}
+  - match_prompt_contains: "BETA-REPORT"
+    outcome: {{ type: completed, summary: planned }}
+"#,
+        dir = artifacts_dir.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 }

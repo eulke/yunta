@@ -725,7 +725,9 @@ nodes:
     // What the run stores is the document, rendered the way the engine
     // renders every document of that kind — not the spelling the node
     // happened to write.
-    let written = bench.artifact("plan.yaml").expect("the node wrote it");
+    let written = bench
+        .projection(None, "plan.yaml")
+        .expect("the node wrote it");
     let stored = bench.object(&held[0].content_hash).expect("the object");
     assert_ne!(stored, written, "the file was not canonical to begin with");
     let parsed: yunta_core::TasksFile =
@@ -1038,5 +1040,45 @@ nodes:
         resumed.resume_policy_applied.as_deref(),
         Some("fail_if_uncertain"),
         "the one policy every orphan shares, never a fixed literal"
+    );
+}
+
+#[tokio::test]
+async fn the_loop_finds_its_tasks_after_the_view_of_them_is_deleted() {
+    // The tasks document is a fact of the log and bytes in the store.
+    // Deleting the whole `artifacts/` view leaves both untouched, so the
+    // loop still has its tasks.
+    let bench = Bench::new();
+    let workflow = r#"
+name: tasks-from-the-log
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{run.dir}}/artifacts/plan.yaml"
+    artifacts:
+      produces: [{ name: plan.yaml, kind: tasks }]
+  - id: wipe
+    kind: bash
+    depends_on: [plan]
+    run: "rm -rf {{run.dir}}/artifacts"
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [wipe]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let fixture = r#"
+sessions:
+  - effects:
+      - { path: hello.txt, content: "hello" }
+    outcome: { type: completed, summary: "did T001" }
+"#;
+
+    let (terminal, state) = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
     );
 }

@@ -220,14 +220,6 @@ pub(super) async fn execute_prompt(
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
     let staged = adapter.staged_paths(&request);
-    // Read before the session opens: what the run's shared `artifacts/`
-    // already holds is what tells this node's writes from every other
-    // node's.
-    let artifacts_before =
-        crate::artifacts::ArtifactsSnapshot::take(ctx.run_dir).map_err(|source| RunError::Io {
-            context: format!("read `artifacts/` before node `{}` runs", node.id),
-            source,
-        })?;
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),
         request,
@@ -246,14 +238,7 @@ pub(super) async fn execute_prompt(
 
     match outcome {
         DispatchOutcome::Completed { summary } => {
-            close_node(
-                ctx,
-                node,
-                Close::new(summary, tokens)
-                    .staged(&staged)
-                    .artifacts_before(&artifacts_before),
-            )
-            .await
+            close_node(ctx, node, Close::new(summary, tokens).staged(&staged)).await
         }
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await

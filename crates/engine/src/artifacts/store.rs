@@ -152,25 +152,3 @@ pub(crate) fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
     path.push(name);
     path
 }
-
-/// Whether a run-dir-relative path under `artifacts/` belongs to the
-/// view of some producer's artifacts — `producers` being every node the
-/// workflow declares.
-///
-/// What a session writes and what the engine projects share one
-/// directory until each node writes into its own, so the audit of what a
-/// session wrote has to tell them apart: nothing under a producer's
-/// directory is a session's doing.
-pub(crate) fn is_view(relative: &Path, producers: &[&NodeId]) -> bool {
-    let Ok(under) = relative.strip_prefix(ARTIFACTS_DIR) else {
-        return false;
-    };
-    let mut components = under.components();
-    let Some(first) = components.next() else {
-        return false;
-    };
-    components.next().is_some()
-        && producers
-            .iter()
-            .any(|node| first.as_os_str() == node.as_str())
-}

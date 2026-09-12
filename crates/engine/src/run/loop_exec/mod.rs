@@ -321,7 +321,7 @@ async fn prepare_loop<'a>(
         node: node.id.clone(),
     };
 
-    let Some(tasks) = load_registered_tasks(ctx)? else {
+    let Some(tasks) = load_registered_tasks(ctx).await? else {
         let end = fail(
             ctx,
             node,
@@ -410,36 +410,31 @@ fn granted_count(events: &[StoredEvent]) -> u32 {
         .count() as u32
 }
 
-/// Finds the tasks document the run registered: the `kind: tasks`
-/// artifact of a node that produced it earlier, re-read from the run's
-/// frozen `artifacts/` — artifacts are immutable once written.
-fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, RunError> {
-    for node in &ctx.manifest.workflow.nodes {
-        let Some(artifacts) = &node.artifacts else {
-            continue;
-        };
-        for spec in &artifacts.produces {
-            let yunta_core::ArtifactSpec::Typed { name, kind } = spec else {
-                continue;
-            };
-            if !matches!(kind, yunta_core::ArtifactKind::Tasks) {
-                continue;
-            }
-            let path = ctx.run_dir.join("artifacts").join(name);
-            if !path.exists() {
-                continue;
-            }
-            let bytes = std::fs::read(&path).map_err(|source| RunError::Io {
-                context: format!("read tasks document `{}`", path.display()),
-                source,
-            })?;
-            // The same door `close_artifacts` reads a tasks document through, so
-            // a file that stops being readable between the node that
-            // wrote it and the loop that consumes it is reported as the
-            // document it is, with every problem named.
-            let tasks = yunta_core::shape::read::<TasksFile>(&bytes, path.display().to_string())?;
-            return Ok(Some(tasks));
-        }
-    }
-    Ok(None)
+/// The tasks document the run registered: the latest `kind: tasks`
+/// artifact its log holds, read out of the object store.
+///
+/// The log is the answer, so a loop resuming long after its planner
+/// finds its tasks whatever became of the `artifacts/` view. `None` when
+/// no node of this run ever produced one.
+async fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, RunError> {
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    let Some(registered) = held
+        .ledger()
+        .of_kind(yunta_core::ArtifactKind::Tasks)
+        .last()
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let bytes = held.bytes(&registered)?;
+    // The same door `close_artifacts` reads a tasks document through, so
+    // a document that stops being readable between the node that wrote
+    // it and the loop that consumes it is reported as the document it
+    // is, with every problem named.
+    let tasks = yunta_core::shape::read::<TasksFile>(
+        &bytes,
+        crate::artifacts::describe(&ctx.manifest.workflow, &registered),
+    )?;
+    Ok(Some(tasks))
 }
