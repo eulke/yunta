@@ -12,9 +12,9 @@ parser del ledger.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 25 filas y **31 `kind` distintos**
-(20 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
-contenido normativo; este documento especifica esos 31 kinds tal como la tabla los
+La tabla de eventos del Contrato del Run tiene 29 filas y **35 `kind` distintos**
+(24 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
+contenido normativo; este documento especifica esos 35 kinds tal como la tabla los
 enumera.
 
 ## 1. Envelope común
@@ -27,7 +27,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 31 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | uno de los 35 nombres de este documento, con su sufijo `_vN` si no es la v1 |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -115,7 +115,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 31 tipos de evento, campo por campo
+## 5. Los 35 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -344,6 +344,59 @@ deje el log en silencio.
 | `finding.location` | string | sí | usada para deduplicación |
 | `finding.detail` | string | sí | — |
 | `finding.proposed_criterion` | `Option<{cmd}>` | no | — |
+
+### 5.21.1 `finding_updated` — engine
+**Fuente:** autor (nodo), el hallazgo entero en su estado nuevo
+
+Un hallazgo se reemplaza, nunca se fusiona: el payload lleva el hallazgo
+completo, así que un campo ausente está ausente. Solo el nodo que posteó
+un id puede actualizarlo, y un id retirado no se actualiza. El estado
+anterior queda en el log: lo que el run tiene es el último.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `finding` | objeto | sí | mismos campos que `finding_posted`; `finding.id` nombra el hallazgo que reemplaza |
+
+### 5.21.2 `finding_withdrawn` — engine
+**Fuente:** autor (nodo), id del hallazgo y el motivo
+
+Retirar es definitivo: un id retirado no se postea, ni se actualiza, ni
+se retira de nuevo. Un hallazgo que vuelve es un id nuevo. El log
+conserva el hallazgo y el motivo por el que dejó de estar en pie.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `id` | string | sí | un hallazgo que este nodo posteó y no retiró |
+| `reason` | string | sí | no vacío; por qué ya no está en pie |
+
+### 5.21.3 `finding_refused` — engine
+**Fuente:** autor (nodo), la operación que no se aceptó y por qué
+
+Un hallazgo que el engine no toma es un hecho del run, no algo que solo
+vio la sesión: la tasa a la que un run reporta mal es medible desde el
+log. Un rechazo no cambia ningún hallazgo.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `operation` | enum | sí | `post` \| `update` \| `withdraw` |
+| `id` | `Option<string>` | no | el id que la llamada nombró, cuando nombró uno que parsea |
+| `report` | objeto | sí | el documento y cada problema, con la forma de §5.15 |
+
+### 5.21.4 `artifact_submitted` — engine
+**Fuente:** node_id, el artifact que una sesión entregó y el veredicto
+
+Toda entrega queda registrada, aceptada o no. Una aceptación lleva el
+hash del archivo que el engine escribió; un rechazo lleva el reporte
+entero, de modo que qué se rechazó y por qué se deriva del log sin
+reconstruir la sesión. La escritura del archivo la reporta además su
+propio `artifact_written` al cierre del nodo.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `name` | string | sí | el nombre que el nodo declara en `artifacts.produces` |
+| `artifact_kind` | enum | sí | `task-ledger` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
+| `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico que el engine escribió |
+| `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
 
 ### 5.22 `promotion_signaled` — engine
 **Fuente:** razón, evidencia, modo sugerido

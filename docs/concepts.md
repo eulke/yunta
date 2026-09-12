@@ -55,21 +55,28 @@ adapters. See [adapters](adapters.md) for configuring this and for what
 
 Three artifact kinds are parsed and validated rather than just stored:
 `task-ledger`, `findings` and `questions`. They are strict — a key that is not
-in the schema fails the node that produced it — which only works because the
-schema is published to whoever has to write one, never assumed.
+in the schema is refused — which only works because the schema is published to
+whoever has to write one, never assumed.
 
 A node that declares one of those kinds gets its shape in context automatically.
 Outside a run, `yunta schema <kind>` prints it and the `document_shape` tool on
 `yunta mcp` returns it, so an agent working in your repo can look the format up
 the same way it looks up anything else. Nobody has to relay a format by hand.
 
-When a document still comes back wrong, the failure names every problem in it in
-the document's own terms — "task `t1`, criterion 1: expected a mapping" rather
-than a path into a parser — and says which file each problem came from. The engine
-then opens one session on the node's own runner whose only job is to write those
-files again, with the problems and the shape in hand. That budget is
-`limits.max_artifact_repairs`; a node with no runner behind it, like a shell
-command or a check, has no such cycle, and the verification itself never relaxes.
+A session hands a document over rather than writing a file. The engine gives it a
+tool per interpreted kind the node declares — `yunta_submit_task_ledger`,
+`yunta_submit_questions` — whose argument is that published schema, so the model
+fills in an object instead of transcribing a format. Findings are finer-grained
+still: each one is reported on its own with `yunta_post_finding`, corrected with
+`yunta_update_finding` and taken back with `yunta_withdraw_finding`, and the engine
+writes the node's findings file at its close from everything that still stands.
+
+The answer comes back in the same call. An acceptance says what the engine
+understood and writes the file itself; a refusal names every problem in the
+document's own terms — "task `t1`: `scope` is empty" rather than a path into a
+parser — and the session fixes it and submits again. Getting a
+document wrong costs a call, not a session. A document nobody hands over fails
+the node, and there is no second session to instruct.
 
 ## Packs: sharing workflows without extending the engine
 

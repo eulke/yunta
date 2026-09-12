@@ -29,8 +29,8 @@ are valid there. A mistyped key never silently becomes a default.
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
   `1`, sequential). See the [ledger schema](design/spec-ledger.md) for what a task looks
-  like — it's written by an earlier `prompt` node as a `kind: task-ledger` artifact,
-  or by hand while you're still designing the workflow.
+  like — an earlier `prompt` node produces it as a `kind: task-ledger` artifact, or
+  you write one by hand while you're still designing the workflow.
 - **`check`** — automatic verification against data the engine already has: `builtin:
   baseline_compare` (did a passing suite start failing), `builtin: coverage_gate`
   (threshold), `builtin: findings_gate` (fails above a declared `max_severity`). No
@@ -135,42 +135,73 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 Most artifacts are opaque: the engine records that the file exists and what it
 hashes to, and its structure is whatever the session decided. `kind:` says the
-opposite — that the engine parses the file, validates it, and turns its contents
+opposite — that the engine reads the document, validates it, and turns its contents
 into events. There are three: `task-ledger`, `findings` and `questions`.
 
-Declaring a `kind:` is all it takes to have its shape published to whoever must
-write the file. A node with `produces: [{ name: plan.yaml, kind: task-ledger }]`
-opens its session with the shape already in context, annotated field by field,
-and with the absolute path the engine will verify — the session's working
-directory is the worktree, not the run directory, so it has no way to guess
-that. Nothing else to declare, and an opaque artifact mounts nothing because it
-has no shape to demand.
+Declaring a `kind:` is all it takes. The node declares, the engine publishes the
+shape and names the tool that takes the document, the session hands the document
+over, and the engine writes the file. A node with
+`produces: [{ name: plan.yaml, kind: task-ledger }]` opens its session with the
+shape already in context — annotated field by field, followed by the rules the
+document has to satisfy — and with a `yunta_submit_task_ledger` run tool whose
+`document` argument is that same schema and whose `name` argument accepts only
+the names this node declares. A `questions` artifact arrives the same way,
+through `yunta_submit_questions`. No session writes an interpreted file itself.
+Nothing else to declare, and an opaque artifact mounts nothing because it has no
+shape to demand.
+
+The tool answers in the same call, with the verdict the node's close reaches: the
+engine reads the object into the same type and runs the same rules. An acceptance
+reports what the engine understood — `plan.yaml — accepted. 6 task(s)
+registered: ...` — and writes the canonical YAML at `<run.dir>/artifacts/<name>`
+itself. A refusal lists every rule the document breaks, all at once — or, when the
+object does not read into its kind at all, that one problem and the path where it
+sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
+before any rule can hold. Either way the session fixes it and submits again: a
+refused document costs a call, not a session. The last accepted submission is the
+file.
+
+Findings are reported one at a time instead. A session calls `yunta_post_finding`
+the moment it sees one — validated on its own, so a refusal names what to fix in
+that finding and everything already reported stands. `yunta_update_finding` replaces
+one by id with its whole new content, and `yunta_withdraw_finding` takes one back
+with a reason; a withdrawal is final, and a finding that comes back is a new id. A
+`prompt` or `loop` node that declares `{ name: review.yaml, kind: findings }` gets
+that file written at its close, from every finding it reported that still stands,
+in the order it first reported them — a node that reports nothing gets a file with
+an empty list. A finding outlives the session that found it, so a session that dies
+after reporting loses nothing.
+
+A document nobody submits fails the node: the file it declared is not there at
+close, and there is no second session to instruct. So does a file that is empty,
+past `limits.max_artifact_bytes`, or refused by the filesystem. An adapter that
+mounts no run tools fails a node that declares an interpreted artifact before the
+session is dispatched — the document has no way in.
+
+A `bash`, `check`, `gate` or `executor` node can declare an interpreted artifact
+too. It writes the file itself, and the close reads it with the same code and holds
+it to the same rules. When such a file does not read back, the node fails with every
+rule problem in it named at once — by task and field, in the document's own words —
+and a node that declares several interpreted artifacts gets each file reported under
+its own path.
+
+An opaque artifact is a file its session writes: a node that declares one gets
+`<run.dir>/artifacts` added to what its session may write, and can call
+`yunta_check_artifact` to confirm the file is there before the session ends. A node
+that declares only interpreted artifacts is granted nothing outside its worktree.
+`yunta_check_artifact` also reads back what the engine wrote from a submitted
+document, so a session can see its meaning survived the parse.
 
 The same shape is available anywhere else you need it:
 
 ```
 yunta schema                    # the kinds
-yunta schema task-ledger        # the shape to write
+yunta schema task-ledger        # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
 ```
 
 and through the `document_shape` tool on `yunta mcp`, so an agent connected to
 the control plane finds it without anyone passing the format along.
-
-When a file still comes back unreadable, the node fails with every problem in it
-named at once — by task and field, never by a parser's path into the document —
-and a node that declares several interpreted artifacts gets each file reported
-under its own path. The node then gets one repair session against
-`limits.max_artifact_repairs` (default 1): the node's own runner, the shape it
-already mounts, those problems, and nothing to do but rewrite the declared files —
-the malformed file is still on disk for the session to read and correct. Every node
-that resolves a runner has this, whatever its kind, so a `loop` node's ledger is
-repaired like a `prompt` node's plan. A node with no runner behind it — `bash`,
-`check`, `gate` — has no repair cycle: there is no agent to instruct, and running
-a command again is a retry, not a repair. Verification does not soften either way:
-the node still fails if the repair does not land. What a rewrite cannot fix — an
-artifact never produced, an empty one, one past `limits.max_artifact_bytes`, one
-the filesystem refuses — fails straight away.
 
 ### Knowledge layers
 
@@ -241,8 +272,11 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   run keeps going independent of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
-  `yunta_task_status`, `yunta_request_scope_expansion` for every such session, plus
-  `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
+  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact`,
+  `yunta_task_status` and `yunta_request_scope_expansion` for every such session;
+  a `yunta_submit_<kind>` tool for each submittable kind the node declares under
+  `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
+  and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
   children (scoped to that group, and only visible after `join` — never mid-flight
   cross-talk that would anchor the group's judgments on each other).
 

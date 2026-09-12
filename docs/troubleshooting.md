@@ -59,25 +59,65 @@ the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissi
 
 ```
 artifacts/plan.yaml: 2 errors
-  the document: unknown key `taks`; the only top-level key is `tasks`
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+  task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
 ```
 
 A node that declares `artifacts.produces: [{ name: ..., kind: ... }]` has to leave
-behind a file the engine can read. The heading names the file and how many problems
-it has; each line below names one problem and the entry it belongs to, in the
-document's own words. The node then gets one repair session
-(`limits.max_artifact_repairs`, default 1): its own runner, the shape it already
-had, exactly those problems, and nothing to do but rewrite the file — and the node
-fails if that session does not land it. A node that resolves no runner (`bash`,
-`check`, `gate`) gets no repair session: there is nobody to instruct.
-`yunta schema <kind>` prints the shape the file is read against.
+behind a document the engine can read. The heading names the file and how many
+problems it has; each line below names one problem and the entry it belongs to, in
+the document's own words. `yunta schema <kind>` prints the shape the document is
+read against.
+
+For a `prompt` or `loop` node, the document arrives through a run tool and the
+engine writes the file, so this failure means the session never handed over a
+document the engine accepted — nothing is there at close. The run's log carries
+every submission the session made, accepted or refused, under
+`artifact_submitted`. There is no second session: a node that produces nothing
+fails once, and the failure is not retryable.
+
+For a `bash`, `check`, `gate` or `executor` node, the command writes the file
+itself. Check that it writes the name the node declared, under
+`{{run.dir}}/artifacts/`.
 
 A file that was never written, is empty, is past `limits.max_artifact_bytes`, or
-that the filesystem refuses is a different failure and gets no second attempt:
-nothing a rewrite of the content can do reaches it. Check that the node writes the
-path it declared; the session is given the absolute path the engine verifies,
-which is in the run's directory and not in the worktree it works in.
+that the filesystem refuses is reported as a failure of the file rather than of the
+document, and names which of those it is.
+
+## The engine refused a document or a finding a session offered
+
+```
+The task ledger `plan.yaml` was not accepted. Fix these and submit again:
+
+  1. task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+
+  2. task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
+```
+
+This is the engine answering `yunta_submit_task_ledger`, `yunta_submit_questions`,
+`yunta_post_finding`, `yunta_update_finding` or `yunta_withdraw_finding` inside the
+session, with the verdict the node's close reaches. It is not a failure: the
+session reads the numbered list, fixes exactly those problems, and calls the tool
+again. A correction costs one call, not a session, and there is no limit on how
+many times a session tries.
+
+A document that reads into its kind is refused with every rule it breaks, all at
+once. A document that does not read into its kind is refused with that one problem
+and the path where it sits:
+
+```
+  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+```
+
+A value of the wrong type stops the read, and the rules only hold over a document
+that parsed, so fixing the structure and submitting again is what surfaces them. A
+refused finding leaves every other finding the node reported standing; only the one
+in that call is rejected.
+
+The refusal also lands in the run's log — `artifact_submitted` with a `refused`
+outcome, or `finding_refused`, each carrying the whole report — so how often a run
+gets a document wrong is a fact about the run and not something only the session
+saw.
 
 ## A node's criteria never turn green
 

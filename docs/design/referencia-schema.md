@@ -88,8 +88,6 @@ limits:
   max_workflow_depth: 4
   max_artifact_bytes: 50_000_000    # guardia contra accidentes (§4)
   inline_context_bytes: 32_000      # sobre este umbral, el contexto se monta por referencia (§9.1)
-  max_artifact_repairs: 1           # cuántas veces se le pide de nuevo un artifact interpretado
-                                    #   que no se pudo leer, con el diagnóstico en la mano
 
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
