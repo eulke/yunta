@@ -12,13 +12,13 @@
 use proptest::prelude::*;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventBody, EventPayload, Failure, Finding,
-    FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
-    NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
+    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
+    NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
+    TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::ArtifactKind;
-use yunta_engine::derive;
+use yunta_engine::{derive, ArtifactIntegrity, ObjectStore};
 
 const RUN: &str = "run-prop";
 
@@ -145,18 +145,30 @@ fn log() -> impl Strategy<Value = Vec<StoredEvent>> {
         entries
             .into_iter()
             .enumerate()
-            .map(|(i, (node, payload))| StoredEvent {
-                run_id: RUN.into(),
-                seq: ((i + 1) as u64).into(),
-                // Fixed: a log's derived state must not depend on wall time.
-                timestamp: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-                    .expect("valid timestamp")
-                    .with_timezone(&chrono::Utc),
-                node_id: node.map(Into::into),
-                body: EventBody::Known(payload),
-            })
+            .map(|(i, (node, payload))| event(i, node, payload))
             .collect()
     })
+}
+
+/// One event at its position in a generated log. Fixed timestamp: a
+/// log's derived state must not depend on wall time.
+fn event(index: usize, node: Option<&'static str>, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
+        run_id: RUN.into(),
+        seq: ((index + 1) as u64).into(),
+        timestamp: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .expect("valid timestamp")
+            .with_timezone(&chrono::Utc),
+        node_id: node.map(Into::into),
+        body: EventBody::Known(payload),
+    }
+}
+
+/// The artifacts a run accepted, each with the bytes behind it — so a
+/// test can fill an object store with exactly what the log names.
+fn accepted_artifacts() -> impl Strategy<Value = Vec<(Option<&'static str>, ArtifactId, String)>> {
+    let node = prop_oneof![Just(None), Just(Some("a")), Just(Some("b"))];
+    prop::collection::vec((node, artifact_id(), "[a-z]{1,8}"), 0..12)
 }
 
 proptest! {
@@ -238,5 +250,56 @@ proptest! {
         let _crashed_at_k = derive(&log[..k]);
         let resumed = derive(&log);
         prop_assert_eq!(resumed, uninterrupted);
+    }
+
+    /// Verifying a run's artifacts against an intact store finds nothing
+    /// and changes nothing: whatever the log accepted, a store holding
+    /// exactly those bytes answers for all of it, the run derives the
+    /// state it derived before, and an artifact named by a log older than
+    /// the store is accounted for as one nothing can be checked against
+    /// rather than as a fault.
+    #[test]
+    fn verifying_an_intact_store_finds_nothing_and_changes_nothing(
+        accepted in accepted_artifacts(),
+        older in prop::collection::vec("[a-z]{1,8}", 0..4),
+    ) {
+        let run = tempfile::tempdir().expect("tempdir");
+        let store = ObjectStore::at(run.path());
+        let mut log: Vec<StoredEvent> = Vec::new();
+        for (node, artifact, content) in &accepted {
+            let content_hash = store.put(content.as_bytes()).expect("store the bytes");
+            log.push(event(
+                log.len(),
+                *node,
+                EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                    artifact: artifact.clone(),
+                    content_hash,
+                    origin: ArtifactOrigin::Submitted,
+                }),
+            ));
+        }
+        for name in &older {
+            log.push(event(
+                log.len(),
+                Some("a"),
+                EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+                    path: std::path::PathBuf::from(format!("artifacts/{name}.md")),
+                    content_hash: yunta_core::sha256_hex(name.as_bytes()),
+                    artifact_kind: None,
+                }),
+            ));
+        }
+
+        let before = derive(&log);
+        let integrity = ArtifactIntegrity::of(run.path(), &log);
+
+        prop_assert!(integrity.faults.is_empty(), "{:?}", integrity.faults);
+        prop_assert_eq!(integrity.diagnostic(&RUN.into()), None);
+        prop_assert_eq!(
+            integrity.verified + integrity.unverifiable,
+            ArtifactLedger::of(&log).every().count(),
+            "every artifact the log names is accounted for"
+        );
+        prop_assert_eq!(derive(&log), before);
     }
 }

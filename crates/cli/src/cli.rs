@@ -163,8 +163,9 @@ enum Command {
         #[arg(long, value_name = "path")]
         dir: Option<PathBuf>,
     },
-    /// Verifies a run's event hash chain: integrity and order,
-    /// recomputed from the log as persisted.
+    /// Verifies a run's evidence: the event hash chain, recomputed from
+    /// the log as persisted, and the bytes of every artifact that log
+    /// accepted, read back and hashed against its own name.
     Verify {
         /// The run id to verify.
         run_id: RunId,

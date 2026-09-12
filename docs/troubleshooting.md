@@ -168,16 +168,58 @@ outside](guide.md#gates-from-the-outside).
   printed audit, or is `deny` and refuses outright regardless of `--yes`.
   See [packs](packs.md#installing-and-using-a-pack).
 
+## `resume` says the run is broken because of an artifact
+
+```
+run is broken: run `01J...` no longer holds the bytes its log accepted for 1
+of the 3 artifact(s) it names: `artifacts/plan/tasks.yaml`: object
+`a1b2...` holds content that hashes to `c3d4...` — the bytes under
+`objects/` are not the bytes the run accepted
+```
+
+Waking a run reads back every artifact its log accepted, because the log
+names bytes by their hash and the run keeps them under `objects/`. That
+message means one of those objects is gone, or its content no longer hashes
+to its own name — somebody edited or replaced a file under `objects/`, or
+the filesystem lost part of it. The run stops before doing any further work:
+its own history says it holds something it can no longer hand to a node.
+
+What to do:
+
+- **Put the bytes back.** If the run's directory came from a backup or a
+  copy, restore `objects/` from it — the object's name *is* its sha256, so
+  any copy of the right content is the right object, wherever it comes from.
+- **Editing an artifact is not how you change one.** The file under
+  `artifacts/` is a view the engine writes and never reads; deleting it is
+  harmless, and editing it changes nothing. `objects/` is the run's
+  evidence, and nothing outside the engine writes there.
+- **If the bytes are gone for good**, the run cannot be resumed — its
+  artifacts are part of what it is. Start a new run from the same inputs.
+
+`yunta verify <run_id>` reports the same check on demand, without resuming.
+
+A run created by a Yunta older than the object store reports instead that it
+holds artifacts this binary cannot verify — a `minor` finding, not a break.
+That log names files rather than objects; see [compatibility](compatibility.md).
+
 ## Something looks corrupted, or a replay disagrees with what you remember
 
 ```bash
 yunta verify <run_id>
 ```
 
-Recomputes the event log's hash chain end to end and reports exactly where
-it breaks, if it does. This is the mechanical way to confirm (or rule out)
-log tampering or corruption — never guess from `status` output alone if you
-suspect this.
+Checks a run's two mechanical guarantees and reports them apart:
+
+- **the event chain** — every link recomputed from the log as persisted, so
+  an altered payload or a deleted, inserted or reordered event is named with
+  the seq it begins at;
+- **the objects** — every artifact the log accepted, read back and hashed
+  against its own name.
+
+The two are independent: a corrupt object leaves the chain intact, and an
+altered event leaves the objects alone. Either one failing exits non-zero.
+This is the mechanical way to confirm (or rule out) tampering or corruption —
+never guess from `status` output alone if you suspect this.
 
 ## Still stuck
 

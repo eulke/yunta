@@ -70,7 +70,10 @@ mod verification_effectiveness;
 mod worktree;
 
 pub use artifacts::store::{ObjectError, ObjectStore};
-pub use artifacts::{close_artifacts, AcceptError, ArtifactContent, VerifiedArtifact};
+pub use artifacts::{
+    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity,
+    VerifiedArtifact,
+};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,

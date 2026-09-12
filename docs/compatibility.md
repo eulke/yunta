@@ -49,6 +49,17 @@ generate today. The only thing a new binary version can change for an
 existing run is how `status`/`stats`/`graph` *render* information already in
 the log — never the log's content or the run's outcome.
 
+Waking a run does verify what it holds: `resume` reads back every artifact
+the run's log accepted, from the object the log names it by, and refuses to
+go on when one is gone or its bytes no longer hash to their own name. That
+check covers a run whose log records artifacts as `artifact_accepted` — the
+current form. A log written before a run kept the bytes of its artifacts
+under `objects/` records them as `artifact_written`, naming a hash with no
+object behind it: those artifacts are counted and reported as ones this
+binary cannot check — a `minor` finding on the run and a line in `yunta
+verify` — and the run resumes. A newer binary never makes an older run
+unresumable by asking of it a guarantee its own format could not give.
+
 ## What every release verifies before it ships
 
 Per the release pipeline's `test` gate (`.github/workflows/release.yml`):

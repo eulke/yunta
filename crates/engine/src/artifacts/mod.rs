@@ -18,10 +18,12 @@
 //!
 //! [`store`] holds the bytes and writes the view; [`ingest`] judges what
 //! a node produced; [`canonical`] turns a document into the bytes the
-//! run stores for it, whoever wrote it.
+//! run stores for it, whoever wrote it; [`integrity`] asks the store
+//! whether it still answers for the log.
 
 mod canonical;
 mod ingest;
+mod integrity;
 pub mod store;
 
 use std::path::Path;
@@ -38,6 +40,7 @@ use store::ObjectStore;
 pub(crate) use canonical::{canonical, canonical_document, derive_findings, submit, SubmitError};
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
 pub(crate) use ingest::{held_document, interpreted, verify_one};
+pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;
 
 /// What the engine appends to the `questions` kind's own name when it

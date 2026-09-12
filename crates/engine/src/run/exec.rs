@@ -18,6 +18,8 @@ use yunta_core::events::{
 use yunta_core::{Clock, ModeName, NodeId, Pid, RunId};
 use yunta_storage::AsyncStorage;
 
+use crate::artifacts::ArtifactIntegrity;
+use crate::replay::RunView;
 use crate::task_cycle::Memo;
 
 use super::schedule::{self, ScheduleStep};
@@ -187,7 +189,8 @@ pub(crate) async fn execute_run_at_depth(
 }
 
 /// Wakes the run: builds its context, refuses a run with no log, returns
-/// early for one whose log already ends, records a resume and any
+/// early for one whose log already ends, verifies that the run still
+/// holds the artifacts its log accepted, records a resume and any
 /// deferred registry-write finding, rechecks approved gates, and freezes
 /// the mode — everything that happens once per invocation, before the
 /// scheduler loop.
@@ -214,30 +217,8 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     }
     if view.events.len() > 1 {
         // Anything beyond run_created means a previous invocation worked
-        // on this run — this one is a resume. A node the mode excludes
-        // never ran, so the orphans are the same whichever nodes are
-        // in the mode.
-        let policies = schedule::resume_policies(
-            ctx.manifest.workflow.nodes.iter(),
-            &view.state,
-            ctx.manifest.config.resolved_on_interrupt(),
-        );
-        let shared: BTreeSet<&str> = policies
-            .iter()
-            .map(|policy| policy.on_interrupt.as_str())
-            .collect();
-        let resume_policy_applied = match shared.iter().next() {
-            Some(policy) if shared.len() == 1 => Some((*policy).to_string()),
-            _ => None,
-        };
-        ctx.emit(
-            None,
-            EventPayload::RunResumed(RunResumedPayload {
-                resume_policy_applied,
-                policies,
-            }),
-        )
-        .await?;
+        // on this run — this one is a resume.
+        resume(&ctx, &view).await?;
     }
 
     // "On wake" means once per invocation, not once per scheduling
@@ -277,6 +258,62 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         mode_name,
         mode_nodes,
     })
+}
+
+/// Wakes a run that already has history: verifies that it still holds
+/// the artifacts its log accepted, records the resume with the policy
+/// each orphan node resolves to, and states what the verification could
+/// not check.
+///
+/// The order is the whole of it. An artifact whose object is gone, or
+/// whose bytes no longer hash to their own name, is a run that cannot
+/// answer for its own history: it is broken with a diagnostic before
+/// anything says it resumed, never a run that keeps going and hands a
+/// node something the log never saw. What the verification could not do
+/// is said after, because by then the run has woken.
+async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
+    let integrity = ArtifactIntegrity::of(ctx.run_dir, &view.events);
+    if let Some(diagnostic) = integrity.diagnostic(ctx.run_id) {
+        return Err(steps::broken(ctx, diagnostic).await);
+    }
+    // A node the mode excludes never ran, so the orphans are the same
+    // whichever nodes are in the mode.
+    let policies = schedule::resume_policies(
+        ctx.manifest.workflow.nodes.iter(),
+        &view.state,
+        ctx.manifest.config.resolved_on_interrupt(),
+    );
+    let shared: BTreeSet<&str> = policies
+        .iter()
+        .map(|policy| policy.on_interrupt.as_str())
+        .collect();
+    let resume_policy_applied = match shared.iter().next() {
+        Some(policy) if shared.len() == 1 => Some((*policy).to_string()),
+        _ => None,
+    };
+    ctx.emit(
+        None,
+        EventPayload::RunResumed(RunResumedPayload {
+            resume_policy_applied,
+            policies,
+        }),
+    )
+    .await?;
+    if let Some(detail) = integrity.unverifiable_detail() {
+        ctx.engine_finding(
+            None,
+            "engine-artifact-store",
+            FindingSeverity::Minor,
+            "the run holds artifacts this binary cannot verify".to_string(),
+            ctx.run_dir
+                .join(crate::artifacts::store::OBJECTS_DIR)
+                .display()
+                .to_string(),
+            detail,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Builds the run's context and the two invocation-scoped values the
