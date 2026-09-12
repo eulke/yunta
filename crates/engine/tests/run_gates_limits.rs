@@ -692,7 +692,7 @@ fn session_token_budget_is_an_equal_share_bounded_by_what_remains() {
 #[tokio::test]
 async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless() {
     let bench = Bench::new();
-    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = loop_cap_fixture();
     let (terminal, state) = bench
         .run_with_config(LOOP_CAP_WORKFLOW, &fixture, LOOP_CAP_CONFIG)
         .await;
@@ -719,7 +719,7 @@ async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless(
 #[tokio::test]
 async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
     let bench = Bench::new();
-    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = loop_cap_fixture();
     let interaction = SequencedInteraction::choosing(&["continue"]);
     let (terminal, state) = bench
         .run_full(LOOP_CAP_WORKFLOW, &fixture, LOOP_CAP_CONFIG, &interaction)
@@ -750,7 +750,7 @@ async fn a_ledger_within_the_default_iteration_cap_runs_unasked() {
     // No `limits:` declared — the reference default (12) covers a
     // three-task ledger with room to spare, and nothing escalates.
     let bench = Bench::new();
-    let fixture = loop_cap_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = loop_cap_fixture();
     let (terminal, _) = bench.run(LOOP_CAP_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();

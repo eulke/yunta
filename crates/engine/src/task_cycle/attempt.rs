@@ -242,11 +242,26 @@ async fn open_and_dispatch(
     // Minimal brief — the node's instruction plus which task is this
     // session's, never the plan as prose. Every attempt is a fresh session
     // with the same request.
+    let mut prompt = format!(
+        "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
+        task.id, task.title
+    );
+    // The node's own declared artifacts are this session's to hand over:
+    // the file a `loop` node closes on is written from what its task
+    // sessions submit and report.
+    if let Some(notice) = crate::run_tools::submission_notice(
+        run_tools.as_ref(),
+        setup
+            .run_tools
+            .as_ref()
+            .map(|access| access.declared.as_slice())
+            .unwrap_or_default(),
+        None,
+    ) {
+        prompt.push_str(&notice);
+    }
     let request = SessionRequest {
-        prompt: format!(
-            "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
-            task.id, task.title
-        ),
+        prompt,
         cwd: cwd.to_path_buf(),
         model: None,
         agent: None,

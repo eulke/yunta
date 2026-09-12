@@ -284,42 +284,6 @@ async fn assembled(
     Ok(assembled.join("\n"))
 }
 
-/// The whole context a repair session gets: the shape of every
-/// interpreted artifact the node declares, and nothing else.
-///
-/// A repair session rewrites a file it already has on disk. The author's
-/// `context:` bought the node its work; buying it again would pay a
-/// second time for the session the node already had, and none of it says
-/// anything about the shape the file was supposed to have. Recorded as
-/// its own `context_assembled` like every other session's, so replay can
-/// name what this one saw.
-///
-/// `None` when the node declares no interpreted artifact — which is also
-/// when no repair is possible, since only an interpreted artifact can
-/// fail on its content.
-pub(super) async fn assemble_shapes(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-) -> Result<Step<Option<String>>, RunError> {
-    let mut blocks = Vec::new();
-    let mut sources = Vec::new();
-    let assembly = mount_artifact_shapes(ctx, node, &mut blocks, &mut sources);
-    if blocks.is_empty() && assembly.is_ok() {
-        return Ok(Step::Value(None));
-    }
-    match assembly {
-        Ok(()) => match assembled(ctx, node, None, sources, blocks, Vec::new(), Vec::new()).await {
-            Ok(text) => Ok(Step::Value(Some(text))),
-            Err(error) => Ok(Step::Ended(
-                fail(ctx, node, error.to_string(), false).await?,
-            )),
-        },
-        Err(error) => Ok(Step::Ended(
-            fail(ctx, node, error.to_string(), false).await?,
-        )),
-    }
-}
-
 async fn resolve_one(
     ctx: &RunCtx<'_>,
     node: &Node,

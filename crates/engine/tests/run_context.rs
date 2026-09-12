@@ -156,14 +156,13 @@ nodes:
 #[tokio::test]
 async fn a_ledger_source_resolves_aggregate_task_state_and_is_replayable() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow = r#"
 name: ctx-ledger
 nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -175,14 +174,12 @@ nodes:
     context:
       - ledger: {}
 "#;
-    let ledger = format!(
-        "tasks:\n{}",
-        task_yaml("task-x", "x", "x.txt", "test -f x.txt")
-    );
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
-        artifacts_dir.display(),
-        ledger,
+        "{}  - match_prompt_contains: \"task-x\"\n    outcome: {{ type: completed, summary: audited }}\n",
+        plan_session(&format!(
+            "tasks:\n{}",
+            task_yaml("task-x", "x", "x.txt", "test -f x.txt")
+        )),
     );
 
     let (terminal, _state) = bench.run(workflow, &fixture).await;
@@ -608,7 +605,6 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
 #[tokio::test]
 async fn a_loop_s_context_reaches_every_task_s_brief() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     std::fs::write(bench.worktree.join("notes.md"), "the-shared-notes").unwrap();
 
     let workflow = r#"
@@ -617,7 +613,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -639,7 +635,7 @@ nodes:
     // The executor sessions only match if their prompt actually carries
     // the context block's content — a brief without it dispatches no
     // session and the run fails, so a Finished terminal IS the proof.
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&ledger);
     for n in 1..=2 {
         let file = if n == 1 { "one.txt" } else { "two.txt" };
         fixture.push_str(&format!(
@@ -682,8 +678,8 @@ nodes:
 //
 // A node that declared `kind: task-ledger` has already said everything
 // needed to publish the shape. These prove it arrives without the author
-// asking, that it says where to write, and that an opaque artifact —
-// which has no shape to demand — mounts nothing.
+// asking, that it names what carries the document, and that an opaque
+// artifact — which has no shape to demand — mounts nothing.
 
 #[tokio::test]
 async fn a_node_that_declares_an_interpreted_artifact_is_told_its_shape() {
@@ -701,12 +697,21 @@ nodes:
     // The script only matches a prompt carrying the published shape, so
     // the run reaching a session at all is the assertion. `type: guard`
     // appears only in the shape, never in the author's prompt.
-    let fixture = format!(
-        "sessions:\n  - match_prompt_contains: \"type: guard\"\n    effects:\n      - {{ path: \"{}/plan.yaml\", content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        bench.run_dir().join("artifacts").display()
-    );
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "type: guard"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks: []
+    outcome: { type: completed, summary: planned }
+"#;
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let (terminal, _state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -721,10 +726,10 @@ nodes:
 }
 
 #[tokio::test]
-async fn the_shape_tells_the_session_the_path_the_engine_will_verify() {
+async fn the_shape_tells_the_session_the_run_tools_carry_the_document() {
     let bench = Bench::new();
     let workflow = r#"
-name: shape-path
+name: shape-carrier
 nodes:
   - id: plan
     kind: prompt
@@ -733,16 +738,23 @@ nodes:
     artifacts:
       produces: [{ name: plan.yaml, kind: task-ledger }]
 "#;
-    // A session's working directory is the worktree, not the run
-    // directory: without the absolute path there is nowhere to write.
-    let expected = bench.run_dir().join("artifacts").join("plan.yaml");
-    let fixture = format!(
-        "sessions:\n  - match_prompt_contains: {:?}\n    effects:\n      - {{ path: {:?}, content: \"tasks: []\\n\" }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        expected.display().to_string(),
-        expected.display().to_string(),
-    );
+    // The file is the engine's to write, so the shape names the way in
+    // rather than a path: the script only matches a prompt that says so.
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "submits through its run tools"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks: []
+    outcome: { type: completed, summary: planned }
+"#;
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let (terminal, _state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 

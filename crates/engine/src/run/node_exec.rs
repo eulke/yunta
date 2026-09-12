@@ -99,19 +99,19 @@ pub(super) async fn execute_node(
     }
 
     let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run, attempt, cancel).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, attempt, cancel).await?,
+        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
+        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
         NodeKind::Loop {
             until: yunta_core::LoopUntil::AllTasksComplete,
             prompt,
             ..
-        } => super::loop_exec::execute_loop(ctx, node, prompt, attempt, cancel).await?,
+        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
         NodeKind::Parallel {
             join,
             coordination,
             nodes,
         } => {
-            let end = execute_parallel(ctx, node, *join, nodes, attempt, cancel).await?;
+            let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
             // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
             // the posts are findings either way), as the group's
@@ -136,7 +136,7 @@ pub(super) async fn execute_node(
             end
         }
         NodeKind::Check(builtin) => {
-            super::check_exec::execute_check(ctx, node, builtin, attempt, cancel).await?
+            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
         }
         NodeKind::Executor {
             executor,
@@ -149,7 +149,6 @@ pub(super) async fn execute_node(
                 executor,
                 with,
                 *timeout_seconds,
-                attempt,
                 cancel,
             )
             .await?
@@ -169,7 +168,6 @@ pub(super) async fn execute_node(
                     isolation: *isolation,
                     mounts,
                 },
-                attempt,
                 cancel,
             )
             .await?
@@ -281,14 +279,19 @@ pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_cor
         .unwrap_or_default()
 }
 
-/// Where this node's declared artifacts land, when it declares any.
+/// Where this node's own files land, when it declares any.
 ///
 /// The run directory, never the worktree: the worktree is the work and
-/// its diff is what the scope check reads. A node that declares no
-/// artifact needs no write access outside the worktree at all, and
-/// saying so keeps an adapter from widening a sandbox for nothing.
+/// its diff is what the scope check reads. Only an artifact the session
+/// writes itself needs this — an interpreted one the engine writes from
+/// what the session submits — so a node that declares none needs no
+/// write access outside the worktree at all, and saying so keeps an
+/// adapter from widening a sandbox for nothing.
 pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::PathBuf> {
-    (!declared_artifacts(ctx, node).is_empty()).then(|| ctx.run_dir.join("artifacts"))
+    declared_artifacts(ctx, node)
+        .iter()
+        .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Plain(_)))
+        .then(|| ctx.run_dir.join("artifacts"))
 }
 
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {

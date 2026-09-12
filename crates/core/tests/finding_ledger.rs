@@ -111,7 +111,7 @@ fn one_node_never_reaches_another_nodes_finding() {
     ];
     let effective = FindingLedger::of(&log).effective();
     assert_eq!(effective.len(), 1);
-    assert_eq!(effective[0].node, NodeId::from("reviewer-a"));
+    assert_eq!(effective[0].node, Some(NodeId::from("reviewer-a")));
     assert_eq!(effective[0].finding.title, "a's own");
 }
 
@@ -144,6 +144,42 @@ fn a_sequence_the_engine_never_writes_leaves_the_state_unmoved() {
         ),
         Some(Slot::Withdrawn { .. }),
     ));
+}
+
+#[test]
+fn a_finding_the_engine_posts_about_the_run_stands_like_any_other() {
+    // The engine reports on the run itself — a cleanup that could not
+    // finish, an artifact a distill did not find — and those carry no
+    // node. They are counted; what they have no owner for is being
+    // updated or withdrawn.
+    let log = vec![
+        event(
+            1,
+            "review",
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("a", "a node's own"),
+            }),
+        ),
+        StoredEvent {
+            node_id: None,
+            ..event(
+                2,
+                "unused",
+                EventPayload::FindingPosted(FindingPostedPayload {
+                    finding: finding("distill-push", "the run could not push"),
+                }),
+            )
+        },
+    ];
+    let ledger = FindingLedger::of(&log);
+    let effective = ledger.effective();
+    assert_eq!(effective.len(), 2, "both stand: {effective:?}");
+    assert_eq!(effective[1].node, None);
+    assert_eq!(
+        ledger.effective_of(&NodeId::from("review")).len(),
+        1,
+        "a node's own artifact holds what that node reported"
+    );
 }
 
 /// One step of a log the engine could actually write.

@@ -23,7 +23,6 @@ pub(super) async fn execute_bash(
     ctx: &RunCtx<'_>,
     node: &Node,
     run: &str,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match render_or_fail(ctx, node, run).await? {
@@ -65,12 +64,7 @@ pub(super) async fn execute_bash(
     )?;
 
     if status.success() {
-        close_node(
-            ctx,
-            node,
-            Close::new("exit 0", TokenUsage::default(), attempt, cancel),
-        )
-        .await
+        close_node(ctx, node, Close::new("exit 0", TokenUsage::default())).await
     } else {
         let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
             .lines()

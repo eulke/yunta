@@ -552,7 +552,6 @@ async fn max_per_run_holds_exactly_under_a_fully_concurrent_batch() {
     // count is deterministic — exactly 2 granted, 2 escalated — never
     // "up to concurrency - 1 over".
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: capped-concurrency
@@ -560,7 +559,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -586,7 +585,7 @@ nodes:
         ));
     }
 
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&ledger);
     for n in 1..=4 {
         let request_yaml = format!(
             "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"

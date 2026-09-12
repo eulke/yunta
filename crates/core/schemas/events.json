@@ -651,148 +651,6 @@
         {
           "oneOf": [
             {
-              "description": "The bytes are not a YAML document at all.",
-              "type": "object",
-              "properties": {
-                "detail": {
-                  "description": "What the parser said, kept for the log and never rendered to\na reader — a parser's account of its own scanner is not\nsomething anyone can act on.",
-                  "type": "string"
-                },
-                "looks_like": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/Malformation"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "not-yaml"
-                }
-              },
-              "required": [
-                "problem"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "instead": {
-                  "description": "What to write instead, when the key is one a reader plausibly\nreaches for.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "key": {
-                  "type": "string"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "unknown-key"
-                },
-                "valid": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "problem",
-                "key",
-                "valid"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "missing-key"
-                }
-              },
-              "required": [
-                "problem",
-                "key"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "example": {
-                  "description": "A line the reader can copy.",
-                  "type": "string"
-                },
-                "expected": {
-                  "type": "string"
-                },
-                "found": {
-                  "$ref": "#/$defs/ValueShape"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "wrong-shape"
-                }
-              },
-              "required": [
-                "problem",
-                "found",
-                "expected",
-                "example"
-              ]
-            },
-            {
-              "type": "object",
-              "properties": {
-                "problem": {
-                  "type": "string",
-                  "const": "invalid-id"
-                },
-                "rule": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "problem",
-                "value",
-                "rule"
-              ]
-            },
-            {
-              "description": "A value outside the closed set its key accepts: a severity that\nis not on the ladder, an answer type that does not exist.",
-              "type": "object",
-              "properties": {
-                "problem": {
-                  "type": "string",
-                  "const": "unknown-value"
-                },
-                "valid": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "problem",
-                "value",
-                "valid"
-              ]
-            },
-            {
               "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root\n(`tasks[1].manual_review`), and is empty when the root itself is\nthe problem; `message` is what the deserializer said about that\nvalue, which names the key and what it expected.",
               "type": "object",
               "properties": {
@@ -830,23 +688,6 @@
               "required": [
                 "problem",
                 "code",
-                "detail"
-              ]
-            },
-            {
-              "description": "The document was refused and nothing in it could be named as the\ncause. That is a gap in the walk, reported as one rather than\nswallowed: `detail` carries what the parser said, for the log.",
-              "type": "object",
-              "properties": {
-                "detail": {
-                  "type": "string"
-                },
-                "problem": {
-                  "type": "string",
-                  "const": "unreadable"
-                }
-              },
-              "required": [
-                "problem",
                 "detail"
               ]
             }
@@ -1730,26 +1571,6 @@
         "until_result"
       ]
     },
-    "Malformation": {
-      "description": "A shape a reader has met before, recognized so the diagnostic can\nname the cause instead of the symptom. A stray backtick is a\ncharacter; a Markdown fence is a mistake with a name.",
-      "oneOf": [
-        {
-          "description": "The document opens with ```` ``` ````.",
-          "type": "string",
-          "const": "markdown-fence"
-        },
-        {
-          "description": "The document is JSON, which YAML mostly accepts but this one did\nnot.",
-          "type": "string",
-          "const": "json-document"
-        },
-        {
-          "description": "Prose before the first key — an agent explaining what it wrote.",
-          "type": "string",
-          "const": "leading-prose"
-        }
-      ]
-    },
     "ModeName": {
       "description": "A mode name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -2051,7 +1872,7 @@
       ]
     },
     "Report": {
-      "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a repair cycle that\nworks that way exhausts its budget before the file is readable.",
+      "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a writer who hears\none rule at a time rewrites the document once per rule.",
       "type": "object",
       "properties": {
         "diagnostics": {
@@ -2635,19 +2456,6 @@
       "required": [
         "input",
         "output"
-      ]
-    },
-    "ValueShape": {
-      "description": "What kind of YAML value was found where another was expected. Named\nas a person writing YAML names them, never as a deserializer names\nits own types.",
-      "type": "string",
-      "enum": [
-        "null",
-        "bool",
-        "number",
-        "string",
-        "sequence",
-        "mapping",
-        "tagged"
       ]
     }
   }

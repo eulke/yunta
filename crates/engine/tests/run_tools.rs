@@ -574,8 +574,9 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 #[tokio::test]
 async fn a_check_names_the_same_problems_the_close_would() {
     let bench = Bench::new();
-    // The failure that motivated the tool: a quoted boolean, and the rule
-    // that a repair round would have discovered next.
+    // The failure that motivated the tool: a quoted boolean where a
+    // boolean belongs. The check reads the file through the same code the
+    // close does, so it locates the value and says what was expected.
     std::fs::write(
         bench.run_dir.join("artifacts").join("plan.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
@@ -590,10 +591,13 @@ async fn a_check_names_the_same_problems_the_close_would() {
     )
     .await;
 
-    assert!(text.contains("could not be read"), "{text}");
-    assert!(text.contains("task `t1`"), "{text}");
+    assert!(text.contains("cannot be read"), "{text}");
     assert!(
-        text.contains("expected true or false"),
+        text.contains("tasks[0].manual_review"),
+        "the path locates the value: {text}"
+    );
+    assert!(
+        text.contains("expected a boolean"),
         "the same diagnostic the close produces: {text}"
     );
 }

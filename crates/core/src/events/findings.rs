@@ -10,16 +10,22 @@
 //! Ownership is by node, not by session or by run: the id a node posts
 //! is unique among that node's own findings, and only that node's later
 //! events reach it. Two nodes may each hold a finding called `dup-1`.
+//! The engine posts findings of its own about the run rather than about
+//! a node — a cleanup that could not finish, an artifact a distill did
+//! not find — and those carry no node. They stand like any other and
+//! are counted like any other; what they have no owner for is being
+//! updated or withdrawn, which nothing does to them.
 
 use std::collections::BTreeMap;
 
 use super::{EventPayload, Finding, StoredEvent};
 use crate::ids::{FindingId, NodeId};
 
-/// A finding as the run holds it now, and which node holds it.
+/// A finding as the run holds it now, and which node holds it — `None`
+/// for one the engine posted about the run itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PostedFinding {
-    pub node: NodeId,
+    pub node: Option<NodeId>,
     pub finding: Finding,
 }
 
@@ -39,11 +45,11 @@ pub enum Slot {
 /// withdrawal — and which findings stand now.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct FindingLedger {
-    slots: BTreeMap<(NodeId, FindingId), Slot>,
+    slots: BTreeMap<(Option<NodeId>, FindingId), Slot>,
     /// The order ids were first posted in, which is the order the
     /// effective set reads in: an update moves nothing, so a reviewer
     /// sees their findings where they left them.
-    first_post: Vec<(NodeId, FindingId)>,
+    first_post: Vec<(Option<NodeId>, FindingId)>,
 }
 
 impl FindingLedger {
@@ -61,17 +67,17 @@ impl FindingLedger {
     /// Applies one event.
     ///
     /// Total, and ignores what it cannot use: an event about something
-    /// else, an event with no node, and a sequence the engine never
-    /// writes — an update or a withdrawal for an id its node never
-    /// posted, or a post on an id it withdrew. The run tools refuse
-    /// those before they are appended, so meeting one here means the log
-    /// came from somewhere else, and the honest reading of it is the
-    /// state it can account for rather than a panic.
+    /// else, and a sequence the engine never writes — an update or a
+    /// withdrawal for an id its node never posted, or a post on an id it
+    /// withdrew. The run tools refuse those before they are appended, so
+    /// meeting one here means the log came from somewhere else, and the
+    /// honest reading of it is the state it can account for rather than
+    /// a panic.
     pub fn apply(&mut self, node: Option<&NodeId>, payload: &EventPayload) {
-        let Some(node) = node else { return };
+        let node = node.cloned();
         match payload {
             EventPayload::FindingPosted(p) => {
-                let key = (node.clone(), p.finding.id.clone());
+                let key = (node, p.finding.id.clone());
                 match self.slots.get(&key) {
                     Some(Slot::Withdrawn { .. }) | Some(Slot::Live(_)) => {}
                     None => {
@@ -81,13 +87,13 @@ impl FindingLedger {
                 }
             }
             EventPayload::FindingUpdated(p) => {
-                let key = (node.clone(), p.finding.id.clone());
+                let key = (node, p.finding.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(key, Slot::Live(p.finding.clone()));
                 }
             }
             EventPayload::FindingWithdrawn(p) => {
-                let key = (node.clone(), p.id.clone());
+                let key = (node, p.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(
                         key,
@@ -102,9 +108,10 @@ impl FindingLedger {
     }
 
     /// Where `id` stands for `node`, or `None` if that node never posted
-    /// it.
+    /// it. Asked by the run tools, which speak for a node, so a session
+    /// never reaches a finding the engine posted about the run.
     pub fn status(&self, node: &NodeId, id: &FindingId) -> Option<&Slot> {
-        self.slots.get(&(node.clone(), id.clone()))
+        self.slots.get(&(Some(node.clone()), id.clone()))
     }
 
     /// Every finding that stands, in the order each was first posted.
@@ -121,11 +128,12 @@ impl FindingLedger {
             .collect()
     }
 
-    /// The same, for one node.
+    /// The same, for one node — never the engine's own run-level
+    /// findings, which belong to no node's artifact.
     pub fn effective_of(&self, node: &NodeId) -> Vec<Finding> {
         self.first_post
             .iter()
-            .filter(|(posted_by, _)| posted_by == node)
+            .filter(|(posted_by, _)| posted_by.as_ref() == Some(node))
             .filter_map(|key| match self.slots.get(key) {
                 Some(Slot::Live(finding)) => Some(finding.clone()),
                 _ => None,

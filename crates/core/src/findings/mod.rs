@@ -109,7 +109,6 @@ impl From<events::ProposedCriterion> for ProposedCriterionEntry {
 }
 
 mod rules;
-pub(crate) mod shape;
 
 /// The shape this document publishes, as the YAML it is.
 ///
@@ -124,10 +123,6 @@ const EXAMPLE: &str = include_str!("shape.yaml");
 impl crate::shape::Document for FindingsFile {
     const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
     const EXAMPLE: &'static str = EXAMPLE;
-
-    fn diagnose(value: &crate::yaml::Value, walk: &mut crate::shape::Walk) {
-        shape::diagnose(value, walk);
-    }
 
     fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::check(self)

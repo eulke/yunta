@@ -10,7 +10,7 @@
 //! doesn't need to reprint an entire golden blob.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, MockAdapter};
@@ -220,7 +220,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/ledger.yaml."
+    prompt: "Write the ledger."
     artifacts:
       produces: [{ name: ledger.yaml, kind: task-ledger }]
   - id: implement
@@ -254,38 +254,43 @@ nodes:
     prompt: "review the change"
 "#;
 
-/// `{artifacts}` is substituted with the run's own absolute
-/// `run.dir/artifacts` before parsing — the same convention
-/// `tests/run.rs`'s own ledger fixtures use, since a mock effect's
-/// `path` is relative to the worktree, not `run.dir`.
-fn fixture(artifacts_dir: &Path) -> String {
-    format!(
-        r#"
+/// The ledger reaches the run through the run tools, so the planning
+/// session names no path at all; every other session's `path` is
+/// relative to the worktree, which is a session's own cwd.
+const FIXTURE: &str = r#"
+capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "Write the ledger"
-    effects:
-      - {{ path: "{artifacts}/ledger.yaml", content: "tasks:\n  - id: T001\n    title: \"Say hello\"\n    scope: [\"hello.txt\"]\n    criteria:\n      - cmd: \"test -f hello.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
+    steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: ledger.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Say hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+    outcome: { type: completed, summary: "planned" }
   - match_prompt_contains: "implement your task"
     effects:
-      - {{ path: hello.txt, content: "hi" }}
-    outcome: {{ type: completed, summary: "done" }}
+      - { path: hello.txt, content: "hi" }
+    outcome: { type: completed, summary: "done" }
   - match_prompt_contains: "fix the lint failure"
     effects:
-      - {{ path: fixed.txt, content: "fixed" }}
-    outcome: {{ type: completed, summary: "fixed it" }}
+      - { path: fixed.txt, content: "fixed" }
+    outcome: { type: completed, summary: "fixed it" }
   - match_prompt_contains: "review the change"
     effects:
-      - {{ path: notes/reviewer.md, content: "looks good" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
+      - { path: notes/reviewer.md, content: "looks good" }
+    outcome: { type: completed, summary: "reviewed" }
   - match_prompt_contains: "review the change"
     effects:
-      - {{ path: notes/reviewer-alt.md, content: "also good" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display(),
-    )
-}
+      - { path: notes/reviewer-alt.md, content: "also good" }
+    outcome: { type: completed, summary: "reviewed" }
+"#;
 
 struct Bench {
     _root: tempfile::TempDir,
@@ -310,10 +315,6 @@ impl Bench {
             storage,
             run_id: RunId::from("run-receipt-1"),
         }
-    }
-
-    fn run_dir(&self) -> PathBuf {
-        self.runs_root.join(self.run_id.as_str())
     }
 
     async fn run(
@@ -377,8 +378,7 @@ impl Bench {
 #[tokio::test]
 async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let bench = Bench::new();
-    let fixture_yaml = fixture(&bench.run_dir().join("artifacts"));
-    let (manifest, events) = bench.run(WORKFLOW, &fixture_yaml).await;
+    let (manifest, events) = bench.run(WORKFLOW, FIXTURE).await;
 
     let chain = EventChainStatus::Intact {
         events: events.len(),
@@ -503,7 +503,7 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     receipt.diagnostics = vec![
         DiagnosticCount {
             kind: Some(ArtifactKind::TaskLedger),
-            code: "unknown-key".to_string(),
+            code: "parse".to_string(),
             occurrences: 2,
         },
         DiagnosticCount {
@@ -515,7 +515,7 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "document problem(s) reported during the run: `unknown-key` in the task ledger \u{d7}2, \
+            "document problem(s) reported during the run: `parse` in the task ledger \u{d7}2, \
              `no-criteria` in the task ledger \u{d7}1"
         ),
         "{markdown}"
@@ -569,13 +569,13 @@ fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
         kind: Some(ArtifactKind::TaskLedger),
-        code: "not-yaml".to_string(),
+        code: "parse".to_string(),
         occurrences: 3,
     }];
     let rendered = render_receipt_json(&receipt).expect("the receipt renders");
     let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
     assert_eq!(json["diagnostics"][0]["kind"], "task-ledger");
-    assert_eq!(json["diagnostics"][0]["code"], "not-yaml");
+    assert_eq!(json["diagnostics"][0]["code"], "parse");
     assert_eq!(json["diagnostics"][0]["occurrences"], 3);
 }
 

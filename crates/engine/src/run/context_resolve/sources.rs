@@ -141,9 +141,22 @@ pub(super) async fn resolve_run_events(
             .into_iter()
             .filter(|e| matches!(e.payload(), Some(EventPayload::NodeFailed(_))))
             .collect(),
+        // History, not state: a session that mounts events wants what
+        // happened, and a finding that was rewritten or taken back is
+        // part of that. A session that wants the set standing now mounts
+        // the findings artifact.
         Some(yunta_core::RunEventsFilter::Findings) => events
             .into_iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .filter(|e| {
+                matches!(
+                    e.payload(),
+                    Some(
+                        EventPayload::FindingPosted(_)
+                            | EventPayload::FindingUpdated(_)
+                            | EventPayload::FindingWithdrawn(_)
+                    )
+                )
+            })
             .collect(),
     };
     let jsonl = crate::events_export::render_events_jsonl(&filtered).map_err(|source| {

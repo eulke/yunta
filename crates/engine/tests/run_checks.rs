@@ -127,16 +127,13 @@ nodes:
     depends_on: [review]
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: blocking\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[(
+        "f1",
+        "blocking",
+        "Unchecked error",
+        "src/lib.rs:10",
+        "The Result is discarded.",
+    )]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     match terminal {
@@ -169,16 +166,7 @@ nodes:
     depends_on: [review]
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: minor\n    title: \"Style nit\"\n    location: \"src/lib.rs:10\"\n    detail: \"Naming.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[("f1", "minor", "Style nit", "src/lib.rs:10", "Naming.")]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -225,16 +213,7 @@ nodes:
         - { name: findings.yaml, kind: findings }
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings: []\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = review_session(&[]);
 
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -437,7 +416,6 @@ nodes:
 #[tokio::test]
 async fn a_denied_task_criterion_blocks_the_task_citing_the_rule() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: criterion-violation
@@ -457,15 +435,10 @@ nodes:
     prompt: "Do the task."
 "#;
 
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Task\"\n    scope: [\"out.txt\"]\n    criteria:\n      - cmd: \"test -f forbidden-marker\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "Task", "out.txt", "test -f forbidden-marker")
+    ));
 
     let (terminal, _) = bench
         .run_with_config(workflow, &fixture, CONFIG_WITH_DENY)

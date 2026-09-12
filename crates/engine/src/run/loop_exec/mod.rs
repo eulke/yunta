@@ -30,7 +30,6 @@ pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
-    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let prep = match prepare_loop(ctx, node, prompt).await? {
@@ -70,8 +69,6 @@ pub(super) async fn execute_loop(
                     Close::new(
                         format!("{} task(s) done", prep.ledger.tasks.len()),
                         state.tokens,
-                        attempt,
-                        cancel,
                     ),
                 )
                 .await;

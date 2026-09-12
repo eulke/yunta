@@ -134,27 +134,38 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     // task, then lint/tests/ship/pr run for real against the sandbox
     // crate above (no mock involved — cargo and git are the real
     // things being exercised, exactly as they would be in production).
-    // A session's own cwd is the worktree, not run.dir — artifacts
-    // (unlike the loop's own scope-relative edits below) need the
-    // absolute run.dir path, the same one a real agent would be given
-    // in its rendered prompt.
+    // The two interpreted documents go over the run tools, so the
+    // sessions name them by the name the node declares; `brief.md` is
+    // the session's own file, and needs the absolute run.dir path the
+    // same way a real agent reads it from its rendered prompt, since a
+    // session's cwd is the worktree.
     let artifacts = run_dir.join("artifacts");
     let fixture = format!(
         r##"
+capabilities: {{ run_tools: true }}
 sessions:
-  - effects:
-      - {{ path: {questions:?}, content: "questions: []\n" }}
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          name: questions.yaml
+          document:
+            questions: []
+    effects:
       - {{ path: {brief:?}, content: "# Brief\n\nAdd dark mode.\n" }}
     outcome: {{ type: completed, summary: "grilled" }}
-  - effects:
-      - path: {plan:?}
-        content: |
-          tasks:
-            - id: T001
-              title: "Document the sandbox crate"
-              scope: ["src/lib.rs"]
-              criteria:
-                - cmd: "grep -q '//! sandbox' src/lib.rs"
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Document the sandbox crate"
+                scope: ["src/lib.rs"]
+                criteria:
+                  - cmd: "grep -q '//! sandbox' src/lib.rs"
     outcome: {{ type: completed, summary: "planned" }}
   - effects:
       - path: "src/lib.rs"
@@ -166,9 +177,7 @@ sessions:
           }}
     outcome: {{ type: completed, summary: "did T001" }}
 "##,
-        questions = artifacts.join("questions.yaml"),
         brief = artifacts.join("brief.md"),
-        plan = artifacts.join("plan.yaml"),
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();

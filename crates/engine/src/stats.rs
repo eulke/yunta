@@ -33,12 +33,12 @@
 //! `parallel` group join semantics aren't simulated here; a child node's
 //! `ready_at` is only as accurate as its own declared `depends_on`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::{EventPayload, StoredEvent, SubmissionOutcome, TaskStatus, TokenUsage};
 use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
@@ -85,6 +85,23 @@ impl NodeStat {
     }
 }
 
+/// Whole documents sessions offered, by what the engine answered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Submissions {
+    pub accepted: u64,
+    pub refused: u64,
+}
+
+/// Finding calls a log carries, by what the engine answered: the three
+/// accepted forms, and the calls it turned down.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FindingActivity {
+    pub posted: u64,
+    pub updated: u64,
+    pub withdrawn: u64,
+    pub refused: u64,
+}
+
 /// One run's derived stats — everything `yunta stats <run_id>`
 /// shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +129,21 @@ pub struct RunStats {
     pub nodes: Vec<NodeStat>,
     /// Events this binary could not interpret, by kind.
     pub unknown_kinds: Vec<UnknownKindCount>,
+    /// Every document submitted across the run, by verdict.
+    pub artifact_submissions: Submissions,
+    /// The same, for each node that submitted at least one.
+    pub submissions_by_node: BTreeMap<NodeId, Submissions>,
+    /// Finding events as the log carries them — a session's own calls,
+    /// the engine's posts (a gate escalation, a scope request) and a
+    /// `kind: workflow` node's re-emission of its child run's findings
+    /// all count the same.
+    pub findings: FindingActivity,
+    /// The same, for each node whose findings the log carries.
+    pub findings_by_node: BTreeMap<NodeId, FindingActivity>,
+    /// How many findings stand now: the fold over the whole log, where
+    /// an update replaces and a withdrawal removes — never a count of
+    /// `finding_posted` events.
+    pub findings_effective: u64,
 }
 
 impl RunStats {
@@ -258,8 +290,15 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStat
         _ => None,
     };
 
+    let activity = Activity::of(events);
+
     RunStats {
         unknown_kinds: unknown_kind_counts(&state),
+        artifact_submissions: activity.submissions,
+        submissions_by_node: activity.submissions_by_node,
+        findings: activity.findings,
+        findings_by_node: activity.findings_by_node,
+        findings_effective: yunta_core::events::findings::effective(events).len() as u64,
         cptv: cptv(&state),
         rework_rate,
         cache_rate,
@@ -310,6 +349,78 @@ fn close_attempt(
 struct OpenAttempt {
     attempt: u32,
     started_at: DateTime<Utc>,
+}
+
+/// What a run's sessions offered and what the engine answered, counted
+/// once for the run and once for the node each event's envelope names.
+/// Its own fold rather than another arm of the attempt walk above: these
+/// counters answer "what was handed over" and share no accumulator with
+/// the token and duration ones.
+#[derive(Debug, Default)]
+struct Activity {
+    submissions: Submissions,
+    submissions_by_node: BTreeMap<NodeId, Submissions>,
+    findings: FindingActivity,
+    findings_by_node: BTreeMap<NodeId, FindingActivity>,
+}
+
+impl Activity {
+    /// Folds every submission and finding event of `events`, in order.
+    fn of(events: &[StoredEvent]) -> Self {
+        let mut activity = Activity::default();
+        for event in events {
+            let node = event.node_id.as_ref();
+            match event.payload() {
+                Some(EventPayload::ArtifactSubmitted(p)) => count(
+                    &mut activity.submissions,
+                    &mut activity.submissions_by_node,
+                    node,
+                    match p.outcome {
+                        SubmissionOutcome::Accepted { .. } => |s: &mut Submissions| &mut s.accepted,
+                        SubmissionOutcome::Refused { .. } => |s: &mut Submissions| &mut s.refused,
+                    },
+                ),
+                Some(EventPayload::FindingPosted(_)) => {
+                    activity.count_finding(node, |f| &mut f.posted)
+                }
+                Some(EventPayload::FindingUpdated(_)) => {
+                    activity.count_finding(node, |f| &mut f.updated)
+                }
+                Some(EventPayload::FindingWithdrawn(_)) => {
+                    activity.count_finding(node, |f| &mut f.withdrawn)
+                }
+                Some(EventPayload::FindingRefused(_)) => {
+                    activity.count_finding(node, |f| &mut f.refused)
+                }
+                _ => {}
+            }
+        }
+        activity
+    }
+
+    fn count_finding(
+        &mut self,
+        node: Option<&NodeId>,
+        field: fn(&mut FindingActivity) -> &mut u64,
+    ) {
+        count(&mut self.findings, &mut self.findings_by_node, node, field);
+    }
+}
+
+/// Adds one to the same counter of the run's own tally and of the
+/// node's, so the two readings of one event can never differ. An
+/// envelope that names no node counts for the run alone, and a node
+/// enters `by_node` on its first event, never with a row of zeroes.
+fn count<T: Default>(
+    total: &mut T,
+    by_node: &mut BTreeMap<NodeId, T>,
+    node: Option<&NodeId>,
+    field: fn(&mut T) -> &mut u64,
+) {
+    *field(total) += 1;
+    if let Some(node) = node {
+        *field(by_node.entry(node.clone()).or_default()) += 1;
+    }
 }
 // --- History across runs of the same workflow (`--workflow`) --
 

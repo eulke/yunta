@@ -177,25 +177,6 @@ impl ConfigLayer {
             .unwrap_or(DefaultOnFailure::Pause)
     }
 
-    /// `limits.max_artifact_repairs`, with the reference default (`2`)
-    /// applied.
-    ///
-    /// One was the earlier number, on the reasoning that a rewrite
-    /// holding the diagnostics either converges on the first attempt or
-    /// does not converge. Measured against real sessions, that is not
-    /// how it goes: refused ledgers rewritten with their diagnostics in
-    /// hand converged five times in six on the first attempt and six in
-    /// six on the second. A document can also owe two rounds by
-    /// construction — a value of the wrong type stops the parse, so the
-    /// rules that only hold across a parsed document cannot be reported
-    /// in the same breath, and the writer meets them one round later.
-    pub fn resolved_max_artifact_repairs(&self) -> u32 {
-        self.limits
-            .as_ref()
-            .and_then(|limits| limits.max_artifact_repairs)
-            .unwrap_or(2)
-    }
-
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
     /// hidden default: absent means unlimited, exactly as before.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {

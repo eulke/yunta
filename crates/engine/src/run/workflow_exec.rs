@@ -174,7 +174,6 @@ pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
     call: WorkflowCall<'_>,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let WorkflowCall {
@@ -231,7 +230,7 @@ pub(super) async fn execute_workflow(
             .await?
             .is_empty()
         {
-            return resume_child(ctx, node, open_child, attempt, cancel).await;
+            return resume_child(ctx, node, open_child, cancel).await;
         }
     }
 
@@ -472,7 +471,6 @@ pub(super) async fn execute_workflow(
             run_dir: &child_run_dir,
             tree: &child_tree,
         },
-        attempt,
         cancel,
     )
     .await
@@ -484,7 +482,6 @@ async fn resume_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child_id: &RunId,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
@@ -538,7 +535,6 @@ async fn resume_child(
             run_dir: &child_run_dir,
             tree: &child_tree,
         },
-        attempt,
         cancel,
     )
     .await
@@ -568,7 +564,6 @@ async fn drive_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child: Child<'_>,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Child {
@@ -627,8 +622,6 @@ async fn drive_child(
                     Close::new(
                         format!("child run `{current_id}` finished"),
                         yunta_core::events::TokenUsage::default(),
-                        attempt,
-                        cancel,
                     ),
                 )
                 .await;

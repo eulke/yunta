@@ -68,28 +68,7 @@ pub enum Subject {
     Question(Named<QuestionId>),
 }
 
-impl Subject {
-    /// The noun an error uses for this kind of entry, so a message can
-    /// say "a task declares ..." without the caller knowing which
-    /// subject it holds.
-    pub(super) fn noun(&self) -> &'static str {
-        match self {
-            Subject::Document => "document",
-            Subject::Task(_) => "task",
-            Subject::Criterion { .. } => "criterion",
-            Subject::Finding(_) => "finding",
-            Subject::Question(_) => "question",
-        }
-    }
-
-    /// Whether the subject is the document itself. The sentence a
-    /// top-level key gets is a different sentence from the one an entry
-    /// gets — "a task declares ..." is right for a task and wrong for a
-    /// file, whose keys are top-level ones.
-    pub(super) fn is_document(&self) -> bool {
-        matches!(self, Subject::Document)
-    }
-}
+impl Subject {}
 
 /// `the first task`, `the 5th finding` — how an entry is named when its
 /// own id could not be read.

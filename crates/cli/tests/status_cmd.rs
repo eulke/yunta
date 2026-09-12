@@ -11,8 +11,8 @@ use std::path::Path;
 use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
 
 /// One node declaring two interpreted documents and writing both with
-/// their required keys left out — two documents, each with problems of
-/// its own, from one attempt.
+/// every entry left blank — two documents, each breaking several of its
+/// own rules, from one attempt.
 const TWO_DOCUMENTS: &str = r#"
 name: two-documents
 nodes:
@@ -20,8 +20,8 @@ nodes:
     kind: bash
     run: |
       mkdir -p {{run.dir}}/artifacts
-      printf 'tasks:\n  - id: T001\n' > {{run.dir}}/artifacts/plan.yaml
-      printf 'findings:\n  - id: F1\n' > {{run.dir}}/artifacts/notes.yaml
+      printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{run.dir}}/artifacts/plan.yaml
+      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{run.dir}}/artifacts/notes.yaml
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -120,11 +120,11 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     );
     assert!(
         ledger_problems.iter().any(|p| p.contains("title")),
-        "a task with no `title` says so: {ledger_problems:?}"
+        "a task with an empty `title` says so: {ledger_problems:?}"
     );
     assert!(
-        findings_problems.iter().any(|p| p.contains("severity")),
-        "a finding with no `severity` says so: {findings_problems:?}"
+        findings_problems.iter().any(|p| p.contains("location")),
+        "a finding with an empty `location` says so: {findings_problems:?}"
     );
 
     // The node list above stays one line per node, and that one line
@@ -194,13 +194,13 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
     assert!(
         ledger_problems
             .iter()
-            .any(|d| d["problem"] == "missing-key" && d["key"] == "title"),
-        "the ledger's task has no `title`: {state:#}"
+            .any(|d| d["problem"] == "rule" && d["code"] == "empty-title"),
+        "the ledger's task has an empty `title`: {state:#}"
     );
     assert!(
         findings_problems
             .iter()
-            .any(|d| d["problem"] == "missing-key" && d["key"] == "severity"),
-        "the finding has no `severity`: {state:#}"
+            .any(|d| d["problem"] == "rule" && d["code"] == "empty-location"),
+        "the finding has an empty `location`: {state:#}"
     );
 }

@@ -8,9 +8,7 @@ nodes:
     kind: prompt
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: |
-      Audit the current changes. Post findings to
-      {{run.dir}}/artifacts/findings-{{runner.role}}.yaml
+    prompt: "Audit the current changes and report what you find."
     artifacts:
       produces:
         - { name: "findings-{{runner.role}}.yaml", kind: findings }

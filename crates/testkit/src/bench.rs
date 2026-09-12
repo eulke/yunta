@@ -43,6 +43,9 @@ pub struct Bench {
     pub run_id: RunId,
     ids: SeqIdSource,
     ambient: Option<yunta_core::Env>,
+    /// The adapter the last run used, so a test can ask what each
+    /// session was actually handed.
+    mock: std::sync::Mutex<Option<Arc<MockAdapter>>>,
 }
 
 impl Default for Bench {
@@ -74,6 +77,7 @@ impl Bench {
             run_id: RunId::from(run_id),
             ids: SeqIdSource::new("minted"),
             ambient: None,
+            mock: std::sync::Mutex::new(None),
         }
     }
 
@@ -95,7 +99,23 @@ impl Bench {
         self.runs_root.join(self.run_id.as_str())
     }
 
+    /// The bytes of one artifact the run wrote, by the name the node
+    /// declares it under.
+    pub fn artifact(&self, name: &str) -> std::io::Result<Vec<u8>> {
+        std::fs::read(self.run_dir().join("artifacts").join(name))
+    }
+
     /// Every event this bench's run has appended.
+    /// The adapter the last run used — what a test asks about the
+    /// requests the engine actually made.
+    pub fn mock(&self) -> Arc<MockAdapter> {
+        self.mock
+            .lock()
+            .expect("the bench's own lock")
+            .clone()
+            .expect("a run has to happen before its sessions can be asked about")
+    }
+
     pub fn events(&self) -> Vec<StoredEvent> {
         self.storage
             .events_for_run(&self.run_id)
@@ -167,9 +187,10 @@ impl Bench {
         .await
         .expect("create run");
 
-        let adapter = MockAdapter::from_yaml(fixture_yaml).expect("parse mock fixture");
+        let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).expect("parse mock fixture"));
+        *self.mock.lock().expect("the bench's own lock") = Some(adapter.clone());
         let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
+        adapters.insert("mock".into(), adapter);
 
         let report = execute_run(RunEnv {
             run_id: &self.run_id,

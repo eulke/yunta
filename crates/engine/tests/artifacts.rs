@@ -196,7 +196,7 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     let report = failures[0].report().expect("a problem with the content");
     assert_eq!(report.document.kind, yunta_core::ArtifactKind::TaskLedger);
     assert_eq!(report.document.path, "artifacts/plan.yaml");
-    assert_eq!(codes(&failures), ["not-yaml"]);
+    assert_eq!(codes(&failures), ["parse"]);
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     write_artifact(run_dir.path(), "findings.yaml", "findings: [not, valid");
 
     let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
-    assert_eq!(codes(&failures), ["not-yaml"]);
+    assert_eq!(codes(&failures), ["parse"]);
 }
 
 const ASK_NODE: &str = r#"
@@ -372,7 +372,7 @@ fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
     write_artifact(run_dir.path(), "questions.yaml", "questions: [not, valid");
 
     let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
-    assert_eq!(codes(&failures), ["not-yaml"]);
+    assert_eq!(codes(&failures), ["parse"]);
 }
 
 #[test]

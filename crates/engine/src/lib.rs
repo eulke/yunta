@@ -110,8 +110,9 @@ pub use run_tools::{
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{
-    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, NodeStat,
-    Percentiles, PriorEstimation, RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,
+    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, FindingActivity,
+    NodeStat, Percentiles, PriorEstimation, RunStats, RunSummary, Submissions,
+    MIN_SAMPLES_FOR_ESTIMATION,
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,

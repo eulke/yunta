@@ -340,7 +340,6 @@ nodes:
 #[tokio::test]
 async fn a_blocked_task_fails_the_loop_and_pauses_the_run() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: blocked-task
@@ -348,7 +347,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -362,18 +361,15 @@ nodes:
 
     // One task whose criterion the executor never satisfies; with
     // DEFAULT_MAX_RETRIES=2 that's three executor sessions, then blocked.
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Impossible\"\n    scope: [\"missing.txt\"]\n    criteria:\n      - cmd: \"test -f missing.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - outcome: {{ type: completed, summary: "attempt 1" }}
-  - outcome: {{ type: completed, summary: "attempt 2" }}
-  - outcome: {{ type: completed, summary: "attempt 3" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let mut fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "Impossible", "missing.txt", "test -f missing.txt")
+    ));
+    for attempt in 1..=(DEFAULT_MAX_RETRIES + 1) {
+        fixture.push_str(&format!(
+            "  - outcome: {{ type: completed, summary: \"attempt {attempt}\" }}\n"
+        ));
+    }
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
 
@@ -607,7 +603,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     // declaration order no matter how many tasks dispatch at once.
     let sequential = Bench::new();
     let workflow_seq = concurrency_workflow(1);
-    let fixture_seq = eight_tasks_fixture(&sequential.run_dir().join("artifacts"));
+    let fixture_seq = eight_tasks_fixture();
     let (terminal_seq, state_seq) = sequential
         .run_with_config(&workflow_seq, &fixture_seq, CONCURRENCY_CONFIG)
         .await;
@@ -615,7 +611,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
 
     let parallel = Bench::new();
     let workflow_par = concurrency_workflow(4);
-    let fixture_par = eight_tasks_fixture(&parallel.run_dir().join("artifacts"));
+    let fixture_par = eight_tasks_fixture();
     let (terminal_par, state_par) = parallel
         .run_with_config(&workflow_par, &fixture_par, CONCURRENCY_CONFIG)
         .await;
@@ -660,7 +656,6 @@ async fn a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns
     // onto — exactly "pasa en su worktree pero rompe tras la integración
     // de otra". B must go back to `ready` without touching A.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: integration-conflict
@@ -668,7 +663,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -692,11 +687,7 @@ nodes:
         ),
     );
 
-    let mut fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
-        ledger,
-    );
+    let mut fixture = plan_session(&ledger);
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
@@ -793,7 +784,6 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
     // against anything but task-x's own isolated diff, task-y's write
     // would spuriously violate it.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = concurrency_workflow(2);
     let ledger = format!(
@@ -802,9 +792,8 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
         task_yaml("task-y", "y", "y.txt", "test -f y.txt"),
     );
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
-        artifacts_dir.display(),
-        ledger,
+        "{}  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
+        plan_session(&ledger),
     );
 
     let (terminal, state) = bench
@@ -1039,7 +1028,6 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_loop_child_when_a_sibling_wins() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: race-loop
@@ -1047,7 +1035,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -1070,16 +1058,11 @@ nodes:
     // cancelling the loser ends it. Were the loser not cancelled the run
     // would hang here, so it finishing at all is the proof the loop was cut
     // short — no wall-clock assertion needed.
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"slow\"\n    scope: [\"slow.txt\"]\n    criteria:\n      - cmd: \"test -f slow.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - outcome: {{ type: hang }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let mut fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "slow", "slow.txt", "test -f slow.txt")
+    ));
+    fixture.push_str("  - outcome: { type: hang }\n");
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);

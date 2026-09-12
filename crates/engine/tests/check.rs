@@ -1808,3 +1808,41 @@ nodes:
         "the rejection names the bad filter or the valid vocabulary: {msg}"
     );
 }
+
+// --- any node may declare an interpreted artifact -----------------------------
+
+/// A workflow whose single node `plan` produces a task ledger, with the
+/// node's own kind lines spliced in.
+fn producing_a_ledger(node_kind: &str) -> Workflow {
+    let yaml = format!(
+        r#"
+name: ledger
+nodes:
+  - id: plan
+{node_kind}
+    artifacts:
+      produces: [{{ name: plan.yaml, kind: task-ledger }}]
+"#
+    );
+    serde_norway::from_str(&yaml).expect("the fixture parses")
+}
+
+#[test]
+fn every_node_kind_may_declare_an_interpreted_artifact() {
+    // A session hands its document to the run tools; a command writes
+    // the file, as `ledger-task` does when it stages a ledger a person
+    // wrote. Both end at the same close, reading the same file through
+    // the same door, so neither is a kind of node the declaration is
+    // wrong on.
+    for node_kind in [
+        "    kind: prompt\n    prompt: \"plan it\"",
+        "    kind: workflow\n    use: planner",
+        "    kind: bash\n    run: \"cp ledger.yaml {{run.dir}}/artifacts/plan.yaml\"",
+    ] {
+        assert_eq!(
+            check(&producing_a_ledger(node_kind), &ConfigLayer::default()),
+            Vec::new(),
+            "`{node_kind}` may declare a task ledger"
+        );
+    }
+}

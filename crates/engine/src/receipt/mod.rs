@@ -349,8 +349,8 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
 /// Which runner ran each node, in the order the nodes first resolved
 /// one.
 ///
-/// A node resolves its runner once per session it opens — again for a
-/// repair, again after a re-route — and the receipt's line counts
+/// A node resolves its runner once per session it opens — again after a
+/// re-route, again on a retry — and the receipt's line counts
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
 /// this.

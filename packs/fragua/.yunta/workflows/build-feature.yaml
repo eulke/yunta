@@ -25,8 +25,8 @@ nodes:
     runner: planner
     interactive: true
     prompt: |
-      Identify the ambiguities in "{{inputs.idea}}" and write the questions
-      you need as an artifact; don't converse. Once answered, write the brief.
+      Identify the ambiguities in "{{inputs.idea}}" and raise the questions
+      you need; don't converse. Once answered, write the brief.
     artifacts:
       produces:
         - { name: questions.yaml, kind: questions }
@@ -93,7 +93,7 @@ nodes:
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Audit the changes; findings to {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    prompt: "Audit the changes and report what you find."
     artifacts:
       produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
 

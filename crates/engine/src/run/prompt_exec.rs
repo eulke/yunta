@@ -118,15 +118,10 @@ async fn resume_target(
 
 /// One `kind: prompt` node: its context, its prompt, one session, and
 /// the close that verifies what it declared.
-///
-/// Repairing an artifact the close cannot read is not this function's
-/// business any more than it is any other kind's — the close owns it and
-/// dispatches a session of its own for it (see [`super::repair`]).
 pub(super) async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match assemble_prompt(ctx, node, prompt, cancel).await? {
@@ -199,9 +194,10 @@ pub(super) async fn execute_prompt(
     // The tool sentence is produced by the mount, so a session is never
     // told to call something this adapter did not give it.
     let mut rendered = rendered;
-    if let Some(notice) = crate::run_tools::self_check_notice(
+    if let Some(notice) = crate::run_tools::submission_notice(
         run_tools.as_ref(),
         &super::node_exec::declared_artifacts(ctx, node),
+        super::node_exec::artifact_dir(ctx, node).as_deref(),
     ) {
         rendered.push_str(&notice);
     }
@@ -253,7 +249,7 @@ pub(super) async fn execute_prompt(
             close_node(
                 ctx,
                 node,
-                Close::new(summary, tokens, attempt, cancel)
+                Close::new(summary, tokens)
                     .staged(&staged)
                     .artifacts_before(&artifacts_before),
             )

@@ -126,7 +126,6 @@ pub(crate) fn check_artifact_names(workflow: &Workflow, errors: &mut Vec<CheckEr
         }
     }
 }
-
 /// Every `on_finish.distill` path must be some node's declared
 /// artifact. Template-bearing names (`findings-{{runner.role}}.yaml`)
 /// compare as written — the distill declaration must match the

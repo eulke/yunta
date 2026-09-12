@@ -11,27 +11,57 @@ use yunta_core::events::EventPayload;
 use yunta_engine::RunTerminal;
 use yunta_testkit::Bench;
 
-const PLAN_ONLY: &str = r#"
-name: plan-only
+/// A node with both kinds of artifact: the ledger it hands over through
+/// the run tools, and a file of its own the session writes. The opaque
+/// one is what earns the session its reach into `artifacts/` — a node
+/// that only submits needs none, so it never gets one, and there would
+/// be nothing for this audit to catch.
+const PLAN_AND_NOTES: &str = r#"
+name: plan-and-notes
 nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write a task ledger."
+    prompt: "Write a task ledger and leave your notes."
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces:
+        - { name: plan.yaml, kind: task-ledger }
+        - notes.md
 "#;
 
-const LEDGER: &str =
-    "tasks:\\n  - id: t1\\n    title: Work\\n    scope: [\\\"src/**\\\"]\\n    criteria:\\n      - cmd: \\\"cargo test\\\"\\n";
+/// A session that submits its ledger and writes `effects` besides — one
+/// `path: content` pair per line, already indented for the script.
+fn fixture(effects: &str) -> String {
+    format!(
+        r#"
+capabilities: {{ run_tools: true }}
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: t1
+                title: "Work"
+                scope: ["src/**"]
+                criteria:
+                  - cmd: "cargo test"
+    effects:
+{effects}
+    outcome: {{ type: completed, summary: planned }}
+"#
+    )
+}
 
-fn artifact_path(bench: &Bench, name: &str) -> String {
-    bench
-        .run_dir()
-        .join("artifacts")
-        .join(name)
-        .display()
-        .to_string()
+/// One `effects` entry, at the indentation [`fixture`] splices it into.
+fn effect(bench: &Bench, name: &str, content: &str) -> String {
+    let path = bench.run_dir().join("artifacts").join(name);
+    format!(
+        "      - {{ path: \"{}\", content: \"{content}\" }}",
+        path.display()
+    )
 }
 
 fn last_failure(events: &[yunta_core::events::StoredEvent]) -> String {
@@ -48,17 +78,13 @@ fn last_failure(events: &[yunta_core::events::StoredEvent]) -> String {
 #[tokio::test]
 async fn a_node_that_writes_an_artifact_it_never_declared_fails() {
     let bench = Bench::new();
-    let declared = artifact_path(&bench, "plan.yaml");
-    let someone_elses = artifact_path(&bench, "findings-reviewer.yaml");
-    let fixture = format!(
-        "sessions:\n  \
-         - effects:\n      \
-         - {{ path: \"{declared}\", content: \"{LEDGER}\" }}\n      \
-         - {{ path: \"{someone_elses}\", content: \"findings: []\\n\" }}\n    \
-           outcome: {{ type: completed, summary: planned }}\n"
+    let effects = format!(
+        "{}\n{}",
+        effect(&bench, "notes.md", "what I did\\n"),
+        effect(&bench, "findings-reviewer.yaml", "findings: []\\n"),
     );
 
-    let (terminal, _state) = bench.run(PLAN_ONLY, &fixture).await;
+    let (terminal, _state) = bench.run(PLAN_AND_NOTES, &fixture(&effects)).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "a node does not get to write another node's artifact: {terminal:?}"
@@ -70,22 +96,16 @@ async fn a_node_that_writes_an_artifact_it_never_declared_fails() {
         "the failure names the file that was not declared: {failure}"
     );
     assert!(
-        !failure.contains("plan.yaml"),
-        "the node's own artifact is the node doing its job: {failure}"
+        !failure.contains("notes.md") && !failure.contains("plan.yaml"),
+        "the node's own artifacts are the node doing its job: {failure}"
     );
 }
 
 #[tokio::test]
 async fn a_node_that_writes_only_what_it_declared_finishes() {
     let bench = Bench::new();
-    let declared = artifact_path(&bench, "plan.yaml");
-    let fixture = format!(
-        "sessions:\n  \
-         - effects:\n      \
-         - {{ path: \"{declared}\", content: \"{LEDGER}\" }}\n    \
-           outcome: {{ type: completed, summary: planned }}\n"
-    );
+    let effects = effect(&bench, "notes.md", "what I did\\n");
 
-    let (terminal, _state) = bench.run(PLAN_ONLY, &fixture).await;
+    let (terminal, _state) = bench.run(PLAN_AND_NOTES, &fixture(&effects)).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }

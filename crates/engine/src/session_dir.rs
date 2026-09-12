@@ -16,10 +16,6 @@ use yunta_core::{NodeId, TaskId};
 pub(crate) enum SessionSlot<'a> {
     /// A node's own session.
     Node(&'a NodeId),
-    /// The session that rewrites a document the node's own session
-    /// wrote wrong. It follows that session rather than running beside
-    /// it, and carries fresh credentials of its own.
-    Repair(&'a NodeId),
     /// One task attempt inside a loop node. Siblings run concurrently,
     /// which is what makes the task's own id part of the name.
     Task(&'a NodeId, &'a TaskId),
@@ -36,7 +32,6 @@ impl SessionSlot<'_> {
         let sessions = run_dir.join("scratch").join("sessions");
         match self {
             Self::Node(node) => sessions.join(node.as_str()),
-            Self::Repair(node) => sessions.join(node.as_str()).join("repair"),
             Self::Task(node, task) => sessions.join(node.as_str()).join(task.as_str()),
         }
     }

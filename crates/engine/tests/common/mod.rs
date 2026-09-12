@@ -33,17 +33,30 @@ nodes:
         - { name: questions.yaml, kind: questions }
 "#;
 
-pub fn questions_fixture(artifacts_dir: &std::path::Path) -> String {
-    format!(
-        r#"
+/// The session [`QUESTIONS_WORKFLOW`]'s `ask` node runs: it hands two
+/// questions — one `choice`, one optional `text` — over through
+/// `yunta_submit_questions`, and the engine writes `questions.yaml`.
+pub const QUESTIONS_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - {{ path: "{artifacts}/questions.yaml", content: "questions:\n  - id: q1\n    text: \"Which environment?\"\n    answer_type: choice\n    values: [staging, production]\n    required: true\n  - id: q2\n    text: \"Any notes?\"\n    answer_type: text\n    required: false\n" }}
-    outcome: {{ type: completed, summary: "asked" }}
-"#,
-        artifacts = artifacts_dir.display()
-    )
-}
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          name: questions.yaml
+          document:
+            questions:
+              - id: q1
+                text: "Which environment?"
+                answer_type: choice
+                values: [staging, production]
+                required: true
+              - id: q2
+                text: "Any notes?"
+                answer_type: text
+                required: false
+    outcome: { type: completed, summary: "asked" }
+"#;
 
 // --- kind: questions → superficie interactiva ------------
 
@@ -157,6 +170,56 @@ permissions:
     deny: ["*forbidden-marker*"]
 "#;
 
+// --- task ledgers handed over through the run tools -----
+
+/// One session that hands `ledger` over as `plan.yaml` through
+/// `yunta_submit_task_ledger` and closes with `summary` — the engine
+/// validates the document and writes the file itself. This is a session
+/// entry alone, to append after others in a fixture; [`plan_session`]
+/// opens a fixture with it.
+pub fn ledger_session(ledger: &str, summary: &str) -> String {
+    let document: String = ledger
+        .lines()
+        .map(|line| format!("            {line}\n"))
+        .collect();
+    format!(
+        "  - steps:\n      - type: run_tool\n        tool: yunta_submit_task_ledger\n\
+         \x20       arguments:\n          name: plan.yaml\n          document:\n{document}\
+         \x20   outcome: {{ type: completed, summary: {summary} }}\n"
+    )
+}
+
+/// The fixture a loop test starts from: the run tools its planner
+/// submits through, and the planner's own session handing `ledger` over.
+/// Executor sessions a test appends land after it, in dispatch order.
+pub fn plan_session(ledger: &str) -> String {
+    format!(
+        "capabilities: {{ run_tools: true }}\nsessions:\n{}",
+        ledger_session(ledger, "planned")
+    )
+}
+
+/// One session posting each `(id, severity, title, location, detail)`
+/// through `yunta_post_finding` — the engine derives `findings.yaml`
+/// from them when the node closes. An empty slice is a review that
+/// finds nothing.
+pub fn review_session(findings: &[(&str, &str, &str, &str, &str)]) -> String {
+    let steps: String = findings
+        .iter()
+        .map(|(id, severity, title, location, detail)| {
+            format!(
+                "      - type: run_tool\n        tool: yunta_post_finding\n        arguments:\n\
+                 \x20         id: {id}\n          severity: {severity}\n          title: {title:?}\n\
+                 \x20         location: {location:?}\n          detail: {detail:?}\n"
+            )
+        })
+        .collect();
+    format!(
+        "capabilities: {{ run_tools: true }}\nsessions:\n  - steps:\n{steps}\
+         \x20   outcome: {{ type: completed, summary: \"reviewed\" }}\n"
+    )
+}
+
 // --- concurrency: N in loop nodes -----------------------
 
 pub const CONCURRENCY_CONFIG: &str = r#"
@@ -194,7 +257,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{{{run.dir}}}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - {{ name: plan.yaml, kind: task-ledger }}
@@ -209,15 +272,12 @@ nodes:
     )
 }
 
-/// One mock session per task, matched by its own id (never by call order —
-/// concurrent dispatch races several `spawn()` calls at once) plus the
-/// planner's own session first.
-pub fn eight_tasks_fixture(artifacts_dir: &std::path::Path) -> String {
-    let mut yaml = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
-        eight_independent_tasks_ledger(),
-    );
+/// One mock session per task of [`eight_independent_tasks_ledger`],
+/// matched by its own id (never by call order — concurrent dispatch
+/// races several `spawn()` calls at once), behind the planner's own
+/// session.
+pub fn eight_tasks_fixture() -> String {
+    let mut yaml = plan_session(&eight_independent_tasks_ledger());
     for n in 1..=8 {
         yaml.push_str(&format!(
             "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: out-{n}.txt, content: \"{n}\" }}\n    outcome: {{ type: completed, summary: \"did task-{n}\" }}\n"
@@ -268,7 +328,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{{{run.dir}}}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - {{ name: plan.yaml, kind: task-ledger }}
@@ -295,7 +355,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -307,14 +367,6 @@ nodes:
     prompt: "Read your task from the ledger and implement it."
 "#
     .to_string()
-}
-
-pub fn plan_session(artifacts_dir: &std::path::Path, ledger: &str) -> String {
-    format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
-        ledger,
-    )
 }
 
 pub fn findings_posted(
@@ -610,7 +662,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the task ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -632,25 +684,35 @@ limits:
   max_loop_iterations: 2
 "#;
 
-pub fn loop_cap_fixture(artifacts_dir: &std::path::Path) -> String {
-    format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"a\"\n    scope: [\"a.txt\"]\n    criteria:\n      - cmd: \"test -f a.txt\"\n  - id: T002\n    title: \"b\"\n    scope: [\"b.txt\"]\n    criteria:\n      - cmd: \"test -f b.txt\"\n    depends_on: [T001]\n  - id: T003\n    title: \"c\"\n    scope: [\"c.txt\"]\n    criteria:\n      - cmd: \"test -f c.txt\"\n    depends_on: [T002]\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - effects:
-      - {{ path: a.txt, content: "a" }}
-    outcome: {{ type: completed, summary: "did T001" }}
-  - effects:
-      - {{ path: b.txt, content: "b" }}
-    outcome: {{ type: completed, summary: "did T002" }}
-  - effects:
-      - {{ path: c.txt, content: "c" }}
-    outcome: {{ type: completed, summary: "did T003" }}
-"#,
-        artifacts = artifacts_dir.display()
-    )
+/// The loop-cap run's sessions: the planner hands a chain of three
+/// tasks — each depending on the one before, so they can only run one
+/// batch at a time — over through the run tools, and one executor
+/// session per task follows, in dispatch order.
+pub fn loop_cap_fixture() -> String {
+    const CHAIN: [(&str, &str); 3] = [("T001", "a"), ("T002", "b"), ("T003", "c")];
+
+    let mut ledger = String::from("tasks:\n");
+    let mut previous: Option<&str> = None;
+    for (task, file) in CHAIN {
+        ledger.push_str(&task_yaml(
+            task,
+            file,
+            &format!("{file}.txt"),
+            &format!("test -f {file}.txt"),
+        ));
+        if let Some(previous) = previous {
+            ledger.push_str(&format!("    depends_on: [{previous}]\n"));
+        }
+        previous = Some(task);
+    }
+
+    let mut yaml = plan_session(&ledger);
+    for (task, file) in CHAIN {
+        yaml.push_str(&format!(
+            "  - effects:\n      - {{ path: {file}.txt, content: \"{file}\" }}\n    outcome: {{ type: completed, summary: \"did {task}\" }}\n"
+        ));
+    }
+    yaml
 }
 
 // --- limits.inline_context_bytes -------------------------

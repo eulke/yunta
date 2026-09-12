@@ -5,10 +5,6 @@
 //! declaration, not a second key an author has to remember. It is the
 //! only context block the engine adds on its own, which is why it lives
 //! apart from resolving what the author asked for.
-//!
-//! Publishing it here, once, is also what keeps it out of the repair
-//! instruction: a session that gets the shape in its stable prefix does
-//! not need it again appended to the problems its last attempt left.
 
 use yunta_core::events::ContextSourceRef;
 use yunta_core::Node;
@@ -68,10 +64,9 @@ pub(super) fn mount_artifact_shapes(
 /// mount ahead of the author's own context. An opaque artifact yields
 /// nothing — it has no shape to demand.
 ///
-/// The path is spelled out because the engine knows it and the session
-/// does not: its working directory is the worktree, not the run
-/// directory, so an agent told only to "write an artifact" has nowhere
-/// to put it.
+/// The block names the kind and what carries it, never a path: an
+/// interpreted artifact is a document the session hands over, and the
+/// file is the engine's to write.
 ///
 /// Names carry templates (`findings-{{runner.role}}`), and what is
 /// published is the rendered name — the one the close will verify
@@ -92,17 +87,28 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
         .iter()
         .filter_map(|spec| match spec {
             yunta_core::ArtifactSpec::Typed { name, kind } => {
-                let path = ctx.run_dir.join("artifacts").join(name);
                 let shape = yunta_core::shape::contract(*kind);
+                let opening = match kind.submit_tool() {
+                    Some(_) => format!(
+                        "This node produces a `{kind}` artifact named `{name}`. It is a \
+                         document this session submits through its run tools; the engine \
+                         validates it and writes the file itself. Do not write the file."
+                    ),
+                    None => format!(
+                        "This node produces a `{kind}` artifact named `{name}`. It is not a \
+                         file this session writes: report each finding through its run tools \
+                         the moment you see it, and the engine writes the file at the end \
+                         from everything this node reported. A finding reported before this \
+                         session ends survives whatever happens after."
+                    ),
+                };
                 Some((
                     format!("{SHAPE_KIND}:{name}"),
                     format!(
-                        "This node produces an artifact the engine reads and validates. \
-                         Write it at {}.\n\nWhat follows is the whole contract for that \
-                         file — the keys, their types, and the rules. Where any other \
-                         instruction describes this file differently, this is what the \
-                         engine enforces.\n\n{shape}",
-                        path.display()
+                        "{opening}\n\nWhat follows is the whole contract for that \
+                         document — the keys, their types, and the rules. Where any other \
+                         instruction describes it differently, this is what the engine \
+                         enforces.\n\n{shape}"
                     ),
                 ))
             }

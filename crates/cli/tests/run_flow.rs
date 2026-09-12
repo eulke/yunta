@@ -156,15 +156,25 @@ nodes:
     prompt: "Implement your task."
 "#,
     );
-    // The fixture is rendered with {{run.dir}} before parsing — the
-    // scripted planner writes its artifact where a real agent would.
+    // The scripted planner hands its ledger over the way a real one
+    // does: a tool call the engine answers, and a file the engine writes.
     write(
         &repo.join(".yunta/tests/fixtures/happy.yaml"),
         r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - path: "{{run.dir}}/artifacts/plan.yaml"
-        content: "tasks:\n  - id: T001\n    title: \"Make it\"\n    scope: [\"made.txt\"]\n    criteria:\n      - cmd: \"test -f made.txt\"\n"
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Make it"
+                scope: ["made.txt"]
+                criteria:
+                  - cmd: "test -f made.txt"
     outcome: { type: completed, summary: "planned" }
   - effects:
       - { path: made.txt, content: "made" }

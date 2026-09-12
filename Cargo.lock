@@ -2812,6 +2812,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "serde_path_to_error",
  "tempfile",
  "thiserror",
  "tokio",

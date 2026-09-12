@@ -11,12 +11,18 @@
 //! for `task_registered`, `Finding`s for `finding_posted`, `Question`s
 //! so `node_exec.rs` can pause the run instead of finishing the node.
 //!
-//! Every failure here is an [`ArtifactFailure`], and its two variants
-//! are the distinction the repair cycle turns on: a problem with the
-//! file (never produced, empty, past the declared ceiling, refused by
-//! the filesystem) is not one a rewrite reaches, while a document whose
-//! content is not what its kind declares is exactly what writing the
-//! file again fixes.
+//! An interpreted artifact reaches that directory through this module
+//! too, and only through it: [`submit`] takes the document a session
+//! handed over, validates it against the kind the node declared, and
+//! writes the canonical YAML; [`derive_findings`] writes the file a
+//! reviewing node's own postings add up to. The close then reads back
+//! what was written, through the same door as any other file — so a
+//! document is judged once, by the code that judges every document.
+//!
+//! Every failure here is an [`ArtifactFailure`]: a problem with the file
+//! (never produced, empty, past the declared ceiling, refused by the
+//! filesystem) or a document whose content is not what its kind
+//! declares.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -201,6 +207,178 @@ fn interpret(
     })
 }
 
+/// Why a document a session handed over did not become a file.
+#[derive(Debug)]
+pub(crate) enum SubmitError {
+    /// The name is declared without a `kind:` — a file the session
+    /// writes itself, with no document for the engine to validate.
+    NotInterpreted { name: String },
+    /// The name is a findings artifact, whose entries arrive one at a
+    /// time and whose file the engine derives at close. Defensive: no
+    /// submission tool is offered for the kind.
+    Accumulated { name: String },
+    /// The document is not what its kind declares.
+    Refused(Report),
+    /// The canonical file would be larger than the run allows.
+    File { path: String, problem: FileProblem },
+    Io {
+        context: String,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for SubmitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SubmitError::NotInterpreted { name } => write!(
+                f,
+                "`{name}` is declared without a `kind:`, so it is a file this session writes \
+                 rather than a document it submits"
+            ),
+            SubmitError::Accumulated { name } => write!(
+                f,
+                "`{name}` is a findings artifact: report each finding with \
+                 `{tool}` and the engine writes the file",
+                tool = ArtifactKind::POST_FINDING_TOOL
+            ),
+            SubmitError::Refused(report) => write!(f, "{report}"),
+            SubmitError::File { path, problem } => {
+                write!(
+                    f,
+                    "{}",
+                    ArtifactFailure::file(path.clone(), problem.clone())
+                )
+            }
+            SubmitError::Io { context, source } => write!(f, "cannot {context}: {source}"),
+        }
+    }
+}
+
+/// Validates `document` against the kind `spec` declares and, once it is
+/// accepted, writes the canonical file the close will read.
+///
+/// The verdict is the close's own: the same type, the same rules, the
+/// same report. What differs is only that the document never was a
+/// file — so a session hears its verdict while it can still act, instead
+/// of after it has ended.
+pub(crate) fn submit(
+    spec: &ArtifactSpec,
+    run_dir: &Path,
+    document: serde_json::Value,
+    max_bytes: Option<u64>,
+) -> Result<VerifiedArtifact, SubmitError> {
+    let ArtifactSpec::Typed { name, kind } = spec else {
+        return Err(SubmitError::NotInterpreted {
+            name: spec.name().to_string(),
+        });
+    };
+    let path = Path::new(ARTIFACTS_DIR).join(name).display().to_string();
+
+    let (content, yaml) = match kind {
+        ArtifactKind::TaskLedger => {
+            let ledger: Ledger =
+                yunta_core::shape::accept(document, &path).map_err(SubmitError::Refused)?;
+            let yaml = render(&ledger, &path)?;
+            (ArtifactContent::TaskLedger(ledger), yaml)
+        }
+        ArtifactKind::Questions => {
+            let file: QuestionsFile =
+                yunta_core::shape::accept(document, &path).map_err(SubmitError::Refused)?;
+            let yaml = render(&file, &path)?;
+            (ArtifactContent::Questions(file.questions), yaml)
+        }
+        ArtifactKind::Findings => return Err(SubmitError::Accumulated { name: name.clone() }),
+    };
+
+    let verified = write_canonical(name, &path, run_dir, yaml, max_bytes)?;
+    Ok(VerifiedArtifact {
+        content,
+        ..verified
+    })
+}
+
+/// Writes the findings file `node` has earned: every finding it posted
+/// that still stands, in the order it first posted them.
+///
+/// A reviewing session reports each finding as it sees it, so the file
+/// is what those reports add up to rather than something the session
+/// writes at the end — which is what makes a finding survive a session
+/// that dies after reporting it. A node that reported nothing gets a
+/// file with an empty list: a review that found nothing is a review.
+pub(crate) fn derive_findings(
+    spec: &ArtifactSpec,
+    run_dir: &Path,
+    posted: Vec<Finding>,
+    max_bytes: Option<u64>,
+) -> Result<VerifiedArtifact, SubmitError> {
+    let ArtifactSpec::Typed {
+        name,
+        kind: ArtifactKind::Findings,
+    } = spec
+    else {
+        return Err(SubmitError::NotInterpreted {
+            name: spec.name().to_string(),
+        });
+    };
+    let path = Path::new(ARTIFACTS_DIR).join(name).display().to_string();
+    let file = FindingsFile::from_findings(posted.clone());
+    let yaml = render(&file, &path)?;
+    let verified = write_canonical(name, &path, run_dir, yaml, max_bytes)?;
+    Ok(VerifiedArtifact {
+        content: ArtifactContent::Findings(posted),
+        ..verified
+    })
+}
+
+fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<String, SubmitError> {
+    yunta_core::shape::render(document).map_err(|source| SubmitError::Io {
+        context: format!("render `{path}`"),
+        source: std::io::Error::other(source.to_string()),
+    })
+}
+
+/// Writes `yaml` at `artifacts/<name>` and reports it as the close will
+/// read it back.
+///
+/// Through the run's own `scratch/` and a rename, which is atomic on one
+/// filesystem: a reader never meets half a document, and the directory
+/// the close audits never holds a temporary file nobody declared.
+fn write_canonical(
+    name: &str,
+    path: &str,
+    run_dir: &Path,
+    yaml: String,
+    max_bytes: Option<u64>,
+) -> Result<VerifiedArtifact, SubmitError> {
+    let bytes = yaml.into_bytes();
+    if let Some(ceiling) = max_bytes {
+        if bytes.len() as u64 > ceiling {
+            return Err(SubmitError::File {
+                path: path.to_string(),
+                problem: FileProblem::Oversized {
+                    bytes: bytes.len() as u64,
+                    ceiling,
+                },
+            });
+        }
+    }
+    let io = |context: String| move |source| SubmitError::Io { context, source };
+    let mut file = tempfile::NamedTempFile::new_in(run_dir.join("scratch"))
+        .map_err(io(format!("open a temporary file for `{path}`")))?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(io(format!("write `{path}`")))?;
+    file.persist(run_dir.join(path))
+        .map_err(|e| SubmitError::Io {
+            context: format!("place `{path}`"),
+            source: e.error,
+        })?;
+    Ok(VerifiedArtifact {
+        name: name.to_string(),
+        path: PathBuf::from(path),
+        content_hash: sha256_hex(&bytes),
+        content: ArtifactContent::Opaque,
+    })
+}
+
 /// What the run's `artifacts/` directory held before a node's session
 /// ran, so the node's close can tell what that session wrote there.
 ///
@@ -228,8 +406,8 @@ impl ArtifactsSnapshot {
     /// directory and named the way the log names an artifact.
     ///
     /// `declared` is the node's rendered artifact names: writing those
-    /// is the node doing its job, and rewriting one across a repair is
-    /// the repair doing its job.
+    /// is the node doing its job, and writing one twice is a session
+    /// that corrected itself.
     pub(crate) fn undeclared_writes(
         &self,
         run_dir: &Path,

@@ -24,10 +24,8 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
     // es el único camino: el run pausa citando las preguntas, no panickea
     // ni queda colgado.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
-    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, &fixture).await;
+    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
 
     match &terminal {
         RunTerminal::Paused { reason } => {
@@ -65,7 +63,6 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     // volver a despachar el nodo, fallaría por "fixture exhausted" en vez
     // de devolver la misma pausa.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
     let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
@@ -91,7 +88,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     .await
     .unwrap();
 
-    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
     let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first_report = execute_run(RunEnv {
@@ -154,13 +151,12 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // channel and responder.
     let bench = Bench::new();
     let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")], // q2 is not required
     };
     let (terminal, state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -194,14 +190,12 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
 #[tokio::test]
 async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q2", "just a note")], // q1 (required) missing
     };
     let (terminal, _state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {
@@ -253,7 +247,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     .unwrap();
 
     // First invocation: headless — asks, pauses.
-    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
     let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first = execute_run(RunEnv {
@@ -325,14 +319,12 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
 #[tokio::test]
 async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "qa")], // not in [staging, production]
     };
     let (terminal, _state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {

@@ -19,7 +19,6 @@ use common::*;
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: bootstrap
@@ -27,7 +26,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the ledger."
     artifacts:
       produces:
         - { name: plan.yaml, kind: task-ledger }
@@ -43,30 +42,44 @@ nodes:
     run: "test -f hello.txt && test -f world.txt"
 "#;
 
-    // Session 1 is the planner: it "writes" the ledger artifact the way a
-    // real agent would, at the absolute path its prompt named. Sessions 2
-    // and 3 are one executor session per task.
-    let fixture = format!(
-        r#"
+    // Session 1 is the planner: it hands the ledger over through its run
+    // tools. Sessions 2 and 3 are one executor session per task, each
+    // writing the file its task is scoped to.
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_task_ledger
+        arguments:
+          name: plan.yaml
+          document:
+            tasks:
+              - id: T001
+                title: "Create hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+              - id: T002
+                title: "Create world"
+                scope: ["world.txt"]
+                criteria:
+                  - cmd: "test -f world.txt"
+                depends_on: [T001]
+    outcome: { type: completed, summary: "planned" }
   - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Create hello\"\n    scope: [\"hello.txt\"]\n    criteria:\n      - cmd: \"test -f hello.txt\"\n  - id: T002\n    title: \"Create world\"\n    scope: [\"world.txt\"]\n    criteria:\n      - cmd: \"test -f world.txt\"\n    depends_on: [T001]\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - effects:
-      - {{ path: hello.txt, content: "hello" }}
+      - { path: hello.txt, content: "hello" }
     steps:
-      - {{ type: usage, input_tokens: 100, output_tokens: 20 }}
-    outcome: {{ type: completed, summary: "did T001" }}
+      - { type: usage, input_tokens: 100, output_tokens: 20 }
+    outcome: { type: completed, summary: "did T001" }
   - effects:
-      - {{ path: world.txt, content: "world" }}
+      - { path: world.txt, content: "world" }
     steps:
-      - {{ type: usage, input_tokens: 80, output_tokens: 10 }}
-    outcome: {{ type: completed, summary: "did T002" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+      - { type: usage, input_tokens: 80, output_tokens: 10 }
+    outcome: { type: completed, summary: "did T002" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
@@ -271,7 +284,7 @@ nodes:
 }
 
 #[tokio::test]
-async fn an_agent_that_never_writes_its_declared_artifact_fails_the_node() {
+async fn a_session_that_never_hands_over_its_declared_document_fails_the_node() {
     let bench = Bench::new();
 
     let workflow = r#"
@@ -286,9 +299,10 @@ nodes:
         - { name: plan.yaml, kind: task-ledger }
 "#;
 
-    // The session claims success but writes nothing — the engine
-    // verifies, and the missing artifact fails the node.
+    // The session claims success but submits nothing — the engine
+    // verifies, and the missing document fails the node.
     let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "trust me, it is written" }
 "#;
@@ -554,18 +568,22 @@ nodes:
         - { name: findings.yaml, kind: findings }
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: major\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+  - steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: f1
+          severity: major
+          title: "Unchecked error"
+          location: "src/lib.rs:10"
+          detail: "The Result is discarded."
+    outcome: { type: completed, summary: "reviewed" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(state.findings.len(), 1);
     assert_eq!(state.findings[0].id, "f1");

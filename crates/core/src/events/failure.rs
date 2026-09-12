@@ -5,7 +5,7 @@
 //! did not close, each carrying its own problems. Keeping both in one
 //! type is what lets the log record the facts and every surface produce
 //! its own prose from them, instead of the engine writing prose once and
-//! three surfaces repairing it.
+//! three surfaces taking it apart again.
 
 use std::fmt;
 
@@ -45,8 +45,8 @@ impl Failure {
     }
 
     /// Every report behind this failure, each carrying the document it
-    /// is about. What a receipt counts and a repair instruction is
-    /// built from.
+    /// is about. What a receipt counts and a diagnostic is rendered
+    /// from.
     pub fn reports(&self) -> impl Iterator<Item = &Report> {
         self.failures().filter_map(ArtifactFailure::report)
     }

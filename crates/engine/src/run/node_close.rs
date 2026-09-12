@@ -2,21 +2,21 @@
 //! refreshing `progress.md` either way.
 //!
 //! Every kind closes through [`close_node`], so every kind gets the same
-//! after-hooks, the same scope check, the same artifact verification and
-//! the same repair cycle — none of them can forget one. Every node
-//! failure the engine records goes through the `fail*` family here, so
-//! `node_failed` is written in one place and a new field on the event is
-//! a change to one function rather than to every kind of node.
+//! after-hooks, the same scope check and the same artifact verification
+//! — none of them can forget one. Every node failure the engine records
+//! goes through the `fail*` family here, so `node_failed` is written in
+//! one place and a new field on the event is a change to one function
+//! rather than to every kind of node.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use tokio_util::sync::CancellationToken;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TaskStatus,
     TaskStatusChangedPayload, TokenUsage,
 };
+use yunta_core::{ArtifactSpec, NodeKind};
 use yunta_core::{HookFailurePolicy, Node};
 
 use crate::artifacts::{close_artifacts, ArtifactContent, ArtifactsSnapshot, VerifiedArtifact};
@@ -24,23 +24,16 @@ use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_exec::{render_artifact_names, NodeEnd};
-use super::repair;
 use super::{RunCtx, RunError};
 
 /// What a node's close needs beyond the node itself.
 ///
 /// Grouped rather than passed loose because every field answers a
-/// question only the caller can: how the node ended, what it spent,
-/// which attempt it is closing (a repair announces the next one), what
-/// the adapter declared it wrote for itself, and which cancellation a
-/// repair session runs under.
+/// question only the caller can: how the node ended, what it spent, and
+/// what the adapter declared it wrote for itself.
 pub(super) struct Close<'a> {
     outcome: String,
     tokens: TokenUsage,
-    /// The attempt being closed. A repair announces the next one.
-    pub(super) attempt: u32,
-    /// The cancellation a repair session runs under.
-    pub(super) cancel: &'a CancellationToken,
     staged: &'a [PathBuf],
     artifacts_before: Option<&'a ArtifactsSnapshot>,
 }
@@ -49,17 +42,10 @@ impl<'a> Close<'a> {
     /// A close that staged nothing in the worktree — every kind but an
     /// agent session, whose adapter writes files of its own that the
     /// scope diff must leave out.
-    pub(super) fn new(
-        outcome: impl Into<String>,
-        tokens: TokenUsage,
-        attempt: u32,
-        cancel: &'a CancellationToken,
-    ) -> Self {
+    pub(super) fn new(outcome: impl Into<String>, tokens: TokenUsage) -> Self {
         Close {
             outcome: outcome.into(),
             tokens,
-            attempt,
-            cancel,
             staged: &[],
             artifacts_before: None,
         }
@@ -83,8 +69,7 @@ impl<'a> Close<'a> {
 
 /// Closes a node: its `after` hooks run, its scope is checked over the
 /// whole diff — hook edits included, staged paths left out — its
-/// declared artifacts are verified (repaired, if their content is wrong
-/// and it resolves a runner to fix them), and it finishes.
+/// declared artifacts are verified, and it finishes.
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -133,33 +118,15 @@ pub(super) async fn close_node(
         .limits
         .as_ref()
         .and_then(|limits| limits.max_artifact_bytes);
-    let mut tokens = tokens;
-    let mut spent = 0;
-    let verified = loop {
-        match close_artifacts(node, ctx.run_dir, ceiling) {
-            Ok(verified) => break verified,
-            // Every `node_failed` on the way is recorded by the cycle,
-            // including the one that ends it.
-            Err(failures) => {
-                match repair::next(ctx, node, &close, spent, tokens, failures).await? {
-                    repair::Next::Ended(end) => return Ok(end),
-                    repair::Next::Wrote(spend) => {
-                        tokens = spend;
-                        spent += 1;
-                        // A repair session is a session like any other, so
-                        // what it wrote sits inside the same scope guard as
-                        // what the node wrote: the diff is checked again
-                        // before its files are read.
-                        if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
-                            return Ok(end);
-                        }
-                        if let Some(end) = artifacts_violation(ctx, node, &close, tokens).await? {
-                            return Ok(end);
-                        }
-                    }
-                }
-            }
-        }
+    // A session node's findings artifact is what that node reported, so
+    // the engine writes it here — before the one read the close does, and
+    // from the log rather than from anything a session left on disk.
+    if let Some(end) = derive_findings(ctx, node, ceiling, tokens).await? {
+        return Ok(end);
+    }
+    let verified = match close_artifacts(node, ctx.run_dir, ceiling) {
+        Ok(verified) => verified,
+        Err(failures) => return fail_artifacts(ctx, node, failures, false, tokens).await,
     };
 
     record_artifacts(ctx, node, &verified).await?;
@@ -307,6 +274,52 @@ async fn artifacts_violation(
 /// (`or_insert`, never overwriting an existing status) already makes an
 /// identical re-registration a no-op — so only a genuine mismatch needs
 /// an explicit event.
+/// Writes the findings file of every `findings` artifact a session node
+/// declares, from what that node reported.
+///
+/// Only a node that runs sessions of its own: a `kind: workflow` node's
+/// findings come from its child run, already a file, and its entries
+/// reach this log through `record_artifacts` instead.
+async fn derive_findings(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    ceiling: Option<u64>,
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    if !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. }) {
+        return Ok(None);
+    }
+    let declared: Vec<&ArtifactSpec> = node
+        .artifacts
+        .iter()
+        .flat_map(|artifacts| artifacts.produces.iter())
+        .filter(|spec| {
+            matches!(
+                spec,
+                ArtifactSpec::Typed {
+                    kind: yunta_core::ArtifactKind::Findings,
+                    ..
+                }
+            )
+        })
+        .collect();
+    if declared.is_empty() {
+        return Ok(None);
+    }
+    let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
+        .effective_of(&node.id);
+    for spec in declared {
+        if let Err(error) =
+            crate::artifacts::derive_findings(spec, ctx.run_dir, posted.clone(), ceiling)
+        {
+            return Ok(Some(
+                fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
+            ));
+        }
+    }
+    Ok(None)
+}
+
 async fn record_artifacts(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -374,7 +387,13 @@ async fn record_artifacts(
                     }
                 }
             }
-            ArtifactContent::Findings(findings) => {
+            // A session node's findings are already on this log — they
+            // are what the file was derived from. A `kind: workflow`
+            // node's come from the child run's log, so this one learns
+            // them here.
+            ArtifactContent::Findings(findings)
+                if matches!(node.kind, NodeKind::Workflow { .. }) =>
+            {
                 for finding in findings {
                     ctx.emit(
                         Some(&node.id),
@@ -385,7 +404,9 @@ async fn record_artifacts(
                     .await?;
                 }
             }
-            ArtifactContent::Questions(_) | ArtifactContent::Opaque => {}
+            ArtifactContent::Findings(_)
+            | ArtifactContent::Questions(_)
+            | ArtifactContent::Opaque => {}
         }
     }
     Ok(())
