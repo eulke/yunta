@@ -59,6 +59,7 @@ mod run_tools;
 mod runner;
 mod scope;
 pub mod scope_expansion;
+mod session_dir;
 mod skills;
 mod stats;
 mod task_cycle;

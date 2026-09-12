@@ -677,13 +677,48 @@ async fn a_declared_artifact_directory_is_writable_by_the_session() {
     let args = std::fs::read_to_string(&args_file).unwrap();
 
     // `workspace-write` confines writes to the workspace, and the run's
-    // artifact directory is never inside it.
+    // artifact directory is never inside it. The expectation spells the
+    // TOML out rather than deriving it the way the adapter does, so a
+    // wrong rendering cannot agree with itself.
+    let expected = format!(
+        "sandbox_workspace_write.writable_roots=[\"{}/run/artifacts\"]",
+        dir.path().display()
+    );
     assert!(
-        args.contains(&format!(
-            "sandbox_workspace_write.writable_roots=[\"{}\"]",
-            artifacts.display()
-        )),
-        "the artifact directory joins the writable roots: {args}"
+        args.lines().any(|arg| arg == expected),
+        "the artifact directory joins the writable roots as {expected}: {args}"
+    );
+}
+
+/// A path is arbitrary bytes; TOML's basic string is not. A directory
+/// whose name carries the two characters that end a TOML string reaches
+/// the CLI as one escaped literal, not as three broken tokens.
+#[tokio::test]
+async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join(r#"quote"and\slash"#);
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts);
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    // The tempdir prefix carries nothing to escape; the tail is the
+    // escaped spelling of `quote"and\slash`, written out by hand.
+    let expected = format!(
+        r#"sandbox_workspace_write.writable_roots=["{}/quote\"and\\slash"]"#,
+        dir.path().display()
+    );
+    assert!(
+        args.lines().any(|arg| arg == expected),
+        "the path reaches the CLI as {expected}: {args}"
     );
 }
 

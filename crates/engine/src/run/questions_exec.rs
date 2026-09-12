@@ -108,7 +108,11 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
     )
     .await?;
     for (relative, reply) in replies {
-        let answers_path = std::path::PathBuf::from(format!("{}.answers.yaml", relative.display()));
+        let answers_path = std::path::PathBuf::from(format!(
+            "{}{}",
+            relative.display(),
+            crate::artifacts::ANSWERS_SUFFIX
+        ));
         let answers_abs = ctx.run_dir.join(&answers_path);
         let answers_file = yunta_core::AnswersFile {
             answers: reply.answers,

@@ -86,11 +86,17 @@ pub struct SessionRequest {
     /// an artifact can never produce one. `None` when the node
     /// declares no artifacts.
     pub artifact_dir: Option<PathBuf>,
-    /// The run's own scratch directory, for scaffolding a session needs
-    /// on disk — an MCP config file, say. It sits outside `cwd` because
-    /// the worktree's diff is what the engine's scope check reads, and
-    /// a file the adapter dropped there would read as the agent's work.
-    /// `None` leaves an adapter that needs one to degrade explicitly.
+    /// This session's own scratch directory, for scaffolding it needs on
+    /// disk — an MCP config file, say. It sits outside `cwd` because the
+    /// worktree's diff is what the engine's scope check reads, and a
+    /// file the adapter dropped there would read as the agent's work.
+    ///
+    /// It belongs to this session alone: sessions of one run that can be
+    /// alive at the same moment each get their own, so an adapter may
+    /// name a file inside it for what the file is rather than having to
+    /// make the name unique. The engine creates the path; an adapter
+    /// creates the directory when it has something to put there. `None`
+    /// leaves an adapter that needs one to degrade explicitly.
     pub scratch_dir: Option<PathBuf>,
 }
 
@@ -104,6 +110,15 @@ pub struct SessionRequest {
 pub struct RunToolsEndpoint {
     pub url: String,
     pub token: Secret<String>,
+}
+
+impl RunToolsEndpoint {
+    /// The name a CLI's own configuration gives this server. Every
+    /// adapter uses the one name: a CLI prefixes the tools it mounts
+    /// with it, so this is also what an allow-rule names to admit all
+    /// of them without any adapter knowing which tools the engine
+    /// mounted.
+    pub const SERVER_NAME: &'static str = "yunta";
 }
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:

@@ -199,7 +199,9 @@ async fn session(
         skills: Vec::new(),
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
         artifact_dir: super::node_exec::artifact_dir(ctx, node),
-        scratch_dir: Some(ctx.run_dir.join("scratch")),
+        scratch_dir: Some(
+            crate::session_dir::SessionSlot::Repair(&node.id).scratch_dir(ctx.run_dir),
+        ),
     };
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),

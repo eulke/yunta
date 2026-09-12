@@ -321,6 +321,7 @@ async fn prepare_loop<'a>(
         env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
         run_tools,
         run_dir: ctx.run_dir.to_path_buf(),
+        node: node.id.clone(),
     };
 
     let Some(ledger) = load_registered_ledger(ctx)? else {

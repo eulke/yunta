@@ -218,12 +218,20 @@ pub(super) async fn execute_prompt(
         skills,
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
         artifact_dir: super::node_exec::artifact_dir(ctx, node),
-        scratch_dir: Some(ctx.run_dir.join("scratch")),
+        scratch_dir: Some(crate::session_dir::SessionSlot::Node(&node.id).scratch_dir(ctx.run_dir)),
     };
 
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
     let staged = adapter.staged_paths(&request);
+    // Read before the session opens: what the run's shared `artifacts/`
+    // already holds is what tells this node's writes from every other
+    // node's.
+    let artifacts_before =
+        crate::artifacts::ArtifactsSnapshot::take(ctx.run_dir).map_err(|source| RunError::Io {
+            context: format!("read `artifacts/` before node `{}` runs", node.id),
+            source,
+        })?;
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),
         request,
@@ -245,7 +253,9 @@ pub(super) async fn execute_prompt(
             close_node(
                 ctx,
                 node,
-                Close::new(summary, tokens, attempt, cancel).staged(&staged),
+                Close::new(summary, tokens, attempt, cancel)
+                    .staged(&staged)
+                    .artifacts_before(&artifacts_before),
             )
             .await
         }

@@ -31,6 +31,7 @@
 //! through `real_adapters()`, a bigger change than this one adapter
 //! justifies on its own.
 
+mod config;
 mod parse;
 mod permissions;
 mod settings;
@@ -40,14 +41,15 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::session::{
+    Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
+};
 use crate::subprocess::{self, Launch, LineParser};
+
+use config::ConfigOverride;
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
-
-/// What the CLI's config calls the engine's per-run MCP server.
-const MCP_SERVER_NAME: &str = "yunta";
 
 /// The variable the CLI reads the per-run bearer token from. Naming the
 /// variable in the config, rather than inlining the token, is what keeps
@@ -96,22 +98,27 @@ impl CodexAdapter {
         // inside it. Without this the session is told to write a file
         // the sandbox then refuses it.
         if let Some(dir) = &req.artifact_dir {
-            args.push("-c".to_string());
-            args.push(format!(
-                "sandbox_workspace_write.writable_roots=[\"{}\"]",
-                dir.display()
-            ));
+            args.extend(
+                ConfigOverride::list(
+                    "sandbox_workspace_write.writable_roots",
+                    [dir.display().to_string()],
+                )
+                .into_args(),
+            );
         }
         if let Some(endpoint) = &req.run_tools_endpoint {
+            let server = RunToolsEndpoint::SERVER_NAME;
             // Streamable HTTP needs the rmcp client; the CLI's own
             // default client speaks stdio only.
             for setting in [
-                "experimental_use_rmcp_client=true".to_string(),
-                format!("mcp_servers.{MCP_SERVER_NAME}.url=\"{}\"", endpoint.url),
-                format!("mcp_servers.{MCP_SERVER_NAME}.bearer_token_env_var=\"{TOKEN_VAR}\""),
+                ConfigOverride::boolean("experimental_use_rmcp_client", true),
+                ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
+                ConfigOverride::string(
+                    format!("mcp_servers.{server}.bearer_token_env_var"),
+                    TOKEN_VAR,
+                ),
             ] {
-                args.push("-c".to_string());
-                args.push(setting);
+                args.extend(setting.into_args());
             }
         }
         // `codex exec` exposes no cap on turns: `budget.max_turns` is

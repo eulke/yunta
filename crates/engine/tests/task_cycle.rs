@@ -75,7 +75,7 @@ outcome: { type: completed, summary: "wrote it" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -130,7 +130,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -171,7 +171,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -224,7 +224,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -286,7 +286,7 @@ outcome: { type: completed, summary: "done" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -343,7 +343,7 @@ sessions:
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -396,7 +396,7 @@ sessions:
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -446,7 +446,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -587,7 +587,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             },
             None,
             &tokio_util::sync::CancellationToken::new(),
-            &yunta_engine::SessionSetup::default(),
+            &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
         ),
     )
     .await
@@ -650,7 +650,7 @@ outcome: { type: completed, summary: "should never be reached" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap();
@@ -839,7 +839,7 @@ outcome: { type: completed, summary: "wrote it" }
         },
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::default(),
+        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
     )
     .await
     .unwrap_err();

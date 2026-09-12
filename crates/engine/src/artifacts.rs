@@ -18,6 +18,7 @@
 //! content is not what its kind declares is exactly what writing the
 //! file again fixes.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
@@ -28,6 +29,16 @@ use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Ledger, Node, Question, QuestionsFile,
 };
+
+/// The run directory's own name for where artifacts live. Every path
+/// this module produces is relative to the run directory and starts
+/// here, which is the shape the log, the diagnostics and the run
+/// contract all use.
+const ARTIFACTS_DIR: &str = "artifacts";
+
+/// What the engine appends to a `questions` artifact's name when it
+/// records the answers beside it.
+pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
 
 /// One declared artifact that passed verification — the data
 /// `artifact_written` needs (run-dir-relative path + content hash), plus
@@ -115,7 +126,7 @@ pub(crate) fn verify_one(
         ArtifactSpec::Typed { name, kind } => (name, Some(*kind)),
     };
 
-    let relative = Path::new("artifacts").join(name);
+    let relative = Path::new(ARTIFACTS_DIR).join(name);
     let path = relative.display().to_string();
 
     let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes)?;
@@ -188,4 +199,95 @@ fn interpret(
             ArtifactContent::Questions(file.questions)
         }
     })
+}
+
+/// What the run's `artifacts/` directory held before a node's session
+/// ran, so the node's close can tell what that session wrote there.
+///
+/// Every node of a run writes into that one directory, and a CLI grants
+/// writes by directory rather than by file — so a node that declares an
+/// artifact can reach every other node's. The worktree has the same
+/// shape and the run answers it the same way: the session may write,
+/// and the close audits what it wrote against what the node declared.
+pub(crate) struct ArtifactsSnapshot(BTreeMap<PathBuf, ContentHash>);
+
+impl ArtifactsSnapshot {
+    /// Reads the directory as it stands. A run whose `artifacts/` has
+    /// not been created yet snapshots as empty rather than failing:
+    /// nothing there is nothing to protect.
+    pub(crate) fn take(run_dir: &Path) -> std::io::Result<Self> {
+        let mut held = BTreeMap::new();
+        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
+            held.insert(path, sha256_hex(bytes));
+        })?;
+        Ok(Self(held))
+    }
+
+    /// The files under `artifacts/` this node changed, added or removed
+    /// that it never declared it produces, each relative to the run
+    /// directory and named the way the log names an artifact.
+    ///
+    /// `declared` is the node's rendered artifact names: writing those
+    /// is the node doing its job, and rewriting one across a repair is
+    /// the repair doing its job.
+    pub(crate) fn undeclared_writes(
+        &self,
+        run_dir: &Path,
+        declared: &[String],
+    ) -> std::io::Result<Vec<PathBuf>> {
+        let owned: BTreeSet<PathBuf> = declared
+            .iter()
+            .map(|name| Path::new(ARTIFACTS_DIR).join(name))
+            .collect();
+        // The engine answers a `questions` artifact by writing beside
+        // it, and the nodes of a parallel group interleave — so that
+        // file can land while a sibling's session is open, and it is
+        // the engine's write, never the sibling's.
+        let engine_written = |path: &Path| path.to_string_lossy().ends_with(ANSWERS_SUFFIX);
+        let mut now = BTreeMap::new();
+        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
+            now.insert(path, sha256_hex(bytes));
+        })?;
+        let touched = now
+            .iter()
+            .filter(|(path, hash)| self.0.get(*path) != Some(*hash))
+            .map(|(path, _)| path.clone());
+        let removed = self.0.keys().filter(|path| !now.contains_key(*path));
+        Ok(touched
+            .chain(removed.cloned())
+            .filter(|path| !owned.contains(path) && !engine_written(path))
+            .collect())
+    }
+}
+
+/// Hands every file under `dir` to `visit`, by its path relative to
+/// `dir`'s parent — `artifacts/<name>`, the shape the log and every
+/// diagnostic already use. An artifact name may nest, so this walks.
+fn collect(dir: &Path, visit: &mut impl FnMut(PathBuf, &[u8])) -> std::io::Result<()> {
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        visit: &mut impl FnMut(PathBuf, &[u8]),
+    ) -> std::io::Result<()> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                walk(root, &path, visit)?;
+                continue;
+            }
+            let relative = match path.strip_prefix(root) {
+                Ok(relative) => Path::new(ARTIFACTS_DIR).join(relative),
+                Err(_) => continue,
+            };
+            visit(relative, &std::fs::read(&path)?);
+        }
+        Ok(())
+    }
+    walk(dir, dir, visit)
 }

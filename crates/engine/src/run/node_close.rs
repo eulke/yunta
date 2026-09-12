@@ -19,7 +19,7 @@ use yunta_core::events::{
 };
 use yunta_core::{HookFailurePolicy, Node};
 
-use crate::artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
+use crate::artifacts::{close_artifacts, ArtifactContent, ArtifactsSnapshot, VerifiedArtifact};
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
@@ -42,6 +42,7 @@ pub(super) struct Close<'a> {
     /// The cancellation a repair session runs under.
     pub(super) cancel: &'a CancellationToken,
     staged: &'a [PathBuf],
+    artifacts_before: Option<&'a ArtifactsSnapshot>,
 }
 
 impl<'a> Close<'a> {
@@ -60,6 +61,7 @@ impl<'a> Close<'a> {
             attempt,
             cancel,
             staged: &[],
+            artifacts_before: None,
         }
     }
 
@@ -67,6 +69,14 @@ impl<'a> Close<'a> {
     /// the scope diff.
     pub(super) fn staged(mut self, staged: &'a [PathBuf]) -> Self {
         self.staged = staged;
+        self
+    }
+
+    /// What the run's `artifacts/` held before this node's session ran,
+    /// which is what makes the files it wrote there tellable from the
+    /// files every other node of the run already owns.
+    pub(super) fn artifacts_before(mut self, before: &'a ArtifactsSnapshot) -> Self {
+        self.artifacts_before = Some(before);
         self
     }
 }
@@ -113,6 +123,10 @@ pub(super) async fn close_node(
     };
     let node = &node_rendered;
 
+    if let Some(end) = artifacts_violation(ctx, node, &close, tokens).await? {
+        return Ok(end);
+    }
+
     let ceiling = ctx
         .manifest
         .config
@@ -137,6 +151,9 @@ pub(super) async fn close_node(
                         // what the node wrote: the diff is checked again
                         // before its files are read.
                         if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
+                            return Ok(end);
+                        }
+                        if let Some(end) = artifacts_violation(ctx, node, &close, tokens).await? {
                             return Ok(end);
                         }
                     }
@@ -213,6 +230,62 @@ async fn scope_violation(
             format!(
                 "scope violated: {} file(s) outside the declared globs",
                 result.violations.len()
+            ),
+            false,
+            tokens,
+        )
+        .await?,
+    ))
+}
+
+/// What the node's session wrote into the run's shared `artifacts/`,
+/// audited against the artifacts the node declares it produces.
+///
+/// The worktree and that directory are the two surfaces a session can
+/// write and neither is confined by the CLI: a scope is a promise, and
+/// `artifacts/` is one directory every node of the run shares. So both
+/// are audited the same way — the session writes, and the close holds
+/// what it wrote against what it was allowed to write.
+///
+/// `None` when the node owes no audit — a close with no session behind
+/// it — or when everything that changed is the node's own to write.
+async fn artifacts_violation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    close: &Close<'_>,
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    let Some(before) = close.artifacts_before else {
+        return Ok(None);
+    };
+    let declared: Vec<String> = node
+        .artifacts
+        .iter()
+        .flat_map(|artifacts| artifacts.produces.iter())
+        .map(|spec| spec.name().to_string())
+        .collect();
+    let undeclared = before
+        .undeclared_writes(ctx.run_dir, &declared)
+        .map_err(|source| RunError::Io {
+            context: format!("audit what node `{}` wrote under `artifacts/`", node.id),
+            source,
+        })?;
+    if undeclared.is_empty() {
+        return Ok(None);
+    }
+    let names = undeclared
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Some(
+        fail_with_tokens(
+            ctx,
+            node,
+            format!(
+                "wrote {} file(s) under `artifacts/` this node never declared: {names} — \
+                 declare them under `artifacts.produces`, or leave them to the node that does",
+                undeclared.len()
             ),
             false,
             tokens,

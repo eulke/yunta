@@ -15,36 +15,22 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use crate::session::{
+    Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
+};
 use crate::subprocess::{self, Launch, LineParser};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("claude-code");
 
-/// What the CLI calls the engine's per-run MCP server. It prefixes every
-/// tool the server mounts (`mcp__yunta__…`), which is how one name
-/// allows all of them without this adapter knowing the list.
-const MCP_SERVER_NAME: &str = "yunta";
-
-/// Where one session's MCP config lives, named for its listener's own
-/// port. The sessions of a run are concurrent and each one gets its own
-/// listener, so the port collides with nothing while staying derivable
-/// rather than random.
-fn config_path(scratch: &Path, url: &str) -> PathBuf {
-    let port = url
-        .rsplit(':')
-        .next()
-        .and_then(|tail| tail.split('/').next())
-        .unwrap_or("session");
-    scratch.join(format!("mcp-{port}.json"))
-}
-
 /// Writes this session's MCP client config and returns its path, or
 /// `None` when there is no per-run server to reach.
 ///
-/// It goes to the run's scratch directory, never the worktree: the
-/// worktree's diff is what the engine's scope check reads, and a file
-/// this adapter dropped there would read as the agent's own work. The
+/// It goes to the session's own scratch directory, never the worktree:
+/// the worktree's diff is what the engine's scope check reads, and a
+/// file this adapter dropped there would read as the agent's own work.
+/// That directory is this session's alone, so the file is named for
+/// what it is rather than for anything that makes it unique. The
 /// bearer token travels in the file rather than on the command line —
 /// `argv` is world-readable through `ps`, and the token is the only
 /// thing standing between any local process and this node's tools.
@@ -62,14 +48,16 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
     };
     let config = serde_json::json!({
         "mcpServers": {
-            MCP_SERVER_NAME: {
+            RunToolsEndpoint::SERVER_NAME: {
                 "type": "http",
                 "url": endpoint.url,
                 "headers": { "Authorization": format!("Bearer {}", endpoint.token.expose()) },
             }
         }
     });
-    let path = config_path(scratch, &endpoint.url);
+    // The directory belongs to this session alone, so the file needs no
+    // name of its own to stay clear of the other sessions of the run.
+    let path = scratch.join("mcp.json");
     let io = |source: std::io::Error| AdapterError::Adapter {
         adapter: ID.clone(),
         message: format!(
@@ -77,12 +65,12 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
             path.display()
         ),
     };
+    let body = serde_json::to_vec_pretty(&config).map_err(|source| AdapterError::Adapter {
+        adapter: ID.clone(),
+        message: format!("could not render the per-run tool config: {source}"),
+    })?;
     std::fs::create_dir_all(scratch).map_err(io)?;
-    std::fs::write(
-        &path,
-        serde_json::to_vec_pretty(&config).unwrap_or_default(),
-    )
-    .map_err(io)?;
+    std::fs::write(&path, body).map_err(io)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -153,7 +141,7 @@ impl ClaudeCodeAdapter {
             // than each tool keeps this adapter from having to know
             // which tools the engine mounts.
             args.push("--allowedTools".to_string());
-            args.push(format!("mcp__{MCP_SERVER_NAME}"));
+            args.push(format!("mcp__{}", RunToolsEndpoint::SERVER_NAME));
         }
         if let Some(max_turns) = req.budget.max_turns {
             args.push("--max-turns".to_string());
