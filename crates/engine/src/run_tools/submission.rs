@@ -3,10 +3,11 @@
 //!
 //! A typed artifact is never a file the session writes: it is submitted
 //! as an object, validated by the code the node's close runs, and taken
-//! into the run once it is accepted. The verdict a session asks for
-//! reads that same document back out of the run — a verdict it can act
-//! on while it still can has to be the verdict that decides the node, or
-//! the first one teaches false confidence.
+//! into the run once it is accepted — bytes in the object store, an
+//! `artifact_accepted` on the log. The verdict a session asks for reads
+//! that same document back out of the run, exactly as the close does — a
+//! verdict it can act on while it still can has to be the verdict that
+//! decides the node, or the first one teaches false confidence.
 //!
 //! What a session may submit is bounded by what its node declares: the
 //! name has to be one of them, under the kind the tool submits, so a
@@ -15,7 +16,7 @@
 use serde_json::Value;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
@@ -55,37 +56,24 @@ impl SessionTools {
     /// What this node's close would say about one declared artifact right
     /// now.
     ///
-    /// A document this node already handed over is a fact of the run, so
-    /// the verdict reads what the run holds — the acceptance on its log
-    /// and the bytes behind it — and says what the engine understood of
-    /// it. Anything else is a file on its way in: an artifact with no
-    /// kind, which the session writes itself, or a document not yet
-    /// submitted. That is what the close reads, and reading it here is
-    /// what keeps the two answers the same one.
+    /// Run tools belong to a session, so this node is one whose typed
+    /// artifacts are never files it writes: a document it declares under
+    /// a `kind:` is answered by what the run holds, and an artifact with
+    /// no kind is the file the session writes itself. Those are the two
+    /// answers the close reaches, through these same two functions —
+    /// which is what keeps the verdict a session can still act on and the
+    /// verdict that decides the node one answer.
     fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
-        let name = spec.name();
-        let accepted = spec.kind().and_then(|kind| {
-            held.ledger()
-                .latest(&ArtifactId::Interpreted { kind }, Some(&self.node))
-        });
-        match accepted {
-            Some(accepted) => match held.bytes(accepted) {
-                Ok(bytes) => render_verdict(
-                    name,
-                    crate::artifacts::interpreted(Some(&self.node), spec, &bytes),
-                ),
-                Err(source) => format!("{name} — {source}"),
-            },
-            None => render_verdict(
-                name,
-                crate::artifacts::verify_one(
-                    &self.node,
-                    spec,
-                    &self.host.run_dir,
-                    self.host.max_artifact_bytes,
-                ),
+        let verified = match spec.kind() {
+            Some(_) => crate::artifacts::held_document(&self.node, spec, held),
+            None => crate::artifacts::verify_one(
+                &self.node,
+                spec,
+                &self.host.run_dir,
+                self.host.max_artifact_bytes,
             ),
-        }
+        };
+        render_verdict(spec.name(), verified)
     }
 
     /// Why a check has nothing to look at: a name this node does not
@@ -103,8 +91,8 @@ impl SessionTools {
     }
 
     /// Takes one document a session submitted: validates it against the
-    /// kind the node declared and, once accepted, writes the file the
-    /// close reads.
+    /// kind the node declared and, once accepted, takes it into the run
+    /// as the artifact the close asks the log for.
     pub(super) async fn submit(
         &self,
         kind: ArtifactKind,
@@ -115,14 +103,13 @@ impl SessionTools {
             return Err(self.invalid_submission(kind, "`document` is missing or is not an object"));
         };
         let name = spec.name().to_string();
-        let written = crate::artifacts::submit(
+        let offered = crate::artifacts::submit(
             &self.node,
             spec,
-            &self.host.run_dir,
             document.clone(),
             self.host.max_artifact_bytes,
         );
-        self.record(name, kind, written).await
+        self.record(name, kind, offered).await
     }
 
     /// Which artifact a submission is about: a name this node declares,
@@ -148,9 +135,10 @@ impl SessionTools {
     }
 
     /// Records the engine's verdict on a submitted document and answers
-    /// the session with it: what was read out of the file on acceptance,
-    /// what to fix on a refusal. Both are events — a run reads back every
-    /// document a session offered, not only the ones that landed.
+    /// the session with it: what was read out of the document on
+    /// acceptance, what to fix on a refusal. Both are events — a run
+    /// reads back every document a session offered, not only the ones
+    /// that landed.
     ///
     /// Two facts, not one: `artifact_submitted` is the call this session
     /// made and how it was answered, and it is on the log whether the
@@ -162,9 +150,9 @@ impl SessionTools {
         &self,
         name: String,
         kind: ArtifactKind,
-        written: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
+        offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
     ) -> Result<String, RunToolError> {
-        let (outcome, answer, accepted) = match written {
+        let (outcome, answer, accepted) = match offered {
             Ok(verified) => (
                 SubmissionOutcome::Accepted {
                     content_hash: verified.content_hash.clone(),

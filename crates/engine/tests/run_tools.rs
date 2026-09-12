@@ -556,8 +556,9 @@ async fn dropping_the_session_closes_the_endpoint() {
 // --- the verdict a session can ask for, before it ends -------------------
 //
 // The point of the tool is that its answer and the node's close are the
-// same code. These name the two halves of that: what it says when the file
-// is right, and that it names the same problems a failed close would.
+// same code. These name the two halves of that: what it says once the
+// document is handed over, and that it says exactly what a failed close
+// would while it is not.
 
 fn tasks_spec() -> yunta_core::ArtifactSpec {
     yunta_core::ArtifactSpec::Typed {
@@ -566,67 +567,26 @@ fn tasks_spec() -> yunta_core::ArtifactSpec {
     }
 }
 
-#[tokio::test]
-async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
-    let bench = Bench::new();
-    std::fs::write(
-        bench.staging("plan").join("plan.yaml"),
-        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+/// The node those specs belong to, as the close reads it.
+fn plan_node() -> yunta_core::Node {
+    serde_norway::from_str(
+        r#"
+id: plan
+kind: prompt
+prompt: "Write the tasks document."
+artifacts:
+  produces:
+    - { name: plan.yaml, kind: tasks }
+"#,
     )
-    .unwrap();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
-    let client = client_for(&session, None).await.unwrap();
-    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
-
-    assert!(!is_error, "got: {text}");
-    assert!(text.contains("plan.yaml — ok"), "{text}");
-    assert!(
-        text.contains("1 task(s) registered: `t1`"),
-        "the session sees its meaning survived, not only its syntax: {text}"
-    );
+    .unwrap()
 }
 
-#[tokio::test]
-async fn a_check_names_the_same_problems_the_close_would() {
-    let bench = Bench::new();
-    // The failure that motivated the tool: a quoted boolean where a
-    // boolean belongs. The check reads the file through the same code the
-    // close does, so it locates the value and says what was expected.
-    std::fs::write(
-        bench.staging("plan").join("plan.yaml"),
-        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
-    )
-    .unwrap();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
-    let client = client_for(&session, None).await.unwrap();
-    let (_, text) = call(
-        &client,
-        "yunta_check_artifact",
-        json!({"name": "plan.yaml"}),
-    )
-    .await;
-
-    assert!(text.contains("cannot be read"), "{text}");
-    assert!(
-        text.contains("tasks[0].manual_review"),
-        "the path locates the value: {text}"
-    );
-    assert!(
-        text.contains("expected a boolean"),
-        "the same diagnostic the close produces: {text}"
-    );
-}
-
-#[tokio::test]
-async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() {
-    // Once a document is handed over it is a fact of the run. The verdict
-    // is about that document, so a file somebody wrote over afterwards
-    // does not change what the session is told.
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
-    let client = client_for(&session, None).await.unwrap();
+/// Hands one valid tasks document over, the way the node's own session
+/// does.
+async fn submit_plan(client: &rmcp::service::RunningService<rmcp::RoleClient, ()>) {
     let (is_error, text) = call(
-        &client,
+        client,
         "yunta_submit_tasks",
         json!({
             "name": "plan.yaml",
@@ -642,6 +602,63 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     )
     .await;
     assert!(!is_error, "got: {text}");
+}
+
+#[tokio::test]
+async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    submit_plan(&client).await;
+
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(
+        text.contains("1 task(s) registered: `t1`"),
+        "the session sees its meaning survived, not only its syntax: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() {
+    let bench = Bench::new();
+    // A tasks document written by hand where a command node writes one.
+    // This node's document arrives through the tool, so the file is not
+    // it — and the session is told exactly what its close would say,
+    // word for word, instead of a confidence the close will not honour.
+    std::fs::write(
+        bench.staging("plan").join("plan.yaml"),
+        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+    )
+    .unwrap();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (_, text) = call(
+        &client,
+        "yunta_check_artifact",
+        json!({"name": "plan.yaml"}),
+    )
+    .await;
+
+    let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
+        .expect_err("the close owes the document nobody handed over");
+    assert!(
+        text.contains(&close[0].to_string()),
+        "the two answers are one: the check said `{text}`, the close says `{}`",
+        close[0]
+    );
+}
+
+#[tokio::test]
+async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() {
+    // Once a document is handed over it is a fact of the run. The verdict
+    // is about that document, so a file somebody wrote over afterwards
+    // does not change what the session is told.
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    submit_plan(&client).await;
 
     std::fs::write(
         bench.staging("plan").join("plan.yaml"),

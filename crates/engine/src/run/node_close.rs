@@ -79,9 +79,10 @@ impl<'a> Close<'a> {
 /// declared artifacts are verified, and it finishes.
 ///
 /// Where those artifacts come from is the one thing that differs by
-/// kind: every node but a composition wrote files this reads back, and a
-/// `kind: workflow` node's are acquired from the log of the child run
-/// named in [`Close::child`].
+/// kind: a `kind: workflow` node's are acquired from the log of the
+/// child run named in [`Close::child`], and every other node's are what
+/// this run answers for — a document already accepted under that node,
+/// or a file it wrote in its staging.
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -127,20 +128,21 @@ pub(super) async fn close_node(
         .as_ref()
         .and_then(|limits| limits.max_artifact_bytes);
     // A session node's findings artifact is what that node reported, so
-    // the engine writes it here — before the one read the close does, and
-    // from the log rather than from anything a session left on disk.
+    // the run derives and accepts it here — before the close asks what
+    // this node produced, because the acceptance is what the answer to
+    // that question is made of.
     if let Some(end) = derive_findings(ctx, node, ceiling, tokens).await? {
         return Ok(end);
     }
     // A `kind: workflow` node writes no file of its own: what it
     // declares is what its child run produced, so the run takes those
-    // over from that log — here, before the one read the close does.
+    // over from that log instead of asking its own.
     let verified = match close.child {
         Some(child) => match acquire_from_child(ctx, node, child).await? {
             Ok(acquired) => acquired,
             Err(problem) => return fail_with(ctx, node, problem.into(), false, tokens).await,
         },
-        None => match close_artifacts(node, ctx.run_dir, ceiling) {
+        None => match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
             Ok(verified) => verified,
             Err(failures) => {
                 return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await

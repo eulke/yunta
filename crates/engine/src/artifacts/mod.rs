@@ -28,12 +28,14 @@ use yunta_core::events::artifacts::{declared_name, ArtifactLedger, ArtifactRef};
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload, StoredEvent,
 };
-use yunta_core::{ArtifactKind, NodeId, Workflow, ARTIFACTS_DIR};
+use yunta_core::{ArtifactKind, NodeId, NodeKind, Workflow, ARTIFACTS_DIR};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
 
-pub(crate) use ingest::{canonical, derive_findings, interpreted, submit, verify_one, SubmitError};
+pub(crate) use ingest::{
+    canonical, derive_findings, held_document, interpreted, submit, verify_one, SubmitError,
+};
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
 pub use store::ObjectError;
 
@@ -62,6 +64,30 @@ pub enum AcceptError {
         #[source]
         source: yunta_storage::StorageError,
     },
+}
+
+/// Whether the run's own log answers for an artifact a node of
+/// `node_kind` declares under `kind`, rather than a file that node wrote
+/// in its staging.
+///
+/// A typed artifact of a session node is never a file that session
+/// wrote: `tasks` and `questions` arrive through the submission tool and
+/// `findings` are derived from what the node posted. A `kind: workflow`
+/// node produces no file at all: everything it declares is taken over
+/// from its child run's log. Each is accepted where it is produced, with
+/// the origin that produced it — so for those the log is both the only
+/// answer and the whole answer. Everything else a node declares is a
+/// file it wrote, and the close is where that file enters the run.
+///
+/// Two decisions turn on this one question — where a close looks for
+/// what a node declared, and whether its acceptance is still owed — so
+/// it is answered once here.
+pub(crate) fn answered_by_the_log(node_kind: &NodeKind, kind: Option<ArtifactKind>) -> bool {
+    match node_kind {
+        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => kind.is_some(),
+        NodeKind::Workflow { .. } => true,
+        _ => false,
+    }
 }
 
 /// What a workflow declares an artifact as: the name its view carries,

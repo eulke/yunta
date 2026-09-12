@@ -1,8 +1,23 @@
+//! What a node's close makes of everything it declared.
+//!
+//! Two sources, one verdict. A file a command node wrote is read from
+//! that node's staging and enters the run here; a document a session
+//! handed over or the engine derived is already a fact of the run's log,
+//! and the close reads it back out of the object store without opening
+//! anything on disk.
+
 use std::path::Path;
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem};
-use yunta_core::{sha256_hex, Node};
-use yunta_engine::{close_artifacts, ArtifactContent};
+use yunta_core::events::{
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventBody, EventPayload, StoredEvent,
+};
+use yunta_core::{sha256_hex, ArtifactKind, Node};
+use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore};
+
+/// A run that has accepted nothing: what a node with no history closes
+/// against.
+const NOTHING_HELD: &[StoredEvent] = &[];
 
 /// Every rule broken across every failing artifact, by its stable code —
 /// a problem with the file under its own code, a problem with the
@@ -46,6 +61,25 @@ fn staged(node: &str, name: &str) -> String {
     format!("scratch/staging/{node}/{name}")
 }
 
+/// Takes `content` into the run the way a submission or a derivation
+/// does: the bytes in the object store, an `artifact_accepted` under
+/// `node` naming their hash.
+fn accepted(run_dir: &Path, node: &str, kind: ArtifactKind, content: &str) -> StoredEvent {
+    std::fs::create_dir_all(run_dir.join("scratch")).unwrap();
+    let content_hash = ObjectStore::at(run_dir).put(content.as_bytes()).unwrap();
+    StoredEvent {
+        run_id: "run-1".into(),
+        seq: 1.into(),
+        timestamp: chrono::Utc::now(),
+        node_id: Some(node.into()),
+        body: EventBody::Known(EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            artifact: ArtifactId::Interpreted { kind },
+            content_hash,
+            origin: ArtifactOrigin::Submitted,
+        })),
+    }
+}
+
 const REPORT_NODE: &str = r#"
 id: report
 kind: prompt
@@ -54,7 +88,22 @@ artifacts:
   produces: [report.md]
 "#;
 
+/// A command node that writes its tasks document itself — the one kind
+/// whose interpreted artifact is a file, and so the one whose close
+/// reads the file.
 const PLAN_NODE: &str = r#"
+id: plan
+kind: bash
+run: "write the tasks document"
+artifacts:
+  produces:
+    - { name: plan.yaml, kind: tasks }
+"#;
+
+/// The same declaration on a session node: the document arrives through
+/// the submission tool, so the run's log is the only thing that answers
+/// for it.
+const PLAN_SESSION_NODE: &str = r#"
 id: plan
 kind: prompt
 prompt: "Write the tasks document."
@@ -82,7 +131,8 @@ tasks:
 fn a_missing_declared_artifact_fails_the_node_no_matter_what_the_agent_said() {
     let run_dir = tempfile::tempdir().unwrap();
 
-    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     // The node that declared it is on the failure as data, not only in
     // the sentence a reader gets.
     match &failures[..] {
@@ -103,7 +153,8 @@ fn an_empty_artifact_is_as_bad_as_a_missing_one() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "");
 
-    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures), ["artifact-empty"]);
 }
 
@@ -120,7 +171,7 @@ artifacts:
 "#,
     );
 
-    let failures = close_artifacts(&n, run_dir.path(), None).unwrap_err();
+    let failures = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(failures.len(), 2);
 }
 
@@ -136,7 +187,7 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
         "{{{ not : parseable ][",
     );
 
-    let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), None).unwrap();
+    let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     assert_eq!(verified.len(), 1);
     assert_eq!(verified[0].name, "report.md");
     assert_eq!(
@@ -152,7 +203,7 @@ fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
 
-    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap();
+    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
         panic!("a parsed tasks document: {:?}", verified[0].content);
     };
@@ -187,7 +238,8 @@ tasks:
 "#,
     );
 
-    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     // Every violation reaches the reader, not a count of them, and in
     // document order: someone correcting a file works top to bottom.
     assert_eq!(codes(&failures), ["no-criteria", "empty-scope"]);
@@ -210,7 +262,8 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
         "tasks: [not, a, document",
     );
 
-    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     // Not a flat list of diagnostics: each one is reachable through the
     // document it is about, so a later reader knows which file to open
     // and which kind's rules were asked.
@@ -224,7 +277,8 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
 fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     let run_dir = tempfile::tempdir().unwrap();
 
-    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     // A tasks document that was never written has no content whose kind could
     // be wrong — which is exactly why a rewrite cannot fix it.
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
@@ -234,10 +288,114 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     );
 }
 
+// --- an interpreted artifact the run already holds ----------------------------
+
+#[test]
+fn a_document_the_run_holds_closes_its_node_with_no_file_anywhere() {
+    let run_dir = tempfile::tempdir().unwrap();
+    // Nothing was ever written where a node writes: the run's own
+    // acceptance is the whole answer, and the bytes come from the store.
+    let held = [accepted(
+        run_dir.path(),
+        "plan",
+        ArtifactKind::Tasks,
+        VALID_TASKS,
+    )];
+
+    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap();
+    let ArtifactContent::Tasks(tasks) = &verified[0].content else {
+        panic!("a parsed tasks document: {:?}", verified[0].content);
+    };
+    let ids: Vec<&str> = tasks.tasks.iter().map(|t| t.id.as_str()).collect();
+    assert_eq!(ids, ["T001", "T002"]);
+    assert!(
+        !run_dir.path().join("scratch").join("staging").exists(),
+        "the close opens no staging directory for a document the run holds"
+    );
+}
+
+#[test]
+fn a_session_node_s_document_is_the_one_it_handed_over_never_a_file_beside_it() {
+    let run_dir = tempfile::tempdir().unwrap();
+    let held = [accepted(
+        run_dir.path(),
+        "plan",
+        ArtifactKind::Tasks,
+        VALID_TASKS,
+    )];
+    // A file of the declared name, with a different document in it. The
+    // run accepted the other one, and a file nobody accepted is not an
+    // artifact of the run.
+    write_artifact(
+        run_dir.path(),
+        "plan",
+        "plan.yaml",
+        r#"
+tasks:
+  - id: IMPOSTOR
+    title: "Never handed over"
+    scope: ["src/x/"]
+    criteria:
+      - cmd: "test -f src/x/done"
+"#,
+    );
+
+    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap();
+    let ArtifactContent::Tasks(tasks) = &verified[0].content else {
+        panic!("a parsed tasks document: {:?}", verified[0].content);
+    };
+    let ids: Vec<&str> = tasks.tasks.iter().map(|t| t.id.as_str()).collect();
+    assert_eq!(ids, ["T001", "T002"]);
+}
+
+#[test]
+fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
+    let run_dir = tempfile::tempdir().unwrap();
+    // A valid document sits exactly where a command node would write
+    // one. This node is not a command node: nobody handed the document
+    // over, and nothing on disk changes that.
+    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
+
+    let failures =
+        close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    match &failures[..] {
+        [ArtifactFailure::File {
+            path,
+            problem: FileProblem::Missing { node },
+        }] => {
+            assert_eq!(*path, staged("plan", "plan.yaml"));
+            assert_eq!(node.as_str(), "plan");
+        }
+        other => panic!("a document nobody handed over: {other:?}"),
+    }
+}
+
+#[test]
+fn a_held_document_whose_bytes_the_store_lost_says_so_instead_of_reading_a_file() {
+    let run_dir = tempfile::tempdir().unwrap();
+    let held = [accepted(
+        run_dir.path(),
+        "plan",
+        ArtifactKind::Tasks,
+        VALID_TASKS,
+    )];
+    std::fs::remove_dir_all(run_dir.path().join("objects")).unwrap();
+    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
+
+    let failures =
+        close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap_err();
+    assert_eq!(codes(&failures), ["artifact-unreadable"]);
+    assert!(
+        rendered(&failures).contains("artifacts/plan/plan.yaml"),
+        "the failure names the artifact by the view a reader opens: {}",
+        rendered(&failures)
+    );
+}
+
 const REVIEW_NODE: &str = r#"
 id: review
-kind: prompt
-prompt: "Review the changes."
+kind: bash
+run: "write the findings"
 artifacts:
   produces:
     - { name: findings.yaml, kind: findings }
@@ -262,7 +420,7 @@ fn a_valid_findings_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "review", "findings.yaml", VALID_FINDINGS);
 
-    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap();
+    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     let ArtifactContent::Findings(findings) = &verified[0].content else {
         panic!("parsed findings: {:?}", verified[0].content);
     };
@@ -292,7 +450,8 @@ findings:
 "#,
     );
 
-    let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures), ["duplicate-id", "empty-title"]);
     let text = rendered(&failures);
     assert!(
@@ -311,14 +470,15 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
         "findings: [not, valid",
     );
 
-    let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
 }
 
 const ASK_NODE: &str = r#"
 id: ask
-kind: prompt
-prompt: "Ask what you need to know."
+kind: bash
+run: "write the questions"
 artifacts:
   produces:
     - { name: questions.yaml, kind: questions }
@@ -342,7 +502,7 @@ fn a_valid_questions_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "ask", "questions.yaml", VALID_QUESTIONS);
 
-    let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap();
+    let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     let ArtifactContent::Questions(questions) = &verified[0].content else {
         panic!("parsed questions: {:?}", verified[0].content);
     };
@@ -366,7 +526,8 @@ questions:
 "#,
     );
 
-    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures).len(), 1);
     let text = rendered(&failures);
     assert!(text.contains(&staged("ask", "questions.yaml")), "{text}");
@@ -392,7 +553,8 @@ questions:
 "#,
     );
 
-    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures), ["duplicate-id", "empty-text"]);
     let text = rendered(&failures);
     assert!(
@@ -411,7 +573,8 @@ fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
         "questions: [not, valid",
     );
 
-    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), None).unwrap_err();
+    let failures =
+        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
 }
 
@@ -426,7 +589,7 @@ run: "true"
 "#,
     );
 
-    let verified = close_artifacts(&n, run_dir.path(), None).unwrap();
+    let verified = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None).unwrap();
     assert!(verified.is_empty());
 }
 
@@ -437,7 +600,8 @@ fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
-    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), Some(5)).unwrap_err();
+    let failures =
+        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(5)).unwrap_err();
     // Both numbers on the table as data, never a truncation, so whoever
     // reads the log does not have to parse them back out of a sentence.
     match &failures[..] {
@@ -460,6 +624,6 @@ fn an_artifact_at_the_cap_or_with_no_cap_passes() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
-    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), Some(10)).is_ok());
-    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), None).is_ok());
+    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(10)).is_ok());
+    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).is_ok());
 }

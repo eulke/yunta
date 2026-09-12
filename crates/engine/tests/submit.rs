@@ -1,6 +1,9 @@
 //! An interpreted artifact, end to end: a mock session acting as a real
 //! MCP client hands a document over, the engine validates it while the
-//! session can still act, and writes the file its close reads back.
+//! session can still act, and takes it into the run — bytes in the
+//! object store, an `artifact_accepted` on the log, a view under the
+//! node. The close then asks the log, so the document never becomes a
+//! file the engine writes for itself to read back.
 //!
 //! What every test here is really about is the seam between writing and
 //! judging. It used to be the session's own end — a document was judged
@@ -87,7 +90,7 @@ fn kinds(bench: &Bench, wanted: &str) -> usize {
 }
 
 #[tokio::test]
-async fn a_session_submits_a_tasks_document_and_the_engine_writes_the_file() {
+async fn a_session_submits_a_tasks_document_and_the_run_holds_it() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
@@ -143,12 +146,20 @@ sessions:
         stored
     );
 
-    // The file is the engine's, and it reads back as the document.
-    let bytes = bench.artifact("plan.yaml").expect("the engine wrote it");
+    // The document is the run's, and it reads back as the document.
+    let bytes = bench.artifact("plan.yaml").expect("the run holds it");
     let tasks: yunta_core::TasksFile =
         yunta_core::shape::read(&bytes, "plan.yaml").expect("a canonical tasks document");
     let ids: Vec<String> = tasks.tasks.iter().map(|t| t.id.to_string()).collect();
     assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
+
+    // And the node closed on it without a file ever existing where the
+    // node writes: the close asked the log, so there was nothing for the
+    // engine to write itself and nothing for it to read back.
+    assert!(
+        !bench.staging("plan").join("plan.yaml").exists(),
+        "a document a session hands over never becomes a file the engine writes for itself"
+    );
 }
 
 #[tokio::test]
@@ -449,7 +460,7 @@ sessions:
     let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("review.yaml").expect("the run holds it");
     let file: yunta_core::FindingsFile =
         yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
     let ids: Vec<String> = file.findings.iter().map(|f| f.id.to_string()).collect();
@@ -457,6 +468,10 @@ sessions:
         ids,
         vec!["null-deref".to_string(), "stale-doc".to_string()],
         "in the order they were reported"
+    );
+    assert!(
+        !bench.staging("review").join("review.yaml").exists(),
+        "a derived document is accepted, not written for the close to read back"
     );
 
     // Reported once, on the log once: the file is what those reports add
@@ -484,7 +499,7 @@ sessions:
     let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("review.yaml").expect("the run holds it");
     let file: yunta_core::FindingsFile =
         yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
     assert!(file.findings.is_empty(), "a review that found nothing");

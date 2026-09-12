@@ -17,15 +17,16 @@ use yunta_core::events::{
 use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
 
 use crate::artifacts::{
-    accept, canonical, interpreted, ArtifactContent, Declared, RunArtifacts, VerifiedArtifact,
+    accept, answered_by_the_log, canonical, interpreted, ArtifactContent, Declared, RunArtifacts,
+    VerifiedArtifact,
 };
 
 use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 
-/// The `findings` artifacts `node` declares — the ones whose file is the
-/// projection of what that node posted rather than anything it wrote.
+/// The `findings` artifacts `node` declares — the ones the run derives
+/// from what that node posted rather than from anything it wrote.
 fn declared_findings(node: &Node) -> Vec<&ArtifactSpec> {
     node.artifacts
         .iter()
@@ -34,8 +35,13 @@ fn declared_findings(node: &Node) -> Vec<&ArtifactSpec> {
         .collect()
 }
 
-/// Writes the findings file of every `findings` artifact a session node
-/// declares, from what that node reported.
+/// Accepts every `findings` artifact a session node declares, derived
+/// from what that node reported.
+///
+/// Before the close asks the log what this node produced, because this
+/// is what makes the answer to that question exist — the document is a
+/// fact of the run from here on, with no file between the deriving and
+/// the reading.
 ///
 /// Only a node that runs sessions of its own: a `kind: workflow` node's
 /// findings are the child run's, acquired from that log by
@@ -57,20 +63,15 @@ pub(super) async fn derive_findings(
     let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
         .effective_of(&node.id);
     for spec in declared {
-        let derived = match crate::artifacts::derive_findings(
-            &node.id,
-            spec,
-            ctx.run_dir,
-            posted.clone(),
-            ceiling,
-        ) {
-            Ok(derived) => derived,
-            Err(error) => {
-                return Ok(Some(
-                    fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
-                ))
-            }
-        };
+        let derived =
+            match crate::artifacts::derive_findings(&node.id, spec, posted.clone(), ceiling) {
+                Ok(derived) => derived,
+                Err(error) => {
+                    return Ok(Some(
+                        fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
+                    ))
+                }
+            };
         accept(
             &ctx.log(),
             ctx.run_dir,
@@ -238,24 +239,6 @@ pub(super) async fn acquire_from_child(
     Ok(Ok(acquired))
 }
 
-/// Whether the run already holds this artifact, under the origin that
-/// brought it in — which is what says the close has nothing to accept.
-///
-/// A typed artifact of a session node is never a file that session
-/// wrote: `tasks` and `questions` arrive through the submission tool and
-/// `findings` are derived from what the node posted. A `kind: workflow`
-/// node produces no file at all: everything it declares is taken over
-/// from its child run's log. Each is accepted where it is produced, with
-/// the origin that produced it. Everything else the close verifies is a
-/// file the node wrote, and the close is where it enters the run.
-fn already_held(node: &Node, artifact: &VerifiedArtifact) -> bool {
-    match node.kind {
-        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => artifact.content.kind().is_some(),
-        NodeKind::Workflow { .. } => true,
-        _ => false,
-    }
-}
-
 /// Records every verified artifact on the log, and what its content
 /// means to the run: a tasks document's tasks registered, a findings
 /// file's entries posted.
@@ -295,7 +278,11 @@ pub(super) async fn record_artifacts(
         .collect();
 
     for artifact in verified {
-        if !already_held(node, artifact) {
+        // What the run already holds came in where it was produced,
+        // under the origin that produced it: there is nothing left for
+        // the close to accept. Everything else is a file the node wrote,
+        // and this is where it enters the run.
+        if !answered_by_the_log(&node.kind, artifact.content.kind()) {
             let bytes = canonical(artifact).map_err(|error| RunError::Broken {
                 diagnostic: error.to_string(),
             })?;

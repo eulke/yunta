@@ -1,29 +1,32 @@
 //! How an artifact enters a run: verified at a node's close, submitted
 //! by a session, or derived by the engine from the log.
 //!
-//! When a node finishes, everything it declared under
-//! `artifacts.produces` must exist and be non-empty under that node's
-//! own staging directory — no matter what the agent reported. Opaque
-//! artifacts are verified by existence and content hash only, never by
-//! format. `tasks`, `findings` and `questions` are the interpreted
-//! kinds: each is read through the one door that names every problem at
-//! once ([`yunta_core::shape::read`], which runs the document's own
-//! rules), and the parsed result handed back to the caller — `TasksFile`
-//! for `task_registered`, `Finding`s for `finding_posted`, `Question`s
-//! so `node_exec.rs` can pause the run instead of finishing the node.
+//! When a node finishes, the run has to answer for everything it
+//! declared under `artifacts.produces` — no matter what the agent
+//! reported. A file the node wrote must exist and be non-empty under
+//! that node's own staging directory; a document the run already holds
+//! is answered by the log. Opaque artifacts are verified by existence
+//! and content hash only, never by format. `tasks`, `findings` and
+//! `questions` are the interpreted kinds: each is read through the one
+//! door that names every problem at once
+//! ([`yunta_core::shape::read`], which runs the document's own rules),
+//! and the parsed result handed back to the caller — `TasksFile` for
+//! `task_registered`, `Finding`s for `finding_posted`, `Question`s so
+//! `node_exec.rs` can pause the run instead of finishing the node.
 //!
-//! An interpreted artifact reaches that directory through this module
-//! too, and only through it: [`submit`] takes the document a session
-//! handed over, validates it against the kind the node declared, and
-//! writes the canonical YAML; [`derive_findings`] writes the file a
-//! reviewing node's own postings add up to. The close then reads back
-//! what was written, through the same door as any other file — so a
-//! document is judged once, by the code that judges every document.
+//! An interpreted artifact of a session node never becomes a file at
+//! all: [`submit`] takes the document a session handed over and
+//! validates it against the kind the node declared, [`derive_findings`]
+//! renders what a reviewing node's own postings add up to, and each is
+//! accepted where it is produced — bytes in the object store, an
+//! `artifact_accepted` on the log. The close then asks the log for it
+//! and reads the bytes back through the same door as any other document,
+//! so a document is judged once, by the code that judges every document,
+//! and no file the engine wrote for itself stands between the two.
 //!
-//! Whatever the file on disk spells, what the run stores is its
-//! canonical rendering: an interpreted document re-rendered from what it
-//! parsed as, so an artifact of a kind is the same bytes whoever wrote
-//! it.
+//! Whatever a file on disk spells, what the run stores is its canonical
+//! rendering: an interpreted document re-rendered from what it parsed
+//! as, so an artifact of a kind is the same bytes whoever wrote it.
 //!
 //! Every failure here is an [`ArtifactFailure`]: a problem with the file
 //! (never produced, empty, past the declared ceiling, refused by the
@@ -33,13 +36,15 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
-use yunta_core::events::Finding;
+use yunta_core::events::{ArtifactId, Finding, StoredEvent};
 use yunta_core::shape::read;
 use yunta_core::FindingsFile;
 use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Node, Question, QuestionsFile, TasksFile,
 };
+
+use super::RunArtifacts;
 
 /// One declared artifact that passed verification: the name it was
 /// declared under, the file it was read from, its bytes and their hash,
@@ -87,21 +92,36 @@ impl ArtifactContent {
 
 /// Verifies every artifact a node declared, collecting every violation
 /// instead of stopping at the first — the node fails once with the whole
-/// picture, not once per missing file. `max_bytes` is
-/// `limits.max_artifact_bytes` when declared — `None` means unbounded.
+/// picture, not once per missing artifact.
+///
+/// Where each answer comes from is the node's own kind: a document this
+/// node handed over or the engine derived is already a fact of `events`,
+/// read back from the object store, and no file stands in for it;
+/// everything else is a file the node wrote in its staging, and this is
+/// where that file enters the run. `max_bytes` is
+/// `limits.max_artifact_bytes` when declared — `None` means unbounded,
+/// and it guards a file on its way in, the one thing already settled for
+/// what the run holds.
 pub fn close_artifacts(
     node: &Node,
     run_dir: &Path,
+    events: &[StoredEvent],
     max_bytes: Option<u64>,
 ) -> Result<Vec<VerifiedArtifact>, Vec<ArtifactFailure>> {
     let Some(artifacts) = &node.artifacts else {
         return Ok(Vec::new());
     };
+    let held = RunArtifacts::of(run_dir, events);
 
     let mut verified = Vec::new();
     let mut failures = Vec::new();
     for spec in &artifacts.produces {
-        match verify_one(&node.id, spec, run_dir, max_bytes) {
+        let answer = if super::answered_by_the_log(&node.kind, spec.kind()) {
+            held_document(&node.id, spec, &held)
+        } else {
+            verify_one(&node.id, spec, run_dir, max_bytes)
+        };
+        match answer {
             Ok(artifact) => verified.push(artifact),
             Err(failure) => failures.push(failure),
         }
@@ -112,6 +132,48 @@ pub fn close_artifacts(
     } else {
         Err(failures)
     }
+}
+
+/// The artifact the run already holds for one declaration of `node`,
+/// read as the kind that declaration gives it.
+///
+/// Nothing on disk is consulted: the acceptance standing on the run's
+/// log is what says the artifact exists, and its bytes come from the
+/// object store. A run that holds none of it was handed none — a
+/// document arrives through the submission tool or is derived from what
+/// the node posted, so no file could stand in for one that never
+/// arrived, and the node is owed exactly what it declared.
+///
+/// The node's close and a session's own `yunta_check_artifact` both read
+/// here, which is what keeps the verdict a session can still act on and
+/// the verdict that decides the node one answer.
+pub(crate) fn held_document(
+    node: &NodeId,
+    spec: &ArtifactSpec,
+    held: &super::RunArtifacts<'_>,
+) -> Result<VerifiedArtifact, ArtifactFailure> {
+    let Some(found) = held
+        .ledger()
+        .latest(&ArtifactId::of(spec.name(), spec.kind()), Some(node))
+    else {
+        return Err(ArtifactFailure::file(
+            crate::run_dir::staged_path(node, spec.name())
+                .display()
+                .to_string(),
+            FileProblem::Missing { node: node.clone() },
+        ));
+    };
+    let bytes = held.bytes(found).map_err(|source| {
+        ArtifactFailure::file(
+            super::store::view_path(Some(node), spec.name())
+                .display()
+                .to_string(),
+            FileProblem::Unreadable {
+                detail: source.to_string(),
+            },
+        )
+    })?;
+    interpreted(Some(node), spec, &bytes)
 }
 
 /// One declared artifact's whole story: the file, its size, and — when the
@@ -279,17 +341,18 @@ impl std::fmt::Display for SubmitError {
     }
 }
 
-/// Validates `document` against the kind `spec` declares and, once it is
-/// accepted, writes the canonical file the close will read.
+/// Validates `document` against the kind `spec` declares and hands back
+/// the canonical rendering the run accepts.
 ///
 /// The verdict is the close's own: the same type, the same rules, the
 /// same report. What differs is only that the document never was a
 /// file — so a session hears its verdict while it can still act, instead
-/// of after it has ended.
+/// of after it has ended. Nothing is written here: an accepted document
+/// goes to the object store through [`accept`](super::accept), which is
+/// also what writes its view, and the close asks the log for it.
 pub(crate) fn submit(
     node: &NodeId,
     spec: &ArtifactSpec,
-    run_dir: &Path,
     document: serde_json::Value,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
@@ -298,9 +361,7 @@ pub(crate) fn submit(
             name: spec.name().to_string(),
         });
     };
-    let path = crate::run_dir::staged_path(node, name)
-        .display()
-        .to_string();
+    let path = document_path(node, name);
 
     let (content, yaml) = match kind {
         ArtifactKind::Tasks => {
@@ -318,25 +379,20 @@ pub(crate) fn submit(
         ArtifactKind::Findings => return Err(SubmitError::Accumulated { name: name.clone() }),
     };
 
-    let verified = write_canonical(name, &path, run_dir, yaml, max_bytes)?;
-    Ok(VerifiedArtifact {
-        content,
-        ..verified
-    })
+    rendered_document(name, path, yaml, content, max_bytes)
 }
 
-/// Writes the findings file `node` has earned: every finding it posted
-/// that still stands, in the order it first posted them.
+/// Renders the findings document `node` has earned: every finding it
+/// posted that still stands, in the order it first posted them.
 ///
-/// A reviewing session reports each finding as it sees it, so the file
-/// is what those reports add up to rather than something the session
-/// writes at the end — which is what makes a finding survive a session
-/// that dies after reporting it. A node that reported nothing gets a
-/// file with an empty list: a review that found nothing is a review.
+/// A reviewing session reports each finding as it sees it, so the
+/// document is what those reports add up to rather than something the
+/// session writes at the end — which is what makes a finding survive a
+/// session that dies after reporting it. A node that reported nothing
+/// gets an empty list: a review that found nothing is a review.
 pub(crate) fn derive_findings(
     node: &NodeId,
     spec: &ArtifactSpec,
-    run_dir: &Path,
     posted: Vec<Finding>,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
@@ -349,16 +405,28 @@ pub(crate) fn derive_findings(
             name: spec.name().to_string(),
         });
     };
-    let path = crate::run_dir::staged_path(node, name)
-        .display()
-        .to_string();
+    let path = document_path(node, name);
     let file = FindingsFile::from_findings(posted.clone());
     let yaml = render(&file, &path)?;
-    let verified = write_canonical(name, &path, run_dir, yaml, max_bytes)?;
-    Ok(VerifiedArtifact {
-        content: ArtifactContent::Findings(posted),
-        ..verified
-    })
+    rendered_document(
+        name,
+        path,
+        yaml,
+        ArtifactContent::Findings(posted),
+        max_bytes,
+    )
+}
+
+/// How a document the engine renders for `node` names itself: the
+/// `artifacts/` view it is projected to once accepted.
+///
+/// Such a document is never a file on its way in, so there is no staging
+/// path to name it by — and the view is where a reader of the run opens
+/// it, which is what a refusal and a diagnostic both have to point at.
+fn document_path(node: &NodeId, name: &str) -> String {
+    super::store::view_path(Some(node), name)
+        .display()
+        .to_string()
 }
 
 fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<String, SubmitError> {
@@ -368,25 +436,25 @@ fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<St
     })
 }
 
-/// Writes `yaml` where the close reads it back — the producing node's
-/// own staging, the same place a file that node wrote itself would sit,
-/// so one read answers for both.
+/// The document the run is about to accept: `yaml` as the bytes it will
+/// store, under the one guard a rendering can still break.
 ///
-/// Through the run's own `scratch/` and a rename, which is atomic on one
-/// filesystem: a reader never meets half a document, and the directory
-/// never holds a temporary file nobody declared.
-fn write_canonical(
+/// `limits.max_artifact_bytes` bounds what the run holds, whoever
+/// produced it, so a canonical rendering past the ceiling is refused
+/// with both numbers on the table exactly as an oversized file is — the
+/// run never accepts an artifact it would have turned away as a file.
+fn rendered_document(
     name: &str,
-    path: &str,
-    run_dir: &Path,
+    path: String,
     yaml: String,
+    content: ArtifactContent,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
     let bytes = yaml.into_bytes();
     if let Some(ceiling) = max_bytes {
         if bytes.len() as u64 > ceiling {
             return Err(SubmitError::File {
-                path: path.to_string(),
+                path,
                 problem: FileProblem::Oversized {
                     bytes: bytes.len() as u64,
                     ceiling,
@@ -394,24 +462,12 @@ fn write_canonical(
             });
         }
     }
-    let io = |context: String| move |source| SubmitError::Io { context, source };
-    let destination = run_dir.join(path);
-    if let Some(parent) = destination.parent() {
-        std::fs::create_dir_all(parent).map_err(io(format!("create `{}`", parent.display())))?;
-    }
-    let mut file = tempfile::NamedTempFile::new_in(run_dir.join(crate::run_dir::SCRATCH_DIR))
-        .map_err(io(format!("open a temporary file for `{path}`")))?;
-    std::io::Write::write_all(&mut file, &bytes).map_err(io(format!("write `{path}`")))?;
-    file.persist(destination).map_err(|e| SubmitError::Io {
-        context: format!("place `{path}`"),
-        source: e.error,
-    })?;
     Ok(VerifiedArtifact {
         name: name.to_string(),
         path: PathBuf::from(path),
         content_hash: sha256_hex(&bytes),
         bytes,
-        content: ArtifactContent::Opaque,
+        content,
     })
 }
 
