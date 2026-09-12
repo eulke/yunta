@@ -173,6 +173,7 @@ escalation:
 			tradeoff: "Ships today; creates known-gap finding for next run"
 		- id: abort
 			label: "Abort the run"
+			tradeoff: "Pauses here; nothing further executes"
 	free_text: true                  # siempre disponible
 	default_on_timeout: none         # jamás auto-decide; esperar es un estado válido
 ```

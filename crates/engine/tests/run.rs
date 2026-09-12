@@ -239,7 +239,7 @@ sessions:
         RunTerminal::Paused { reason } => {
             assert_eq!(
                 reason,
-                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1"
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted — exit 1"
             );
         }
         other => panic!("expected Paused, got {other:?}"),

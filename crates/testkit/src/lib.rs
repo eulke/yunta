@@ -14,6 +14,7 @@
 mod bench;
 mod bin;
 mod capture;
+mod checkout;
 mod clock;
 mod frames;
 mod interaction;
@@ -25,6 +26,7 @@ mod wait;
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{run_id_from, run_yunta, stderr, stdout};
 pub use capture::Captured;
+pub use checkout::Checkout;
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
 pub use frames::{child_link, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};

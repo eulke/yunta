@@ -3,7 +3,7 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
+    EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
     PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, RunMetrics, StoredEvent,
     TerminalState,
 };
@@ -191,7 +191,7 @@ pub(super) async fn gate_exhausted(
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or a future MCP client) carry the
         // decision instead.
-        return Ok(Some(pause(ctx, escalation.summary).await?));
+        return Ok(Some(pause(ctx, escalation.sentence()).await?));
     };
     if !already_recorded {
         ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
@@ -227,14 +227,15 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
+        let evidence: Evidence = vec![Fact::bare(cause)].into();
         ctx.emit(
             None,
             EventPayload::PromotionSignaled(PromotionSignaledPayload {
-                reason: yunta_core::text::detailed(
+                reason: yunta_core::text::aside(
                     format!("node `{node}` exhausted its re-routes to `{goto}`"),
-                    &cause,
+                    &evidence.one_line(),
                 ),
-                evidence: cause,
+                evidence,
                 suggested_mode: next_mode.clone(),
             }),
         )

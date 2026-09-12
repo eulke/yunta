@@ -11,9 +11,11 @@
 //! The hash chain over persisted rows lives in `yunta-storage`; nothing
 //! here carries a hash.
 
+mod evidence;
 mod failure;
 mod payloads;
 
+pub use evidence::{Evidence, Fact};
 pub use failure::Failure;
 pub use payloads::*;
 

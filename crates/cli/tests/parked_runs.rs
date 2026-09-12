@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_testkit::{git, init_repo, run_id_from, stdout, wait_for, write, yunta_in, MOCK_CONFIG};
+use yunta_testkit::{git, run_id_from, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG};
 
 /// A node that fails with its one re-route already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
@@ -95,22 +95,21 @@ nodes:
     run: "touch started.txt; until [ -f go.txt ]; do :; done"
 "#;
 
-/// The width a rendered line stays inside, and the width a reader's
-/// terminal is taken to have.
+/// The width a rendered line stays inside when there is no terminal to
+/// ask, restated here because a test binary cannot reach into the one
+/// place that decides it — `render::width::LINE_WIDTH`, in a crate with
+/// no library target to import. The two must agree; nothing but this
+/// sentence makes them.
 const LINE_WIDTH: usize = 80;
 
 /// A git repo carrying `workflows` as `<name>.yaml`, committed — every
 /// run starts from a clean tree.
 fn repo_with(root: &Path, workflows: &[(&str, &str)]) -> PathBuf {
-    let repo = root.join("repo");
-    std::fs::create_dir_all(&repo).expect("create the repo directory");
-    init_repo(&repo);
+    let mut checkout = Checkout::under(root);
     for (name, contents) in workflows {
-        write(&repo.join(format!("{name}.yaml")), contents);
+        checkout = checkout.workflow(name, contents);
     }
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "workflows"]);
-    repo
+    checkout.committed().repo
 }
 
 /// The lines of the `decision needed` block: everything from its heading
@@ -259,7 +258,7 @@ fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_ask
 }
 
 #[test]
-fn evidence_is_printed_only_where_it_says_more_than_the_summary_already_did() {
+fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     let root = tempfile::tempdir().unwrap();
     let repo = repo_with(
         root.path(),
@@ -267,10 +266,10 @@ fn evidence_is_printed_only_where_it_says_more_than_the_summary_already_did() {
     );
     let home = root.path().join("state");
 
-    // An exhausted re-route: the engine quotes the failure into the
-    // summary and attaches that same failure as the evidence under it.
-    // A reader meets the failure once, and no heading promises a record
-    // that turns out to be the sentence above it.
+    // An exhausted re-route: the claim names what happened and the
+    // record under it is the failure the log holds. A reader audits the
+    // first against the second, which only works while the failure is
+    // in one of them.
     let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
     let run_id = run_id_from(&run);
     let closing = stdout(&run);
@@ -280,13 +279,17 @@ fn evidence_is_printed_only_where_it_says_more_than_the_summary_already_did() {
         decision_block(&status).join("\n"),
     ] {
         assert!(
-            !block.contains("evidence"),
-            "the summary already carries it: {block}"
+            block.contains("are exhausted"),
+            "the claim says what happened: {block}"
+        );
+        assert!(
+            block.contains("evidence"),
+            "the record behind it is shown under its own name: {block}"
         );
         assert_eq!(
             block.matches("exit 1").count(),
             1,
-            "the failure the run stopped on is named once: {block}"
+            "the failure is the record, not also the claim: {block}"
         );
     }
 
@@ -299,10 +302,17 @@ fn evidence_is_printed_only_where_it_says_more_than_the_summary_already_did() {
     let gate_status = stdout(&yunta_in!(&repo, &home, &["status", &gate_id]));
     let trailer = closing_decision(&gate_closing).join("\n");
     let page = decision_block(&gate_status).join("\n");
-    assert!(trailer.contains("evidence: assignee: lead"), "{trailer}");
     assert!(
-        page.contains("  evidence:") && page.contains("assignee: lead"),
-        "{page}"
+        trailer.contains("evidence: assignee:"),
+        "the trailer keeps the record on its own line: {trailer}"
+    );
+    assert!(
+        page.lines().any(|line| line.trim() == "evidence:"),
+        "the page heads the record: {page}"
+    );
+    assert!(
+        page.contains("assignee:"),
+        "the page shows the record it headed: {page}"
     );
 }
 
@@ -339,16 +349,25 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
     // What a page drops because the summary already said it, a document
     // still carries: the machine surface is the escalation as the log
     // recorded it, never what a reader was shown.
-    assert!(
-        decision["evidence"]
-            .as_str()
-            .is_some_and(|text| text.contains("exit 1")),
+    let facts = decision["evidence"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the record is data, not a sentence: {state:#}"));
+    assert_eq!(
+        facts
+            .iter()
+            .map(|fact| fact["value"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["exit 1"],
         "{state:#}"
+    );
+    assert!(
+        facts[0].get("label").is_none(),
+        "a fact that names itself carries no label invented for it: {state:#}"
     );
 
     // Additive: the document a reader already parses is untouched —
     // same version, same fields, one more of them.
-    assert_eq!(state["schema_version"], 2, "{state:#}");
+    assert_eq!(state["schema_version"], 3, "{state:#}");
     assert!(
         state["summary"]
             .as_str()

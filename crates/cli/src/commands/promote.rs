@@ -126,25 +126,9 @@ mod tests {
         build_manifest, create_run, execute_run, HumanInteraction, RunEnv, DEFAULT_MAX_RETRIES,
     };
     use yunta_storage::Storage;
-    use yunta_testkit::RecordingObserver;
+    use yunta_testkit::{init_repo, RecordingObserver};
 
     use super::*;
-
-    fn git(dir: &Path, args: &[&str]) {
-        assert!(
-            yunta_engine::git::success_blocking(dir, args).unwrap(),
-            "git {args:?} failed"
-        );
-    }
-
-    fn init_repo(dir: &Path) {
-        git(dir, &["init", "-q"]);
-        git(dir, &["config", "user.email", "test@example.com"]);
-        git(dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join(".gitkeep"), "").unwrap();
-        git(dir, &["add", "."]);
-        git(dir, &["commit", "-q", "-m", "initial"]);
-    }
 
     struct AlwaysPromote;
 

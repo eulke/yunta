@@ -8,13 +8,13 @@
 //! that could drift apart.
 
 use yunta_core::events::{
-    EventDraft, EventPayload, GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice,
-    StoredEvent,
+    EventDraft, EventPayload, Fact, GateOption, GateResolvedPayload, GateWaitingPayload,
+    HumanChoice, StoredEvent,
 };
 use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
-use crate::reserved::ReservedOption;
+use crate::reserved::{offers, ReservedOption};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
 /// the resolve-gate path reads a parked run's log by.
@@ -34,38 +34,19 @@ pub(crate) fn build_reroute_escalation(
     cause: &str,
 ) -> GateWaitingPayload {
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
-    let mut options = vec![
-        GateOption {
-            id: ReservedOption::Retry.id(),
-            label: format!("Re-route to `{goto}` once more"),
-            tradeoff: format!(
-                "Uses one extra correction attempt beyond the declared max_reroutes \
-                 ({max_reroutes}); escalates again if `{goto}` doesn't fix it"
-            ),
-        },
-        GateOption {
-            id: ReservedOption::Abort.id(),
-            label: "Abort the run".to_string(),
-            tradeoff: "Stops here; nothing further executes".to_string(),
-        },
-    ];
+    let mut options = vec![offers::retry(goto, max_reroutes), offers::abort()];
     if let Some(next_mode) = &suggested_mode {
-        options.push(GateOption {
-            id: ReservedOption::Promote.id(),
-            label: format!("Promote to mode `{next_mode}`"),
-            tradeoff: format!(
-                "Closes this run (`run_finished: promoted`) and starts a successor in \
-                 `{next_mode}`, inheriting this run's artifacts — there's no \
-                 mechanism to demote back to `{mode_name}`"
-            ),
-        });
+        options.push(offers::promote(next_mode, mode_name));
     }
     GateWaitingPayload {
         summary: format!(
             "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are \
-             exhausted: {cause}"
+             exhausted"
         ),
-        evidence: cause.to_string(),
+        // The cause names itself — `exit 1` needs no word in front of
+        // it — so it is attached as the record, not repeated into the
+        // claim above it.
+        evidence: vec![Fact::bare(cause)].into(),
         options,
         external_ref: None,
     }
@@ -90,32 +71,19 @@ pub(crate) fn build_internal_gate_escalation(
     };
     let mut gate_options: Vec<GateOption> = declared
         .iter()
-        .map(|id| GateOption {
-            id: id.clone(),
-            label: id.to_string(),
-            tradeoff: match on.get(id) {
-                Some(target) => {
-                    format!("re-routes to `{target}` and asks again once it completes")
-                }
-                None => "resolves this gate; the flow continues".to_string(),
-            },
-        })
+        .map(|id| offers::declared(id, on.get(id)))
         .collect();
     let engine_abort = !declared
         .iter()
         .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
     if engine_abort {
-        gate_options.push(GateOption {
-            id: ReservedOption::Abort.id(),
-            label: "Abort the run".to_string(),
-            tradeoff: "Pauses here; nothing further executes".to_string(),
-        });
+        gate_options.push(offers::abort());
     }
     GateWaitingPayload {
         summary: message
             .map(str::to_string)
             .unwrap_or_else(|| format!("gate `{node}` needs a decision")),
-        evidence: format!("assignee: {assignee}"),
+        evidence: vec![Fact::labelled("assignee", assignee)].into(),
         options: gate_options,
         external_ref: None,
     }

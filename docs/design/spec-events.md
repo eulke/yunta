@@ -304,8 +304,8 @@ migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este ca
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `summary` | string | solo en `gate_waiting` | objeto de escalación |
-| `evidence` | estructura del engine | solo en `gate_waiting` | nunca prosa generada por agente |
-| `options` | lista de `{option, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
+| `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | la adjunta el engine desde el log; nunca prosa generada por agente. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
+| `options` | lista de `{id, label, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `free_text` | `Option<string>` | no | siempre disponible como canal |
@@ -350,8 +350,8 @@ deje el log en silencio.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `reason` | string | sí | — |
-| `evidence` | estructura del engine | sí | — |
+| `reason` | string | sí | la afirmación y los hechos detrás, en una línea — es el único campo que un lector del evento en sí recibe |
+| `evidence` | lista de `{label?, value}` | sí | la misma estructura que `gate_waiting`, con la misma tolerancia de lectura |
 | `suggested_mode` | string | sí | debe respetar la escalera de promoción |
 
 ### 5.23 `child_run_created` / `child_run_finished` — engine

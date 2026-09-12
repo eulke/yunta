@@ -14,7 +14,7 @@ use std::io::Write;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{EventPayload, GateResolvedPayload, StoredEvent};
-use yunta_core::text::{detailed, one_line};
+use yunta_core::text::{aside, detailed, one_line};
 
 use crate::render::format_duration;
 
@@ -57,21 +57,9 @@ impl Lines {
         if let Some(node) = &event.node_id {
             line.push_str(&format!(" on `{node}`"));
         }
-        if let Some(detail) = event.payload().and_then(detail) {
-            line.push_str(&format!(" — {}", one_line(&detail)));
-        }
-        write_line(&mut self.out, &line);
+        let detail = event.payload().and_then(detail).unwrap_or_default();
+        write_line(&mut self.out, &aside(line, &one_line(&detail)));
     }
-}
-
-/// The free text a payload carries, or `None` when it says nothing.
-///
-/// A kind whose whole detail is one field off the log has nothing to add
-/// once that field is blank, and the line reads as one that carries no
-/// detail at all: the dash a line joins its detail with promises a
-/// reader exactly what a colon does.
-fn said(text: &str) -> Option<String> {
-    Some(one_line(text)).filter(|text| !text.is_empty())
 }
 
 /// What one event carries beyond its kind and its node: the fact a reader
@@ -110,11 +98,11 @@ fn detail(payload: &EventPayload) -> Option<String> {
         EventPayload::ScopeChecked(p) => {
             Some(format!("{} path(s) out of scope", p.violations.len()))
         }
-        EventPayload::NodeFinished(p) => said(&p.outcome),
-        EventPayload::NodeFailed(p) => said(&p.failure.to_string()),
+        EventPayload::NodeFinished(p) => Some(p.outcome.clone()),
+        EventPayload::NodeFailed(p) => Some(p.failure.to_string()),
         EventPayload::HookExecuted(p) => Some(format!("{:?} exit {}", p.phase, p.exit_code)),
         EventPayload::NodeRerouted(p) => Some(detailed(format!("to `{}`", p.to_node), &p.cause)),
-        EventPayload::GateWaiting(p) => said(&p.summary),
+        EventPayload::GateWaiting(p) => Some(p.summary.clone()),
         EventPayload::GateResolved(p) => Some(resolution(p)),
         EventPayload::LoopIteration(p) => Some(format!("iteration {}", p.iteration)),
         EventPayload::FindingPosted(p) => Some(detailed(
@@ -134,7 +122,7 @@ fn detail(payload: &EventPayload) -> Option<String> {
             format!("{:?} on {}", p.capability, p.adapter),
             &p.policy_applied,
         )),
-        EventPayload::RunPaused(p) => said(&p.reason),
+        EventPayload::RunPaused(p) => Some(p.reason.clone()),
         EventPayload::RunFinished(p) => Some(view::closed_as(p.terminal_state).to_string()),
         EventPayload::BaselineCaptured(_)
         | EventPayload::AgentSessionOpened(_)
@@ -166,13 +154,33 @@ fn resolution(payload: &GateResolvedPayload) -> String {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CapabilityDegradedPayload, EventPayload, Finding, FindingPostedPayload, FindingSeverity,
-        NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload, RerouteOrigin,
-        RunPausedPayload, TokenUsage,
+        CapabilityDegradedPayload, EventPayload, Evidence, Finding, FindingPostedPayload,
+        FindingSeverity, NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload,
+        RerouteOrigin, RunPausedPayload, StoredEvent, TokenUsage,
     };
     use yunta_core::Capability;
 
-    use super::detail;
+    use super::{detail, Lines};
+
+    /// The line one event writes, as a reader meets it: the surface's
+    /// own output, not the private field it is built from.
+    fn line_for(payload: EventPayload) -> String {
+        let captured = yunta_testkit::Captured::default();
+        let mut lines = Lines::open(Box::new(captured.clone()), "a test is reading");
+        lines.event(&StoredEvent {
+            seq: yunta_core::Seq::from(1),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: yunta_core::Clock::now(&yunta_testkit::FixedClock),
+            body: yunta_core::events::EventBody::Known(payload),
+        });
+        captured
+            .text()
+            .lines()
+            .last()
+            .unwrap_or_default()
+            .to_string()
+    }
 
     /// A log this binary reads back was written by some other
     /// invocation: nothing guarantees the free text on a payload says
@@ -204,7 +212,7 @@ mod tests {
     fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
         let payload = EventPayload::PromotionSignaled(PromotionSignaledPayload {
             reason: String::new(),
-            evidence: String::new(),
+            evidence: Evidence::none(),
             suggested_mode: "ship".into(),
         });
         assert_eq!(detail(&payload).as_deref(), Some("to `ship`"));
@@ -227,27 +235,30 @@ mod tests {
 
     #[test]
     fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
-        let payload = EventPayload::RunPaused(RunPausedPayload {
+        let line = line_for(EventPayload::RunPaused(RunPausedPayload {
             reason: "   ".to_string(),
-        });
-        assert_eq!(detail(&payload), None);
+        }));
+        assert_eq!(
+            line, "[0s] run_paused",
+            "no dash promises what is not there"
+        );
     }
 
     #[test]
     fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
-        let payload = EventPayload::RunPaused(RunPausedPayload {
+        let line = line_for(EventPayload::RunPaused(RunPausedPayload {
             reason: "budget\n  reached".to_string(),
-        });
-        assert_eq!(detail(&payload).as_deref(), Some("budget reached"));
+        }));
+        assert_eq!(line, "[0s] run_paused — budget reached");
     }
 
     #[test]
     fn a_node_that_finished_saying_nothing_leaves_the_line_at_its_kind() {
-        let payload = EventPayload::NodeFinished(NodeFinishedPayload {
+        let line = line_for(EventPayload::NodeFinished(NodeFinishedPayload {
             outcome: String::new(),
             tokens_used: TokenUsage::default(),
-        });
-        assert_eq!(detail(&payload), None);
+        }));
+        assert_eq!(line, "[0s] node_finished");
     }
 
     #[test]

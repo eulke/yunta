@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use yunta_core::text::indent;
-use yunta_testkit::{git, init_repo, runs_root, wait_until, write, yunta_on_terminal, Terminal};
+use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
 /// A node that asks: the session writes the questions artifact and
 /// ends, and the round with the person happens after it closes.
@@ -84,18 +84,15 @@ fn run_dir(root: &Path) -> Option<std::path::PathBuf> {
 /// A run of [`ASKING`] on a terminal, its node having produced
 /// `questions`.
 fn asking(root: &Path, questions: &str) -> Terminal {
-    let repo = root.join("repo");
-    let home = home(root);
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    write(&repo.join(".yunta/config.yaml"), CONFIG);
-    write(&repo.join("wf.yaml"), ASKING);
-    write(
-        &repo.join("fixture.yaml"),
-        &WROTE_THEM.replace("QUESTIONS", &indent(questions, &" ".repeat(10))),
-    );
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "asking"]);
+    let checkout = Checkout::under(root)
+        .config(CONFIG)
+        .workflow("wf", ASKING)
+        .file(
+            "fixture.yaml",
+            &WROTE_THEM.replace("QUESTIONS", &indent(questions, &" ".repeat(10))),
+        )
+        .committed();
+    let (repo, home) = (checkout.repo, checkout.home);
     // `--quiet` leaves the run's progress out: what a person is asked is
     // not progress, and the round is what these tests read.
     yunta_on_terminal!(
@@ -116,22 +113,16 @@ fn asking(root: &Path, questions: &str) -> Terminal {
 /// A run that reaches a gate with its re-routes already spent — an
 /// escalation put to a person with no agent anywhere in it.
 fn gated(root: &Path) -> Terminal {
-    let repo = root.join("repo");
-    let home = home(root);
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "defaults:\n  isolation: none\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: gated\nnodes:\n  - id: lint\n    kind: bash\n    run: \"false\"\n    \
-         on_failure: { goto: fix, max_reroutes: 0 }\n  - id: fix\n    kind: bash\n    \
-         run: \"true\"\n",
-    );
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "gated"]);
+    let checkout = Checkout::under(root)
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: gated\nnodes:\n  - id: lint\n    kind: bash\n    run: \"false\"\n    \
+             on_failure: { goto: fix, max_reroutes: 0 }\n  - id: fix\n    kind: bash\n    \
+             run: \"true\"\n",
+        )
+        .committed();
+    let (repo, home) = (checkout.repo, checkout.home);
     yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
 }
 
@@ -140,21 +131,15 @@ fn gated(root: &Path) -> Terminal {
 /// assigned to — which that question never says — is the evidence the
 /// engine attaches under it.
 fn approving(root: &Path) -> Terminal {
-    let repo = root.join("repo");
-    let home = home(root);
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "defaults:\n  isolation: none\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: approving\nnodes:\n  - id: ship\n    kind: gate\n    assignee: the release \
-         lead\n    message: \"Ship what is on the branch?\"\n",
-    );
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "approving"]);
+    let checkout = Checkout::under(root)
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: approving\nnodes:\n  - id: ship\n    kind: gate\n    assignee: the release \
+             lead\n    message: \"Ship what is on the branch?\"\n",
+        )
+        .committed();
+    let (repo, home) = (checkout.repo, checkout.home);
     yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
 }
 
@@ -281,7 +266,7 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
 }
 
 #[test]
-fn an_escalation_whose_summary_already_quotes_its_record_is_not_shown_it_twice() {
+fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for(
@@ -290,18 +275,28 @@ fn an_escalation_whose_summary_already_quotes_its_record_is_not_shown_it_twice()
     );
     let drawn = terminal.drawn();
 
-    // An exhausted re-route is built out of its own record: the engine
-    // quotes the failure into the summary and attaches that same
-    // failure. A heading promising the record behind the claim, over a
-    // second copy of the claim, sends a person waiting at a prompt
-    // hunting for a difference that is not there.
+    // The claim says what happened and the record says what the log
+    // holds about it. A person at a prompt audits the first against the
+    // second, which only works while the account they are reading is
+    // not two copies of one sentence.
     assert!(
-        drawn.contains("exit 1"),
+        drawn.contains("re-route(s) to `fix` are exhausted"),
         "the account of what raised the decision never reached the console:\n{drawn}"
     );
     assert!(
-        !drawn.contains("evidence, attached by the engine"),
-        "the prompt headed a second copy of the summary as the record behind it:\n{drawn}"
+        drawn.contains("evidence, attached by the engine"),
+        "the record behind the claim reached the console under no heading:\n{drawn}"
+    );
+    // Scoped to the decision itself: the node's own failure line said
+    // `exit 1` too, and that is a different surface reporting a
+    // different thing, not this block saying one thing twice.
+    let decision = &drawn[drawn
+        .find("a decision is needed")
+        .expect("the prompt never opened its block")..];
+    assert_eq!(
+        decision.matches("exit 1").count(),
+        1,
+        "the failure is the record behind the claim, not also the claim:\n{decision}"
     );
 }
 

@@ -22,7 +22,7 @@
 
 use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
+    EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity, GateResolvedPayload,
     GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
@@ -31,7 +31,7 @@ use super::node_close::{fail, write_progress};
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
-use crate::reserved::ReservedOption;
+use crate::reserved::{offers, ReservedOption};
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
@@ -104,7 +104,7 @@ pub(super) async fn publish_gate(
         Some(&node.id),
         EventPayload::GateWaiting(GateWaitingPayload {
             summary,
-            evidence: published.url.clone(),
+            evidence: vec![Fact::labelled("published at", published.url.clone())].into(),
             options: Vec::new(),
             external_ref: Some(encode_ref(&published)),
         }),
@@ -400,10 +400,7 @@ pub(super) async fn resolve_internal_gate(
             Some(choice) => choice,
             None => {
                 return Ok(GateStep::StillWaiting {
-                    reason: format!(
-                        "gate `{}` (assignee: {assignee}) awaits a decision",
-                        node.id
-                    ),
+                    reason: escalation.sentence(),
                 });
             }
         },
@@ -534,24 +531,17 @@ async fn degrade_to_console(
 ) -> Result<GateStep, RunError> {
     let escalation = GateWaitingPayload {
         summary: summary.clone(),
-        evidence: "no forge reachable from this machine".to_string(),
+        evidence: vec![Fact::bare("no forge reachable from this machine")].into(),
         options: vec![
-            GateOption {
-                id: ReservedOption::Approve.id(),
-                label: "Approve".to_string(),
-                tradeoff: "Marks the gate as passed; the run continues".to_string(),
-            },
-            GateOption {
-                id: ReservedOption::Reject.id(),
-                label: "Reject".to_string(),
-                tradeoff: "Fails the node; its declared re-route (if any) takes over".to_string(),
-            },
+            offers::approve_from_console(),
+            offers::reject_from_console(),
         ],
         external_ref: None,
     };
     let Some(choice) = ctx.ask_human(&escalation).await? else {
-        pause(ctx, summary.clone()).await?;
-        return Ok(GateStep::StillWaiting { reason: summary });
+        let reason = escalation.sentence();
+        pause(ctx, reason.clone()).await?;
+        return Ok(GateStep::StillWaiting { reason });
     };
 
     ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))

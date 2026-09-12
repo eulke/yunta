@@ -144,7 +144,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::GateWaiting(GateWaitingPayload {
             summary: "Ready to open the PR?".to_string(),
-            evidence: "all criteria green".to_string(),
+            evidence: vec![Fact::bare("all criteria green")].into(),
             options: vec![GateOption {
                 id: "approve".into(),
                 label: "Approve and open the PR".to_string(),
@@ -177,7 +177,7 @@ fn all_kinds() -> Vec<EventPayload> {
         }),
         EventPayload::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
-            evidence: "criteria log".to_string(),
+            evidence: vec![Fact::labelled("criteria", "log")].into(),
             suggested_mode: "standard".into(),
         }),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {

@@ -52,10 +52,13 @@ fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Resul
     console.say("")?;
     console.say("a decision is needed")?;
     console.block(&escalation.summary, INDENT)?;
-    if let Some(attached) = evidence(escalation) {
+    let attached = evidence(escalation);
+    if !attached.is_empty() {
         console.say("")?;
         console.say("evidence, attached by the engine from the run's own log")?;
-        console.block(attached, INDENT)?;
+        for fact in &attached {
+            console.block(fact, INDENT)?;
+        }
     }
     console.say("")
 }
@@ -76,12 +79,12 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yunta_core::events::GateOption;
+    use yunta_core::events::{Fact, GateOption};
 
     fn escalation() -> GateWaitingPayload {
         GateWaitingPayload {
             summary: "T007 failed three times".to_string(),
-            evidence: "criteria_checked: 2/3 green".to_string(),
+            evidence: vec![Fact::labelled("criteria_checked", "2/3 green")].into(),
             options: vec![GateOption {
                 id: "approve".into(),
                 label: "Add an in-memory session store".to_string(),

@@ -11,10 +11,10 @@
 //! resume re-asks; the decision it gets is still audited in the log as
 //! a run-level gate pair (`node_id: None`).
 
-use yunta_core::events::{EventPayload, GateOption, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{EventPayload, Fact, GateResolvedPayload, GateWaitingPayload};
 
 use super::{RunCtx, RunError};
-use crate::reserved::ReservedOption;
+use crate::reserved::{offers, ReservedOption};
 
 /// What the invocation does after the human (or their absence) weighs in.
 pub enum BudgetDecision {
@@ -70,28 +70,16 @@ pub fn over_budget_escalation(
     cap: u64,
 ) -> (GateWaitingPayload, String) {
     let escalation = GateWaitingPayload {
-        summary: format!(
-            "run `{}` exhausted its token budget: {spent} of {cap} tokens spent",
-            ctx.run_id
-        ),
-        evidence: format!(
-            "limits.max_tokens_per_run: {cap}; total input+output tokens derived \
-             from the event log: {spent}"
-        ),
-        options: vec![
-            GateOption {
-                id: ReservedOption::Continue.id(),
-                label: "Continue past the cap".to_string(),
-                tradeoff: "Lifts the cap for this invocation only; a later resume \
-                           will ask again before spending more"
-                    .to_string(),
-            },
-            GateOption {
-                id: ReservedOption::Abort.id(),
-                label: "Pause the run".to_string(),
-                tradeoff: "The run pauses with reason `budget`; a resume re-asks".to_string(),
-            },
-        ],
+        summary: format!("run `{}` exhausted its token budget", ctx.run_id),
+        evidence: vec![
+            Fact::labelled("limits.max_tokens_per_run", cap.to_string()),
+            Fact::labelled(
+                "total input+output tokens derived from the event log",
+                spent.to_string(),
+            ),
+        ]
+        .into(),
+        options: vec![offers::continue_past_tokens(), offers::abort_on_tokens()],
         external_ref: None,
     };
     let reason = format!(
@@ -116,26 +104,18 @@ pub fn loop_overrun_escalation(
             "loop `{node_id}` needs iteration {iteration} but `limits.max_loop_iterations` \
              is {cap}"
         ),
-        evidence: format!(
-            "iterations already run this invocation: {}; limits.max_loop_iterations: {cap}; \
-             the ledger still has ready tasks",
-            iteration - 1
-        ),
+        evidence: vec![
+            Fact::labelled(
+                "iterations already run this invocation",
+                (iteration - 1).to_string(),
+            ),
+            Fact::labelled("limits.max_loop_iterations", cap.to_string()),
+            Fact::bare("the ledger still has ready tasks"),
+        ]
+        .into(),
         options: vec![
-            GateOption {
-                id: ReservedOption::Continue.id(),
-                label: "Keep iterating".to_string(),
-                tradeoff: "Lifts the cap for this invocation only; a later resume \
-                           will ask again"
-                    .to_string(),
-            },
-            GateOption {
-                id: ReservedOption::Abort.id(),
-                label: "Fail the loop node".to_string(),
-                tradeoff: "The node fails naming the limit and the run pauses; a \
-                           resume re-runs the loop and re-asks"
-                    .to_string(),
-            },
+            offers::continue_past_iterations(),
+            offers::abort_on_iterations(),
         ],
         external_ref: None,
     };

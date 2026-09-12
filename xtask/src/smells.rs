@@ -254,10 +254,15 @@ fn measure() -> BTreeMap<String, usize> {
         count_lines(&cli_src, |line| line.contains("ExitCode::FAILURE")),
     );
     // Test infrastructure lives in the support crate, never copied into a
-    // test file.
+    // test that needs it. Counted over `src` as well as `tests`, because
+    // a `#[cfg(test)]` module inside a crate is a test that needs it too,
+    // and a copy there drifts from the one place just as quietly — the
+    // one this found had dropped the initial-branch pin that makes the
+    // support crate's version hermetic.
+    let test_code: Vec<PathBuf> = tests.iter().chain(src_files.iter()).cloned().collect();
     counts.insert(
         "copied_test_helpers".to_string(),
-        count_lines(&tests, |line| {
+        count_lines(&test_code, |line| {
             let t = line.trim_start();
             t.starts_with("fn git(")
                 || t.starts_with("fn yunta_in(")

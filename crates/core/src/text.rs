@@ -62,6 +62,29 @@ pub fn detailed(headline: impl fmt::Display, detail: &str) -> String {
     format!("{headline}: {detail}")
 }
 
+/// A subject and what it carries, set off by an em dash, and the subject
+/// alone when there is nothing to set off.
+///
+/// The dash promises a reader exactly what [`detailed`]'s colon does;
+/// what chooses between them is the shape of what follows. A colon
+/// introduces a value, so it reads wrong in front of something that
+/// carries colons of its own — a claim followed by the labelled facts
+/// behind it, or an event line followed by the free text a payload
+/// holds. The dash sets those aside instead of introducing them.
+///
+/// ```
+/// # use yunta_core::text::aside;
+/// assert_eq!(aside("run_paused", "cap: 400; spent: 500"), "run_paused — cap: 400; spent: 500");
+/// assert_eq!(aside("run_paused", ""), "run_paused");
+/// ```
+pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
+    let carried = carried.trim();
+    if carried.is_empty() {
+        return subject.to_string();
+    }
+    format!("{subject} — {carried}")
+}
+
 /// The block `spec-ledger.md` §4 fixes: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///
@@ -88,7 +111,7 @@ pub fn problems(heading: impl fmt::Display, items: &[impl fmt::Display]) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::detailed;
+    use super::{aside, detailed};
 
     #[test]
     fn a_headline_with_detail_is_joined_by_a_colon() {
@@ -114,5 +137,19 @@ mod tests {
             detailed("exit 2", "\nfirst\nsecond\n"),
             "exit 2: first\nsecond"
         );
+    }
+
+    #[test]
+    fn a_subject_with_something_to_carry_is_joined_by_a_dash() {
+        assert_eq!(
+            aside("run_paused", "cap: 400; spent: 500"),
+            "run_paused — cap: 400; spent: 500"
+        );
+    }
+
+    #[test]
+    fn a_subject_carrying_nothing_keeps_no_dash_promising_one() {
+        assert_eq!(aside("run_paused", ""), "run_paused");
+        assert_eq!(aside("run_paused", "  \n\t "), "run_paused");
     }
 }

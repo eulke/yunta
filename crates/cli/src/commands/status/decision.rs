@@ -69,9 +69,7 @@ pub(crate) fn block(
 ) -> String {
     let mut out = layout.heading(node);
     out.push_str(&layout.lead(&escalation.summary));
-    if let Some(attached) = evidence(escalation) {
-        out.push_str(&layout.field("evidence", attached));
-    }
+    out.push_str(&layout.facts("evidence", &evidence(escalation)));
     if let Some(external_ref) = &escalation.external_ref {
         out.push_str(&layout.field("published at", external_ref));
     }
@@ -112,6 +110,27 @@ impl Layout {
         match self {
             Layout::Page => format!("{}{}", self.section(label), paragraph(text, 2)),
             Layout::Trailer => verbatim(2, &yunta_core::text::detailed(label, &one_line(text))),
+        }
+    }
+
+    /// A labelled group of facts — the record the engine attached. The
+    /// page heads them and lists one to a line; the trailer has one
+    /// line for the lot and joins them the way the engine's own
+    /// one-line surfaces do. Nothing at all when nothing is attached,
+    /// so no heading promises a reader something to read.
+    fn facts(self, label: &str, facts: &[String]) -> String {
+        if facts.is_empty() {
+            return String::new();
+        }
+        match self {
+            Layout::Page => {
+                let mut out = self.section(label);
+                for fact in facts {
+                    out.push_str(&paragraph(fact, 2));
+                }
+                out
+            }
+            Layout::Trailer => self.field(label, &facts.join("; ")),
         }
     }
 
@@ -228,14 +247,15 @@ impl DecisionJson {
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::{Evidence, Fact};
+
     use super::*;
 
     fn escalation() -> GateWaitingPayload {
         GateWaitingPayload {
-            summary: "node `lint` failed and its 0 re-route(s) to `fix-lint` are \
-                      exhausted: exit 1"
+            summary: "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted"
                 .to_string(),
-            evidence: "exit 1".to_string(),
+            evidence: vec![Fact::bare("exit 1")].into(),
             options: vec![
                 GateOption {
                     id: yunta_core::OptionId::from_static("retry"),
@@ -248,7 +268,7 @@ mod tests {
                 GateOption {
                     id: yunta_core::OptionId::from_static("abort"),
                     label: "Abort the run".to_string(),
-                    tradeoff: "Stops here; nothing further executes".to_string(),
+                    tradeoff: "Pauses here; nothing further executes".to_string(),
                 },
             ],
             external_ref: None,
@@ -262,7 +282,7 @@ mod tests {
     fn gate() -> GateWaitingPayload {
         GateWaitingPayload {
             summary: "Approve the plan?".to_string(),
-            evidence: "assignee: lead".to_string(),
+            evidence: vec![Fact::labelled("assignee", "lead")].into(),
             options: vec![GateOption {
                 id: yunta_core::OptionId::from_static("approve"),
                 label: "approve".to_string(),
@@ -328,21 +348,35 @@ mod tests {
     }
 
     #[test]
-    fn evidence_the_summary_already_carries_is_not_printed_a_second_time() {
-        // An exhausted re-route's summary is built out of the very cause
-        // the engine attaches as its evidence. A heading promising the
-        // record behind the claim, over that same string, sends a reader
-        // looking for a difference that is not there.
+    fn the_claim_and_the_record_behind_it_are_each_said_once() {
+        // The summary is what happened and the evidence is what the log
+        // says about it. A reader audits the first against the second,
+        // which only works while neither one is a copy of the other.
         for layout in [Layout::Page, Layout::Trailer] {
             let drawn = block(layout, &RUN, &NODE, &escalation());
             assert_eq!(
                 drawn.matches("exit 1").count(),
                 1,
-                "the cause is said once, in the summary: {drawn}"
+                "the cause is attached as the record, not repeated into the claim: {drawn}"
             );
             assert!(
+                drawn.contains("are exhausted"),
+                "the claim says what happened: {drawn}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_escalation_with_nothing_attached_heads_no_record() {
+        let bare = GateWaitingPayload {
+            evidence: Evidence::none(),
+            ..escalation()
+        };
+        for layout in [Layout::Page, Layout::Trailer] {
+            let drawn = block(layout, &RUN, &NODE, &bare);
+            assert!(
                 !drawn.contains("evidence"),
-                "no heading over what was already said: {drawn}"
+                "no heading promises a record that is not there: {drawn}"
             );
         }
     }
@@ -373,7 +407,7 @@ mod tests {
             "one tradeoff per option: {block}"
         );
         assert!(
-            block.contains("Stops here; nothing further executes"),
+            block.contains("Pauses here; nothing further executes"),
             "{block}"
         );
     }

@@ -1293,6 +1293,40 @@
         }
       ]
     },
+    "Evidence": {
+      "description": "The facts behind an escalation's summary, attached by the engine\nstraight from the log.\n\nThe pair is the point: the summary is a *claim* about what happened\nand this is the *record* it is audited against, so neither one\nrepeats the other. A producer that writes the cause into both leaves\nevery surface printing it twice, under a heading that promised\nsomething new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nrenders as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
+      "anyOf": [
+        {
+          "description": "What this binary writes: the labelled facts, in the order a\nreader meets them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fact"
+          }
+        },
+        {
+          "description": "One string, as an older log recorded it. Only reading produces\nthis; nothing in this workspace writes one.",
+          "type": "string"
+        }
+      ]
+    },
+    "Fact": {
+      "description": "One fact the engine read off the log: the label a reader scans for,\nand the value under it.\n\nThe label is optional because not every fact needs one. A cause like\n`exit 1` or a sentence like `no forge reachable from this machine`\nalready names itself, and putting a word in front of it would add\nreading without adding meaning; a bare number like `400` says\nnothing until `limits.max_tokens_per_run` is in front of it. A fact\nthat carries a label states it here rather than writing it into the\nvalue, so every surface sets the two apart the same way.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ]
+    },
     "FileProblem": {
       "description": "What is wrong with the file, before anything inside it is read.\n\nEach renders as the rest of the sentence \"the document ...\", because\nthere is no entry inside to blame and pointing at one would be an\ninvention.",
       "oneOf": [
@@ -1504,7 +1538,8 @@
       "type": "object",
       "properties": {
         "evidence": {
-          "type": "string"
+          "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
+          "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
           "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PublishedGate` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
@@ -1520,6 +1555,7 @@
           }
         },
         "summary": {
+          "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
           "type": "string"
         }
       },
@@ -1825,9 +1861,11 @@
       "type": "object",
       "properties": {
         "evidence": {
-          "type": "string"
+          "description": "The record `reason` is built from, kept apart so a surface can\nshow it under its own heading.",
+          "$ref": "#/$defs/Evidence"
         },
         "reason": {
+          "description": "Why the run promoted, on one line — the claim and the facts\nbehind it, since this is the only field a reader of the event\nitself gets.",
           "type": "string"
         },
         "suggested_mode": {

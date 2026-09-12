@@ -3,13 +3,14 @@
 //! denied.
 
 use yunta_core::events::{
-    Decider, EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateResolvedPayload,
-    ProposedCriterionPrecheck, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
-    ScopeExpansionRequestedPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    Decider, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
+    GateResolvedPayload, ProposedCriterionPrecheck, ScopeExpansionDeniedPayload,
+    ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload, TaskStatus,
+    TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{FindingId, Node};
 
-use crate::reserved::ReservedOption;
+use crate::reserved::{offers, ReservedOption};
 use crate::run::node_close::fail_with_tokens;
 use crate::run::node_exec::NodeEnd;
 use crate::run::{RunCtx, RunError};
@@ -191,26 +192,14 @@ fn expansion_escalation(
             "task `{}` requests scope expansion: {}",
             pending.task_id, request.reason
         ),
-        evidence: format!(
-            "paths: {}; {precheck}; mode: {mode_name}; {cap}",
-            request.paths.join(", ")
-        ),
-        options: vec![
-            yunta_core::events::GateOption {
-                id: ReservedOption::Grant.id(),
-                label: format!("Grant access to {}", request.paths.join(", ")),
-                tradeoff: "The task's final diff is evaluated against its scope plus these \
-                           paths; consumes 1 of max_per_run"
-                    .to_string(),
-            },
-            yunta_core::events::GateOption {
-                id: ReservedOption::Deny.id(),
-                label: "Deny the expansion".to_string(),
-                tradeoff: "The denial becomes a finding; the task retries within its \
-                           original scope"
-                    .to_string(),
-            },
-        ],
+        evidence: vec![
+            Fact::labelled("paths", request.paths.join(", ")),
+            Fact::bare(precheck),
+            Fact::labelled("mode", mode_name),
+            Fact::bare(cap),
+        ]
+        .into(),
+        options: vec![offers::grant(&request.paths.join(", ")), offers::deny()],
         external_ref: None,
     }
 }

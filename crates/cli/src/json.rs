@@ -14,7 +14,7 @@ use crate::error::{CliError, Outcome};
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the

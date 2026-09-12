@@ -11,24 +11,18 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal,
+    git, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal, Checkout,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
 /// it under. `isolation: none` keeps every node's work in this checkout,
 /// which is what lets a test read what a run produced.
 fn project(root: &Path, workflow: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-    let repo = root.join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "defaults:\n  isolation: none\n",
-    );
-    write(&repo.join("wf.yaml"), workflow);
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "fixtures"]);
-    (repo, root.join("state"))
+    let checkout = Checkout::under(root)
+        .working_in_place()
+        .workflow("wf", workflow)
+        .committed();
+    (checkout.repo, checkout.home)
 }
 
 const TWO_NODES: &str = r#"
@@ -273,20 +267,19 @@ fn resume_json_is_the_document_run_json_prints() {
 /// a run of its own, with its own id and its own log, so the parent is
 /// left with the default isolation its children need.
 fn composing(root: &Path, child_runs: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-    let repo = root.join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    write(
-        &repo.join(".yunta/workflows/child.yaml"),
-        &format!("name: child\nnodes:\n  - {{ id: work, kind: bash, run: \"{child_runs}\" }}\n"),
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: parent\nnodes:\n  - { id: compose, kind: workflow, use: child }\n",
-    );
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "catalog"]);
-    (repo, root.join("state"))
+    let checkout = Checkout::under(root)
+        .file(
+            ".yunta/workflows/child.yaml",
+            &format!(
+                "name: child\nnodes:\n  - {{ id: work, kind: bash, run: \"{child_runs}\" }}\n"
+            ),
+        )
+        .workflow(
+            "wf",
+            "name: parent\nnodes:\n  - { id: compose, kind: workflow, use: child }\n",
+        )
+        .committed();
+    (checkout.repo, checkout.home)
 }
 
 #[test]

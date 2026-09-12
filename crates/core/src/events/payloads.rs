@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
-use crate::events::Failure;
+use crate::events::{Evidence, Failure};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{
     AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, OptionId, Responder, RunId,
@@ -481,8 +481,13 @@ pub enum RerouteOrigin {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
+    /// The claim: what happened, in the words of whoever escalated.
+    /// It ends where the record begins — a summary that quotes what
+    /// `evidence` holds leaves every surface printing it twice.
     pub summary: String,
-    pub evidence: String,
+    /// The record `summary` is audited against, attached by the engine
+    /// straight from the log.
+    pub evidence: Evidence,
     pub options: Vec<GateOption>,
     /// The forge's own handle for this gate — a PR URL,
     /// today — `None` for the internal escalation case (exhausted
@@ -500,6 +505,18 @@ impl GateWaitingPayload {
     /// answer passes before it counts as a decision on it.
     pub fn offers(&self, option: &OptionId) -> bool {
         self.options.iter().any(|o| o.id == *option)
+    }
+
+    /// The escalation on one line — its claim, then the facts behind
+    /// it — for a surface with room for exactly one: the reason a
+    /// `run_paused` records, and the row a listing gives a run.
+    ///
+    /// A surface with room for two parts heads each separately; a line
+    /// has room for neither heading. Composing them here is what keeps
+    /// the page and the line from disagreeing about what an escalation
+    /// says.
+    pub fn sentence(&self) -> String {
+        crate::text::aside(&self.summary, &self.evidence.one_line())
     }
 
     /// The menu's option ids as one comma-separated line, for a message
@@ -667,8 +684,13 @@ pub struct FindingPostedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PromotionSignaledPayload {
+    /// Why the run promoted, on one line — the claim and the facts
+    /// behind it, since this is the only field a reader of the event
+    /// itself gets.
     pub reason: String,
-    pub evidence: String,
+    /// The record `reason` is built from, kept apart so a surface can
+    /// show it under its own heading.
+    pub evidence: Evidence,
     pub suggested_mode: ModeName,
 }
 

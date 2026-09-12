@@ -12,11 +12,11 @@ use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactWrittenPayload,
     Capabilities, CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload,
-    DiscardedCandidate, EventBody, EventPayload, Failure, GateWaitingPayload, NodeFailedPayload,
-    NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload, PromotionSignaledPayload,
-    RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
-    RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
+    DiscardedCandidate, EventBody, EventPayload, Evidence, Fact, Failure, GateWaitingPayload,
+    NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload,
+    PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics,
+    RunPausedPayload, RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload,
+    TaskStatus, TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
 use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
@@ -179,7 +179,7 @@ fn tool_use(tool: &str) -> EventPayload {
 fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
     EventPayload::GateWaiting(GateWaitingPayload {
         summary: "answer before going on".to_string(),
-        evidence: String::new(),
+        evidence: Evidence::none(),
         options: Vec::new(),
         external_ref: external_ref.map(str::to_string),
     })
@@ -890,7 +890,7 @@ nodes:
             Some("approve"),
             EventPayload::GateWaiting(GateWaitingPayload {
                 summary: "approve the plan".to_string(),
-                evidence: "the plan".to_string(),
+                evidence: vec![Fact::bare("the plan")].into(),
                 options: Vec::new(),
                 external_ref: Some("https://forge/pr/1".to_string()),
             }),
@@ -1047,7 +1047,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
             None,
             EventPayload::PromotionSignaled(PromotionSignaledPayload {
                 reason: "re-routes exhausted".to_string(),
-                evidence: "criteria still red".to_string(),
+                evidence: vec![Fact::bare("criteria still red")].into(),
                 suggested_mode: "full".into(),
             }),
         ),

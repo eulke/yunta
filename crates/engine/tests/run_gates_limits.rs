@@ -167,7 +167,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
         RunTerminal::Paused { reason } => {
             assert_eq!(
                 reason,
-                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1"
+                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted — exit 1"
             );
         }
         other => panic!("expected Paused, got {other:?}"),
@@ -498,8 +498,11 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     .await
     .unwrap();
     match &first.terminal {
+        // The reason a pause records is the escalation on one line, so a
+        // reader of `status` and a reader of the decision page meet the
+        // same words. The node is on the event, not spelled into them.
         RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "gate `approve` (assignee: lead) awaits a decision")
+            assert_eq!(*reason, "Approve the plan? — assignee: lead")
         }
         other => panic!("headless internal gate must pause, got {other:?}"),
     }

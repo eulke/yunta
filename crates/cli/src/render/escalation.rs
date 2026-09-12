@@ -21,40 +21,27 @@ pub(crate) fn option_tradeoff(option: &GateOption) -> String {
     yunta_core::text::detailed("tradeoff", &option.tradeoff)
 }
 
-/// The engine's own record of what happened, when reading it tells a
-/// person something the summary did not already say. `None` when there
-/// is nothing to add.
+/// The lines the engine's own record is shown on, one fact to a line.
+/// Empty when nothing is attached.
 ///
-/// The summary is an account of what happened and the evidence is what
-/// the engine derived from the log, which is why a surface puts them
-/// side by side: the second is what the first is audited against. But
-/// some escalations are built out of their own evidence — an exhausted
-/// re-route quotes the failure that caused it into its summary — and
-/// there the two are the same string. Printing it again under a heading
-/// that promises the record behind the claim sends a reader hunting for
-/// a difference that is not there.
-pub(crate) fn evidence(escalation: &GateWaitingPayload) -> Option<&str> {
-    let evidence = escalation.evidence.trim();
-    if evidence.is_empty() {
-        return None;
-    }
-    // Compared as the surfaces lay them out, not as they were stored: a
-    // summary that wrapped the evidence across lines still says it.
-    let summary = yunta_core::text::one_line(&escalation.summary);
-    if summary.contains(&yunta_core::text::one_line(evidence)) {
-        return None;
-    }
-    Some(evidence)
+/// The summary is an account of what happened and this is what the
+/// engine read off the log, which is why a surface puts them side by
+/// side: the second is what the first is audited against. Neither one
+/// repeats the other, so a surface with room for both shows both.
+pub(crate) fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
+    escalation.evidence.lines()
 }
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::{Evidence, Fact};
+
     use super::*;
 
-    fn escalation(summary: &str, evidence: &str) -> GateWaitingPayload {
+    fn escalation(summary: &str, evidence: Evidence) -> GateWaitingPayload {
         GateWaitingPayload {
             summary: summary.to_string(),
-            evidence: evidence.to_string(),
+            evidence,
             options: Vec::new(),
             external_ref: None,
         }
@@ -78,32 +65,47 @@ mod tests {
     }
 
     #[test]
-    fn evidence_the_summary_already_carries_is_not_offered_again() {
-        // The shape an exhausted re-route has: the engine quotes the
-        // cause into the summary and attaches that same cause.
-        let repeated = escalation(
-            "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted: exit 1",
-            "exit 1",
+    fn each_fact_the_engine_attached_gets_its_own_line() {
+        let capped = escalation(
+            "run `r` exhausted its token budget",
+            vec![
+                Fact::labelled("limits.max_tokens_per_run", "400"),
+                Fact::labelled(
+                    "total input+output tokens derived from the event log",
+                    "500",
+                ),
+            ]
+            .into(),
         );
-        assert_eq!(evidence(&repeated), None);
+        assert_eq!(
+            evidence(&capped),
+            vec![
+                "limits.max_tokens_per_run: 400",
+                "total input+output tokens derived from the event log: 500",
+            ]
+        );
     }
 
     #[test]
-    fn evidence_the_summary_carries_across_a_line_break_is_not_offered_again() {
-        let wrapped = escalation("node `lint` failed:\n  exit 1", "exit 1");
-        assert_eq!(evidence(&wrapped), None);
+    fn a_fact_that_names_itself_is_shown_without_a_label_invented_for_it() {
+        let exhausted = escalation(
+            "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted",
+            vec![Fact::bare("exit 1")].into(),
+        );
+        assert_eq!(evidence(&exhausted), vec!["exit 1"]);
     }
 
     #[test]
-    fn evidence_that_says_more_than_the_summary_is_offered() {
-        // The shape an unresolved gate has: the message it asks with
-        // never names who is being asked.
-        let gate = escalation("Approve the plan?", "assignee: lead");
-        assert_eq!(evidence(&gate), Some("assignee: lead"));
+    fn an_escalation_with_nothing_attached_shows_no_record() {
+        assert!(evidence(&escalation("Approve the plan?", Evidence::none())).is_empty());
     }
 
     #[test]
-    fn evidence_with_nothing_in_it_is_not_offered() {
-        assert_eq!(evidence(&escalation("Approve the plan?", "  \n ")), None);
+    fn a_log_that_recorded_its_record_as_one_string_still_shows_it() {
+        let older = escalation(
+            "Approve the plan?",
+            Evidence::Prose("assignee: lead".into()),
+        );
+        assert_eq!(evidence(&older), vec!["assignee: lead"]);
     }
 }

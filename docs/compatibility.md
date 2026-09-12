@@ -151,9 +151,14 @@ that group is ordered by run id alone.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 2`. The
+`stats --json`, `status --json` and `run --json` carry `schema_version: 3`. The
 three share one stamp, so all of them carry the new number even though only
 `status --json` changed shape.
+
+A parked run's `decision.evidence` is a list of the facts the engine attached,
+each `{label?, value}` — the escalation as the log holds it, not the lines a
+reader was shown. A fact that names itself, like a failing command's `exit 1`,
+carries no `label`.
 
 In `status --json`, `diagnostics` maps a failed node to the documents its failure
 names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
