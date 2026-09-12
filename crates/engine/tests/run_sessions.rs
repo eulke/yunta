@@ -746,8 +746,13 @@ capabilities: { resume_session: true }
 sessions:
   - outcome: { type: completed, summary: "picked up where it left off" }
 "#;
-    let (terminal, events, adapter) =
-        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -770,8 +775,13 @@ async fn resume_session_without_the_capability_degrades_to_restart_with_an_event
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
-    let (terminal, events, adapter) =
-        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(adapter.resumes_seen().is_empty());
@@ -792,7 +802,13 @@ capabilities: { resume_session: true }
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
-    let (terminal, events, adapter) = resume_orphan_with_mock(RESUME_WORKFLOW, fixture, None).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: None,
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(adapter.resumes_seen().is_empty());
@@ -823,6 +839,96 @@ sessions:
         e.payload(),
         Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
     )));
+}
+
+/// A resumable `prompt` node that owes a file of its own: what the
+/// session writes is what the close reads back.
+const RESUME_ARTIFACT_WORKFLOW: &str = r#"
+name: resumable-artifact
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    on_interrupt: resume_session
+    prompt: "Write the report."
+    artifacts: { produces: [report.md] }
+"#;
+
+/// What the cut session had already written before the interruption.
+const REPORT_LEFT_BY_THE_CUT_SESSION: &[(&str, &str, &str)] =
+    &[("work", "report.md", "the report the cut session wrote\n")];
+
+#[tokio::test]
+async fn a_continued_session_keeps_the_artifact_it_had_already_written() {
+    // The staging belongs to the session, not to the attempt: the
+    // session picked back up is the one that wrote `report.md`, so that
+    // file is work it did. It does not write it again, and the node
+    // closes on it.
+    let fixture = r#"
+capabilities: { resume_session: true }
+sessions:
+  - outcome: { type: completed, summary: "finished what it had started" }
+"#;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_ARTIFACT_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+    })
+    .await;
+
+    assert_eq!(
+        adapter.resumes_seen(),
+        vec![yunta_core::SessionId::from("mock-session-orig")],
+        "the cut session must be resumed, not replaced"
+    );
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "what the continued session already wrote closes the node"
+    );
+    let accepted: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ArtifactAccepted(p)) => {
+                Some(p.artifact.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        accepted,
+        vec!["report.md".to_string()],
+        "the run holds the artifact the continued session wrote"
+    );
+}
+
+#[tokio::test]
+async fn a_fresh_session_replacing_an_interrupted_one_opens_on_an_empty_staging() {
+    // The adapter declares no session resume, so the interrupted session
+    // is replaced rather than continued. This session wrote nothing:
+    // what the one before it left is not its work, and the node owes an
+    // artifact it never produced.
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "started over" }
+"#;
+    let (terminal, _events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_ARTIFACT_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+    })
+    .await;
+
+    assert!(adapter.resumes_seen().is_empty());
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("a fresh session is judged on what it produced: {terminal:?}");
+    };
+    assert!(
+        reason.contains("report.md") && reason.contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason}"
+    );
 }
 
 /// A `prompt` node that declares `network: false` — the policy no adapter

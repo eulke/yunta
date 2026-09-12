@@ -76,21 +76,16 @@ pub(super) async fn execute_node(
     )
     .await?;
 
-    // An attempt opens on an empty directory of its own. `node_started`
-    // is where every kind of node begins an attempt — a session, a
-    // command, a check, a composition — so it is the one place that can
-    // state it for all of them. A file an earlier attempt left would
-    // otherwise close this one as work it never did, and the run's own
-    // history says which attempt produced what.
-    crate::run_dir::open_staging(ctx.run_dir, &node.id)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!(
-                "open the staging directory of node `{}` for attempt {attempt}",
-                node.id
-            ),
-            source,
-        })?;
+    // A node that continues no session opens on an empty directory of
+    // its own, and `node_started` is the one point every one of its
+    // attempts passes through — a command, a check, a composition alike.
+    // A `kind: prompt` node may instead go on writing into the staging
+    // of the session it resumes, and whether that resume happens is only
+    // settled once its runner resolves, so that node opens its own
+    // staging at dispatch (`prompt_exec::execute_prompt`).
+    if !node.kind.opens_resumable_session() {
+        open_staging(ctx, node, crate::run_dir::Opening::Fresh).await?;
+    }
 
     // hooks.before: a failing before aborts without spending a
     // token; a failing after fails the node before verification. Either
@@ -207,6 +202,26 @@ pub(super) async fn execute_node(
         }
     };
     Ok(end)
+}
+
+/// Prepares the directory `node` writes the files it declares into, for
+/// the work about to run.
+///
+/// The one door onto [`crate::run_dir::open_staging`] from a running
+/// node, so a directory that cannot be prepared reaches the run as one
+/// error naming the node, wherever the opening was decided.
+pub(super) async fn open_staging(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    opening: crate::run_dir::Opening,
+) -> Result<(), RunError> {
+    crate::run_dir::open_staging(ctx.run_dir, &node.id, opening)
+        .await
+        .map(|_| ())
+        .map_err(|source| RunError::Io {
+            context: format!("open the staging directory of node `{}`", node.id),
+            source,
+        })
 }
 
 /// Template variables for one node's own rendering: `run.*`

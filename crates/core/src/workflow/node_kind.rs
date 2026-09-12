@@ -173,6 +173,20 @@ impl NodeKind {
         "prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow",
     ];
 
+    /// Whether a node of this kind runs one session of its own, which an
+    /// interruption leaves open and `on_interrupt: resume_session` picks
+    /// back up.
+    ///
+    /// Only `kind: prompt` does: a loop's sessions belong to its tasks
+    /// and re-run from the tasks document rather than continuing, and
+    /// every other kind opens none at all. Two decisions ask this same
+    /// question — whether the declaration is even legal on a node, and
+    /// whether an attempt inherits what the session before it wrote — so
+    /// the answer is stated once here.
+    pub fn opens_resumable_session(&self) -> bool {
+        matches!(self, NodeKind::Prompt { .. })
+    }
+
     /// The keys a node of `kind` accepts besides the node-level ones,
     /// or `None` for a kind that does not exist. The lists mirror the
     /// variants above; a test serializes each kind with every field set

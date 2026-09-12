@@ -796,6 +796,7 @@ pub async fn run_with_recording_mock(
     )
     .await
     .unwrap();
+
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".into(), adapter.clone());
@@ -851,19 +852,36 @@ sessions:
 
 // --- on_interrupt: resume_session -------------------------------------
 
+/// The interrupted run a resume test picks back up.
+pub struct Orphan<'a> {
+    /// The workflow the cut run was executing.
+    pub workflow: &'a str,
+    /// The mock adapter fixture the resuming attempt runs against.
+    pub fixture: &'a str,
+    /// The session the interruption left open, if it had opened one.
+    pub session: Option<&'a str>,
+    /// What the cut session had already written where a node writes the
+    /// files it declares, as `(node, file name, content)`.
+    pub staged: &'a [(&'a str, &'a str, &'a str)],
+}
+
 /// Crafts an interrupted run: `run_created` + a `node_started` (and
-/// optionally an open `agent_session_opened`) with no terminal event —
-/// exactly what a mid-session crash leaves — then resumes it with a
-/// recording mock.
+/// optionally an open `agent_session_opened`) with no terminal event,
+/// plus whatever the cut session had written — exactly what a
+/// mid-session crash leaves — then resumes it with a recording mock.
 pub async fn resume_orphan_with_mock(
-    workflow_yaml: &str,
-    fixture_yaml: &str,
-    orphan_session: Option<&str>,
+    orphan: Orphan<'_>,
 ) -> (
     RunTerminal,
     Vec<yunta_core::events::StoredEvent>,
     Arc<MockAdapter>,
 ) {
+    let Orphan {
+        workflow: workflow_yaml,
+        fixture: fixture_yaml,
+        session: orphan_session,
+        staged,
+    } = orphan;
     let bench = Bench::new();
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
@@ -922,6 +940,12 @@ pub async fn resume_orphan_with_mock(
         );
     }
 
+    for (node, name, content) in staged {
+        let dir = yunta_engine::run_dir::staging(&run_dir, &(*node).into());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), content).unwrap();
+    }
+
     let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     adapters.insert("mock".into(), adapter.clone());
@@ -943,7 +967,6 @@ pub async fn resume_orphan_with_mock(
     })
     .await
     .unwrap();
-    let _ = run_dir;
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     (report.terminal, events, adapter)
 }

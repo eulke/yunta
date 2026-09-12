@@ -6,10 +6,11 @@ use yunta_adapters::SessionRequest;
 use yunta_core::events::EventPayload;
 use yunta_core::{Node, PromptSource};
 
+use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
-use super::node_exec::{cancelled_end, render_or_fail, session_profile, NodeEnd};
+use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -218,6 +219,21 @@ pub(super) async fn execute_prompt(
     };
 
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    // The staging is the session's. A session continuing here already
+    // wrote in it and what it left is work it did; a fresh session —
+    // including one replacing an interrupted session the adapter cannot
+    // resume — opens on nothing, so no earlier attempt's file closes
+    // this one. Only here is the answer known: it takes the node's
+    // policy, the log, AND the runner this node just resolved.
+    open_staging(
+        ctx,
+        node,
+        match resume_session {
+            Some(_) => Opening::ContinuedSession,
+            None => Opening::Fresh,
+        },
+    )
+    .await?;
 
     let staged = adapter.staged_paths(&request);
     let (outcome, tokens) = dispatch_session(

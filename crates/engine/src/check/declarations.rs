@@ -34,7 +34,7 @@ pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<Check
 pub(crate) fn check_resume_session(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         if node.on_interrupt == Some(yunta_core::OnInterrupt::ResumeSession)
-            && !matches!(node.kind, NodeKind::Prompt { .. })
+            && !node.kind.opens_resumable_session()
         {
             errors.push(CheckError::ResumeSessionOnSessionlessNode {
                 node: node.id.clone(),

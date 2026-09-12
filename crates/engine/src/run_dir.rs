@@ -46,19 +46,40 @@ pub(crate) fn staged_path(node: &NodeId, name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Opens `node`'s staging for one attempt: the directory exists and it
-/// is empty.
+/// Whose work a node's staging directory holds when the work about to
+/// run opens it.
 ///
-/// Emptying is the point. An attempt that ends without producing what it
-/// declared must not be rescued by a file an earlier attempt left, and a
-/// run derives what it holds from what each attempt actually did — so
-/// every attempt starts with nothing of its own on disk.
-pub(crate) async fn open_staging(run_dir: &Path, node: &NodeId) -> std::io::Result<PathBuf> {
+/// The directory belongs to the session, not to the attempt. A session
+/// picked back up under `on_interrupt: resume_session` goes on writing
+/// where it was writing, so what it left there is work it did and
+/// emptying would take it away — an artifact it already wrote and does
+/// not write again would close the node as undelivered. Everything
+/// else opens on nothing: a command node has no session to continue, and
+/// a fresh session replacing an interrupted one did not write what the
+/// interrupted one left, so a file from an earlier attempt must not
+/// close this one as work it never did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opening {
+    /// The session that wrote here is the one about to continue.
+    ContinuedSession,
+    /// Nothing continues here.
+    Fresh,
+}
+
+/// Opens `node`'s staging for the work about to run: the directory
+/// exists, holding only what [`Opening`] says is still that work's own.
+pub(crate) async fn open_staging(
+    run_dir: &Path,
+    node: &NodeId,
+    opening: Opening,
+) -> std::io::Result<PathBuf> {
     let dir = staging(run_dir, node);
-    match tokio::fs::remove_dir_all(&dir).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    if opening == Opening::Fresh {
+        match tokio::fs::remove_dir_all(&dir).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
     }
     tokio::fs::create_dir_all(&dir).await?;
     Ok(dir)
