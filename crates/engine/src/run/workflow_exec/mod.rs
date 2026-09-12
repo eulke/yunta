@@ -28,6 +28,11 @@
 //!   parent's HEAD; `inherit` runs the child directly in the parent's
 //!   tree as manifest `isolation: none` — the child never owns (nor
 //!   cleans up, nor commits) a tree that isn't its own.
+//!
+//! [`mounts`] holds the other side of the same boundary: what the child
+//! is born holding, read out of the log of whichever run holds it.
+
+mod mounts;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -36,17 +41,17 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{
-    Isolation, Manifest, MountSpec, Node, NodeKind, RunId, Workflow, WorkflowIsolation,
-};
+use yunta_core::{Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation};
 
 use crate::replay::derive;
 use crate::template::render_template;
 
+use mounts::resolve_mounts;
+
 use super::node_close::{close_node, fail, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
-use super::{BirthArtifact, RunCtx, RunError, RunTerminal};
+use super::{RunCtx, RunError, RunTerminal};
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
 /// it, so no configuration lookup can ever disagree with where the
@@ -70,163 +75,6 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
     runs.parent()
         .map(|parent| parent.join("worktrees"))
         .unwrap_or_else(|| runs.join("worktrees"))
-}
-
-/// A mount the child cannot be born with.
-#[derive(Debug, thiserror::Error)]
-enum MountError {
-    #[error(
-        "mount `{name}` from node `{node}`: no linked child run of `{node}` reached a terminal \
-         state in this run — did this run's mode exclude it?"
-    )]
-    NoTerminalChild {
-        name: String,
-        node: yunta_core::NodeId,
-    },
-    #[error(
-        "mount `{name}` from node `{node}`: run `{run}` holds no artifact `{name}` — the source \
-         node never produced it"
-    )]
-    Unheld {
-        name: String,
-        node: yunta_core::NodeId,
-        run: RunId,
-    },
-    #[error("mount `{name}` from node `{node}`: run `{run}` cannot hand over its bytes")]
-    Unreadable {
-        name: String,
-        node: yunta_core::NodeId,
-        run: RunId,
-        #[source]
-        source: crate::artifacts::ObjectError,
-    },
-    #[error(
-        "mount `{name}` from node `{node}`: the frozen truth of run `{run}` cannot be read: \
-         {detail}"
-    )]
-    Unfrozen {
-        name: String,
-        node: yunta_core::NodeId,
-        run: RunId,
-        detail: String,
-    },
-    /// Boxed: a storage failure carries far more than any other mount
-    /// problem, and every caller moves this error by value.
-    #[error("mount `{name}` from node `{node}`: the log of run `{run}` cannot be reached")]
-    Unlogged {
-        name: String,
-        node: yunta_core::NodeId,
-        run: RunId,
-        #[source]
-        source: Box<yunta_storage::StorageError>,
-    },
-}
-
-/// Resolves every declared mount to bytes, in memory, *before*
-/// the child is linked or born — a missing source fails the parent's
-/// node with nothing dangling.
-///
-/// Each mount is answered by the log that holds the artifact and the
-/// store that keeps its bytes. A `kind: workflow` source resolves
-/// through the recorded link (its last `child_run_finished` on this log)
-/// to that child run's own log and store; any other node is this run's,
-/// and the mount reaches that node's artifact alone. Returns the child's
-/// birth artifacts, or the diagnostic to fail the node with.
-async fn resolve_mounts(
-    ctx: &RunCtx<'_>,
-    events: &[yunta_core::events::StoredEvent],
-    mounts: &[MountSpec],
-) -> Result<Vec<BirthArtifact>, MountError> {
-    let mut resolved = Vec::new();
-    for mount in mounts {
-        let m = &mount.artifact;
-        let target = ctx
-            .manifest
-            .workflow
-            .nodes
-            .iter()
-            .find(|candidate| candidate.id == m.node);
-        let source_run = match target.map(|candidate| &candidate.kind) {
-            Some(NodeKind::Workflow { .. }) => {
-                let child = events.iter().rev().find_map(|e| match e.payload() {
-                    Some(EventPayload::ChildRunFinished(p))
-                        if e.node_id.as_ref() == Some(&m.node) =>
-                    {
-                        Some(p.child_run_id.clone())
-                    }
-                    _ => None,
-                });
-                match child {
-                    Some(child_id) => child_id,
-                    None => {
-                        return Err(MountError::NoTerminalChild {
-                            name: m.name.clone(),
-                            node: m.node.clone(),
-                        });
-                    }
-                }
-            }
-            _ => ctx.run_id.clone(),
-        };
-        // The source run's own log is what says which artifact the
-        // mounted name is and who produced it there; a mount only
-        // chooses the name the child carries it under. A sibling child
-        // run answers about itself, so its workflow is the one that
-        // reads the name.
-        let source_dir = runs_root(ctx).join(source_run.as_str());
-        let (source_events, source_workflow, producer) = if source_run == *ctx.run_id {
-            (
-                events.to_vec(),
-                ctx.manifest.workflow.clone(),
-                Some(m.node.clone()),
-            )
-        } else {
-            let manifest =
-                super::read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
-                    MountError::Unfrozen {
-                        name: m.name.clone(),
-                        node: m.node.clone(),
-                        run: source_run.clone(),
-                        detail: yunta_core::describe(&source),
-                    }
-                })?;
-            let child_events = ctx
-                .storage
-                .events_for_run(source_run.clone())
-                .await
-                .map_err(|source| MountError::Unlogged {
-                    name: m.name.clone(),
-                    node: m.node.clone(),
-                    run: source_run.clone(),
-                    source: Box::new(source),
-                })?;
-            (child_events, manifest.workflow, None)
-        };
-        let held = crate::artifacts::RunArtifacts::of(&source_dir, &source_events);
-        let found = held
-            .named(&source_workflow, producer.as_ref(), &m.name)
-            .ok_or_else(|| MountError::Unheld {
-                name: m.name.clone(),
-                node: m.node.clone(),
-                run: source_run.clone(),
-            })?
-            .clone();
-        let bytes = held
-            .bytes(&found)
-            .map_err(|source| MountError::Unreadable {
-                name: m.name.clone(),
-                node: m.node.clone(),
-                run: source_run.clone(),
-                source,
-            })?;
-        resolved.push(super::promote::birth_artifact(
-            m.rename.clone().unwrap_or_else(|| m.name.clone()),
-            bytes,
-            &source_run,
-            &found,
-        ));
-    }
-    Ok(resolved)
 }
 
 /// What a `kind: workflow` node declares: which workflow to run, what
@@ -609,16 +457,6 @@ async fn resume_child(
     .await
 }
 
-/// Executes the child run to its next stop and maps that onto this
-/// node — chasing a promotion chain to its end: a chain
-/// member that closes `promoted` gets its successor created (fresh
-/// worktree off the parent's tree, artifacts inherited, `promoted_from`
-/// audited) and recorded as a NEW linked child of this same node, then
-/// driven in turn. A terminal child closes the node; each member's
-/// whole spend rides its own `child_run_finished.tokens` (replay
-/// aggregates it into the parent's total exactly once — the node's own
-/// close deliberately carries none); a paused child keeps the node open
-/// and pauses the parent.
 /// A child run as its parent holds it: the frozen truth it was created
 /// with, carried together because no caller ever has one of these
 /// without the other three.
@@ -629,6 +467,16 @@ struct Child<'a> {
     tree: &'a Path,
 }
 
+/// Executes the child run to its next stop and maps that onto this
+/// node — chasing a promotion chain to its end: a chain
+/// member that closes `promoted` gets its successor created (fresh
+/// worktree off the parent's tree, artifacts inherited, `promoted_from`
+/// audited) and recorded as a NEW linked child of this same node, then
+/// driven in turn. A terminal child closes the node; each member's
+/// whole spend rides its own `child_run_finished.tokens` (replay
+/// aggregates it into the parent's total exactly once — the node's own
+/// close deliberately carries none); a paused child keeps the node open
+/// and pauses the parent.
 async fn drive_child(
     ctx: &RunCtx<'_>,
     node: &Node,
