@@ -7,8 +7,8 @@ use yunta_core::diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
     Subject,
 };
-use yunta_core::events::Failure;
-use yunta_core::{ArtifactKind, NodeId, TaskId};
+use yunta_core::events::{ArtifactId, Failure};
+use yunta_core::{ArtifactKind, NodeId, RunId, TaskId};
 
 fn plan() -> DocumentRef {
     DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
@@ -149,7 +149,7 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
         malformed.report().is_some(),
         "a document that did not read names itself"
     );
-    assert_eq!(missing.path(), "artifacts/plan.yaml");
+    assert_eq!(missing.path(), Some("artifacts/plan.yaml"));
     assert!(missing.report().is_none());
     assert!(malformed.report().is_some());
 }
@@ -227,4 +227,65 @@ fn a_log_written_before_failures_were_data_still_reads() {
     let older: Failure =
         serde_json::from_str(r#"{"outcome":"the runner exited with status 2"}"#).expect("reads");
     assert_eq!(older, Failure::message("the runner exited with status 2"));
+}
+
+#[test]
+fn an_artifact_no_run_holds_is_a_failure_of_the_artifact_itself() {
+    let unheld = ArtifactFailure::Unheld {
+        run: RunId::from("run-child-1"),
+        producer: None,
+        artifact: ArtifactId::of("report.md", None),
+    };
+
+    assert_eq!(
+        unheld.code(),
+        Some("artifact-unheld"),
+        "a receipt counts it under its own stable name"
+    );
+    assert!(
+        unheld.path().is_none(),
+        "no node wrote a file, so there is none to open"
+    );
+    assert!(
+        unheld.report().is_none(),
+        "nothing read a document that was never handed over"
+    );
+}
+
+#[test]
+fn an_unheld_artifact_reads_back_with_its_tag_and_the_run_it_was_missing_from() {
+    let unheld = ArtifactFailure::Unheld {
+        run: RunId::from("run-child-1"),
+        producer: Some(NodeId::from("plan")),
+        artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+    };
+
+    let value = serde_json::to_value(&unheld).expect("a failure is data");
+    assert_eq!(value["failure"], "unheld", "{value:#}");
+    assert_eq!(value["run"], "run-child-1", "{value:#}");
+    assert_eq!(value["producer"], "plan", "{value:#}");
+    assert_eq!(value["artifact"]["kind"], "tasks", "{value:#}");
+
+    let back: ArtifactFailure = serde_json::from_value(value).expect("and reads back as itself");
+    assert_eq!(back, unheld);
+}
+
+#[test]
+fn an_artifact_another_run_owes_renders_as_the_run_that_does_not_hold_it() {
+    let failure = Failure::artifacts(vec![ArtifactFailure::Unheld {
+        run: RunId::from("run-child-1"),
+        producer: None,
+        artifact: ArtifactId::of("report.md", None),
+    }]);
+    assert_eq!(
+        failure.to_string(),
+        "run `run-child-1`: 1 error\n  \
+         holds no artifact `report.md` — produce it there, or stop declaring it here"
+    );
+    assert_eq!(
+        failure.failures().count(),
+        1,
+        "it is one declared artifact that did not close"
+    );
+    assert_eq!(failure.reports().count(), 0, "no document was read");
 }

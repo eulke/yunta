@@ -10,11 +10,11 @@ use yunta_engine::{close_artifacts, ArtifactContent};
 fn codes(failures: &[ArtifactFailure]) -> Vec<&str> {
     failures
         .iter()
-        .flat_map(|failure| match failure {
-            ArtifactFailure::File { problem, .. } => vec![problem.code()],
-            ArtifactFailure::Content(report) => {
-                report.diagnostics.iter().map(|d| d.code()).collect()
-            }
+        .flat_map(|failure| match failure.report() {
+            // A problem with the artifact itself is one code; a document
+            // whose content failed answers with every problem it has.
+            None => failure.code().into_iter().collect::<Vec<_>>(),
+            Some(report) => report.diagnostics.iter().map(|d| d.code()).collect(),
         })
         .collect()
 }
@@ -228,7 +228,10 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     // A tasks document that was never written has no content whose kind could
     // be wrong — which is exactly why a rewrite cannot fix it.
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
-    assert_eq!(failures[0].path(), staged("plan", "plan.yaml"));
+    assert_eq!(
+        failures[0].path(),
+        Some(staged("plan", "plan.yaml").as_str())
+    );
 }
 
 const REVIEW_NODE: &str = r#"

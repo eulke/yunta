@@ -53,7 +53,7 @@ use crate::template::render_template;
 
 use mounts::resolve_mounts;
 
-use super::node_close::{close_node, fail, ChildRun, Close};
+use super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{RunCtx, RunError, RunTerminal};
@@ -246,7 +246,16 @@ pub(super) async fn execute_workflow(
     // child left behind.
     let mounted = match resolve_mounts(ctx, &events, mounts).await {
         Ok(mounted) => mounted,
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+        Err(problem) => {
+            return fail_with(
+                ctx,
+                node,
+                problem.into(),
+                false,
+                yunta_core::events::TokenUsage::default(),
+            )
+            .await
+        }
     };
 
     // Budgets cascade: the child's frozen cap is what the parent

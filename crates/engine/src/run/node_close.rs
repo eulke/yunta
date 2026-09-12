@@ -10,7 +10,6 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
 };
@@ -139,20 +138,13 @@ pub(super) async fn close_node(
     let verified = match close.child {
         Some(child) => match acquire_from_child(ctx, node, child).await? {
             Ok(acquired) => acquired,
-            Err(problems) => {
-                return fail_with_tokens(
-                    ctx,
-                    node,
-                    yunta_core::text::problems(format!("child run `{}`", child.id), &problems),
-                    false,
-                    tokens,
-                )
-                .await
-            }
+            Err(problem) => return fail_with(ctx, node, problem.into(), false, tokens).await,
         },
         None => match close_artifacts(node, ctx.run_dir, ceiling) {
             Ok(verified) => verified,
-            Err(failures) => return fail_artifacts(ctx, node, failures, false, tokens).await,
+            Err(failures) => {
+                return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
+            }
         },
     };
 
@@ -264,25 +256,14 @@ pub(super) async fn fail_with_tokens(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    record(ctx, node, Failure::message(outcome), retryable, tokens).await
+    fail_with(ctx, node, Failure::message(outcome), retryable, tokens).await
 }
 
-/// Fails a node with the artifacts that did not close, each keeping the
-/// document its problems belong to. The prose a reader sees is produced
-/// from this on read, so no surface can disagree with the facts behind
-/// it.
-pub(super) async fn fail_artifacts(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    failures: Vec<ArtifactFailure>,
-    retryable: bool,
-    tokens: TokenUsage,
-) -> Result<NodeEnd, RunError> {
-    record(ctx, node, Failure::artifacts(failures), retryable, tokens).await
-}
-
-/// The one place `node_failed` is written.
-async fn record(
+/// The one place `node_failed` is written. The failure reaches the log
+/// as the data it is — one sentence, or the declared artifacts that did
+/// not close — and every surface produces its own prose from that, so
+/// none of them can disagree with the facts behind it.
+pub(super) async fn fail_with(
     ctx: &RunCtx<'_>,
     node: &Node,
     failure: Failure,

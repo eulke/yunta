@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
+use yunta_testkit::{git, init_repo, run_id_from, stdout, write, yunta_in};
 
 /// One node declaring two interpreted documents and writing both with
 /// every entry left blank — two documents, each breaking several of its
@@ -212,4 +212,92 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
             .any(|d| d["problem"] == "rule" && d["code"] == "empty-location"),
         "the finding has an empty `location`: {state:#}"
     );
+}
+
+/// A `kind: workflow` node whose child run produces nothing, declaring
+/// an artifact of that child — the composition's two ends disagreeing
+/// about what comes back.
+const UNHELD_PARENT: &str = r#"
+name: unheld-parent
+nodes:
+  - id: compose
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#;
+
+const UNHELD_CHILD: &str = r#"
+name: producer
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+
+/// Runs [`UNHELD_PARENT`] against a committed catalog holding
+/// [`UNHELD_CHILD`], and hands back the run id the follow-up `status`
+/// needs. The node fails: that is the point of the fixture.
+fn run_unheld(repo: &Path, home: &Path) -> String {
+    init_repo(repo);
+    write(&repo.join(".yunta/workflows/producer.yaml"), UNHELD_CHILD);
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "catalog"]);
+    write(&repo.join("wf.yaml"), UNHELD_PARENT);
+    let run = yunta_in!(repo, home, &["run", "wf.yaml"]);
+    assert!(
+        !run.status.success(),
+        "the node must fail on what its child never produced: {}",
+        stdout(&run)
+    );
+    run_id_from(&run)
+}
+
+#[test]
+fn status_attributes_an_artifact_no_run_holds_to_that_artifact() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    let run_id = run_unheld(&repo, &home);
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    let text = stdout(&status);
+    assert!(
+        text.lines().any(|line| line.trim() == "compose:"),
+        "the failing node heads its own detail: {text}"
+    );
+    assert!(
+        text.contains("holds no artifact `report.md`"),
+        "the block says which artifact did not close: {text}"
+    );
+}
+
+#[test]
+fn status_json_publishes_an_unheld_artifact_under_its_stable_code() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    let run_id = run_unheld(&repo, &home);
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout)
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}\n{}", stdout(&status)));
+
+    let entries = state["diagnostics"]["compose"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the failed node's artifacts are data: {state:#}"));
+    assert_eq!(entries.len(), 1, "one artifact did not close: {state:#}");
+    let entry = &entries[0];
+    assert_eq!(entry["code"], "artifact-unheld", "{state:#}");
+    assert_eq!(entry["artifact"]["name"], "report.md", "{state:#}");
+    // The run a reader has to go look at is the child's, not this one's.
+    let child = entry["run"].as_str().expect("the run it was missing from");
+    assert_ne!(child, run_id, "{state:#}");
+    assert!(!child.is_empty(), "{state:#}");
+    // Nothing read a document, so the entry claims neither a path nor a
+    // kind nor a problem inside a file.
+    assert!(entry["path"].is_null(), "{state:#}");
+    assert!(entry["kind"].is_null(), "{state:#}");
+    assert!(entry["file"].is_null(), "{state:#}");
 }

@@ -118,15 +118,19 @@ reading the run fails naming its position.
 
 `node_failed` records what failed, not a sentence about it. Its `failure` is
 either `outcome:` — one sentence the engine states, for a failure with no
-document behind it — or `artifacts:`, one entry per declared artifact that did
-not close. An entry is either the file itself (`artifact-missing`,
-`artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`)
-or its content: the path, the kind whose shape it was read against, and every
-problem that document has. Each problem names its subject in the document's own
-words — ``task `t1`, criterion 1`` — which is the whole of where it is: a
-diagnostic carries no line and column, and `events.json` publishes none. Every
-surface renders from that value — `status` and the receipt — so none of them can
-disagree about the facts, and nothing has to take a sentence apart to recover them.
+artifact behind it — or `artifacts:`, one entry per declared artifact that did
+not close. An entry is one of three: the file itself (`artifact-missing`,
+`artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`),
+its content — the path, the kind whose shape it was read against, and every
+problem that document has — or an artifact no run holds (`artifact-unheld`),
+which carries the run that owes it, the node of that run it was asked of when
+the reference names one, and the identity it was asked for. A node of
+composition writes no file, so its entry names none. Each content problem names
+its subject in the document's own words — ``task `t1`, criterion 1`` — which is
+the whole of where it is: a diagnostic carries no line and column, and
+`events.json` publishes none. Every surface renders from that value — `status`
+and the receipt — so none of them can disagree about the facts, and nothing has
+to take a sentence apart to recover them.
 
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the

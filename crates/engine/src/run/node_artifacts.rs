@@ -9,10 +9,12 @@
 
 use std::collections::BTreeMap;
 
+use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, EventPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    ArtifactId, ArtifactOrigin, EventPayload, Failure, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage,
 };
-use yunta_core::{ArtifactSpec, Node, NodeKind};
+use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
 
 use crate::artifacts::{
     accept, canonical, interpreted, ArtifactContent, Declared, RunArtifacts, VerifiedArtifact,
@@ -85,31 +87,39 @@ pub(super) async fn derive_findings(
     Ok(None)
 }
 
-/// Why one artifact a `kind: workflow` node declares did not come across
-/// from its child run.
-///
-/// Each renders as one line of the block the node fails with, under a
-/// heading that names the child run — so the run a reader has to go look
-/// at is stated once, and each line says which artifact and what about
-/// it.
-#[derive(Debug, thiserror::Error)]
+/// Why a `kind: workflow` node cannot take over what its child run
+/// produced, in the two shapes a node failure has.
+#[derive(Debug)]
 pub(super) enum NotAcquired {
-    #[error(
-        "artifact `{name}`: the child run's log holds none — declare it in the child workflow, \
-         or drop it from this node's `artifacts.produces`"
-    )]
-    Unheld { name: String },
-    #[error("artifact `{name}`: the child run cannot hand over its bytes: {source}")]
-    Unreadable {
+    /// Declared artifacts the child run does not close: one it holds
+    /// nothing of, or one whose bytes do not read as the kind this node
+    /// declares. Every one of them at once, like any other close — two
+    /// ends of a composition that disagree about three artifacts say so
+    /// once, not three times.
+    Undelivered(Vec<ArtifactFailure>),
+    /// The child run's log names bytes its store cannot produce. No
+    /// artifact entry describes that: it is the engine unable to read a
+    /// run rather than two workflows disagreeing, so it stops the
+    /// resolution instead of being listed beside one.
+    Unreachable {
         name: String,
-        #[source]
         source: crate::artifacts::ObjectError,
     },
-    /// The two workflows disagree about what the artifact is: the child
-    /// holds one of this identity and it does not read as the kind this
-    /// node declares.
-    #[error("artifact `{name}`: what the child run holds does not read here: {detail}")]
-    Unread { name: String, detail: String },
+}
+
+impl From<NotAcquired> for Failure {
+    /// The node's failure in the shape its facts have: artifact entries
+    /// a receipt counts and `status` attributes by artifact, or the one
+    /// sentence the engine states when no artifact entry describes what
+    /// went wrong. This is the single border where either becomes text.
+    fn from(problem: NotAcquired) -> Self {
+        match problem {
+            NotAcquired::Undelivered(failures) => Failure::artifacts(failures),
+            NotAcquired::Unreachable { name, source } => Failure::message(format!(
+                "artifact `{name}`: the child run cannot hand over its bytes: {source}"
+            )),
+        }
+    }
 }
 
 /// One artifact the child's ledger answers for, before the parent
@@ -131,34 +141,34 @@ struct Resolved<'a> {
 /// child's ledger is asked for. The child may hold more — those are that
 /// run's business and stay there — and it must hold these, because a
 /// node cannot finish owing what it declared.
-///
-/// Every problem at once, like any other close: two ends of a
-/// composition that disagree about three artifacts say so once, not
-/// three times.
 fn resolve_from_child<'a>(
     node: &Node,
     produces: &'a [ArtifactSpec],
     held: &RunArtifacts<'_>,
-) -> Result<Vec<Resolved<'a>>, Vec<NotAcquired>> {
+    child: &RunId,
+) -> Result<Vec<Resolved<'a>>, NotAcquired> {
     let mut resolved = Vec::new();
-    let mut problems = Vec::new();
+    let mut undelivered = Vec::new();
     for spec in produces {
-        let name = spec.name().to_string();
         // The declaration in hand is the identity: this node's names are
         // already rendered, so the manifest's own templates cannot
         // answer for them.
-        let Some(found) = held
-            .ledger()
-            .latest(&ArtifactId::of(&name, spec.kind()), None)
-        else {
-            problems.push(NotAcquired::Unheld { name });
+        let artifact = ArtifactId::of(spec.name(), spec.kind());
+        let Some(found) = held.ledger().latest(&artifact, None) else {
+            undelivered.push(ArtifactFailure::Unheld {
+                run: child.clone(),
+                producer: None,
+                artifact,
+            });
             continue;
         };
         let bytes = match held.bytes(found) {
             Ok(bytes) => bytes,
             Err(source) => {
-                problems.push(NotAcquired::Unreadable { name, source });
-                continue;
+                return Err(NotAcquired::Unreachable {
+                    name: spec.name().to_string(),
+                    source,
+                })
             }
         };
         match interpreted(Some(&node.id), spec, &bytes) {
@@ -168,16 +178,17 @@ fn resolve_from_child<'a>(
                 bytes,
                 verified,
             }),
-            Err(failure) => problems.push(NotAcquired::Unread {
-                name,
-                detail: yunta_core::text::one_line(&failure.to_string()),
-            }),
+            // What the child holds does not read as the kind this node
+            // declares: the artifact's content failed, and the report
+            // saying how travels whole rather than as a sentence about
+            // itself.
+            Err(failure) => undelivered.push(failure),
         }
     }
-    if problems.is_empty() {
+    if undelivered.is_empty() {
         Ok(resolved)
     } else {
-        Err(problems)
+        Err(NotAcquired::Undelivered(undelivered))
     }
 }
 
@@ -194,15 +205,15 @@ pub(super) async fn acquire_from_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child: ChildRun<'_>,
-) -> Result<Result<Vec<VerifiedArtifact>, Vec<NotAcquired>>, RunError> {
+) -> Result<Result<Vec<VerifiedArtifact>, NotAcquired>, RunError> {
     let Some(artifacts) = &node.artifacts else {
         return Ok(Ok(Vec::new()));
     };
     let events = ctx.storage.events_for_run(child.id.clone()).await?;
     let held = RunArtifacts::of(child.run_dir, &events);
-    let resolved = match resolve_from_child(node, &artifacts.produces, &held) {
+    let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id) {
         Ok(resolved) => resolved,
-        Err(problems) => return Ok(Err(problems)),
+        Err(problem) => return Ok(Err(problem)),
     };
 
     let mut acquired = Vec::with_capacity(resolved.len());

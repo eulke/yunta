@@ -785,6 +785,18 @@ impl ArtifactId {
     }
 }
 
+impl ArtifactId {
+    /// How an artifact names itself inside a sentence: an interpreted
+    /// one by what it is, an opaque one by the name that is all there
+    /// is to call it.
+    pub fn label(&self) -> String {
+        match self {
+            ArtifactId::Interpreted { kind } => kind.label().to_string(),
+            ArtifactId::Opaque { name } => format!("artifact `{name}`"),
+        }
+    }
+}
+
 /// How an artifact names itself to a reader: an interpreted one by its
 /// kind, an opaque one by the name it was declared under.
 impl std::fmt::Display for ArtifactId {

@@ -279,12 +279,16 @@ registra.
 **La falla es dato, no prosa.** `failure` toma una de dos formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
 `artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
-es o el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
-`artifact-oversized` (con bytes y techo) o `artifact-unreadable` — o el contenido:
-el path del documento, la `kind` que fija su forma y todos sus diagnósticos. El
-texto que ve una persona se produce al leer el evento, nunca al escribirlo (D133).
-Un payload que lleva `outcome:` solo se lee como la falla de una frase, sin
-migración: es la tolerancia de lectura de §3.1 del Contrato aplicada a este campo.
+es una de tres: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
+`artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, el contenido
+—el path del documento, la `kind` que fija su forma y todos sus diagnósticos— o un
+artifact que ningún run tiene (`artifact-unheld`): el `run` que lo debe, el
+`producer` de ese run al que se le pidió cuando la referencia nombra uno, y el
+`artifact` —la identidad— que se le pidió. Un nodo de composición no escribe
+archivo, así que su elemento no nombra ninguno. El texto que ve una persona se
+produce al leer el evento, nunca al escribirlo (D133). Un payload que lleva
+`outcome:` solo se lee como la falla de una frase, sin migración: es la tolerancia
+de lectura de §3.1 del Contrato aplicada a este campo.
 
 ### 5.16 `hook_executed` — engine
 **Fuente:** node_id, fase before/after, comando, exit code

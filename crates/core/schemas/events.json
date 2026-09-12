@@ -139,7 +139,7 @@
       ]
     },
     "ArtifactFailure": {
-      "description": "Why one declared artifact did not close.",
+      "description": "Why one declared artifact did not close.\n\nThe variants answer the one question that decides what is worth\ndoing next: rewriting the content reaches [`Content`](Self::Content),\nnothing this node writes reaches [`File`](Self::File), and nothing\nthis run does at all reaches [`Unheld`](Self::Unheld), because the\nartifact is another run's to produce.",
       "oneOf": [
         {
           "description": "The file itself. No rewrite of its content reaches this.",
@@ -174,6 +174,40 @@
           "$ref": "#/$defs/Report",
           "required": [
             "failure"
+          ]
+        },
+        {
+          "description": "Declared here and held by no run that could hand it over: the\nrun that owes it — a `kind: workflow` node's child, or the run a\nmount names as its source — answers with nothing under this\nidentity.\n\nA node of composition writes no file, so there is nothing on\ndisk to be missing and nothing this run does reaches the\nartifact: producing it is another run's to do.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "What the run was asked for: the identity, which is what a\nlog answers by.",
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "failure": {
+              "type": "string",
+              "const": "unheld"
+            },
+            "producer": {
+              "description": "The node of that run the artifact was asked of, when the\nreference names one. `None` when the question is about the\nrun as a whole, which is what a `kind: workflow` node asks\nof its child.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "description": "The run that was asked and holds none of it — where a reader\ngoes to look.",
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "failure",
+            "run",
+            "artifact"
           ]
         }
       ]
@@ -882,7 +916,7 @@
       ]
     },
     "DocumentRef": {
-      "description": "Which document a report is about: the kind that fixes its shape, and\nwhere a reader opens it.\n\nA document always has a kind. An artifact the engine never\ninterprets has no shape to demand and therefore no content to report\non; what can go wrong with one is a [`FileProblem`] instead.",
+      "description": "Which document a report is about: the kind that fixes its shape, and\nwhere a reader opens it.\n\nA document always has a kind. An artifact the engine never\ninterprets has no shape to demand and therefore no content to report\non; what can go wrong with one is a [`FileProblem`] instead. An\nartifact another run owes has no document at all, and names none.",
       "type": "object",
       "properties": {
         "kind": {
@@ -1851,7 +1885,7 @@
       },
       "anyOf": [
         {
-          "description": "Declared artifacts that did not close, each with its own\nproblems.",
+          "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
           "type": "object",
           "properties": {
             "artifacts": {

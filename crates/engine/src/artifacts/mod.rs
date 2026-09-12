@@ -162,8 +162,24 @@ impl<'a> RunArtifacts<'a> {
         producer: Option<&NodeId>,
         name: &str,
     ) -> Option<&ArtifactRef> {
+        self.identified(workflow, producer, name).1
+    }
+
+    /// What `workflow` makes `name` mean, and the artifact answering it.
+    ///
+    /// The question and its answer come from one place, so a caller that
+    /// has to say what the run was asked for — a mount reporting a
+    /// source that holds none of it — names the identity the lookup
+    /// actually used rather than deriving it a second time.
+    pub(crate) fn identified(
+        &self,
+        workflow: &Workflow,
+        producer: Option<&NodeId>,
+        name: &str,
+    ) -> (ArtifactId, Option<&ArtifactRef>) {
         let id = yunta_core::events::artifacts::declared_identity(workflow, producer, name);
-        self.ledger.latest(&id, producer)
+        let found = self.ledger.latest(&id, producer);
+        (id, found)
     }
 
     /// The bytes `held` names, verified against its hash.

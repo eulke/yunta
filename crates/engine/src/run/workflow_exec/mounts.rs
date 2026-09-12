@@ -13,14 +13,46 @@
 //! a source the run cannot hand over fails the parent's node with nothing
 //! dangling behind it.
 
-use yunta_core::events::{EventPayload, StoredEvent};
+use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::{EventPayload, Failure, StoredEvent};
 use yunta_core::{MountSpec, NodeKind, RunId};
 
 use super::runs_root;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
 
-/// A mount the child cannot be born with.
+/// Why the parent's node fails instead of giving birth to the child, in
+/// the two shapes a node failure has.
+#[derive(Debug)]
+pub(super) enum NotMounted {
+    /// The source run holds nothing under the identity the mount names.
+    /// That is a declared artifact that did not close, recorded as one,
+    /// so a receipt counts it and `status` attributes it by artifact
+    /// like any other.
+    Undelivered(ArtifactFailure),
+    /// The engine cannot reach the source at all. No artifact entry
+    /// describes that, so it is the one sentence the engine states.
+    Unreachable(MountError),
+}
+
+impl From<MountError> for NotMounted {
+    fn from(error: MountError) -> Self {
+        NotMounted::Unreachable(error)
+    }
+}
+
+impl From<NotMounted> for Failure {
+    /// The single border where either shape becomes what the log
+    /// records: an artifact entry, or a sentence.
+    fn from(problem: NotMounted) -> Self {
+        match problem {
+            NotMounted::Undelivered(failure) => Failure::artifacts(vec![failure]),
+            NotMounted::Unreachable(error) => Failure::message(error.to_string()),
+        }
+    }
+}
+
+/// A source a mount names and the engine cannot reach.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum MountError {
     #[error(
@@ -30,15 +62,6 @@ pub(super) enum MountError {
     NoTerminalChild {
         name: String,
         node: yunta_core::NodeId,
-    },
-    #[error(
-        "mount `{name}` from node `{node}`: run `{run}` holds no artifact `{name}` — the source \
-         node never produced it"
-    )]
-    Unheld {
-        name: String,
-        node: yunta_core::NodeId,
-        run: RunId,
     },
     #[error("mount `{name}` from node `{node}`: run `{run}` cannot hand over its bytes")]
     Unreadable {
@@ -84,94 +107,107 @@ pub(super) async fn resolve_mounts(
     ctx: &RunCtx<'_>,
     events: &[StoredEvent],
     mounts: &[MountSpec],
-) -> Result<Vec<BirthArtifact>, MountError> {
+) -> Result<Vec<BirthArtifact>, NotMounted> {
     let mut resolved = Vec::new();
     for mount in mounts {
-        let m = &mount.artifact;
-        let target = ctx
-            .manifest
-            .workflow
-            .nodes
-            .iter()
-            .find(|candidate| candidate.id == m.node);
-        let source_run = match target.map(|candidate| &candidate.kind) {
-            Some(NodeKind::Workflow { .. }) => {
-                let child = events.iter().rev().find_map(|e| match e.payload() {
-                    Some(EventPayload::ChildRunFinished(p))
-                        if e.node_id.as_ref() == Some(&m.node) =>
-                    {
-                        Some(p.child_run_id.clone())
-                    }
-                    _ => None,
-                });
-                match child {
-                    Some(child_id) => child_id,
-                    None => {
-                        return Err(MountError::NoTerminalChild {
-                            name: m.name.clone(),
-                            node: m.node.clone(),
-                        });
-                    }
-                }
-            }
-            _ => ctx.run_id.clone(),
-        };
-        // The source run's own log is what says which artifact the
-        // mounted name is and who produced it there; a mount only
-        // chooses the name the child carries it under. A sibling child
-        // run answers about itself, so its workflow is the one that
-        // reads the name.
-        let source_dir = runs_root(ctx).join(source_run.as_str());
-        let (source_events, source_workflow, producer) = if source_run == *ctx.run_id {
-            (
-                events.to_vec(),
-                ctx.manifest.workflow.clone(),
-                Some(m.node.clone()),
-            )
-        } else {
-            let manifest = read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
-                MountError::Unfrozen {
-                    name: m.name.clone(),
-                    node: m.node.clone(),
-                    run: source_run.clone(),
-                    detail: yunta_core::describe(&source),
-                }
-            })?;
-            let child_events = ctx
-                .storage
-                .events_for_run(source_run.clone())
-                .await
-                .map_err(|source| MountError::Unlogged {
-                    name: m.name.clone(),
-                    node: m.node.clone(),
-                    run: source_run.clone(),
-                    source: Box::new(source),
-                })?;
-            (child_events, manifest.workflow, None)
-        };
-        let held = crate::artifacts::RunArtifacts::of(&source_dir, &source_events);
-        let found = held
-            .named(&source_workflow, producer.as_ref(), &m.name)
-            .ok_or_else(|| MountError::Unheld {
-                name: m.name.clone(),
-                node: m.node.clone(),
-                run: source_run.clone(),
-            })?
-            .clone();
-        let bytes = held
-            .bytes(&found)
-            .map_err(|source| MountError::Unreadable {
-                name: m.name.clone(),
-                node: m.node.clone(),
-                run: source_run.clone(),
-                source,
-            })?;
-        resolved.push(birth_artifact(
-            m.rename.clone().unwrap_or_else(|| m.name.clone()),
-            bytes,
-            &source_run,
-            &found,
-        ));
+        resolved.push(resolve_one(ctx, events, mount).await?);
     }
     Ok(resolved)
+}
+
+/// One mount, resolved to the bytes the child is born holding.
+async fn resolve_one(
+    ctx: &RunCtx<'_>,
+    events: &[StoredEvent],
+    mount: &MountSpec,
+) -> Result<BirthArtifact, NotMounted> {
+    let m = &mount.artifact;
+    let target = ctx
+        .manifest
+        .workflow
+        .nodes
+        .iter()
+        .find(|candidate| candidate.id == m.node);
+    let source_run = match target.map(|candidate| &candidate.kind) {
+        Some(NodeKind::Workflow { .. }) => {
+            let child = events.iter().rev().find_map(|e| match e.payload() {
+                Some(EventPayload::ChildRunFinished(p)) if e.node_id.as_ref() == Some(&m.node) => {
+                    Some(p.child_run_id.clone())
+                }
+                _ => None,
+            });
+            match child {
+                Some(child_id) => child_id,
+                None => {
+                    return Err(MountError::NoTerminalChild {
+                        name: m.name.clone(),
+                        node: m.node.clone(),
+                    }
+                    .into());
+                }
+            }
+        }
+        _ => ctx.run_id.clone(),
+    };
+    // The source run's own log is what says which artifact the
+    // mounted name is and who produced it there; a mount only
+    // chooses the name the child carries it under. A sibling child
+    // run answers about itself, so its workflow is the one that
+    // reads the name.
+    let source_dir = runs_root(ctx).join(source_run.as_str());
+    let (source_events, source_workflow, producer) = if source_run == *ctx.run_id {
+        (
+            events.to_vec(),
+            ctx.manifest.workflow.clone(),
+            Some(m.node.clone()),
+        )
+    } else {
+        let manifest = read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
+            MountError::Unfrozen {
+                name: m.name.clone(),
+                node: m.node.clone(),
+                run: source_run.clone(),
+                detail: yunta_core::describe(&source),
+            }
+        })?;
+        let child_events = ctx
+            .storage
+            .events_for_run(source_run.clone())
+            .await
+            .map_err(|source| MountError::Unlogged {
+                name: m.name.clone(),
+                node: m.node.clone(),
+                run: source_run.clone(),
+                source: Box::new(source),
+            })?;
+        (child_events, manifest.workflow, None)
+    };
+    let held = crate::artifacts::RunArtifacts::of(&source_dir, &source_events);
+    // The source run answers by identity, so the failure records the
+    // identity it was asked for rather than the name the mount spells
+    // it with here.
+    let (artifact, found) = held.identified(&source_workflow, producer.as_ref(), &m.name);
+    let found = found
+        .ok_or_else(|| {
+            NotMounted::Undelivered(ArtifactFailure::Unheld {
+                run: source_run.clone(),
+                producer: Some(m.node.clone()),
+                artifact,
+            })
+        })?
+        .clone();
+    let bytes = held
+        .bytes(&found)
+        .map_err(|source| MountError::Unreadable {
+            name: m.name.clone(),
+            node: m.node.clone(),
+            run: source_run.clone(),
+            source,
+        })?;
+    Ok(birth_artifact(
+        m.rename.clone().unwrap_or_else(|| m.name.clone()),
+        bytes,
+        &source_run,
+        &found,
+    ))
 }

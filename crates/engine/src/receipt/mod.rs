@@ -117,9 +117,9 @@ pub struct Receipt {
     /// Events this binary could not interpret, by kind — a run with any
     /// is certified only for what the binary understood.
     pub unknown_kinds: Vec<UnknownKindCount>,
-    /// What the run's documents got wrong, counted by the document kind
-    /// the rule was asked of and the stable name of each kind of
-    /// problem.
+    /// What the run's declared artifacts got wrong, counted by the
+    /// document kind the rule was asked of — `None` where nothing read a
+    /// document — and the stable name of each kind of problem.
     ///
     /// Counting is the whole reason a diagnostic is a value: a receipt
     /// that had to read prose could only reprint it, and "how often does
@@ -135,8 +135,8 @@ pub struct Receipt {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiagnosticCount {
     /// The document whose rules were asked. `None` for a problem with
-    /// the file itself — a file that was never written has no content
-    /// to have a kind.
+    /// the artifact itself — a file that was never written, and an
+    /// artifact another run owes, have no content to have a kind.
     pub kind: Option<ArtifactKind>,
     pub code: String,
     pub occurrences: usize,
@@ -173,11 +173,16 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
         };
         for failure in artifacts {
             match failure {
-                // A problem with the file itself is counted under its own
-                // code and no kind: `artifact-missing` is the same fact
-                // whatever the file was going to contain.
-                ArtifactFailure::File { problem, .. } => {
-                    *counts.entry((None, problem.code())).or_default() += 1;
+                // A problem with the artifact itself is counted under
+                // its own code and no kind: `artifact-missing` is the
+                // same fact whatever the file was going to contain, and
+                // `artifact-unheld` the same whatever run was asked.
+                // `code()` answers for every failure that is not about
+                // content, which is exactly this arm.
+                ArtifactFailure::File { .. } | ArtifactFailure::Unheld { .. } => {
+                    if let Some(code) = failure.code() {
+                        *counts.entry((None, code)).or_default() += 1;
+                    }
                 }
                 ArtifactFailure::Content(report) => {
                     for diagnostic in &report.diagnostics {

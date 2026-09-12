@@ -33,7 +33,8 @@ use crate::ArtifactKind;
 ///
 /// A document always has a kind. An artifact the engine never
 /// interprets has no shape to demand and therefore no content to report
-/// on; what can go wrong with one is a [`FileProblem`] instead.
+/// on; what can go wrong with one is a [`FileProblem`] instead. An
+/// artifact another run owes has no document at all, and names none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DocumentRef {
     pub kind: ArtifactKind,

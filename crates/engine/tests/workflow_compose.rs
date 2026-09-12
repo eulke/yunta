@@ -11,8 +11,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{EventPayload, TerminalState};
-use yunta_core::{AdapterId, ConfigLayer, IdSource, Manifest, RunId, SeqIdSource, Workflow};
+use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::{ArtifactId, EventPayload, TerminalState};
+use yunta_core::{
+    AdapterId, ConfigLayer, IdSource, Manifest, NodeId, RunId, SeqIdSource, Workflow,
+};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
@@ -1065,6 +1068,23 @@ nodes:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.get("cons") {
         Some(NodeState::Failed { failure, .. }) => {
+            // A source the run does not hold is a declared artifact that
+            // did not close, so it reaches every surface as one entry
+            // with its own code — never a sentence to be taken apart.
+            let entries: Vec<&ArtifactFailure> = failure.failures().collect();
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
+            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert!(
+                matches!(
+                    entries[0],
+                    ArtifactFailure::Unheld { run, producer, artifact }
+                        if *run == run_id
+                            && producer.as_ref() == Some(&NodeId::from("plan"))
+                            && *artifact == ArtifactId::of("plan.yaml", None)
+                ),
+                "the entry names the run asked, the node and the artifact: {:?}",
+                entries[0]
+            );
             let outcome = failure.to_string();
             assert!(
                 outcome.contains("plan.yaml") && outcome.contains("plan"),
@@ -1333,6 +1353,24 @@ nodes:
         .expect("the child is linked on the parent's log");
     match state.nodes.get("feat") {
         Some(NodeState::Failed { failure, .. }) => {
+            // The child run holding none of what this node declares is
+            // exactly one declared artifact that did not close: the
+            // failure carries it as an entry, with the run it was
+            // missing from.
+            let entries: Vec<&ArtifactFailure> = failure.failures().collect();
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
+            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert!(
+                matches!(
+                    entries[0],
+                    ArtifactFailure::Unheld { run, producer, artifact }
+                        if *run == child_id
+                            && producer.is_none()
+                            && *artifact == ArtifactId::of("report.md", None)
+                ),
+                "the entry names the child run and the artifact: {:?}",
+                entries[0]
+            );
             let outcome = failure.to_string();
             assert!(
                 outcome.contains("report.md") && outcome.contains(child_id.as_str()),

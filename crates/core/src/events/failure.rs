@@ -2,10 +2,10 @@
 //!
 //! The one payload field that is not a plain value: a node fails either
 //! with a sentence the engine states, or with declared artifacts that
-//! did not close, each carrying its own problems. Keeping both in one
-//! type is what lets the log record the facts and every surface produce
-//! its own prose from them, instead of the engine writing prose once and
-//! three surfaces taking it apart again.
+//! did not close, each saying what went wrong with it. Keeping both in
+//! one type is what lets the log record the facts and every surface
+//! produce its own prose from them, instead of the engine writing prose
+//! once and three surfaces taking it apart again.
 
 use std::fmt;
 
@@ -24,8 +24,9 @@ use crate::diagnostic::{ArtifactFailure, Report};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum Failure {
-    /// Declared artifacts that did not close, each with its own
-    /// problems.
+    /// Declared artifacts that did not close, each saying what went
+    /// wrong with it: the file, the content of the document, or the run
+    /// that owes the artifact and holds none of it.
     Artifacts { artifacts: Vec<ArtifactFailure> },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
@@ -45,8 +46,8 @@ impl Failure {
     }
 
     /// Every report behind this failure, each carrying the document it
-    /// is about. What a receipt counts and a diagnostic is rendered
-    /// from.
+    /// is about. What a diagnostic is rendered from; a failure whose
+    /// artifacts name no document yields none.
     pub fn reports(&self) -> impl Iterator<Item = &Report> {
         self.failures().filter_map(ArtifactFailure::report)
     }

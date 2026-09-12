@@ -14,7 +14,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{StoredEvent, TerminalState, TokenUsage};
+use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::{
+    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
+    RunMetrics, StoredEvent, TerminalState, TokenUsage,
+};
 use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
@@ -498,7 +502,7 @@ nodes:
 /// back unreadable" becomes a number on the receipt instead of a grep
 /// over free text.
 #[test]
-fn the_receipt_counts_document_problems_by_their_stable_code() {
+fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
@@ -515,10 +519,99 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "document problem(s) reported during the run: `parse` in the tasks document \u{d7}2, \
+            "artifact problem(s) reported during the run: `parse` in the tasks document \u{d7}2, \
              `no-criteria` in the tasks document \u{d7}1"
         ),
         "{markdown}"
+    );
+}
+
+/// A `kind: workflow` node declaring what its child run never produced
+/// fails on the artifact itself, and the receipt counts that like any
+/// other artifact failure — by its stable code, with no document kind,
+/// because nothing ever read a document.
+///
+/// Derived from a log built here rather than from a run: an unheld
+/// artifact leaves its run paused, and a receipt certifies closed work
+/// only. What is under test is the derivation from `node_failed`, and
+/// that is exactly what the log carries.
+#[test]
+fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_norway::from_str(
+        r#"
+name: unheld-fixture
+nodes:
+  - id: compose
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#,
+    )
+    .unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    let events = vec![
+        StoredEvent {
+            run_id: bench.run_id.clone(),
+            seq: 1_u64.into(),
+            timestamp: yunta_core::Clock::now(&FixedClock),
+            node_id: Some(NodeId::from("compose")),
+            body: EventBody::Known(EventPayload::NodeFailed(NodeFailedPayload::new(
+                Failure::artifacts(vec![ArtifactFailure::Unheld {
+                    run: RunId::from("run-child-1"),
+                    producer: None,
+                    artifact: ArtifactId::of("report.md", None),
+                }]),
+                false,
+                TokenUsage::default(),
+            ))),
+        },
+        StoredEvent {
+            run_id: bench.run_id.clone(),
+            seq: 2_u64.into(),
+            timestamp: yunta_core::Clock::now(&FixedClock),
+            node_id: None,
+            body: EventBody::Known(EventPayload::RunFinished(RunFinishedPayload {
+                terminal_state: TerminalState::Failed,
+                metrics: RunMetrics {
+                    cptv: None,
+                    tokens: TokenUsage::default(),
+                },
+            })),
+        },
+    ];
+
+    let receipt = build_receipt(
+        &bench.run_id,
+        &manifest,
+        &events,
+        EventChainStatus::Intact {
+            events: events.len(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        receipt.diagnostics,
+        vec![DiagnosticCount {
+            kind: None,
+            code: "artifact-unheld".to_string(),
+            occurrences: 1,
+        }],
+        "an artifact no run holds is counted by its own code, under no kind"
+    );
+    assert!(
+        render_receipt_markdown(&receipt).contains("`artifact-unheld` \u{d7}1"),
+        "{receipt:?}"
     );
 }
 
@@ -582,7 +675,7 @@ fn the_json_receipt_carries_the_counts_as_data() {
 /// A clean run says nothing about problems, rather than a zero line —
 /// the same rule the baseline section already follows.
 #[test]
-fn a_run_with_no_document_problems_prints_no_line_about_them() {
+fn a_run_with_no_artifact_problems_prints_no_line_about_them() {
     let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    assert!(!render_receipt_markdown(&receipt).contains("document problem"));
+    assert!(!render_receipt_markdown(&receipt).contains("artifact problem"));
 }
