@@ -10,7 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
+use yunta_core::events::{ArtifactId, ArtifactOrigin, StoredEvent};
+use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId, ARTIFACTS_DIR};
 use yunta_storage::AsyncStorage;
 
 use super::{create_run, BirthArtifact, CreateRunParams, RunError};
@@ -89,11 +90,15 @@ pub async fn create_promotion_successor(
         Isolation::None => predecessor_worktree.to_path_buf(),
     };
 
+    // What the predecessor's own log says it held, so each inherited
+    // artifact keeps the identity and the producer it had there.
+    let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
     let inherited =
-        read_inherited_artifacts(predecessor_run_dir).map_err(|source| RunError::Io {
-            context: format!("inherit artifacts from `{predecessor_id}`"),
-            source,
-        })?;
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)
+            .map_err(|source| RunError::Io {
+                context: format!("inherit artifacts from `{predecessor_id}`"),
+                source,
+            })?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -120,8 +125,18 @@ pub async fn create_promotion_successor(
 /// `artifacts/` is carried into the successor at birth. Deliberately
 /// narrower than the general linked-run mounting a composed workflow
 /// run uses.
-fn read_inherited_artifacts(from_run_dir: &Path) -> std::io::Result<Vec<BirthArtifact>> {
-    let from = from_run_dir.join("artifacts");
+///
+/// Each file is looked up in `from_events` by what its bytes hash to,
+/// which is what gives the successor the identity and the producer the
+/// predecessor held it under. A file that log never accepted is
+/// inherited as opaque under its own name, with no producer: that is
+/// everything the predecessor's log knows about it.
+fn read_inherited_artifacts(
+    from_run_dir: &Path,
+    from_run: &RunId,
+    from_events: &[StoredEvent],
+) -> std::io::Result<Vec<BirthArtifact>> {
+    let from = from_run_dir.join(ARTIFACTS_DIR);
     if !from.exists() {
         return Ok(Vec::new());
     }
@@ -137,12 +152,34 @@ fn read_inherited_artifacts(from_run_dir: &Path) -> std::io::Result<Vec<BirthArt
                 format!("artifact name `{}` is not UTF-8", name.to_string_lossy()),
             )
         })?;
-        inherited.push(BirthArtifact {
-            name,
-            bytes: std::fs::read(entry.path())?,
-        });
+        let bytes = std::fs::read(entry.path())?;
+        inherited.push(birth_artifact(name, bytes, from_run, from_events));
     }
     Ok(inherited)
+}
+
+/// One artifact as the run receiving it holds it: the name it carries,
+/// and the identity and producer the handing-over log states for exactly
+/// these bytes.
+pub(super) fn birth_artifact(
+    name: String,
+    bytes: Vec<u8>,
+    from_run: &RunId,
+    from_events: &[StoredEvent],
+) -> BirthArtifact {
+    let held = crate::artifacts::handed_over(from_events, &yunta_core::sha256_hex(&bytes));
+    BirthArtifact {
+        artifact: held
+            .as_ref()
+            .map(|held| held.artifact.clone())
+            .unwrap_or_else(|| ArtifactId::Opaque { name: name.clone() }),
+        origin: ArtifactOrigin::Inherited {
+            run: from_run.clone(),
+            producer: held.and_then(|held| held.producer),
+        },
+        name,
+        bytes,
+    }
 }
 
 fn head_commit(worktree: &Path) -> Result<CommitSha, RunError> {

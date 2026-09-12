@@ -55,6 +55,7 @@ mod receipt;
 mod replay;
 mod reserved;
 mod run;
+mod run_log;
 mod run_tools;
 mod runner;
 mod scope;
@@ -67,7 +68,8 @@ mod template;
 mod verification_effectiveness;
 mod worktree;
 
-pub use artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub use artifacts::store::{ObjectError, ObjectStore};
+pub use artifacts::{close_artifacts, AcceptError, ArtifactContent, VerifiedArtifact};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
@@ -76,7 +78,7 @@ pub use check::{
     check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
-pub use findings::inherited_findings;
+pub use findings::{inherited_findings, INHERITED_FINDINGS};
 pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};

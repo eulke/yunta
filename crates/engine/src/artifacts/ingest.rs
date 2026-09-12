@@ -1,4 +1,5 @@
-//! Artifact verification at node close.
+//! How an artifact enters a run: verified at a node's close, submitted
+//! by a session, or derived by the engine from the log.
 //!
 //! When a node finishes, everything it declared under
 //! `artifacts.produces` must exist and be non-empty under the run's
@@ -19,12 +20,16 @@
 //! what was written, through the same door as any other file — so a
 //! document is judged once, by the code that judges every document.
 //!
+//! Whatever the file on disk spells, what the run stores is its
+//! canonical rendering: an interpreted document re-rendered from what it
+//! parsed as, so an artifact of a kind is the same bytes whoever wrote
+//! it.
+//!
 //! Every failure here is an [`ArtifactFailure`]: a problem with the file
 //! (never produced, empty, past the declared ceiling, refused by the
 //! filesystem) or a document whose content is not what its kind
 //! declares.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
@@ -37,18 +42,19 @@ use yunta_core::{
     ARTIFACTS_DIR,
 };
 
-/// What the engine appends to a `questions` artifact's name when it
-/// records the answers beside it.
-pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
-
-/// One declared artifact that passed verification — the data
-/// `artifact_written` needs (run-dir-relative path + content hash), plus
-/// whatever its declared `kind:` turned the bytes into.
+/// One declared artifact that passed verification: the name it was
+/// declared under, the file it was read from, its bytes and their hash,
+/// and whatever its declared `kind:` turned those bytes into.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedArtifact {
     pub name: String,
     /// Relative to the run directory (`artifacts/<name>`).
     pub path: PathBuf,
+    /// The bytes as they were read or written, which is what
+    /// `content_hash` is the hash of. What the run stores is their
+    /// canonical rendering, which differs whenever a node wrote an
+    /// interpreted document in its own spelling.
+    pub bytes: Vec<u8>,
     pub content_hash: ContentHash,
     pub content: ArtifactContent,
 }
@@ -66,8 +72,8 @@ pub enum ArtifactContent {
 
 impl ArtifactContent {
     /// The kind whose shape produced this content — `None` for an
-    /// opaque artifact, which is what `artifact_written` records for a
-    /// file the engine never interprets.
+    /// opaque artifact, which is what the engine records for a file it
+    /// never interprets.
     pub fn kind(&self) -> Option<ArtifactKind> {
         match self {
             ArtifactContent::Opaque => None,
@@ -137,6 +143,7 @@ pub(crate) fn verify_one(
         name: name.clone(),
         path: relative,
         content_hash: sha256_hex(&bytes),
+        bytes,
         content,
     })
 }
@@ -370,97 +377,33 @@ fn write_canonical(
         name: name.to_string(),
         path: PathBuf::from(path),
         content_hash: sha256_hex(&bytes),
+        bytes,
         content: ArtifactContent::Opaque,
     })
 }
 
-/// What the run's `artifacts/` directory held before a node's session
-/// ran, so the node's close can tell what that session wrote there.
+/// The bytes the run stores for `artifact`.
 ///
-/// Every node of a run writes into that one directory, and a CLI grants
-/// writes by directory rather than by file — so a node that declares an
-/// artifact can reach every other node's. The worktree has the same
-/// shape and the run answers it the same way: the session may write,
-/// and the close audits what it wrote against what the node declared.
-pub(crate) struct ArtifactsSnapshot(BTreeMap<PathBuf, ContentHash>);
-
-impl ArtifactsSnapshot {
-    /// Reads the directory as it stands. A run whose `artifacts/` has
-    /// not been created yet snapshots as empty rather than failing:
-    /// nothing there is nothing to protect.
-    pub(crate) fn take(run_dir: &Path) -> std::io::Result<Self> {
-        let mut held = BTreeMap::new();
-        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
-            held.insert(path, sha256_hex(bytes));
-        })?;
-        Ok(Self(held))
-    }
-
-    /// The files under `artifacts/` this node changed, added or removed
-    /// that it never declared it produces, each relative to the run
-    /// directory and named the way the log names an artifact.
-    ///
-    /// `declared` is the node's rendered artifact names: writing those
-    /// is the node doing its job, and writing one twice is a session
-    /// that corrected itself.
-    pub(crate) fn undeclared_writes(
-        &self,
-        run_dir: &Path,
-        declared: &[String],
-    ) -> std::io::Result<Vec<PathBuf>> {
-        let owned: BTreeSet<PathBuf> = declared
-            .iter()
-            .map(|name| Path::new(ARTIFACTS_DIR).join(name))
-            .collect();
-        // The engine answers a `questions` artifact by writing beside
-        // it, and the nodes of a parallel group interleave — so that
-        // file can land while a sibling's session is open, and it is
-        // the engine's write, never the sibling's.
-        let engine_written = |path: &Path| path.to_string_lossy().ends_with(ANSWERS_SUFFIX);
-        let mut now = BTreeMap::new();
-        collect(&run_dir.join(ARTIFACTS_DIR), &mut |path, bytes| {
-            now.insert(path, sha256_hex(bytes));
-        })?;
-        let touched = now
-            .iter()
-            .filter(|(path, hash)| self.0.get(*path) != Some(*hash))
-            .map(|(path, _)| path.clone());
-        let removed = self.0.keys().filter(|path| !now.contains_key(*path));
-        Ok(touched
-            .chain(removed.cloned())
-            .filter(|path| !owned.contains(path) && !engine_written(path))
-            .collect())
-    }
-}
-
-/// Hands every file under `dir` to `visit`, by its path relative to
-/// `dir`'s parent — `artifacts/<name>`, the shape the log and every
-/// diagnostic already use. An artifact name may nest, so this walks.
-fn collect(dir: &Path, visit: &mut impl FnMut(PathBuf, &[u8])) -> std::io::Result<()> {
-    fn walk(
-        root: &Path,
-        dir: &Path,
-        visit: &mut impl FnMut(PathBuf, &[u8]),
-    ) -> std::io::Result<()> {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(err),
-        };
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_type()?.is_dir() {
-                walk(root, &path, visit)?;
-                continue;
-            }
-            let relative = match path.strip_prefix(root) {
-                Ok(relative) => Path::new(ARTIFACTS_DIR).join(relative),
-                Err(_) => continue,
-            };
-            visit(relative, &std::fs::read(&path)?);
+/// An interpreted document is re-rendered from what it parsed as, so
+/// what the store holds under a kind is always canonical — a node that
+/// writes a tasks document in its own spelling and a session that hands
+/// the same document over end up at the same object. An opaque
+/// artifact's bytes are its own: the engine assumes no format, so it has
+/// nothing to render them from.
+pub(crate) fn canonical(artifact: &VerifiedArtifact) -> Result<Vec<u8>, SubmitError> {
+    let path = artifact.path.display().to_string();
+    Ok(match &artifact.content {
+        ArtifactContent::Opaque => artifact.bytes.clone(),
+        ArtifactContent::Tasks(tasks) => render(tasks, &path)?.into_bytes(),
+        ArtifactContent::Findings(findings) => {
+            render(&FindingsFile::from_findings(findings.clone()), &path)?.into_bytes()
         }
-        Ok(())
-    }
-    walk(dir, dir, visit)
+        ArtifactContent::Questions(questions) => render(
+            &QuestionsFile {
+                questions: questions.clone(),
+            },
+            &path,
+        )?
+        .into_bytes(),
+    })
 }

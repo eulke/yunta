@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{sha256_hex, ContentHash, Node, NodeId};
+use yunta_core::{ContentHash, Node, NodeId};
 
+use crate::artifacts::store::ObjectStore;
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use crate::template::render_template;
 
@@ -108,7 +109,10 @@ pub(super) async fn resolve_artifact(
     source_id: &str,
     artifact: &yunta_core::ArtifactContextRef,
 ) -> Result<Vec<u8>, ContextResolveError> {
-    let path = ctx.run_dir.join("artifacts").join(&artifact.name);
+    let path = ctx
+        .run_dir
+        .join(yunta_core::ARTIFACTS_DIR)
+        .join(&artifact.name);
     std::fs::read(&path).map_err(|_| ContextResolveError::MissingArtifact {
         node: node.id.clone(),
         source_id: source_id.to_string(),
@@ -246,14 +250,19 @@ pub(in crate::run) fn write_node_output(
     })
 }
 
+/// Puts a resolved source's bytes where the run keeps every artifact's
+/// bytes, and answers with the object and its hash.
+///
+/// The same store, not a second one: a context segment and an artifact
+/// are both content the run must be able to hand back exactly as it
+/// recorded it, and one content-addressed store answers for both. What
+/// `context_assembled` carries is that hash.
 pub(super) fn materialize(
     run_dir: &Path,
     content: &[u8],
 ) -> std::io::Result<(PathBuf, ContentHash)> {
-    let hash = sha256_hex(content);
-    let dir = run_dir.join("context").join(hash.as_str());
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("content");
-    std::fs::write(&path, content)?;
+    let store = ObjectStore::at(run_dir);
+    let hash = store.put(content)?;
+    let path = store.path_of(&hash);
     Ok((path, hash))
 }

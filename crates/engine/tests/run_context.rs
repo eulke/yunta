@@ -78,6 +78,17 @@ nodes:
     let sources = context_sources(&events, "plan");
     assert_eq!(sources[0].kind, "artifact");
     assert_materialized(&bench.run_dir(), &sources[0]);
+
+    // One store, not two: the bytes `context_assembled` names and the
+    // bytes the artifact's own acceptance names are the same object,
+    // held once under the hash both events carry.
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].content_hash, sources[0].content_hash);
+    assert_eq!(
+        bench.object(&sources[0].content_hash).expect("the object"),
+        b"MARKER-ARTIFACT-CONTENT"
+    );
 }
 
 #[tokio::test]
@@ -422,9 +433,8 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     assert_materialized(&bench.run_dir(), &sources[0]);
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         content.contains("MARKER-FROM-REPO-WINS"),
@@ -498,9 +508,8 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     let sources = context_sources(&events, "ask");
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         content.contains("MARKER-FROM-REPO-WINS"),
@@ -577,9 +586,8 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     let sources = context_sources(&events, "ask");
     let path = bench
         .run_dir()
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let content = std::fs::read_to_string(path).unwrap();
     assert!(
         !content.contains("MARKER-ORG-MUST-NOT-APPEAR"),

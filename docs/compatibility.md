@@ -147,7 +147,8 @@ document it was found in, and a failure of the file itself, which has no documen
 counts by code alone.
 
 An artifact kind is read under its current name and under the one it had. The
-tasks document is `tasks`; a log — `artifact_written`, `artifact_submitted` — or
+tasks document is `tasks`; a log — `artifact_accepted`, `artifact_written`,
+`artifact_submitted` — or
 a frozen manifest that spells it `task-ledger` reads as `tasks`, and so does a
 workflow's `kind: task-ledger` or a `ledger: {}` context source. What the binary
 writes is always the current spelling.

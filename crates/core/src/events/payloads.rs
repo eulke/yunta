@@ -210,7 +210,7 @@ pub struct DiscardedCandidate {
 /// it into an enum, since a pack can add its own sources without
 /// this type needing to change. `content_hash` is what makes every
 /// resolution's event carry a verifiable hash — the hash of exactly
-/// the bytes materialized under `context/<content_hash>/` for this
+/// the bytes the run stored under `objects/<content_hash>` for this
 /// source, so replay can name precisely what a session saw without
 /// re-running anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -764,6 +764,36 @@ pub struct ArtifactAcceptedPayload {
 pub enum ArtifactId {
     Interpreted { kind: crate::workflow::ArtifactKind },
     Opaque { name: String },
+}
+
+impl ArtifactId {
+    /// What an artifact declared as `name` under `kind` is. A declared
+    /// `kind:` *is* the identity; without one the artifact is opaque and
+    /// the name it was declared under is all that names it.
+    ///
+    /// The one place a declaration becomes an identity, so every door
+    /// that accepts an artifact — a submission, a close, a mount, a
+    /// promotion, a log written before origins existed — asks the same
+    /// question and gets the same answer.
+    pub fn of(name: &str, kind: Option<crate::workflow::ArtifactKind>) -> Self {
+        match kind {
+            Some(kind) => ArtifactId::Interpreted { kind },
+            None => ArtifactId::Opaque {
+                name: name.to_string(),
+            },
+        }
+    }
+}
+
+/// How an artifact names itself to a reader: an interpreted one by its
+/// kind, an opaque one by the name it was declared under.
+impl std::fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArtifactId::Interpreted { kind } => write!(f, "{kind}"),
+            ArtifactId::Opaque { name } => write!(f, "{name}"),
+        }
+    }
 }
 
 /// How the run came by an artifact.

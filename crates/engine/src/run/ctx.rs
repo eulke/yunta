@@ -10,14 +10,15 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    EventDraft, EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload,
-    HumanChoice, StoredEvent,
+    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload, HumanChoice,
+    StoredEvent,
 };
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
 use crate::replay::RunView;
+use crate::run_log::RunLog;
 use crate::task_cycle::Memo;
 
 use super::{budget, RunError};
@@ -97,21 +98,20 @@ impl RunCtx<'_> {
         }
     }
 
-    /// Appends one event and returns the seq storage assigned to it. The
-    /// timestamp is read from the run's clock here, before the hop to
-    /// the blocking thread that writes it.
+    /// This run's log: its storage handle, its identity and its clock,
+    /// for the sites that append through [`RunLog`] rather than through
+    /// [`RunCtx::emit`].
+    pub(crate) fn log(&self) -> RunLog<'_> {
+        RunLog::new(self.storage, self.run_id, self.clock.as_ref())
+    }
+
+    /// Appends one event and returns the seq storage assigned to it.
     pub(crate) async fn emit(
         &self,
         node_id: Option<&NodeId>,
         payload: EventPayload,
     ) -> Result<Seq, RunError> {
-        let draft = EventDraft {
-            run_id: self.run_id.clone(),
-            node_id: node_id.cloned(),
-            payload,
-        };
-        let at = self.clock.now();
-        Ok(self.storage.append(draft, at).await?)
+        Ok(self.log().record(node_id, payload).await?)
     }
 
     pub(crate) async fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
@@ -288,13 +288,7 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         // finds), so the storage cause travels back to the dispatch and
         // fails the node — the same storage the run's next mandatory
         // event would hit anyway, surfaced now instead of masked.
-        let draft = EventDraft {
-            run_id: self.run_id.clone(),
-            node_id: Some(node_id.clone()),
-            payload,
-        };
-        let at = self.clock.now();
-        self.storage.append(draft, at).await.map(|_| ())
+        self.log().record(Some(node_id), payload).await.map(|_| ())
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {

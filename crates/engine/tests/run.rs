@@ -633,9 +633,8 @@ nodes:
     let content = std::fs::read_to_string(
         bench
             .run_dir()
-            .join("context")
-            .join(source.content_hash.as_str())
-            .join("content"),
+            .join("objects")
+            .join(source.content_hash.as_str()),
     )
     .unwrap();
     assert!(
@@ -653,6 +652,96 @@ nodes:
     assert!(
         content.lines().any(|l| l.contains("run_created")),
         "the run's own events are present in the context"
+    );
+}
+
+// --- what a command node writes enters the run at its close ------------------
+
+#[tokio::test]
+async fn a_file_a_command_node_writes_enters_the_run_as_ingested() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ingest
+nodes:
+  - id: report
+    kind: bash
+    run: "echo the-report > {{run.dir}}/artifacts/report.md"
+    artifacts: { produces: [report.md] }
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(
+        held[0].producer.as_ref().map(|n| n.to_string()),
+        Some("report".to_string())
+    );
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Opaque {
+            name: "report.md".to_string()
+        }
+    );
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        bench.object(&held[0].content_hash).expect("the object"),
+        b"the-report\n"
+    );
+    assert_eq!(
+        std::fs::read(bench.run_dir().join("artifacts/report/report.md")).expect("the view"),
+        b"the-report\n",
+        "the view sits under the node that produced it"
+    );
+}
+
+#[tokio::test]
+async fn an_interpreted_artifact_a_node_wrote_is_stored_canonical() {
+    let bench = Bench::new();
+    // A valid tasks document in the node's own spelling: a comment and a
+    // flow style nothing canonical writes.
+    let workflow = r#"
+name: ingest-typed
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{run.dir}}/artifacts/plan.yaml"
+    artifacts:
+      produces: [{ name: plan.yaml, kind: tasks }]
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks
+        }
+    );
+
+    // What the run stores is the document, rendered the way the engine
+    // renders every document of that kind — not the spelling the node
+    // happened to write.
+    let written = bench.artifact("plan.yaml").expect("the node wrote it");
+    let stored = bench.object(&held[0].content_hash).expect("the object");
+    assert_ne!(stored, written, "the file was not canonical to begin with");
+    let parsed: yunta_core::TasksFile =
+        yunta_core::shape::read(&stored, "plan.yaml").expect("a canonical tasks document");
+    assert_eq!(
+        stored,
+        yunta_core::shape::render(&parsed).unwrap().into_bytes(),
+        "the stored bytes re-render to themselves"
+    );
+    assert_eq!(
+        parsed
+            .tasks
+            .iter()
+            .map(|t| t.id.to_string())
+            .collect::<Vec<_>>(),
+        vec!["alpha".to_string()]
     );
 }
 
@@ -732,11 +821,19 @@ async fn create_run_refuses_an_existing_run_dir() {
 }
 
 #[tokio::test]
-async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log() {
+async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     let bench = BirthBench::new();
     let run_id = RunId::from("run-with-brief");
+    let from = RunId::from("run-predecessor");
     let artifacts = vec![yunta_engine::BirthArtifact {
         name: "brief/plan.md".to_string(),
+        artifact: yunta_core::events::ArtifactId::Opaque {
+            name: "brief/plan.md".to_string(),
+        },
+        origin: yunta_core::events::ArtifactOrigin::Inherited {
+            run: from.clone(),
+            producer: Some("write".into()),
+        },
         bytes: b"hello".to_vec(),
     }];
 
@@ -744,15 +841,38 @@ async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log(
 
     assert_eq!(
         std::fs::read(run_dir.join("artifacts").join("brief").join("plan.md")).unwrap(),
-        b"hello"
+        b"hello",
+        "the view of what the run was handed sits at the root: it has no producer here"
     );
     let events = bench.storage.events_for_run(&run_id).unwrap();
     assert!(
         matches!(
-            events.as_slice(),
-            [only] if matches!(only.payload(), Some(yunta_core::events::EventPayload::RunCreated(_)))
+            events.first().and_then(|e| e.payload()),
+            Some(yunta_core::events::EventPayload::RunCreated(_))
         ),
-        "the birth is one run_created after the directory is complete"
+        "the run exists in the log before anything is said about it"
+    );
+    let accepted = yunta_testkit::accepted(&events);
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    assert_eq!(
+        accepted[0].producer, None,
+        "no node of this run produced it"
+    );
+    assert_eq!(
+        accepted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: from,
+            producer: Some("write".into()),
+        }
+    );
+    assert_eq!(
+        std::fs::read(
+            run_dir
+                .join("objects")
+                .join(accepted[0].content_hash.as_str())
+        )
+        .unwrap(),
+        b"hello"
     );
 }
 

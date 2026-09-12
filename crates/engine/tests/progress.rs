@@ -3,8 +3,9 @@
 //! full run.
 
 use yunta_core::events::{
-    ArtifactWrittenPayload, EventBody, EventPayload, Failure, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TokenUsage,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
+    EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, StoredEvent,
+    TokenUsage,
 };
 use yunta_core::{Node, NodeKind, PromptSource, Workflow};
 use yunta_engine::render_progress;
@@ -97,14 +98,25 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
         event(
             2,
             "plan",
-            EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-                path: "artifacts/tasks.yaml".into(),
+            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                artifact: ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Tasks,
+                },
                 content_hash: yunta_core::sha256_hex(b"deadbeef"),
-                artifact_kind: None,
+                origin: ArtifactOrigin::Submitted,
             }),
         ),
         event(
             3,
+            "plan",
+            EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+                path: "artifacts/notes.md".into(),
+                content_hash: yunta_core::sha256_hex(b"notes"),
+                artifact_kind: None,
+            }),
+        ),
+        event(
+            4,
             "plan",
             EventPayload::NodeFinished(NodeFinishedPayload {
                 outcome: "planned".to_string(),
@@ -115,9 +127,18 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
 
     let markdown = render_progress(&wf, &events);
 
+    // Each artifact by what it is and what it holds: an interpreted one
+    // names its kind, an opaque one the name it was declared under, and
+    // both name the bytes the run accepted.
     assert_eq!(
         markdown,
-        "# Progress\n\n## Finished\n\n- **plan** — Writes the tasks document\n  outcome: planned\n  artifact: artifacts/tasks.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n"
+        format!(
+            "# Progress\n\n## Finished\n\n- **plan** — Writes the tasks document\n  \
+             outcome: planned\n  artifact: tasks · {}\n  artifact: notes.md · {}\n\n\
+             ## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n",
+            yunta_core::sha256_hex(b"deadbeef").abbreviated(),
+            yunta_core::sha256_hex(b"notes").abbreviated()
+        )
     );
 }
 

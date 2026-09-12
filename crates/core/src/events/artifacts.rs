@@ -70,13 +70,19 @@ impl ArtifactLedger {
     }
 
     /// Applies one event, `node` being the envelope's producer and `seq`
-    /// its position.
+    /// its position, and answers with the artifact it now holds — `None`
+    /// for an event that states no artifact.
     ///
     /// Total, and ignores an event about anything else: the fold reads
     /// the two kinds that state an artifact and nothing more, so a log
     /// from anywhere leaves it with the artifacts it can account for
     /// rather than a panic.
-    pub fn apply(&mut self, node: Option<&NodeId>, seq: Seq, payload: &EventPayload) {
+    pub fn apply(
+        &mut self,
+        node: Option<&NodeId>,
+        seq: Seq,
+        payload: &EventPayload,
+    ) -> Option<&ArtifactRef> {
         let (artifact, content_hash, origin) = match payload {
             EventPayload::ArtifactAccepted(accepted) => (
                 accepted.artifact.clone(),
@@ -88,14 +94,14 @@ impl ArtifactLedger {
                 written.content_hash.clone(),
                 ArtifactOrigin::Legacy,
             ),
-            _ => return,
+            _ => return None,
         };
         let held = (node.cloned(), artifact.clone());
         if !self.current.contains_key(&held) {
             self.first_accepted.push(held.clone());
         }
         self.current.insert(
-            held,
+            held.clone(),
             ArtifactRef {
                 producer: node.cloned(),
                 artifact,
@@ -104,6 +110,7 @@ impl ArtifactLedger {
                 seq,
             },
         );
+        self.current.get(&held)
     }
 
     /// The artifact answering `id`, or `None` when the run holds none.
@@ -149,12 +156,7 @@ impl ArtifactLedger {
 /// is the identity; without one the artifact is opaque and its name is
 /// what the run wrote it as.
 fn legacy_identity(written: &ArtifactWrittenPayload) -> ArtifactId {
-    match written.artifact_kind {
-        Some(kind) => ArtifactId::Interpreted { kind },
-        None => ArtifactId::Opaque {
-            name: artifact_name(&written.path),
-        },
-    }
+    ArtifactId::of(&artifact_name(&written.path), written.artifact_kind)
 }
 
 /// The name under `artifacts/` of a run-dir-relative path, which is the

@@ -423,19 +423,16 @@ pub fn context_sources(
         .unwrap_or_else(|| panic!("no context_assembled event found for node `{node}`"))
 }
 
-/// Confirms a resolved source is genuinely replayable: the file
-/// materialized under `context/<content_hash>/content` exists and its
-/// own hash matches what the event recorded — reconstructing it never
-/// needs to re-run the command, re-read the original path outside the
-/// snapshot, or touch the network.
+/// Confirms a resolved source is genuinely replayable: the object the
+/// run stored under `objects/<content_hash>` exists and its own hash
+/// matches what the event recorded — reconstructing it never needs to
+/// re-run the command, re-read the original path outside the snapshot,
+/// or touch the network.
 pub fn assert_materialized(
     run_dir: &std::path::Path,
     source: &yunta_core::events::ContextSourceRef,
 ) {
-    let path = run_dir
-        .join("context")
-        .join(source.content_hash.as_str())
-        .join("content");
+    let path = run_dir.join("objects").join(source.content_hash.as_str());
     let bytes = std::fs::read(&path)
         .unwrap_or_else(|e| panic!("materialized file missing at {path:?}: {e}"));
     assert_eq!(

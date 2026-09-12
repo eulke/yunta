@@ -39,11 +39,13 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
-        events.iter().any(|e| matches!(
-            e.payload(),
-            Some(yunta_core::events::EventPayload::ArtifactWritten(p)) if p.path.to_string_lossy().contains("questions.yaml")
-        )),
-        "the questions artifact must still be recorded as written"
+        yunta_testkit::accepted(&events)
+            .iter()
+            .any(|held| held.artifact
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Questions
+                }),
+        "the questions artifact must still be an artifact the run holds"
     );
     assert!(
         !events.iter().any(|e| matches!(
@@ -185,6 +187,30 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     let raw = std::fs::read_to_string(&answers_path).expect("answers artifact must exist");
     let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
+
+    // The answers are the run's too, with the origin that says the
+    // engine materialized them from what a person replied.
+    let held = yunta_testkit::accepted(&events)
+        .into_iter()
+        .find(|held| {
+            held.artifact
+                == yunta_core::events::ArtifactId::Opaque {
+                    name: "questions.yaml.answers.yaml".to_string(),
+                }
+        })
+        .expect("the answers are an artifact the run holds");
+    assert_eq!(held.origin, yunta_core::events::ArtifactOrigin::Answered);
+    assert_eq!(held.content_hash, answered.answers_hash);
+    assert_eq!(
+        std::fs::read(
+            bench
+                .run_dir()
+                .join("objects")
+                .join(held.content_hash.as_str())
+        )
+        .expect("the bytes are in the store"),
+        raw.as_bytes()
+    );
 }
 
 #[tokio::test]

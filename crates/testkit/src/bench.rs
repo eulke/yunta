@@ -105,6 +105,17 @@ impl Bench {
         std::fs::read(self.run_dir().join("artifacts").join(name))
     }
 
+    /// The bytes the run stored under `hash` — what an acceptance names,
+    /// read straight out of the object store.
+    pub fn object(&self, hash: &yunta_core::ContentHash) -> std::io::Result<Vec<u8>> {
+        std::fs::read(self.run_dir().join("objects").join(hash.as_str()))
+    }
+
+    /// Every artifact this run's log says it accepted, in log order.
+    pub fn accepted(&self) -> Vec<yunta_core::events::artifacts::ArtifactRef> {
+        crate::events::accepted(&self.events())
+    }
+
     /// Every event this bench's run has appended.
     /// The adapter the last run used — what a test asks about the
     /// requests the engine actually made.

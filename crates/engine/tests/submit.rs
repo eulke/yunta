@@ -8,7 +8,8 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
-use yunta_core::events::{EventPayload, SubmissionOutcome};
+use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, SubmissionOutcome};
+use yunta_core::ArtifactKind;
 use yunta_engine::{NodeState, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -108,9 +109,39 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     assert_eq!(submitted(&bench), vec![("plan.yaml".to_string(), true)]);
-    assert_eq!(kinds(&bench, "artifact_written"), 1);
+    assert_eq!(kinds(&bench, "artifact_written"), 0, "nothing writes it");
     assert_eq!(kinds(&bench, "task_registered"), 2);
     assert_eq!(kinds(&bench, "node_failed"), 0);
+
+    // Two facts, one document: the call the session made, and the
+    // artifact the run now holds because the call was accepted.
+    let accepted = bench.accepted();
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    let held = &accepted[0];
+    assert_eq!(
+        held.producer.as_ref().map(|n| n.to_string()),
+        Some("plan".into())
+    );
+    assert_eq!(
+        held.artifact,
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks
+        }
+    );
+    assert_eq!(held.origin, ArtifactOrigin::Submitted);
+
+    // The bytes are in the store under the hash the event names, and
+    // the view under the node that produced it says the same.
+    let stored = bench.object(&held.content_hash).expect("the object exists");
+    assert_eq!(
+        yunta_core::sha256_hex(&stored),
+        held.content_hash,
+        "the object is what its name says"
+    );
+    assert_eq!(
+        std::fs::read(bench.run_dir().join("artifacts/plan/plan.yaml")).expect("the view exists"),
+        stored
+    );
 
     // The file is the engine's, and it reads back as the document.
     let bytes = bench.artifact("plan.yaml").expect("the engine wrote it");
@@ -431,7 +462,15 @@ sessions:
     // Reported once, on the log once: the file is what those reports add
     // up to, never a second telling of them.
     assert_eq!(kinds(&bench, "finding_posted"), 2);
-    assert_eq!(kinds(&bench, "artifact_written"), 1);
+    assert_eq!(
+        bench
+            .accepted()
+            .iter()
+            .map(|held| held.origin.clone())
+            .collect::<Vec<_>>(),
+        vec![ArtifactOrigin::Derived],
+        "the engine derived the file from what the node posted"
+    );
 }
 
 #[tokio::test]
@@ -450,7 +489,15 @@ sessions:
         yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
     assert!(file.findings.is_empty(), "a review that found nothing");
     assert_eq!(kinds(&bench, "finding_posted"), 0);
-    assert_eq!(kinds(&bench, "artifact_written"), 1);
+    assert_eq!(
+        bench
+            .accepted()
+            .iter()
+            .map(|held| held.origin.clone())
+            .collect::<Vec<_>>(),
+        vec![ArtifactOrigin::Derived],
+        "a review that found nothing still holds its findings artifact"
+    );
 }
 
 #[tokio::test]

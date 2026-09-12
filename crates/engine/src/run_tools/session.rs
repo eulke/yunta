@@ -23,10 +23,11 @@ use rmcp::model::{
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
-use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
+use yunta_core::events::{EventPayload, StoredEvent};
 use yunta_core::{ArtifactKind, ArtifactSpec, NodeId, TaskId};
 
 use super::host::RunToolsHost;
+use crate::run_log::RunLog;
 
 /// The run tools of one session. Which of them are even *listed* depends
 /// on the session: `yunta_get_blackboard` only inside a
@@ -114,6 +115,11 @@ pub(super) enum RunToolError {
     NoArtifacts { node: NodeId },
     #[error("`{name}` is not an artifact this node declares; it declares {declared}")]
     UndeclaredArtifact { name: String, declared: String },
+    #[error(transparent)]
+    Accept {
+        #[from]
+        source: crate::artifacts::AcceptError,
+    },
 }
 
 impl SessionTools {
@@ -126,19 +132,21 @@ impl SessionTools {
             .map_err(|source| RunToolError::Storage { source })
     }
 
+    /// The run's log as this listener reaches it: the host's own handle,
+    /// the run's identity and its clock.
+    pub(super) fn log(&self) -> RunLog<'_> {
+        RunLog::new(
+            &self.host.storage,
+            &self.host.run_id,
+            self.host.clock.as_ref(),
+        )
+    }
+
     /// Records `payload` against this session's run and node, stamped
     /// with the run's own clock.
     pub(super) async fn append(&self, payload: EventPayload) -> Result<(), RunToolError> {
-        self.host
-            .storage
-            .append(
-                EventDraft {
-                    run_id: self.host.run_id.clone(),
-                    node_id: Some(self.node.clone()),
-                    payload,
-                },
-                self.host.clock.now(),
-            )
+        self.log()
+            .record(Some(&self.node), payload)
             .await
             .map(|_| ())
             .map_err(|source| RunToolError::Storage { source })

@@ -1,7 +1,8 @@
 use yunta_core::events::{
-    EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
-    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage, UnknownEvent,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
+    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
+    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
 use yunta_core::Seq;
@@ -405,5 +406,73 @@ fn an_unknown_kind_is_counted_and_never_breaks_replay() {
     assert_eq!(
         state.unknown_kinds,
         vec![(Seq::try_from(2_i64).unwrap(), "future_kind".to_string())]
+    );
+}
+
+#[test]
+fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
+    // The same run twice: one log naming the file it wrote, one naming
+    // the artifact it accepted. A `questions` artifact, because its
+    // identity is what leaves the node waiting — the strongest thing an
+    // old log has to keep deriving.
+    let hash = yunta_core::sha256_hex(b"questions");
+    let run = |artifact: EventPayload| {
+        vec![
+            event(
+                1,
+                Some("ask"),
+                EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            ),
+            event(2, Some("ask"), artifact),
+            event(
+                3,
+                Some("ask"),
+                EventPayload::NodeFailed(NodeFailedPayload::new(
+                    Failure::message("node `ask` asked 1 question(s) awaiting an answer: q1"),
+                    false,
+                    tokens(0, 0),
+                )),
+            ),
+        ]
+    };
+    let old = run(EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+        path: "artifacts/questions.yaml".into(),
+        content_hash: hash.clone(),
+        artifact_kind: Some(yunta_core::ArtifactKind::Questions),
+    }));
+    let new = run(EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+        artifact: ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Questions,
+        },
+        content_hash: hash.clone(),
+        origin: ArtifactOrigin::Submitted,
+    }));
+
+    let (old, new) = (derive(&old), derive(&new));
+    assert_eq!(
+        old.nodes.get("ask"),
+        Some(&NodeState::Waiting { external_ref: None }),
+        "the old log still leaves the node waiting on its questions"
+    );
+    assert_eq!(old.nodes, new.nodes);
+
+    let identities = |state: &yunta_engine::RunState| {
+        state
+            .artifacts
+            .every()
+            .map(|held| {
+                (
+                    held.producer.clone(),
+                    held.artifact.clone(),
+                    held.content_hash.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(identities(&old), identities(&new));
+    assert_eq!(
+        old.artifacts.every().next().unwrap().origin,
+        ArtifactOrigin::Legacy,
+        "the one thing an old log cannot state is how the run came by it"
     );
 }

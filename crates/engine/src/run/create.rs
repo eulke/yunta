@@ -3,19 +3,43 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{EventDraft, EventPayload, RunCreatedPayload};
-use yunta_core::{Clock, Manifest, ModeName, RunId};
+use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
+use yunta_core::{ArtifactKind, Clock, Manifest, ModeName, RunId, ARTIFACTS_DIR};
 use yunta_storage::AsyncStorage;
+
+use crate::artifacts::{accept, Declared};
+use crate::run_log::RunLog;
 
 use super::RunError;
 
-/// A file a run carries from birth, under its `artifacts/`: what a
-/// parent mounts into a child, or a successor inherits from its
-/// predecessor. `name` is relative to `artifacts/` and may nest.
+/// An artifact a run carries from birth: what a parent mounts into a
+/// child, or a successor inherits from its predecessor.
+///
+/// It carries its own identity and origin because the run that receives
+/// it cannot derive either: the bytes arrive under a name the mount
+/// chose, and only the log they came from says what artifact they are
+/// and who produced it there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BirthArtifact {
+    /// The name the run's view carries, relative to `artifacts/`. May
+    /// nest.
     pub name: String,
+    /// What the artifact is, as the run that handed it over holds it.
+    pub artifact: ArtifactId,
+    /// Which run it comes from, and who produced it there.
+    pub origin: ArtifactOrigin,
     pub bytes: Vec<u8>,
+}
+
+impl BirthArtifact {
+    /// The kind the receiving run reads it under — what its identity
+    /// says, never the file name it arrives as.
+    fn kind(&self) -> Option<ArtifactKind> {
+        match &self.artifact {
+            ArtifactId::Interpreted { kind } => Some(*kind),
+            ArtifactId::Opaque { .. } => None,
+        }
+    }
 }
 
 /// What [`create_run`] freezes: the run's identity and its
@@ -30,15 +54,19 @@ pub struct CreateRunParams<'a> {
     pub mode: &'a ModeName,
     /// The predecessor this run inherits from, if any.
     pub promoted_from: Option<&'a RunId>,
-    /// Files under `artifacts/` from birth, written before
-    /// `run_created` — a run that exists in the log has them.
+    /// The artifacts the run holds from birth, accepted right after
+    /// `run_created` — a run that exists in the log names every one of
+    /// them.
     pub artifacts: &'a [BirthArtifact],
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
-/// `scratch/`, the frozen `manifest.yaml`, the birth artifacts, and
-/// the `run_created` event — in that order, so the log names a run
-/// only once its directory is complete. Returns the run directory.
+/// `scratch/`, the frozen `manifest.yaml`, the `run_created` event, and
+/// then one acceptance per birth artifact. Returns the run directory.
+///
+/// `run_created` comes first because it is the run: replay reads it
+/// before anything else, so an artifact a run is born holding is a fact
+/// stated about a run that already exists.
 ///
 /// The run directory must not exist: a run is born once, and an id is
 /// never reused ([`RunError::RunDirExists`]).
@@ -107,8 +135,7 @@ pub async fn create_run(
             });
         }
     }
-    let artifacts_dir = run_dir.join("artifacts");
-    for dir in [artifacts_dir.clone(), run_dir.join("scratch")] {
+    for dir in [run_dir.join(ARTIFACTS_DIR), run_dir.join("scratch")] {
         tokio::fs::create_dir(&dir)
             .await
             .map_err(|source| RunError::Io {
@@ -129,28 +156,10 @@ pub async fn create_run(
             source,
         })?;
 
-    for artifact in artifacts {
-        let dest = artifacts_dir.join(&artifact.name);
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|source| RunError::Io {
-                    context: format!("create `{}`", parent.display()),
-                    source,
-                })?;
-        }
-        tokio::fs::write(&dest, &artifact.bytes)
-            .await
-            .map_err(|source| RunError::Io {
-                context: format!("write birth artifact `{}`", dest.display()),
-                source,
-            })?;
-    }
-
-    let event = EventDraft {
-        run_id: run_id.clone(),
-        node_id: None,
-        payload: EventPayload::RunCreated(RunCreatedPayload {
+    let log = RunLog::new(storage, run_id, clock);
+    log.record(
+        None,
+        EventPayload::RunCreated(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
             // Every declared input as the manifest froze it — provided
             // or defaulted, already validated: what the run used.
@@ -174,9 +183,23 @@ pub async fn create_run(
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
         }),
-    };
-    let at = clock.now();
-    storage.append(event, at).await?;
+    )
+    .await?;
+
+    for artifact in artifacts {
+        accept(
+            &log,
+            &run_dir,
+            None,
+            Declared {
+                name: &artifact.name,
+                kind: artifact.kind(),
+            },
+            &artifact.bytes,
+            artifact.origin.clone(),
+        )
+        .await?;
+    }
 
     Ok(run_dir)
 }

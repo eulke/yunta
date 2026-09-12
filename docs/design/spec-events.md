@@ -182,13 +182,15 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché |
 | `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado |
 
-### 5.7 `artifact_written` — engine
+### 5.7 `artifact_written` — solo lectura
 **Fuente:** node_id, path, content hash
 
-Un lector lo pliega como identidad de artifact cuando el run no tiene
-`artifact_accepted` (§5.21.5): `artifact_kind` presente da la identidad
-interpretada, ausente da la opaca con el nombre bajo `artifacts/`, y el
-origen es `legacy` porque el evento no lo registra.
+El engine no lo escribe: todo artifact que un run adquiere entra por
+`artifact_accepted` (§5.21.5). Queda como kind para que un log anterior
+se lea, y un lector lo pliega como identidad de artifact: `artifact_kind`
+presente da la identidad interpretada, ausente da la opaca con el nombre
+bajo `artifacts/`, y el origen es `legacy` porque el evento no lo
+registra.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
@@ -394,8 +396,11 @@ log. Un rechazo no cambia ningún hallazgo.
 Toda entrega queda registrada, aceptada o no. Una aceptación lleva el
 hash del archivo que el engine escribió; un rechazo lleva el reporte
 entero, de modo que qué se rechazó y por qué se deriva del log sin
-reconstruir la sesión. La escritura del archivo la reporta además su
-propio `artifact_written` al cierre del nodo.
+reconstruir la sesión. Son dos hechos, no uno: este evento es la llamada
+que la sesión hizo y cómo se le respondió, y está en el log haya
+aterrizado el documento o no; una entrega aceptada es además un artifact
+que el run tiene, y eso lo dice su propio `artifact_accepted` (§5.21.5)
+con origen `submitted`.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|

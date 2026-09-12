@@ -980,6 +980,51 @@ nodes:
             .trim(),
         "the-plan"
     );
+
+    // The child's own log names each one, after its `run_created` and
+    // with no node of its own behind it: the child produced neither.
+    let child_events = bench.storage.events_for_run(&cons_id).unwrap();
+    assert!(
+        matches!(
+            child_events.first().and_then(|e| e.payload()),
+            Some(EventPayload::RunCreated(_))
+        ),
+        "the child exists in its log before anything is said about it"
+    );
+    let mounted = yunta_testkit::accepted(&child_events);
+    assert_eq!(mounted.len(), 2, "{mounted:?}");
+    assert!(
+        mounted.iter().all(|held| held.producer.is_none()),
+        "a mount has no producer in the run that receives it: {mounted:?}"
+    );
+    assert_eq!(
+        mounted
+            .iter()
+            .map(|held| held.artifact.to_string())
+            .collect::<Vec<_>>(),
+        vec!["report.md".to_string(), "brief.md".to_string()],
+        "each is opaque under the name the mount carries it as"
+    );
+    // The parent's own artifact comes from the parent's log; the
+    // sibling's comes from the child run that produced it.
+    let from_parent = yunta_core::events::ArtifactOrigin::Inherited {
+        run: run_id.clone(),
+        producer: Some("plan".into()),
+    };
+    assert_eq!(mounted[1].origin, from_parent);
+    let prod_id = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "prod")
+        .map(|(_, id)| id)
+        .expect("the prod child is linked on the parent's log");
+    assert_eq!(
+        mounted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: prod_id,
+            producer: Some("work".into()),
+        }
+    );
 }
 
 #[tokio::test]

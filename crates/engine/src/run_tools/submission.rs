@@ -13,8 +13,12 @@
 //! document the close would never look for has no way in.
 
 use serde_json::Value;
-use yunta_core::events::{ArtifactSubmittedPayload, EventPayload, SubmissionOutcome};
+use yunta_core::events::{
+    ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+};
 use yunta_core::{ArtifactKind, ArtifactSpec};
+
+use crate::artifacts::{accept, Declared};
 
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::{backticked, failure_heading, numbered, read_as, submission_refusal};
@@ -127,24 +131,33 @@ impl SessionTools {
     /// the session with it: what was read out of the file on acceptance,
     /// what to fix on a refusal. Both are events — a run reads back every
     /// document a session offered, not only the ones that landed.
+    ///
+    /// Two facts, not one: `artifact_submitted` is the call this session
+    /// made and how it was answered, and it is on the log whether the
+    /// document landed or not. An accepted document is also an artifact
+    /// the run now holds, which is what [`accept`] states — so a reader
+    /// asking what the run holds never has to know that a session is
+    /// what handed it over.
     async fn record(
         &self,
         name: String,
         kind: ArtifactKind,
         written: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
     ) -> Result<String, RunToolError> {
-        let (outcome, answer) = match written {
+        let (outcome, answer, accepted) = match written {
             Ok(verified) => (
                 SubmissionOutcome::Accepted {
                     content_hash: verified.content_hash.clone(),
                 },
                 Ok(format!("{name} — accepted. {}", read_as(&verified))),
+                Some(verified),
             ),
             Err(crate::artifacts::SubmitError::Refused(report)) => {
                 let text = submission_refusal(&report, &name);
                 (
                     SubmissionOutcome::Refused { report },
                     Err(RunToolError::Refused { text }),
+                    None,
                 )
             }
             Err(other) => {
@@ -154,11 +167,25 @@ impl SessionTools {
             }
         };
         self.append(EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
-            name,
+            name: name.clone(),
             artifact_kind: kind,
             outcome,
         }))
         .await?;
+        if let Some(verified) = accepted {
+            accept(
+                &self.log(),
+                &self.host.run_dir,
+                Some(&self.node),
+                Declared {
+                    name: &name,
+                    kind: Some(kind),
+                },
+                &verified.bytes,
+                ArtifactOrigin::Submitted,
+            )
+            .await?;
+        }
         answer
     }
 

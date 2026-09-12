@@ -30,6 +30,7 @@ mod executor_exec;
 mod gate_exec;
 mod hooks_exec;
 mod loop_exec;
+mod node_artifacts;
 mod node_close;
 mod node_exec;
 mod parallel_exec;
@@ -194,6 +195,11 @@ pub enum RunError {
 
     #[error(transparent)]
     Worktree(#[from] crate::worktree::WorktreeError),
+
+    /// An artifact the run acquired that could not become a fact of the
+    /// run: its bytes, its acceptance or its view did not land.
+    #[error(transparent)]
+    Artifact(#[from] crate::artifacts::AcceptError),
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or

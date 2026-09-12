@@ -65,14 +65,27 @@ nodes:
     run: "true"
 "#;
 
+/// A run that has already closed, with everything a test needs to ask
+/// about it — and to build its successor on top.
+struct Promoted {
+    terminal: RunTerminal,
+    events: Vec<yunta_core::events::StoredEvent>,
+    run_id: RunId,
+    run_dir: std::path::PathBuf,
+    worktree: std::path::PathBuf,
+    runs_root: std::path::PathBuf,
+    manifest: yunta_core::Manifest,
+    storage: Storage,
+    _root: tempfile::TempDir,
+}
+
 async fn run_with_mode(
     workflow_yaml: &str,
     mode: &str,
     interaction: &dyn HumanInteraction,
 ) -> (RunTerminal, Vec<yunta_core::events::StoredEvent>) {
-    let (terminal, events, _run_dir, _root) =
-        run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
-    (terminal, events)
+    let closed = run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
+    (closed.terminal, closed.events)
 }
 
 /// Same, but with engine findings planted on the log after creation (the
@@ -83,12 +96,7 @@ async fn run_with_mode_and_findings(
     mode: &str,
     interaction: &dyn HumanInteraction,
     findings: &[yunta_core::events::Finding],
-) -> (
-    RunTerminal,
-    Vec<yunta_core::events::StoredEvent>,
-    std::path::PathBuf,
-    tempfile::TempDir,
-) {
+) -> Promoted {
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
@@ -157,7 +165,17 @@ async fn run_with_mode_and_findings(
     .unwrap();
 
     let events = storage.events_for_run(&run_id).unwrap();
-    (report.terminal, events, run_dir, root)
+    Promoted {
+        terminal: report.terminal,
+        events,
+        run_id,
+        run_dir,
+        worktree,
+        runs_root,
+        manifest,
+        storage,
+        _root: root,
+    }
 }
 
 #[tokio::test]
@@ -259,11 +277,11 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
             "tasks/T002",
         ),
     ];
-    let (terminal, _events, run_dir, _root) =
+    let closed =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
-    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
 
-    let path = run_dir.join("artifacts/findings-inherited.yaml");
+    let path = closed.run_dir.join("artifacts/findings-inherited.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
     // Through the same door every findings artifact is read by, so the
     // derived file satisfies the shape and the rules, not just serde.
@@ -280,11 +298,87 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 #[tokio::test]
 async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     let interaction = ScriptedInteraction::choose("promote");
-    let (terminal, _events, run_dir, _root) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
-    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
     assert!(
-        !run_dir.join("artifacts/findings-inherited.yaml").exists(),
+        !closed
+            .run_dir
+            .join("artifacts/findings-inherited.yaml")
+            .exists(),
         "no findings, no file — zero noise"
+    );
+}
+
+#[tokio::test]
+async fn a_successor_is_born_naming_every_artifact_it_inherits() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
+    let closed =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    assert!(
+        matches!(
+            events.first().and_then(|e| e.payload()),
+            Some(EventPayload::RunCreated(_))
+        ),
+        "the successor exists in its log before anything is said about it"
+    );
+    let inherited = yunta_testkit::accepted(&events);
+    assert_eq!(
+        inherited.len(),
+        1,
+        "one acceptance per inherited file: {inherited:?}"
+    );
+    let held = &inherited[0];
+    assert_eq!(
+        held.producer, None,
+        "no node of the successor produced it — it was handed over"
+    );
+    assert_eq!(
+        held.artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Findings
+        },
+        "the identity the predecessor held it under, not the file name"
+    );
+    assert_eq!(
+        held.origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: closed.run_id.clone(),
+            producer: None,
+        },
+        "the predecessor derived it as the run's own, with no node behind it"
+    );
+    assert_eq!(
+        std::fs::read(
+            successor
+                .run_dir
+                .join("objects")
+                .join(held.content_hash.as_str())
+        )
+        .expect("the successor holds the bytes"),
+        std::fs::read(closed.run_dir.join("artifacts/findings-inherited.yaml")).unwrap()
     );
 }

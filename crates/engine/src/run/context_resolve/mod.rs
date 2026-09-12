@@ -1,5 +1,5 @@
 //! Context resolution: every `context:` entry is resolved and
-//! materialized under `context/<content_hash>/` *before* the node's
+//! materialized under `objects/<content_hash>` *before* the node's
 //! session opens, then folded into the rendered prompt — so replay can
 //! name exactly what a session saw without re-running anything (the
 //! hash identifies the content, it never substitutes for it).

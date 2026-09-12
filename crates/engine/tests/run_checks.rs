@@ -218,8 +218,20 @@ nodes:
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
+    // The artifact is named by what it is and by the bytes the run
+    // holds, never by where the file happens to sit.
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
     let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  outcome: reviewed\n  artifact: artifacts/findings.yaml\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
+    assert_eq!(
+        progress,
+        format!(
+            "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  \
+             outcome: reviewed\n  artifact: findings · {}\n\n\
+             ## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n",
+            held[0].content_hash.abbreviated()
+        )
+    );
 }
 
 #[tokio::test]
