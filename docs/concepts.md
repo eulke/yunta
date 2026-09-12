@@ -71,10 +71,11 @@ to name: a node produces at most one document of each kind, so the kind the node
 declared is the whole identity. Findings are finer-grained
 still: each one is reported on its own with `yunta_post_finding`, corrected with
 `yunta_update_finding` and taken back with `yunta_withdraw_finding`, and the engine
-writes the node's findings file at its close from everything that still stands.
+derives the node's findings document at its close from everything that still stands.
 
 The answer comes back in the same call. An acceptance says what the engine
-understood and writes the file itself; a refusal names every problem in the
+understood and takes the document into the run — the canonical bytes under
+`objects/`, the acceptance on the log; a refusal names every problem in the
 document's own terms — "task `t1`: `scope` is empty" rather than a path into a
 parser — and the session fixes it and submits again. Getting a
 document wrong costs a call, not a session. A document nobody hands over fails

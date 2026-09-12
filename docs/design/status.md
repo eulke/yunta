@@ -30,5 +30,5 @@ Restricciones que se mantienen por decisión; reabrirlas requiere una decisión 
 - **Consenso multi-reviewer: fuera del engine.** La última revisión decisiva gana; cuántas aprobaciones hacen falta es política de la forja (branch protection). Duplicarlo crearía dos fuentes de verdad sobre la misma pregunta.
 - **`ForgeKind` con una sola variante.** El punto de extensión existe (trait más enum cerrado); un segundo forge se agrega con demanda real, no de forma especulativa.
 - **`include:` de modos solo nombra nodos de primer nivel.** Un grupo `parallel` entra o sale entero; nombrar un hijo es error de `check`.
-- **Paths de artifacts en gates externos** relativos a `run.dir/artifacts/`, mismo path relativo en la rama: convención documentada en la guía, no un mecanismo.
+- **Nombre de un artifact publicado por un gate externo**: el que le da su identidad — `<kind>.yaml` para un documento, el nombre declarado para un opaco — en la raíz de la rama. No hay clave para elegir otro: el gate nombra artifacts, no rutas.
 - **Clasificación de modo "nodo temprano + gate"** se expresa con composición: arrancar en el modo piso, un nodo temprano propone, un gate interno confirma, la promoción escala. No existe un tercer mecanismo que mute el modo de un run en curso.

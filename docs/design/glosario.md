@@ -56,6 +56,30 @@ usa para resolverlo; dentro de un run, un artifact lo identifica el par
 interpretado) y nadie la lee para resolver nada (D157).
 _Evitar_: nombre del artifact, path del artifact.
 
+**Objeto**:
+Los bytes de algo que el run tiene, guardados bajo `objects/<sha256>` y nombrados
+por su propio hash. Es el único transporte: todo artifact y todo contenido
+efectivo de una fuente de contexto vive ahí, y leer un objeto lo rehashea, así que
+un contenido que ya no hashea a su nombre es corrupción que el run reporta. Dos
+escrituras del mismo contenido son un solo objeto.
+_Evitar_: blob, archivo del artifact, caché.
+
+**Vista**:
+El directorio `artifacts/` que el engine proyecta desde el store para que una
+persona lea lo que el run tiene: los artifacts de un productor bajo su nodo
+(`artifacts/<nodo>/<kind>.yaml` para un interpretado, el nombre declarado para un
+opaco), lo adquirido sin productor en la raíz. La escribe una sola función y
+ningún lector del engine la abre; borrarla no cambia lo que el run tiene.
+_Evitar_: directorio de artifacts como fuente, salida del nodo.
+
+**Staging**:
+`scratch/staging/<node_id>/`, el único directorio que un nodo amplía: lo que
+`artifact_dir` le entrega a una sesión que declara un artifact opaco, lo que
+`{{node.artifacts}}` rinde, y de donde el cierre lee el archivo que ese nodo
+escribió. Es de la sesión y no del intento: un intento que continúa una sesión
+conserva lo que esa sesión escribió, y todo otro lo abre vacío.
+_Evitar_: directorio de trabajo del nodo, salida, artifacts del nodo.
+
 **Kind de artifact**:
 El conjunto cerrado de documentos que el engine interpreta, y el tipo que lo
 nombra en todas partes: el `kind:` de un workflow, el argumento de
@@ -83,8 +107,8 @@ _Evitar_: usar la palabra para el documento de tareas.
 **Entrega** (*submission*):
 Un documento entero que una sesión le pasa al engine por su tool
 `yunta_submit_<kind>`, como objeto estructurado y nunca como archivo. El engine
-lo valida con el tipo y las reglas del cierre y, si lo acepta, escribe él el YAML
-canónico (D156).
+lo valida con el tipo y las reglas del cierre y, si lo acepta, guarda el YAML
+canónico como objeto del run y lo afirma en el log (D156, D157).
 _Evitar_: subida, escritura del artifact, guardado.
 
 **Posteo**:
@@ -94,12 +118,12 @@ a ese y a ninguno de los ya reportados. `yunta_update_finding` lo reemplaza ente
 por id y `yunta_withdraw_finding` lo retira con motivo, definitivamente (D156).
 _Evitar_: entrega de findings, envío.
 
-**Archivo derivado**:
-El artifact `findings` de un nodo `prompt` o `loop`: lo escribe el engine al
-cierre como proyección de lo que ese nodo reporta, no la sesión. Un nodo que no
-reporta nada obtiene una lista vacía, que es el resultado de una revisión sin
-hallazgos.
-_Evitar_: artifact de salida, volcado.
+**Documento derivado**:
+El artifact `findings` de un nodo `prompt` o `loop`: lo deriva el engine al cierre
+como proyección de lo que ese nodo reporta, y lo acepta como cualquier otro. Un
+nodo que no reporta nada obtiene una lista vacía, que es el resultado de una
+revisión sin hallazgos.
+_Evitar_: archivo derivado, artifact de salida, volcado.
 
 **Conjunto efectivo**:
 Los hallazgos que un log deja en pie: el último estado de cada par `(nodo, id)`,
@@ -153,7 +177,7 @@ _Evitar_: is_repairable, artifact inválido a secas.
 **Reporte**:
 Todos los problemas de un mismo documento juntos, con la kind que fija su forma
 y el path donde se abre. Un nodo que declara varios artifacts interpretados
-falla con un reporte por archivo, nunca con una lista sin dueño.
+falla con un reporte por documento, nunca con una lista sin dueño.
 _Evitar_: lista de diagnósticos.
 
 **Diagnóstico**:
@@ -205,8 +229,8 @@ _Evitar_: «el esquema» para el contrato — el JSON Schema es otra cosa, y dic
 
 **Verificación en sesión** — el veredicto que una sesión pide con
 `yunta_check_artifact` antes de terminar: confirma un archivo que la sesión escribió
-—un artifact opaco, o el de un nodo de comando— y lee lo que el engine escribió de
-un documento entregado. Corre la misma verificación que el cierre, así que su
-respuesta y la del nodo no pueden diferir (D146, D156). Es consultiva: el cierre
-sigue siendo el único juez.
+—un artifact opaco, o el de un nodo de comando— y, para un documento, lee el que el
+run ya tiene. Llama a las mismas dos funciones que el cierre, así que su respuesta y
+la del nodo no pueden diferir —incluido «nadie lo entregó»— (D146, D156, D157). Es
+consultiva: el cierre sigue siendo el único juez.
 

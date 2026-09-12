@@ -39,9 +39,11 @@ are valid there. A mistyped key never silently becomes a default.
   target}` to re-route on a choice exactly like `on_failure.goto` does. Renders
   through the console when attended, or as the same structured escalation object via
   `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
-  into a forge round-trip instead: the listed paths (relative to `run.dir`) get
-  committed to `branch` and opened as a PR for review there — the same relative paths
-  the run's own worktree used, so a reviewer sees exactly what the run produced.
+  into a forge round-trip instead: `artifacts:` names artifacts of this run the same
+  way `produces:` does — a kind, or an opaque file name — and the engine commits the
+  bytes the run holds for each to `branch` and opens a PR for review there, under the
+  name that artifact's identity gives it. A run that holds none of one fails the node
+  instead of publishing a partial review.
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)
@@ -151,8 +153,8 @@ that runs the same node once per runner needs no template for that: each sibling
 is a node of its own and holds its own document.
 
 The node declares, the engine publishes the shape and names the tool that takes
-the document, the session hands the document over, and the engine writes the
-file. A node with `produces: [tasks]` opens its session with the shape already in
+the document, the session hands the document over, and the engine takes it into
+the run. A node with `produces: [tasks]` opens its session with the shape already in
 context — annotated field by field, followed by the rules the document has to
 satisfy — and with a `yunta_submit_tasks` run tool whose one argument,
 `document`, is that same schema. A `questions` artifact arrives the same way,
@@ -163,13 +165,15 @@ shape to demand.
 The tool answers in the same call, with the verdict the node's close reaches: the
 engine reads the object into the same type and runs the same rules. An acceptance
 reports what the engine understood — `tasks.yaml — accepted. 6 task(s)
-registered: ...` — and writes the canonical document itself. A refusal lists every
+registered: ...` — and puts the canonical document into the run: the bytes under
+`objects/`, the acceptance on the log. A refusal lists every
 rule the document breaks, all at once — or, when the
 object does not read into its kind at all, that one problem and the path where it
 sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
 before any rule can hold. Either way the session fixes it and submits again: a
-refused document costs a call, not a session. The last accepted submission is the
-file.
+refused document costs a call, not a session. The document the node holds is the
+last one it got accepted, and the node's close asks the log for it — no file
+stands in for one that never arrived.
 
 Findings are reported one at a time instead. A session calls `yunta_post_finding`
 the moment it sees one — validated on its own, so a refusal names what to fix in
@@ -177,10 +181,10 @@ that finding and everything already reported stands. `yunta_update_finding` repl
 one by id with its whole new content, and `yunta_withdraw_finding` takes one back
 with a reason; a withdrawal is final, and a finding that comes back is a new id. A
 `prompt` or `loop` node that declares `produces: [findings]` gets that document
-written at its close, from every finding it reported that still stands,
-in the order it first reported them — a node that reports nothing gets a file with
-an empty list. A finding outlives the session that found it, so a session that dies
-after reporting loses nothing.
+derived at its close, from every finding it reported that still stands,
+in the order it first reported them — a node that reports nothing gets a document
+with an empty list. A finding outlives the session that found it, so a session
+that dies after reporting loses nothing.
 
 A document nobody submits fails the node, named by the node that owes it and the
 document it owes rather than by a file — there was never going to be one — and
@@ -203,12 +207,15 @@ directory of its own added to what its session may write, and can call
 `yunta_check_artifact` to confirm the file is there before the session ends. That
 directory is `{{node.artifacts}}` in the node's own templates — which is how a
 `bash`, `check` or `executor` node names it too. It belongs to that node alone, so
-two nodes that declare the same name never write over each other, and the engine
-empties it at the start of every attempt: a file a failed attempt left is not the
-next attempt's work. A node that declares only interpreted artifacts is granted
-nothing outside its worktree. `yunta_check_artifact` also reads back what the engine
-wrote from a submitted document, so a session can see its meaning survived the
-parse.
+two nodes that declare the same name never write over each other. The directory
+belongs to the session rather than to the attempt: a node picking a session back
+up under `on_interrupt: resume_session` keeps what that session wrote there,
+because it is work that session did, and every other attempt — a command node, or
+a fresh session replacing an interrupted one — opens on an empty directory, so no
+earlier attempt's file closes this one as work it never did. A node that declares
+only interpreted artifacts is granted nothing outside its worktree.
+`yunta_check_artifact` also reads back the document the run already holds for that
+node, so a session can see its meaning survived the parse.
 
 The same shape is available anywhere else you need it:
 

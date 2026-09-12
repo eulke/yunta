@@ -174,11 +174,12 @@ writes is always the current spelling.
 ## Documents a session hands over, and findings it reports
 
 `artifact_submitted` records a whole document a session offered and what the engine
-answered: `name`, `artifact_kind` (named in full so it does not collide with the
-envelope's own `kind`), and `outcome` — either `accepted` with the `content_hash` of
-the file the engine writes from it, or `refused` with the whole `report`. Both are
-kept: how often a run gets a document wrong is a fact about the run, not something
-only the session saw.
+answered: `name` (the document's view name, `<kind>.yaml` — the node declared the
+kind, so the call names nothing), `artifact_kind` (named in full so it does not
+collide with the envelope's own `kind`), and `outcome` — either `accepted` with the
+`content_hash` of the canonical bytes the run stored, or `refused` with the whole
+`report`. Both are kept: how often a run gets a document wrong is a fact about the
+run, not something only the session saw.
 
 Findings carry three accepted forms and one refusal. `finding_posted` carries the
 whole `finding`; `finding_updated` carries the whole finding again, under the same
@@ -203,13 +204,21 @@ it is the state it can account for.
 three share one stamp, so all of them carry the new number even though only
 `status --json` changed shape.
 
-In `status --json`, `diagnostics` maps a failed node to the documents its failure
-names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
-file. `path` is always there. A content failure carries `kind`, the artifact kind
-whose shape the file was read against, and `diagnostics`, every problem that
-document has in document order. A file-level failure carries `file` instead,
-naming what went wrong with the file itself: never written, empty, past
-`limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
+In `status --json`, `diagnostics` maps a failed node to the artifacts its failure
+names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,
+diagnostics?}, ...]}`, one entry per artifact. Every field is absent when the
+failure has nothing to put there, so no consumer meets an invented path: only a
+failure the close opened a file for carries `path`. `code` is the stable name of
+what is wrong with the artifact itself — `artifact-missing`, `artifact-undelivered`,
+`artifact-unheld` — and is absent for a content failure, whose problems each carry
+a code of their own. A content failure carries `kind`, the artifact kind whose
+shape the content was read against, and `diagnostics`, every problem that document
+has in document order. A file-level failure carries `file` instead, naming what
+went wrong with the file itself: never written, empty, past
+`limits.max_artifact_bytes`, or refused by the filesystem. A document a node ended
+owing carries `producer`, the node that owes it, and `artifact`, the identity it
+owes. One no run holds carries `artifact` too, plus `run` — the run that was asked
+— and `producer` when the reference named a node of that run. A node whose most
 recent failure is a plain message has no entry at all, so what the field shows is
 always the state the node is in now.
 

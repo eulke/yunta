@@ -195,7 +195,7 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `path` | string | sí | relativo al run dir: `artifacts/<nombre>`, con el nombre que el nodo declara en `artifacts.produces` |
-| `content_hash` | string | sí | los artifacts son inmutables; esto es lo que se verifica en `resume` |
+| `content_hash` | string | sí | el hash de los bytes que el run escribió; sin objeto detrás, así que el `resume` cuenta el artifact como no verificable en vez de rehashearlo (Contrato §8.1) |
 | `artifact_kind` | enum | no | `tasks` \| `findings` \| `questions` cuando el artifact declara `kind:`; ausente para uno opaco y para un log escrito antes del campo |
 
 ### 5.8 `context_assembled` — engine
@@ -401,7 +401,7 @@ log. Un rechazo no cambia ningún hallazgo.
 **Fuente:** node_id, el artifact que una sesión entregó y el veredicto
 
 Toda entrega queda registrada, aceptada o no. Una aceptación lleva el
-hash del archivo que el engine escribió; un rechazo lleva el reporte
+hash de los bytes canónicos que el run guardó; un rechazo lleva el reporte
 entero, de modo que qué se rechazó y por qué se deriva del log sin
 reconstruir la sesión. Son dos hechos, no uno: este evento es la llamada
 que la sesión hizo y cómo se le respondió, y está en el log haya
@@ -411,9 +411,9 @@ con origen `submitted`.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `name` | string | sí | el nombre que el nodo declara en `artifacts.produces` |
+| `name` | string | sí | el nombre de la vista del documento entregado, `<kind>.yaml`: el nodo declara el kind, así que la entrega no nombra nada |
 | `artifact_kind` | enum | sí | `tasks` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
-| `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico que el engine escribió |
+| `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico, que es el objeto bajo `objects/` que el `artifact_accepted` de esa entrega nombra |
 | `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
 
 ### 5.21.5 `artifact_accepted` — engine

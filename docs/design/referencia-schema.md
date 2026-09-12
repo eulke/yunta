@@ -300,7 +300,7 @@ que siempre está al día.
   `yunta schema <kind>`, el catálogo de la tool `document_shape` y el documento del
   que habla un reporte de lectura (D132). Declararlo alcanza para que el nodo reciba
   la forma de ese documento en su contexto: no hay una segunda clave que la pida.
-  Qué implica declararlo — parser, reglas, corrección de un archivo ilegible — está
+  Qué implica declararlo — parser, reglas, rechazo de un documento inválido — está
   en el Contrato §4.1; la forma de cada kind se lee con `yunta schema <kind>`, y su
   JSON Schema con `--json`.
 - **`inputs:`**: un mapa de nombre a especificación, con `type:` eligiendo la forma

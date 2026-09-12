@@ -109,7 +109,7 @@ tasks:
       - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Materializar en context/<hash>/; fuente caída = nodo failed."
+    notes: "Materializar el contenido efectivo en objects/<hash>; fuente caída = nodo failed."
 
   - id: context-assembly
     title: "Stable-first context assembly with per-segment hashes"
