@@ -29,8 +29,8 @@ use crate::{ArtifactKind, FindingsFile, Ledger, QuestionsFile};
 ///
 /// Sealed: the three kinds are the schema, and a fourth is a schema
 /// change rather than an extension point. Sealing is what lets the trait
-/// name [`Walk`] and [`Value`] in its signatures without those becoming
-/// a contract owed to implementors outside this crate.
+/// name [`Diagnostic`] and [`Rule`] in its signatures without those
+/// becoming a contract owed to implementors outside this crate.
 pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// How every door names this document.
     const KIND: ArtifactKind;
