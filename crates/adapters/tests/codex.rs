@@ -40,6 +40,8 @@ fn request(cwd: PathBuf) -> SessionRequest {
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
         run_tools_endpoint: None,
+        artifact_dir: None,
+        scratch_dir: None,
     }
 }
 
@@ -83,7 +85,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
     assert!(!caps.edit_hooks);
-    assert!(!caps.run_tools);
+    assert!(caps.run_tools);
 }
 
 #[tokio::test]
@@ -655,4 +657,95 @@ async fn a_fatal_error_event_ends_the_session_as_failed() {
         }
         other => panic!("expected Failed, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_declared_artifact_directory_is_writable_by_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts.clone());
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    // `workspace-write` confines writes to the workspace, and the run's
+    // artifact directory is never inside it.
+    assert!(
+        args.contains(&format!(
+            "sandbox_workspace_write.writable_roots=[\"{}\"]",
+            artifacts.display()
+        )),
+        "the artifact directory joins the writable roots: {args}"
+    );
+}
+
+#[tokio::test]
+async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let env_file = dir.path().join("env.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_ENV_FILE".to_string(),
+        env_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+    let env = std::fs::read_to_string(&env_file).unwrap();
+
+    assert!(
+        args.contains("mcp_servers.yunta.url=\"http://127.0.0.1:54321/mcp\""),
+        "the per-run server is configured: {args}"
+    );
+    // The CLI reads the credential from a named variable rather than
+    // from its own config, which is what keeps it out of argv.
+    assert!(
+        args.contains("mcp_servers.yunta.bearer_token_env_var=\"YUNTA_RUN_TOOLS_TOKEN\""),
+        "the credential is named, not inlined: {args}"
+    );
+    assert!(
+        env.contains("YUNTA_RUN_TOOLS_TOKEN=s3cr3t-token-value"),
+        "the token reaches the child by environment"
+    );
+    assert!(
+        !args.contains("s3cr3t-token-value"),
+        "the token must never reach the process list: {args}"
+    );
+}
+
+#[tokio::test]
+async fn no_per_run_endpoint_configures_no_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    assert!(
+        !std::fs::read_to_string(&args_file)
+            .unwrap()
+            .contains("mcp_servers"),
+        "nothing to configure, nothing configured"
+    );
 }

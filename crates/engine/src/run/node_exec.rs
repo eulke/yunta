@@ -281,6 +281,16 @@ pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_cor
         .unwrap_or_default()
 }
 
+/// Where this node's declared artifacts land, when it declares any.
+///
+/// The run directory, never the worktree: the worktree is the work and
+/// its diff is what the scope check reads. A node that declares no
+/// artifact needs no write access outside the worktree at all, and
+/// saying so keeps an adapter from widening a sandbox for nothing.
+pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::PathBuf> {
+    (!declared_artifacts(ctx, node).is_empty()).then(|| ctx.run_dir.join("artifacts"))
+}
+
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());

@@ -22,6 +22,8 @@ fn request(cwd: PathBuf) -> SessionRequest {
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
         run_tools_endpoint: None,
+        artifact_dir: None,
+        scratch_dir: None,
     }
 }
 

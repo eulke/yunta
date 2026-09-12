@@ -21,6 +21,76 @@ use crate::subprocess::{self, Launch, LineParser};
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("claude-code");
 
+/// What the CLI calls the engine's per-run MCP server. It prefixes every
+/// tool the server mounts (`mcp__yunta__…`), which is how one name
+/// allows all of them without this adapter knowing the list.
+const MCP_SERVER_NAME: &str = "yunta";
+
+/// Where one session's MCP config lives, named for its listener's own
+/// port. The sessions of a run are concurrent and each one gets its own
+/// listener, so the port collides with nothing while staying derivable
+/// rather than random.
+fn config_path(scratch: &Path, url: &str) -> PathBuf {
+    let port = url
+        .rsplit(':')
+        .next()
+        .and_then(|tail| tail.split('/').next())
+        .unwrap_or("session");
+    scratch.join(format!("mcp-{port}.json"))
+}
+
+/// Writes this session's MCP client config and returns its path, or
+/// `None` when there is no per-run server to reach.
+///
+/// It goes to the run's scratch directory, never the worktree: the
+/// worktree's diff is what the engine's scope check reads, and a file
+/// this adapter dropped there would read as the agent's own work. The
+/// bearer token travels in the file rather than on the command line —
+/// `argv` is world-readable through `ps`, and the token is the only
+/// thing standing between any local process and this node's tools.
+fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
+    let Some(endpoint) = &req.run_tools_endpoint else {
+        return Ok(None);
+    };
+    let Some(scratch) = &req.scratch_dir else {
+        return Err(AdapterError::Adapter {
+            adapter: ID.clone(),
+            message: "per-run tools were granted with no scratch directory to configure them in: \
+                     the session would be told to call tools it cannot reach"
+                .to_string(),
+        });
+    };
+    let config = serde_json::json!({
+        "mcpServers": {
+            MCP_SERVER_NAME: {
+                "type": "http",
+                "url": endpoint.url,
+                "headers": { "Authorization": format!("Bearer {}", endpoint.token.expose()) },
+            }
+        }
+    });
+    let path = config_path(scratch, &endpoint.url);
+    let io = |source: std::io::Error| AdapterError::Adapter {
+        adapter: ID.clone(),
+        message: format!(
+            "could not write the per-run tool config at {}: {source}",
+            path.display()
+        ),
+    };
+    std::fs::create_dir_all(scratch).map_err(io)?;
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&config).unwrap_or_default(),
+    )
+    .map_err(io)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(io)?;
+    }
+    Ok(Some(path))
+}
+
 pub struct ClaudeCodeAdapter {
     binary: PathBuf,
     /// The typed reading of `adapter_settings`, or the error it
@@ -40,7 +110,12 @@ impl ClaudeCodeAdapter {
         }
     }
 
-    fn build_args(&self, req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String> {
+    fn build_args(
+        &self,
+        req: &SessionRequest,
+        resume: Option<&SessionId>,
+        mcp_config: Option<&Path>,
+    ) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
             "--output-format".to_string(),
@@ -61,6 +136,25 @@ impl ClaudeCodeAdapter {
             args.push(agent.to_string());
         }
         args.extend(permissions::permission_args(req.permissions));
+        // The CLI confines file writes to its working directory. A
+        // declared artifact lands in the run directory, which is never
+        // inside it, so without this the session is told to write a
+        // file it is then refused permission to create — and the node
+        // fails at close for a document that was never producible.
+        if let Some(dir) = &req.artifact_dir {
+            args.push("--add-dir".to_string());
+            args.push(dir.display().to_string());
+        }
+        if let Some(path) = mcp_config {
+            args.push("--mcp-config".to_string());
+            args.push(path.display().to_string());
+            // `--tools` selects among built-ins only; an MCP server's
+            // tools are reached by name. Allowing the server rather
+            // than each tool keeps this adapter from having to know
+            // which tools the engine mounts.
+            args.push("--allowedTools".to_string());
+            args.push(format!("mcp__{MCP_SERVER_NAME}"));
+        }
         if let Some(max_turns) = req.budget.max_turns {
             args.push("--max-turns".to_string());
             args.push(max_turns.to_string());
@@ -76,7 +170,8 @@ impl ClaudeCodeAdapter {
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
         stage_skills(&req)?;
-        let args = self.build_args(&req, resume);
+        let mcp_config = write_mcp_config(&req)?;
+        let args = self.build_args(&req, resume, mcp_config.as_deref());
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
@@ -123,8 +218,10 @@ impl Adapter for ClaudeCodeAdapter {
             permission_profiles: true,
             custom_agents: true,
             usage_reporting: true,
-            // MCP per-run tools aren't wired yet.
-            run_tools: false,
+            // The per-run MCP server reaches the CLI as an external
+            // HTTP server (`--mcp-config`), the same mechanism a user
+            // configures by hand.
+            run_tools: true,
             // Mounted by staging into the session cwd's own
             // `.claude/skills/` — the CLI's native discovery location.
             skills: true,

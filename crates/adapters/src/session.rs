@@ -79,6 +79,19 @@ pub struct SessionRequest {
     /// `capabilities().run_tools` (same rule: never claim more than is
     /// actually built).
     pub run_tools_endpoint: Option<RunToolsEndpoint>,
+    /// Where this node's declared artifacts land. It is never inside
+    /// `cwd`: the worktree is the work, the run directory is the
+    /// record. An adapter whose CLI confines writes to the working
+    /// directory has to widen it to this path, or a node that declares
+    /// an artifact can never produce one. `None` when the node
+    /// declares no artifacts.
+    pub artifact_dir: Option<PathBuf>,
+    /// The run's own scratch directory, for scaffolding a session needs
+    /// on disk — an MCP config file, say. It sits outside `cwd` because
+    /// the worktree's diff is what the engine's scope check reads, and
+    /// a file the adapter dropped there would read as the agent's work.
+    /// `None` leaves an adapter that needs one to degrade explicitly.
+    pub scratch_dir: Option<PathBuf>,
 }
 
 /// Where a session's per-run MCP server listens: a loopback URL plus

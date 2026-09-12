@@ -159,6 +159,33 @@ async fn session(
     let adapter = &ctx.adapters[&chosen.adapter];
     report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
+    // A repair session is the one that most needs the verdict in hand:
+    // it is rewriting a document the engine already refused once, and
+    // this node's budget for refusals is nearly spent.
+    let run_tools = match super::runner_resolve::open_run_tools(
+        ctx,
+        node,
+        adapter.as_ref(),
+        &chosen.adapter,
+        None,
+    )
+    .await
+    {
+        Ok(resolution) => resolution.session,
+        Err(error) => {
+            return Ok(Next::Ended(
+                fail_with_tokens(ctx, node, error.to_string(), false, TokenUsage::default())
+                    .await?,
+            ))
+        }
+    };
+    let mut prompt = prompt;
+    if let Some(notice) = crate::run_tools::self_check_notice(
+        run_tools.as_ref(),
+        &super::node_exec::declared_artifacts(ctx, node),
+    ) {
+        prompt.push_str(&notice);
+    }
     let request = SessionRequest {
         prompt,
         cwd: ctx.worktree.to_path_buf(),
@@ -170,7 +197,9 @@ async fn session(
         budget: ctx.session_budget().await?,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills: Vec::new(),
-        run_tools_endpoint: None,
+        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
+        artifact_dir: super::node_exec::artifact_dir(ctx, node),
+        scratch_dir: Some(ctx.run_dir.join("scratch")),
     };
     let (outcome, tokens) = dispatch_session(
         adapter.as_ref(),

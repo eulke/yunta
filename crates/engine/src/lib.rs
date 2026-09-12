@@ -107,7 +107,7 @@ pub use run_tools::{
     consolidate_blackboard, open_session_listener, RunToolsAccess, RunToolsHost, RunToolsSession,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
-pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
+pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
 pub use stats::{
     budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, NodeStat,
     Percentiles, PriorEstimation, RunStats, RunSummary, MIN_SAMPLES_FOR_ESTIMATION,

@@ -168,6 +168,31 @@ impl Drop for RunToolsSession {
     }
 }
 
+/// What to tell a session about checking its own artifacts, produced
+/// from the mount itself so it cannot outlive it.
+///
+/// Telling an agent to call a tool is a promise, and a promise is only
+/// keepable where the tool was actually mounted. Keeping the sentence
+/// here — rather than beside the published contract, which is assembled
+/// before any runner is resolved — is what makes "instructed but not
+/// mounted" unrepresentable instead of merely avoided: an adapter that
+/// declares no `run_tools` opens no session, and no session produces no
+/// sentence. `None` when there is nothing mounted, or nothing declared
+/// for it to check.
+pub(crate) fn self_check_notice(
+    session: Option<&RunToolsSession>,
+    declared: &[ArtifactSpec],
+) -> Option<String> {
+    (session.is_some() && !declared.is_empty()).then(|| {
+        "\n\nWhen you have written what this node declares, call \
+         `yunta_check_artifact`. It runs this node's own verification — the same one \
+         the node closes on — and answers while you can still fix what it names. \
+         Call it again after each fix, as many times as it takes: it costs the run \
+         nothing, and a clean answer here is a clean close."
+            .to_string()
+    })
+}
+
 /// Starts the listener for one session attempt: fresh port, fresh
 /// single-use token. `task` is `Some` for ledger-task sessions — the
 /// only ones `yunta_request_scope_expansion` exists for (scope expansion

@@ -180,18 +180,20 @@ pub(super) async fn close_node(
 /// `staged` is what the adapter declared it wrote for itself, which is
 /// not the node's doing and so is not the node's diff.
 ///
-/// `None` when the node declares no scope, or when its diff is inside
-/// it — a node that declares nothing constrains nothing.
+/// `None` when the node owes no audit at all, or when its diff is
+/// inside what it may touch. Which scope that is — a declared one, or
+/// nothing whatsoever for a `read-only` node — is
+/// [`audited_scope`](crate::audited_scope)'s call, not this one's.
 async fn scope_violation(
     ctx: &RunCtx<'_>,
     node: &Node,
     staged: &[PathBuf],
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
-    if node.scope.is_empty() {
+    let Some(scope) = crate::audited_scope(node) else {
         return Ok(None);
-    }
-    let result = scope_check(ctx.worktree, &node.scope, staged).await?;
+    };
+    let result = scope_check(ctx.worktree, scope, staged).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {

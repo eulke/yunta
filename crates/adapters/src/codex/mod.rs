@@ -46,6 +46,14 @@ use crate::subprocess::{self, Launch, LineParser};
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
 
+/// What the CLI's config calls the engine's per-run MCP server.
+const MCP_SERVER_NAME: &str = "yunta";
+
+/// The variable the CLI reads the per-run bearer token from. Naming the
+/// variable in the config, rather than inlining the token, is what keeps
+/// the credential out of `argv` — which `ps` shows to any local process.
+const TOKEN_VAR: &str = "YUNTA_RUN_TOOLS_TOKEN";
+
 pub struct CodexAdapter {
     binary: PathBuf,
     /// The typed reading of `adapter_settings`, or the error it
@@ -83,6 +91,29 @@ impl CodexAdapter {
             .and_then(|settings| settings.sandbox)
             .unwrap_or_default();
         args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
+        // `workspace-write` confines writes to the workspace, and a
+        // declared artifact lands in the run directory, which is never
+        // inside it. Without this the session is told to write a file
+        // the sandbox then refuses it.
+        if let Some(dir) = &req.artifact_dir {
+            args.push("-c".to_string());
+            args.push(format!(
+                "sandbox_workspace_write.writable_roots=[\"{}\"]",
+                dir.display()
+            ));
+        }
+        if let Some(endpoint) = &req.run_tools_endpoint {
+            // Streamable HTTP needs the rmcp client; the CLI's own
+            // default client speaks stdio only.
+            for setting in [
+                "experimental_use_rmcp_client=true".to_string(),
+                format!("mcp_servers.{MCP_SERVER_NAME}.url=\"{}\"", endpoint.url),
+                format!("mcp_servers.{MCP_SERVER_NAME}.bearer_token_env_var=\"{TOKEN_VAR}\""),
+            ] {
+                args.push("-c".to_string());
+                args.push(setting);
+            }
+        }
         // `codex exec` exposes no cap on turns: `budget.max_turns` is
         // bounded here by the engine's own timeout and token budget.
         // `-` makes the CLI read the prompt from stdin, so nothing of
@@ -97,12 +128,18 @@ impl CodexAdapter {
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
         let args = self.build_args(&req, resume);
+        // The credential the config names, placed where a secret is
+        // allowed to travel: the child's own environment.
+        let mut env = req.env.clone();
+        if let Some(endpoint) = &req.run_tools_endpoint {
+            env.insert(TOKEN_VAR.to_string(), endpoint.token.clone());
+        }
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
             args,
             cwd: &req.cwd,
-            env: &req.env,
+            env: &env,
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
@@ -156,8 +193,12 @@ impl Adapter for CodexAdapter {
             // capability would be claiming something that isn't built.
             custom_agents: false,
             usage_reporting: true,
-            // MCP per-run tools aren't wired yet.
-            run_tools: false,
+            // The per-run MCP server reaches the CLI as an external
+            // streamable-HTTP server, configured by `-c` overrides.
+            // Like every other mapping in this adapter, this is read
+            // off the CLI's own source rather than confirmed live —
+            // see this module's doc comment.
+            run_tools: true,
             // `codex exec` isolates no network — declaring the capability
             // would claim a sandbox that isn't built, so `network: false`
             // degrades to declarative-only here.

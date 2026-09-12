@@ -196,6 +196,15 @@ pub(super) async fn execute_prompt(
         }
         Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
+    // The tool sentence is produced by the mount, so a session is never
+    // told to call something this adapter did not give it.
+    let mut rendered = rendered;
+    if let Some(notice) = crate::run_tools::self_check_notice(
+        run_tools.as_ref(),
+        &super::node_exec::declared_artifacts(ctx, node),
+    ) {
+        rendered.push_str(&notice);
+    }
     let request = SessionRequest {
         prompt: rendered,
         cwd: ctx.worktree.to_path_buf(),
@@ -208,6 +217,8 @@ pub(super) async fn execute_prompt(
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
+        artifact_dir: super::node_exec::artifact_dir(ctx, node),
+        scratch_dir: Some(ctx.run_dir.join("scratch")),
     };
 
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;

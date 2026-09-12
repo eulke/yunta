@@ -31,6 +31,10 @@ pub struct SessionSetup {
     /// task attempt opens its own fresh listener+credential from it —
     /// per session, never reused.
     pub run_tools: Option<crate::run_tools::RunToolsAccess>,
+    /// The run's own directory, so a task session can be told where its
+    /// adapter may drop scaffolding — outside the worktree, whose diff
+    /// the scope check reads.
+    pub run_dir: PathBuf,
 }
 
 impl SessionSetup {

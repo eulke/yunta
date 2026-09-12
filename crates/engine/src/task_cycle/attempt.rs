@@ -257,6 +257,11 @@ async fn open_and_dispatch(
         adapter_settings: setup.adapter_settings.clone(),
         skills: setup.skills.clone(),
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
+        // A task session produces no declared artifact of its own:
+        // the ledger it works from was written by the node that
+        // declared it, and its work lands in the worktree.
+        artifact_dir: None,
+        scratch_dir: Some(setup.run_dir.join("scratch")),
     };
     let last_staged = adapter.staged_paths(&request);
     let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)

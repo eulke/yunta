@@ -194,13 +194,14 @@ async fn the_repair_session_gets_the_shape_and_the_problems_and_nothing_else() {
 async fn a_node_that_never_gets_it_right_fails_once_the_budget_is_spent() {
     let bench = Bench::new();
     let path = plan_path(&bench);
-    // Both scripts write the same unreadable file. The default budget is
-    // one repair, so exactly two sessions run and then the node fails.
+    // Every script writes the same unreadable file. The default budget
+    // is two repairs, so exactly three sessions run and then the node
+    // fails.
     let script = format!(
         "  - effects:\n      - {{ path: \"{path}\", content: \"{WRONG_LEDGER}\" }}\n    \
            outcome: {{ type: completed, summary: planned }}\n"
     );
-    let fixture = format!("sessions:\n{script}{script}");
+    let fixture = format!("sessions:\n{script}{script}{script}");
 
     let (terminal, _state) = bench.run(PLAN_ONLY, &fixture).await;
     assert!(
@@ -209,7 +210,11 @@ async fn a_node_that_never_gets_it_right_fails_once_the_budget_is_spent() {
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert_eq!(attempts(&events, "plan"), 2, "one attempt, then one repair");
+    assert_eq!(
+        attempts(&events, "plan"),
+        3,
+        "one attempt, then the two repairs the budget buys"
+    );
 
     let failure = last_failure(&events);
     // Nothing is going to attempt this node again, and the log says so
