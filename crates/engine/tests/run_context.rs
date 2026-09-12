@@ -114,7 +114,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, fixture).await;
     match &state.nodes.get("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
+            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -174,8 +174,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: audit
     kind: prompt
     runner: executor
@@ -622,8 +621,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -699,7 +697,7 @@ nodes:
     runner: executor
     prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 "#;
     // The script only matches a prompt carrying the published shape, so
     // the run reaching a session at all is the assertion. `type: guard`
@@ -712,7 +710,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks: []
     outcome: { type: completed, summary: planned }
@@ -743,19 +740,18 @@ nodes:
     runner: executor
     prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 "#;
     // The file is the engine's to write, so the shape names the way in
     // rather than a path: the script only matches a prompt that says so.
     let fixture = r#"
 capabilities: { run_tools: true }
 sessions:
-  - match_prompt_contains: "submits through its run tools"
+  - match_prompt_contains: "hand it over with `yunta_submit_tasks`"
     steps:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks: []
     outcome: { type: completed, summary: planned }

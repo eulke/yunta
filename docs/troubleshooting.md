@@ -58,13 +58,13 @@ the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissi
 ## A node failed on an artifact it declared
 
 ```
-artifacts/plan.yaml: 2 errors
+artifacts/plan/tasks.yaml: 2 errors
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
   task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
 ```
 
-A node that declares `artifacts.produces: [{ name: ..., kind: ... }]` has to leave
-behind a document the engine can read. The heading names the file and how many
+A node that declares a kind under `artifacts.produces` — `tasks`, `findings` or
+`questions` — has to leave behind a document the engine can read. The heading names the file and how many
 problems it has; each line below names one problem and the entry it belongs to, in
 the document's own words. `yunta schema <kind>` prints the shape the document is
 read against.
@@ -97,7 +97,7 @@ document, and names which of those it is.
 ## The engine refused a document or a finding a session offered
 
 ```
-The tasks document `plan.yaml` was not accepted. Fix these and submit again:
+The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
 
   1. task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
 

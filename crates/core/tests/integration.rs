@@ -206,7 +206,12 @@ nodes:
     };
     assert_eq!(mounts.len(), 2);
     assert_eq!(mounts[0].artifact.node.as_str(), "prod");
-    assert_eq!(mounts[0].artifact.name, "report.md");
+    assert_eq!(
+        mounts[0].artifact.id,
+        yunta_core::ArtifactRefId::Name {
+            name: "report.md".to_string()
+        }
+    );
     assert!(mounts[0].artifact.rename.is_none());
     assert_eq!(mounts[1].artifact.rename.as_deref(), Some("brief.md"));
 
@@ -234,7 +239,12 @@ nodes:
         panic!("expected an artifact context source");
     };
     assert!(artifact.node.is_none());
-    assert_eq!(artifact.name, "brief.md");
+    assert_eq!(
+        artifact.id,
+        yunta_core::ArtifactRefId::Name {
+            name: "brief.md".to_string()
+        }
+    );
 
     let reserialized = serde_norway::to_string(&workflow).unwrap();
     let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();

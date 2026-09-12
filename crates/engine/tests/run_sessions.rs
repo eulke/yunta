@@ -251,7 +251,7 @@ nodes:
     artifacts:
       produces: [notes.md]
 on_finish:
-  - distill: [plan.md, notes.md]
+  - distill: [{ node: plan, name: plan.md }, { node: notes, name: notes.md }]
 "#;
     // `notes` fails before producing its artifact — but with a re-route
     // budget of zero the run pauses... instead: notes produces, then we
@@ -372,7 +372,7 @@ nodes:
     depends_on: [plan]
     run: "false"
 on_finish:
-  - distill: [plan.md]
+  - distill: [{ node: plan, name: plan.md }]
 "#;
     let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(workflow, &fixture).await;
@@ -524,6 +524,91 @@ sessions:
     }
 }
 
+/// Two fan-out siblings each declare `findings` — the same kind, with no
+/// template between them — and each holds its own.
+///
+/// The identity is `(node, kind)` and a fan-out sibling is a node of its
+/// own, so nothing has to be spelled per role for the two documents to
+/// stay apart: the template the reference workflows carried existed only
+/// because `artifacts/` was flat.
+#[tokio::test]
+async fn two_fanout_siblings_each_hold_their_own_document_of_one_kind() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: fanout-findings
+nodes:
+  - id: review
+    kind: prompt
+    runners: [reviewer, reviewer-alt]
+    prompt: "Audit as {{runner.role}} and report what you find."
+    artifacts:
+      produces: [findings]
+"#;
+    let config = r#"
+runners:
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }
+"#;
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "Audit as reviewer and"
+    steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments: { id: f-one, severity: minor, title: One, location: src/a.rs, detail: "the first" }
+    outcome: { type: completed, summary: "reviewed" }
+  - match_prompt_contains: "Audit as reviewer-alt and"
+    steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments: { id: f-two, severity: minor, title: Two, location: src/b.rs, detail: "the second" }
+    outcome: { type: completed, summary: "reviewed-alt" }
+"#;
+
+    let (terminal, state) = bench.run_with_config(workflow, fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    // One acceptance per sibling, under the same identity and different
+    // producers — and each view sits under its own node, named by the
+    // kind.
+    let held = bench.accepted();
+    let findings: Vec<_> = held
+        .iter()
+        .filter(|a| {
+            a.artifact
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Findings,
+                }
+        })
+        .collect();
+    assert_eq!(findings.len(), 2, "one per sibling: {held:?}");
+    for (role, id) in [("reviewer", "f-one"), ("reviewer-alt", "f-two")] {
+        let node = format!("review@{role}");
+        assert!(
+            findings
+                .iter()
+                .any(|a| a.producer.as_ref().map(|n| n.as_str()) == Some(node.as_str())),
+            "`{node}` holds its own findings artifact: {findings:?}"
+        );
+        let bytes = bench
+            .projection(Some(&node), "findings.yaml")
+            .unwrap_or_else(|e| panic!("`{node}`'s view is named by its kind: {e}"));
+        let file: yunta_core::FindingsFile =
+            yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
+        assert_eq!(
+            file.findings
+                .iter()
+                .map(|f| f.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![id],
+            "each sibling's document is its own"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_node_level_agent_overrides_the_runner_candidate_s_agent() {
     let bench = Bench::new();
@@ -572,8 +657,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -1054,7 +1138,7 @@ nodes:
     depends_on: [plan]
     run: "echo TAMPERED-VIEW > {view}/plan/plan.md"
 on_finish:
-  - distill: [plan.md]
+  - distill: [{{ node: plan, name: plan.md }}]
 "#,
         view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );

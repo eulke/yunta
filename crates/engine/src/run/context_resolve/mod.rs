@@ -139,7 +139,7 @@ async fn assemble(
     memo: Option<&StableContextMemo>,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    if node.context.is_empty() && artifact_shapes(ctx, node).is_empty() {
+    if node.context.is_empty() && artifact_shapes(node).is_empty() {
         return Ok(Step::Value(None));
     }
 
@@ -371,8 +371,8 @@ fn source_id_for(spec: &ContextSpec) -> String {
         ContextSpec::Files { files } => format!("files:{}", files.join(",")),
         ContextSpec::Command { command } => format!("command:{command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
-            Some(node) => format!("artifact:{}/{}", node, artifact.name),
-            None => format!("artifact:{}", artifact.name),
+            Some(node) => format!("artifact:{}/{}", node, artifact.id),
+            None => format!("artifact:{}", artifact.id),
         },
         ContextSpec::RunEvents { run_events } => format!(
             "run-events:{}",

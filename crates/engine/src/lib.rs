@@ -79,7 +79,7 @@ pub use check::{
     check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
-pub use findings::{inherited_findings, INHERITED_FINDINGS};
+pub use findings::inherited_findings;
 pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError};

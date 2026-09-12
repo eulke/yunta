@@ -34,13 +34,24 @@ _Evitar_: estado interno.
 **Artifact opaco**:
 Un artifact del que el engine conoce existencia, tamaño y hash, y nada más. Es
 el default: dos runs del mismo workflow pueden producir formatos distintos y
-los dos son válidos.
+los dos son válidos. Lo identifica su nombre, que es todo lo que tiene.
 _Evitar_: artifact sin tipo, blob.
 
 **Artifact interpretado**:
-Un artifact cuyo `kind:` declara que el engine parsea su contenido, lo valida y
-lo convierte en eventos. Los kinds son `tasks`, `findings` y `questions`.
+Un artifact cuyo kind declara que el engine parsea su contenido, lo valida y
+lo convierte en eventos. Los kinds son `tasks`, `findings` y `questions`, y lo
+identifica el kind: un nodo produce a lo sumo uno de cada uno.
 _Evitar_: artifact estructurado, artifact tipado.
+
+**Identidad de artifact**:
+Por qué se pregunta cuando se pide un artifact: el kind para un interpretado,
+el nombre para un opaco. Es lo que el log afirma al aceptarlo y lo que todo
+lector —una fuente de contexto, un mount, una destilación, un gate externo—
+usa para resolverlo; dentro de un run, un artifact lo identifica el par
+`(nodo, identidad)`. Un nombre de archivo no es identidad: la vista bajo
+`artifacts/<nodo>/` se nombra desde la identidad (`<kind>.yaml` para un
+interpretado) y nadie la lee para resolver nada (D157).
+_Evitar_: nombre del artifact, path del artifact.
 
 **Kind de artifact**:
 El conjunto cerrado de documentos que el engine interpreta, y el tipo que lo
@@ -127,10 +138,12 @@ persiste `node_failed`; el texto lo produce cada superficie al leerlo (D133).
 _Evitar_: outcome, mensaje de error, motivo.
 
 **Falla de artifact**:
-Por qué un artifact declarado no cerró. Hay dos y solo dos: el archivo —
+Por qué un artifact declarado no cerró. Hay cuatro y solo cuatro: el archivo —
 ausente, vacío, por encima de `limits.max_artifact_bytes`, rechazado por el
-filesystem — o su contenido, que es un reporte. La distinción vive en el tipo y
-no en un predicado, así que ninguna superficie la deduce de la prosa (D134).
+filesystem —, un documento que el nodo quedó debiendo, su contenido, que es un
+reporte, y un artifact que ningún run tiene. La distinción vive en el tipo y
+no en un predicado, así que ninguna superficie la deduce de la prosa (D134,
+D157).
 _Evitar_: is_repairable, artifact inválido a secas.
 
 **Reporte**:

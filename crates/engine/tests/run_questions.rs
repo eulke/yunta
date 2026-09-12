@@ -184,7 +184,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // the given values, consumable by a later node via `artifact:`.
     let raw = String::from_utf8(
         bench
-            .projection(Some("ask"), "questions.yaml.answers.yaml")
+            .projection(Some("ask"), "questions.answers.yaml")
             .expect("the answers artifact has a view"),
     )
     .unwrap();
@@ -198,7 +198,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
         .find(|held| {
             held.artifact
                 == yunta_core::events::ArtifactId::Opaque {
-                    name: "questions.yaml.answers.yaml".to_string(),
+                    name: "questions.answers.yaml".to_string(),
                 }
         })
         .expect("the answers are an artifact the run holds");
@@ -341,7 +341,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     ));
     let raw = String::from_utf8(
         bench
-            .projection(Some("ask"), "questions.yaml.answers.yaml")
+            .projection(Some("ask"), "questions.answers.yaml")
             .unwrap(),
     )
     .unwrap();

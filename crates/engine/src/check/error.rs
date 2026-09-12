@@ -78,10 +78,34 @@ pub enum CheckError {
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
     #[error(
-        "`on_finish.distill` names `{path}` but no node's `artifacts.produces` declares it — \
-         declare the artifact on the node that writes it, or drop it from `distill`"
+        "`on_finish.distill` names {artifact} but that node's `artifacts.produces` does not \
+         declare it — declare the artifact on the node that produces it, or drop it from \
+         `distill`"
     )]
-    DistillUnknownArtifact { path: String },
+    DistillUnknownArtifact {
+        artifact: yunta_core::DistillArtifact,
+    },
+
+    /// A node produces at most one document of each kind: the identity
+    /// is `(node, kind)`, so a second declaration names the first.
+    #[error(
+        "node `{node}` declares `{kind}` twice — a node produces at most one {label}, and it \
+         is identified by its kind, so there is no second one to declare",
+        label = .kind.label()
+    )]
+    DuplicateArtifactKind {
+        node: NodeId,
+        kind: yunta_core::ArtifactKind,
+    },
+
+    /// The three kind names are how a document the engine reads is
+    /// referred to, so none of them is available as a file name.
+    #[error(
+        "{site} names the artifact `{name}`, and `{name}` is a document Yunta reads — refer to \
+         it with `kind: {name}` instead; the names {kinds} are not available as file names",
+        kinds = yunta_core::ArtifactKind::listed()
+    )]
+    ReservedArtifactName { site: String, name: String },
 
     /// An artifact is written under `run.dir/artifacts/`; a name that
     /// is absolute or climbs with `..` would land somewhere else.

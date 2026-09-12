@@ -30,9 +30,7 @@ nodes:
       Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
       necesarias como artifact; no converses. Con las respuestas, escribí el brief.
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
-        - brief.md
+      produces: [questions, brief.md]
 
   - id: plan
     kind: prompt
@@ -47,7 +45,7 @@ nodes:
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 
   - id: approve-plan
     kind: gate
@@ -98,7 +96,7 @@ nodes:
     permissions: read-only
     prompt: "Auditá los cambios y reportá cada hallazgo."
     artifacts:
-      produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
+      produces: [findings]
 
   - id: fix-findings
     kind: prompt
@@ -123,4 +121,4 @@ nodes:
 
 on_finish:
   - cleanup: worktree
-  - distill: [plan.yaml]
+  - distill: [{ node: plan, kind: tasks }]

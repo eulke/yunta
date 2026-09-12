@@ -432,9 +432,7 @@ async fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, Ru
     // a document that stops being readable between the node that wrote
     // it and the loop that consumes it is reported as the document it
     // is, with every problem named.
-    let tasks = yunta_core::shape::read::<TasksFile>(
-        &bytes,
-        crate::artifacts::describe(&ctx.manifest.workflow, &registered),
-    )?;
+    let tasks =
+        yunta_core::shape::read::<TasksFile>(&bytes, crate::artifacts::describe(&registered))?;
     Ok(Some(tasks))
 }

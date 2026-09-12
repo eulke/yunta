@@ -74,12 +74,9 @@
       "minLength": 1
     },
     "ArtifactContextRef": {
-      "description": "`artifact: { node: ..., name: ... }` — the referenced node's own\ndeclared artifact. Reading it creates an *implicit* `depends_on` edge\n(`build_manifest` expands it into the frozen workflow's own\n`depends_on`, so `check`/the scheduler need no separate awareness of\n`context:` at all — by the time either runs, the edge is already\nordinary `depends_on`).\n\n`node` is optional: `artifact: { name }` means \"an artifact of\nthis run's dir, whoever produced it\" — a mounted one included. It\ncreates no implicit edge (there is no producer to order behind), and\nit's what keeps a catalog child parametric: it never has to name a\nproducer it doesn't have.",
+      "description": "`artifact: { node: ..., kind: ... }` or\n`artifact: { node: ..., name: ... }` — the referenced node's own\ndeclared artifact. Reading it creates an *implicit* `depends_on` edge\n(`build_manifest` expands it into the frozen workflow's own\n`depends_on`, so `check`/the scheduler need no separate awareness of\n`context:` at all — by the time either runs, the edge is already\nordinary `depends_on`).\n\n`node` is optional: a reference without one means \"an artifact of\nthis run, whoever produced it\" — a mounted one included. It\ncreates no implicit edge (there is no producer to order behind), and\nit's what keeps a catalog child parametric: it never has to name a\nproducer it doesn't have.",
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string"
-        },
         "node": {
           "anyOf": [
             {
@@ -91,9 +88,29 @@
           ]
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "name"
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
       ]
     },
     "ArtifactKind": {
@@ -106,29 +123,20 @@
       ]
     },
     "ArtifactSpec": {
+      "description": "One artifact named by a bare string: a node's `artifacts.produces`\nentry, or one of the artifacts an external gate publishes.\n\nA node produces at most one document of each kind, so a kind\nidentifies an interpreted artifact on its own and there is no file\nname to choose. An opaque artifact has nothing else to go by, so its\nname is what identifies it — which is why the three kind names are\nnot available as file names.",
       "anyOf": [
         {
-          "type": "string"
+          "description": "A document the engine reads and validates, identified by its\nkind.",
+          "$ref": "#/$defs/ArtifactKind"
         },
         {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "$ref": "#/$defs/ArtifactKind"
-            },
-            "name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "kind"
-          ]
+          "description": "A file the engine only carries, identified by its name.",
+          "type": "string"
         }
       ]
     },
     "Artifacts": {
-      "description": "`artifacts.produces`. `tasks`, `findings` and\n`questions` are interpreted. A plain string stays\nopaque.",
+      "description": "`artifacts.produces`. Each entry is one bare string: `tasks`,\n`findings` and `questions` name the documents the engine reads, and\nevery other string is the name of a file it only carries.",
       "type": "object",
       "properties": {
         "produces": {
@@ -253,6 +261,42 @@
         "blackboard"
       ]
     },
+    "DistillArtifact": {
+      "description": "One `distill:` entry — `{ node: <id>, kind: <kind> }` or\n`{ node: <id>, name: <file> }`.\n\nThe node is part of the reference because a kind identifies an\nartifact within one producer: two reviewing nodes each hold a\nfindings artifact, and a distillation says which one it means.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
+      "required": [
+        "node"
+      ]
+    },
     "ExecutorName": {
       "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -263,10 +307,10 @@
       "type": "object",
       "properties": {
         "artifacts": {
-          "description": "Paths (relative to `run.dir`) committed to `branch` for review —\nthe reference example: `[spec.md]`.",
+          "description": "The artifacts of this run committed to `branch` for review, named\nthe way `artifacts.produces` names them — the reference example:\n`[spec.md]`. Each is published under the name the run's own view\ncarries it by.",
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ArtifactSpec"
           }
         },
         "branch": {
@@ -663,7 +707,7 @@
       ]
     },
     "MountArtifact": {
-      "description": "The mounted artifact: `node` names a node of the *parent's own*\ngraph — a `kind: workflow` sibling resolves through the recorded\nlink (`child_run_finished`) to that child run's artifacts, any other\nnode to the parent's own `run.dir/artifacts/`. `as:` renames the\ncopy in the child (absent keeps `name`).",
+      "description": "The mounted artifact: `node` names a node of the *parent's own*\ngraph — a `kind: workflow` sibling resolves through the recorded\nlink (`child_run_finished`) to that child run's artifacts, any other\nnode to the parent's own artifacts. `as:` gives an opaque artifact\nanother name in the child, which is what the child holds it as; a\ndocument the engine reads is identified by its kind in either run, so\nthere is nothing for `as:` to change and declaring it is refused.",
       "type": "object",
       "properties": {
         "as": {
@@ -672,17 +716,36 @@
             "null"
           ]
         },
-        "name": {
-          "type": "string"
-        },
         "node": {
           "$ref": "#/$defs/NodeId"
         }
       },
-      "additionalProperties": false,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
       "required": [
-        "node",
-        "name"
+        "node"
       ]
     },
     "MountSpec": {
@@ -1206,7 +1269,7 @@
             "distill": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/DistillArtifact"
               }
             }
           },

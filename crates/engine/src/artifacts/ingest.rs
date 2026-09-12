@@ -46,12 +46,13 @@ use yunta_core::{
 
 use super::RunArtifacts;
 
-/// One declared artifact that passed verification: the name it was
-/// declared under, the file it was read from, its bytes and their hash,
-/// and whatever its declared `kind:` turned those bytes into.
+/// One declared artifact that passed verification: what it is, the file
+/// it was read from, its bytes and their hash, and whatever its kind
+/// turned those bytes into.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedArtifact {
-    pub name: String,
+    /// What the artifact is, which is what the run's log answers by.
+    pub artifact: ArtifactId,
     /// Relative to the run directory: where the artifact was read from
     /// or written to — a node's own staging for a file on its way in,
     /// the `artifacts/` view for one the run already holds.
@@ -152,8 +153,8 @@ pub(crate) fn held_document(
     spec: &ArtifactSpec,
     held: &super::RunArtifacts<'_>,
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
-    let artifact = ArtifactId::of(spec.name(), spec.kind());
-    let Some(found) = held.ledger().latest(&artifact, Some(node)) else {
+    let artifact = ArtifactId::from(spec);
+    let Some(found) = held.held(&artifact, Some(node)) else {
         return Err(ArtifactFailure::Undelivered {
             node: node.clone(),
             artifact,
@@ -161,9 +162,7 @@ pub(crate) fn held_document(
     };
     let bytes = held.bytes(found).map_err(|source| {
         ArtifactFailure::file(
-            super::store::view_path(Some(node), spec.name())
-                .display()
-                .to_string(),
+            view_path(node, &artifact),
             FileProblem::Unreadable {
                 detail: source.to_string(),
             },
@@ -185,19 +184,18 @@ pub(crate) fn verify_one(
     run_dir: &Path,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
-    let (name, kind) = match spec {
-        ArtifactSpec::Plain(name) => (name, None),
-        ArtifactSpec::Typed { name, kind } => (name, Some(*kind)),
-    };
-
-    let relative = crate::run_dir::staged_path(node, name);
+    let artifact = ArtifactId::from(spec);
+    // A file on its way in sits under the name the node writes it as,
+    // which for a document the engine reads is that document's own name
+    // for itself.
+    let relative = crate::run_dir::staged_path(node, &artifact.view_name());
     let path = relative.display().to_string();
 
     let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes)?;
-    let content = interpret(kind, &bytes, &path).map_err(ArtifactFailure::Content)?;
+    let content = interpret(spec.kind(), &bytes, &path).map_err(ArtifactFailure::Content)?;
 
     Ok(VerifiedArtifact {
-        name: name.clone(),
+        artifact,
         path: relative,
         content_hash: sha256_hex(&bytes),
         bytes,
@@ -217,11 +215,12 @@ pub(crate) fn interpreted(
     spec: &ArtifactSpec,
     bytes: &[u8],
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
-    let path = super::store::view_path(node, spec.name());
+    let artifact = ArtifactId::from(spec);
+    let path = super::store::view_path(node, &artifact.view_name());
     let content = interpret(spec.kind(), bytes, &path.display().to_string())
         .map_err(ArtifactFailure::Content)?;
     Ok(VerifiedArtifact {
-        name: spec.name().to_string(),
+        artifact,
         path,
         content_hash: sha256_hex(bytes),
         bytes: bytes.to_vec(),
@@ -293,13 +292,13 @@ fn interpret(
 /// Why a document a session handed over did not become a file.
 #[derive(Debug)]
 pub(crate) enum SubmitError {
-    /// The name is declared without a `kind:` — a file the session
-    /// writes itself, with no document for the engine to validate.
+    /// The declaration is an opaque artifact — a file the session writes
+    /// itself, with no document for the engine to validate.
     NotInterpreted { name: String },
-    /// The name is a findings artifact, whose entries arrive one at a
-    /// time and whose file the engine derives at close. Defensive: no
-    /// submission tool is offered for the kind.
-    Accumulated { name: String },
+    /// The declaration is a findings artifact, whose entries arrive one
+    /// at a time and whose file the engine derives at close. Defensive:
+    /// no submission tool is offered for the kind.
+    Accumulated,
     /// The document is not what its kind declares.
     Refused(Report),
     /// The canonical file would be larger than the run allows.
@@ -318,9 +317,9 @@ impl std::fmt::Display for SubmitError {
                 "`{name}` is declared without a `kind:`, so it is a file this session writes \
                  rather than a document it submits"
             ),
-            SubmitError::Accumulated { name } => write!(
+            SubmitError::Accumulated => write!(
                 f,
-                "`{name}` is a findings artifact: report each finding with \
+                "a findings artifact is not submitted whole: report each finding with \
                  `{tool}` and the engine writes the file",
                 tool = ArtifactKind::POST_FINDING_TOOL
             ),
@@ -352,12 +351,13 @@ pub(crate) fn submit(
     document: serde_json::Value,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
-    let ArtifactSpec::Typed { name, kind } = spec else {
+    let ArtifactSpec::Interpreted(kind) = spec else {
         return Err(SubmitError::NotInterpreted {
-            name: spec.name().to_string(),
+            name: spec.to_string(),
         });
     };
-    let path = document_path(node, name);
+    let artifact = ArtifactId::Interpreted { kind: *kind };
+    let path = document_path(node, &artifact);
 
     let (content, yaml) = match kind {
         ArtifactKind::Tasks => {
@@ -372,10 +372,10 @@ pub(crate) fn submit(
             let yaml = render(&file, &path)?;
             (ArtifactContent::Questions(file.questions), yaml)
         }
-        ArtifactKind::Findings => return Err(SubmitError::Accumulated { name: name.clone() }),
+        ArtifactKind::Findings => return Err(SubmitError::Accumulated),
     };
 
-    rendered_document(name, path, yaml, content, max_bytes)
+    rendered_document(artifact, path, yaml, content, max_bytes)
 }
 
 /// Renders the findings document `node` has earned: every finding it
@@ -388,24 +388,17 @@ pub(crate) fn submit(
 /// gets an empty list: a review that found nothing is a review.
 pub(crate) fn derive_findings(
     node: &NodeId,
-    spec: &ArtifactSpec,
     posted: Vec<Finding>,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
-    let ArtifactSpec::Typed {
-        name,
+    let artifact = ArtifactId::Interpreted {
         kind: ArtifactKind::Findings,
-    } = spec
-    else {
-        return Err(SubmitError::NotInterpreted {
-            name: spec.name().to_string(),
-        });
     };
-    let path = document_path(node, name);
+    let path = document_path(node, &artifact);
     let file = FindingsFile::from_findings(posted.clone());
     let yaml = render(&file, &path)?;
     rendered_document(
-        name,
+        artifact,
         path,
         yaml,
         ArtifactContent::Findings(posted),
@@ -419,8 +412,13 @@ pub(crate) fn derive_findings(
 /// Such a document is never a file on its way in, so there is no staging
 /// path to name it by — and the view is where a reader of the run opens
 /// it, which is what a refusal and a diagnostic both have to point at.
-fn document_path(node: &NodeId, name: &str) -> String {
-    super::store::view_path(Some(node), name)
+fn document_path(node: &NodeId, artifact: &ArtifactId) -> String {
+    view_path(node, artifact)
+}
+
+/// Where `node`'s view of `artifact` sits, as a diagnostic names it.
+fn view_path(node: &NodeId, artifact: &ArtifactId) -> String {
+    super::store::view_path(Some(node), &artifact.view_name())
         .display()
         .to_string()
 }
@@ -440,7 +438,7 @@ fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<St
 /// with both numbers on the table exactly as an oversized file is — the
 /// run never accepts an artifact it would have turned away as a file.
 fn rendered_document(
-    name: &str,
+    artifact: ArtifactId,
     path: String,
     yaml: String,
     content: ArtifactContent,
@@ -459,7 +457,7 @@ fn rendered_document(
         }
     }
     Ok(VerifiedArtifact {
-        name: name.to_string(),
+        artifact,
         path: PathBuf::from(path),
         content_hash: sha256_hex(&bytes),
         bytes,

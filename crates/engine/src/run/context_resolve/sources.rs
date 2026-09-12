@@ -116,11 +116,12 @@ pub(super) async fn resolve_artifact(
     source_id: &str,
     artifact: &yunta_core::ArtifactContextRef,
 ) -> Result<Vec<u8>, ContextResolveError> {
+    let wanted = yunta_core::events::ArtifactId::from(&artifact.id);
     let missing = || ContextResolveError::MissingArtifact {
         node: node.id.clone(),
         source_id: source_id.to_string(),
         referenced: artifact.node.clone(),
-        name: artifact.name.clone(),
+        artifact: wanted.clone(),
     };
     let events = ctx
         .load_events()
@@ -133,18 +134,14 @@ pub(super) async fn resolve_artifact(
         })?;
     let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let found = held
-        .named(
-            &ctx.manifest.workflow,
-            artifact.node.as_ref(),
-            &artifact.name,
-        )
+        .held(&wanted, artifact.node.as_ref())
         .ok_or_else(missing)?;
     held.bytes(found).map_err(|source| ContextResolveError::Io {
         node: node.id.clone(),
         source_id: source_id.to_string(),
         action: format!(
             "read the artifact `{}` the run holds",
-            crate::artifacts::describe(&ctx.manifest.workflow, found)
+            crate::artifacts::describe(found)
         ),
         source: std::io::Error::other(source.to_string()),
     })

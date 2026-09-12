@@ -17,7 +17,7 @@ use yunta_core::events::{
 use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
 
 use crate::artifacts::{
-    accept, answered_by_the_log, canonical, interpreted, ArtifactContent, Declared, RunArtifacts,
+    accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
 
@@ -25,14 +25,15 @@ use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 
-/// The `findings` artifacts `node` declares — the ones the run derives
-/// from what that node posted rather than from anything it wrote.
-fn declared_findings(node: &Node) -> Vec<&ArtifactSpec> {
-    node.artifacts
-        .iter()
-        .flat_map(|artifacts| artifacts.produces.iter())
-        .filter(|spec| spec.kind() == Some(yunta_core::ArtifactKind::Findings))
-        .collect()
+/// Whether `node` declares the `findings` artifact the run derives from
+/// what that node posted rather than from anything it wrote.
+fn declares_findings(node: &Node) -> bool {
+    node.artifacts.iter().any(|artifacts| {
+        artifacts
+            .produces
+            .iter()
+            .any(|spec| spec.kind() == Some(yunta_core::ArtifactKind::Findings))
+    })
 }
 
 /// Accepts every `findings` artifact a session node declares, derived
@@ -56,35 +57,28 @@ pub(super) async fn derive_findings(
     if !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. }) {
         return Ok(None);
     }
-    let declared = declared_findings(node);
-    if declared.is_empty() {
+    if !declares_findings(node) {
         return Ok(None);
     }
     let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
         .effective_of(&node.id);
-    for spec in declared {
-        let derived =
-            match crate::artifacts::derive_findings(&node.id, spec, posted.clone(), ceiling) {
-                Ok(derived) => derived,
-                Err(error) => {
-                    return Ok(Some(
-                        fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
-                    ))
-                }
-            };
-        accept(
-            &ctx.log(),
-            ctx.run_dir,
-            Some(&node.id),
-            Declared {
-                name: &derived.name,
-                kind: Some(yunta_core::ArtifactKind::Findings),
-            },
-            &derived.bytes,
-            ArtifactOrigin::Derived,
-        )
-        .await?;
-    }
+    let derived = match crate::artifacts::derive_findings(&node.id, posted, ceiling) {
+        Ok(derived) => derived,
+        Err(error) => {
+            return Ok(Some(
+                fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
+            ))
+        }
+    };
+    accept(
+        &ctx.log(),
+        ctx.run_dir,
+        Some(&node.id),
+        derived.artifact.clone(),
+        &derived.bytes,
+        ArtifactOrigin::Derived,
+    )
+    .await?;
     Ok(None)
 }
 
@@ -103,7 +97,7 @@ pub(super) enum NotAcquired {
     /// run rather than two workflows disagreeing, so it stops the
     /// resolution instead of being listed beside one.
     Unreachable {
-        name: String,
+        artifact: ArtifactId,
         source: crate::artifacts::ObjectError,
     },
 }
@@ -116,8 +110,9 @@ impl From<NotAcquired> for Failure {
     fn from(problem: NotAcquired) -> Self {
         match problem {
             NotAcquired::Undelivered(failures) => Failure::artifacts(failures),
-            NotAcquired::Unreachable { name, source } => Failure::message(format!(
-                "artifact `{name}`: the child run cannot hand over its bytes: {source}"
+            NotAcquired::Unreachable { artifact, source } => Failure::message(format!(
+                "the {}: the child run cannot hand over its bytes: {source}",
+                artifact.label()
             )),
         }
     }
@@ -151,11 +146,11 @@ fn resolve_from_child<'a>(
     let mut resolved = Vec::new();
     let mut undelivered = Vec::new();
     for spec in produces {
-        // The declaration in hand is the identity: this node's names are
-        // already rendered, so the manifest's own templates cannot
-        // answer for them.
-        let artifact = ArtifactId::of(spec.name(), spec.kind());
-        let Some(found) = held.ledger().latest(&artifact, None) else {
+        // The declaration in hand is the identity: this node's opaque
+        // names are already rendered, so the manifest's own templates
+        // cannot answer for them.
+        let artifact = ArtifactId::from(spec);
+        let Some(found) = held.held(&artifact, None) else {
             undelivered.push(ArtifactFailure::Unheld {
                 run: child.clone(),
                 producer: None,
@@ -165,12 +160,7 @@ fn resolve_from_child<'a>(
         };
         let bytes = match held.bytes(found) {
             Ok(bytes) => bytes,
-            Err(source) => {
-                return Err(NotAcquired::Unreachable {
-                    name: spec.name().to_string(),
-                    source,
-                })
-            }
+            Err(source) => return Err(NotAcquired::Unreachable { artifact, source }),
         };
         match interpreted(Some(&node.id), spec, &bytes) {
             Ok(verified) => resolved.push(Resolved {
@@ -223,10 +213,7 @@ pub(super) async fn acquire_from_child(
             &ctx.log(),
             ctx.run_dir,
             Some(&node.id),
-            Declared {
-                name: item.spec.name(),
-                kind: item.spec.kind(),
-            },
+            ArtifactId::from(item.spec),
             &item.bytes,
             ArtifactOrigin::Inherited {
                 run: child.id.clone(),
@@ -290,10 +277,7 @@ pub(super) async fn record_artifacts(
                 &ctx.log(),
                 ctx.run_dir,
                 Some(&node.id),
-                Declared {
-                    name: &artifact.name,
-                    kind: artifact.content.kind(),
-                },
+                artifact.artifact.clone(),
                 &bytes,
                 ArtifactOrigin::Ingested,
             )

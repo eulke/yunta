@@ -49,6 +49,22 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
     Ok((key.to_string(), value))
 }
 
+/// Takes the value of `key` out of `mapping`, parsed, leaving every
+/// other entry for whoever owns it.
+///
+/// How a container reads its own keys before handing the rest to the
+/// part of the mapping that is not its own — so an unknown key is named
+/// by the one listing that knows every key the whole shape has.
+pub(super) fn take<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    mapping: &mut Mapping,
+    key: &str,
+) -> Result<Option<T>, D::Error> {
+    match mapping.remove(key) {
+        Some(value) => nested::<D, _>(key, value).map(Some),
+        None => Ok(None),
+    }
+}
+
 /// Parses the value found under `key`, keeping `key` in the error's
 /// path so the location stays complete once the parser adds its own.
 pub(super) fn nested<'de, D: Deserializer<'de>, T: DeserializeOwned>(

@@ -42,13 +42,11 @@ pub(crate) fn submission_notice(
 /// The documents this node declares under a kind that has a submission
 /// tool, each paired with the tool that takes it.
 fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {
-    let submitted: Vec<(&str, &str)> = declared
+    let submitted: Vec<(ArtifactKind, &str)> = declared
         .iter()
         .filter_map(|spec| match spec {
-            ArtifactSpec::Typed { name, kind } => {
-                kind.submit_tool().map(|tool| (name.as_str(), tool))
-            }
-            ArtifactSpec::Plain(_) => None,
+            ArtifactSpec::Interpreted(kind) => kind.submit_tool().map(|tool| (*kind, tool)),
+            ArtifactSpec::Opaque(_) => None,
         })
         .collect();
     if submitted.is_empty() {
@@ -58,8 +56,8 @@ fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {
         "\n\nSubmit each document this node declares with its run tool, as a structured \
          object — never as a file:",
     );
-    for (name, tool) in submitted {
-        text.push_str(&format!("\n  `{name}` → `{tool}`"));
+    for (kind, tool) in submitted {
+        text.push_str(&format!("\n  the `{kind}` document → `{tool}`"));
     }
     text.push_str(
         "\nThe tool validates the document exactly as the node's close will and answers \
@@ -73,23 +71,17 @@ fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {
 /// The findings artifact this node declares — a file the session never
 /// writes, because the engine derives it from what the session reported.
 fn findings_to_report(declared: &[ArtifactSpec]) -> Option<String> {
-    let accumulated: Vec<&str> = declared
-        .iter()
-        .filter_map(|spec| match spec {
-            ArtifactSpec::Typed { name, kind } if kind.submit_tool().is_none() => {
-                Some(name.as_str())
-            }
-            _ => None,
-        })
-        .collect();
-    let name = accumulated.first()?;
+    let kind = declared.iter().find_map(|spec| match spec {
+        ArtifactSpec::Interpreted(kind) if kind.submit_tool().is_none() => Some(*kind),
+        _ => None,
+    })?;
     Some(format!(
         "\n\nReport each finding with `{post}` the moment you see it — one call per \
-         finding, never a file. The engine writes `{name}` at the end from everything \
-         this node reported; a session that reports nothing yields an empty list. A \
-         refusal names what to fix in that one finding — fix it and post it again; the \
-         others already reported are kept. To change a finding you reported, \
-         `{update}` with the same id and the whole finding; to take one back, \
+         finding, never a file. The engine writes this node's `{kind}` artifact at the \
+         end from everything this node reported; a session that reports nothing yields \
+         an empty list. A refusal names what to fix in that one finding — fix it and \
+         post it again; the others already reported are kept. To change a finding you \
+         reported, `{update}` with the same id and the whole finding; to take one back, \
          `{withdraw}` with its id and why. A withdrawn id is final.",
         post = ArtifactKind::POST_FINDING_TOOL,
         update = ArtifactKind::UPDATE_FINDING_TOOL,
@@ -107,8 +99,8 @@ fn files_to_write(
     let written: Vec<&str> = declared
         .iter()
         .filter_map(|spec| match spec {
-            ArtifactSpec::Plain(name) => Some(name.as_str()),
-            ArtifactSpec::Typed { .. } => None,
+            ArtifactSpec::Opaque(name) => Some(name.as_str()),
+            ArtifactSpec::Interpreted(_) => None,
         })
         .collect();
     if written.is_empty() {

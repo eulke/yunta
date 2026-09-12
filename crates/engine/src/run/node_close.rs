@@ -112,9 +112,10 @@ pub(super) async fn close_node(
         return Ok(end);
     }
 
-    // Artifact names are templates too (`findings-{{runner.role}}`
-    // in the reference workflow) — rendered per node so every fan-out
-    // sibling verifies its own file.
+    // An opaque artifact's name can carry a template
+    // (`report-{{runner.role}}.md`) — rendered per node so every fan-out
+    // sibling verifies its own file. A document the engine reads has no
+    // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
         Err(error) => return fail_with_tokens(ctx, node, error.to_string(), false, tokens).await,

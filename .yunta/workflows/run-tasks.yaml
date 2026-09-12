@@ -8,9 +8,9 @@ inputs:
 nodes:
   - id: register
     kind: bash
-    run: "cp {{inputs.tasks}} {{node.artifacts}}/plan.yaml"
+    run: "cp {{inputs.tasks}} {{node.artifacts}}/tasks.yaml"
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 
   - id: implement
     kind: loop

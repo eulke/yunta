@@ -4,10 +4,10 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
-use yunta_core::{ArtifactKind, Clock, Manifest, ModeName, RunId, ARTIFACTS_DIR};
+use yunta_core::{Clock, Manifest, ModeName, RunId, ARTIFACTS_DIR};
 use yunta_storage::AsyncStorage;
 
-use crate::artifacts::{accept, Declared};
+use crate::artifacts::accept;
 use crate::run_log::RunLog;
 
 use super::RunError;
@@ -16,30 +16,17 @@ use super::RunError;
 /// child, or a successor inherits from its predecessor.
 ///
 /// It carries its own identity and origin because the run that receives
-/// it cannot derive either: the bytes arrive under a name the mount
-/// chose, and only the log they came from says what artifact they are
-/// and who produced it there.
+/// it cannot derive either: only the log the bytes came from says what
+/// artifact they are and who produced it there. A mount that renames an
+/// opaque artifact hands over the renamed identity, which is what the
+/// receiving run holds it as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BirthArtifact {
-    /// The name the run's view carries, relative to `artifacts/`. May
-    /// nest.
-    pub name: String,
-    /// What the artifact is, as the run that handed it over holds it.
+    /// What the artifact is in the run receiving it.
     pub artifact: ArtifactId,
     /// Which run it comes from, and who produced it there.
     pub origin: ArtifactOrigin,
     pub bytes: Vec<u8>,
-}
-
-impl BirthArtifact {
-    /// The kind the receiving run reads it under — what its identity
-    /// says, never the file name it arrives as.
-    fn kind(&self) -> Option<ArtifactKind> {
-        match &self.artifact {
-            ArtifactId::Interpreted { kind } => Some(*kind),
-            ArtifactId::Opaque { .. } => None,
-        }
-    }
 }
 
 /// What [`create_run`] freezes: the run's identity and its
@@ -194,10 +181,7 @@ pub async fn create_run(
             &log,
             &run_dir,
             None,
-            Declared {
-                name: &artifact.name,
-                kind: artifact.kind(),
-            },
+            artifact.artifact.clone(),
             &artifact.bytes,
             artifact.origin.clone(),
         )

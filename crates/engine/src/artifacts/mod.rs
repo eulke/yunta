@@ -24,11 +24,11 @@ pub mod store;
 
 use std::path::Path;
 
-use yunta_core::events::artifacts::{declared_name, ArtifactLedger, ArtifactRef};
+use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload, StoredEvent,
 };
-use yunta_core::{ArtifactKind, NodeId, NodeKind, Workflow, ARTIFACTS_DIR};
+use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
@@ -39,9 +39,20 @@ pub(crate) use ingest::{
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
 pub use store::ObjectError;
 
-/// What the engine appends to a `questions` artifact's name when it
-/// records the answers beside it.
+/// What the engine appends to the `questions` kind's own name when it
+/// records the answers beside them.
 pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
+
+/// The artifact a node's answers are: an opaque one, named after the
+/// questions it answers, so the two sit side by side in the node's view.
+///
+/// Opaque because the engine carries it rather than reading it: a node
+/// holds one questions document, and its answers are the file beside it.
+pub(crate) fn answers_artifact() -> ArtifactId {
+    ArtifactId::Opaque {
+        name: format!("{}{ANSWERS_SUFFIX}", ArtifactKind::Questions),
+    }
+}
 
 /// Why an artifact the run acquired did not become a fact of the run.
 #[derive(Debug, thiserror::Error)]
@@ -90,15 +101,6 @@ pub(crate) fn answered_by_the_log(node_kind: &NodeKind, kind: Option<ArtifactKin
     }
 }
 
-/// What a workflow declares an artifact as: the name its view carries,
-/// and the kind the engine reads it under — `None` for an artifact the
-/// engine only carries.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Declared<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) kind: Option<ArtifactKind>,
-}
-
 /// Takes one artifact into the run: stores its bytes, records the
 /// acceptance, and writes the view.
 ///
@@ -113,17 +115,16 @@ pub(crate) async fn accept(
     log: &RunLog<'_>,
     run_dir: &Path,
     producer: Option<&NodeId>,
-    declared: Declared<'_>,
+    artifact: ArtifactId,
     bytes: &[u8],
     origin: ArtifactOrigin,
 ) -> Result<ArtifactRef, AcceptError> {
     let store = ObjectStore::at(run_dir);
-    let name = declared.name.to_string();
+    let name = artifact.view_name();
     let content_hash = store.put(bytes).map_err(|source| AcceptError::Store {
         name: name.clone(),
         source,
     })?;
-    let artifact = ArtifactId::of(declared.name, declared.kind);
     let seq = log
         .record(
             producer,
@@ -139,7 +140,7 @@ pub(crate) async fn accept(
             source,
         })?;
     store
-        .project(producer, declared.name, &content_hash)
+        .project(producer, &name, &content_hash)
         .map_err(|source| AcceptError::Project { name, source })?;
     Ok(ArtifactRef {
         producer: producer.cloned(),
@@ -179,33 +180,11 @@ impl<'a> RunArtifacts<'a> {
         &self.ledger
     }
 
-    /// The artifact `workflow` calls `name`, as `producer` holds it —
-    /// without a producer, the last acceptance of that identity by
-    /// anyone. `None` when the run holds none.
-    pub(crate) fn named(
-        &self,
-        workflow: &Workflow,
-        producer: Option<&NodeId>,
-        name: &str,
-    ) -> Option<&ArtifactRef> {
-        self.identified(workflow, producer, name).1
-    }
-
-    /// What `workflow` makes `name` mean, and the artifact answering it.
-    ///
-    /// The question and its answer come from one place, so a caller that
-    /// has to say what the run was asked for — a mount reporting a
-    /// source that holds none of it — names the identity the lookup
-    /// actually used rather than deriving it a second time.
-    pub(crate) fn identified(
-        &self,
-        workflow: &Workflow,
-        producer: Option<&NodeId>,
-        name: &str,
-    ) -> (ArtifactId, Option<&ArtifactRef>) {
-        let id = yunta_core::events::artifacts::declared_identity(workflow, producer, name);
-        let found = self.ledger.latest(&id, producer);
-        (id, found)
+    /// The artifact `id` names, as `producer` holds it — without a
+    /// producer, the last acceptance of that identity by anyone. `None`
+    /// when the run holds none.
+    pub(crate) fn held(&self, id: &ArtifactId, producer: Option<&NodeId>) -> Option<&ArtifactRef> {
+        self.ledger.latest(id, producer)
     }
 
     /// The bytes `held` names, verified against its hash.
@@ -215,39 +194,9 @@ impl<'a> RunArtifacts<'a> {
 }
 
 /// How a diagnostic names one artifact the run holds: where its view
-/// sits when the workflow names it, and its identity when nothing does.
-///
-/// A reader that reports a problem with a document says which document,
-/// in the terms the workflow author wrote it in.
-pub(crate) fn describe(workflow: &Workflow, held: &ArtifactRef) -> String {
-    match view_name(workflow, held) {
-        Some(name) => store::view_path(held.producer.as_ref(), &name)
-            .display()
-            .to_string(),
-        None => held.artifact.to_string(),
-    }
-}
-
-/// The name a run's `artifacts/` view carries one held artifact under.
-///
-/// An opaque artifact is named by its identity. An interpreted one is
-/// named by the declaration it answers — its producer's
-/// `artifacts.produces` entry of that kind — and the one document a run
-/// derives for itself rather than for a node by the name a successor
-/// mounts it as. `None` for an interpreted artifact a run holds with no
-/// node behind it and no declaration covering it: nothing in the run
-/// names it, which a reader handing it on has to know rather than invent
-/// a name.
-pub(crate) fn view_name(workflow: &Workflow, held: &ArtifactRef) -> Option<String> {
-    match (&held.artifact, &held.producer) {
-        (ArtifactId::Opaque { name }, _) => Some(name.clone()),
-        (id, Some(node)) => declared_name(workflow, node, id),
-        (
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Findings,
-            },
-            None,
-        ) => Some(crate::findings::INHERITED_FINDINGS.to_string()),
-        (ArtifactId::Interpreted { .. }, None) => None,
-    }
+/// sits, which is the file a reader opens.
+pub(crate) fn describe(held: &ArtifactRef) -> String {
+    store::view_path(held.producer.as_ref(), &held.artifact.view_name())
+        .display()
+        .to_string()
 }

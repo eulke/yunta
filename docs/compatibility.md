@@ -222,7 +222,7 @@ paragraph. The heading names the document by the noun of its kind — `tasks doc
 `findings artifact`, `questions artifact`:
 
 ```
-The tasks document `plan.yaml` was not accepted. Fix these and submit again:
+The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
 The finding was not accepted. Fix these and post it again:
 The finding update was not accepted. Fix these and update it again:
 The withdrawal was not accepted. Fix these and withdraw it again:
@@ -232,9 +232,8 @@ A call the engine cannot read as a call at all is answered by naming what that t
 takes instead:
 
 ```
-invalid submission — requires `name` (one of `plan.yaml`) and `document` (an object): `document` is missing or is not an object
-`review.yaml` is declared by this node with kind `findings`, not the kind this tool submits — use `yunta_post_finding`
-`notes.md` is not an artifact this node declares; it declares `plan.yaml`
+invalid submission — requires `document` (an object), the `tasks` document this node declares: `document` is missing or is not an object
+`notes.md` is not an artifact this node declares; it declares `tasks`
 node `plan` declares no artifacts, so there is nothing to check
 ```
 

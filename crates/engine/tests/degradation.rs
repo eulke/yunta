@@ -213,7 +213,7 @@ nodes:
     run: "true"
 on_finish:
   - distill:
-      - notes.md
+      - { node: build, name: notes.md }
 "#;
     let terminal = bench.run(workflow).await;
 

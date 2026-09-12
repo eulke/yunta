@@ -146,8 +146,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -167,7 +166,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: T001
@@ -1635,7 +1633,7 @@ nodes:
     artifacts:
       produces: [plan.md]
 on_finish:
-  - distill: [plan.md]
+  - distill: [{ node: plan, name: plan.md }]
 "#,
     );
     git(&repo, &["add", "."]);

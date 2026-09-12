@@ -10,17 +10,14 @@ use std::collections::HashSet;
 use yunta_core::events::findings::effective;
 use yunta_core::events::{Finding, StoredEvent};
 
-/// The name a promoting run's inherited findings are held under, which
-/// is what the successor mounts them as.
-pub const INHERITED_FINDINGS: &str = "findings-inherited.yaml";
-
 /// The findings a successor inherits, derived purely from the parent's
 /// own log: every finding the log leaves standing — the content of its
 /// latest posting, and nothing its node took back — deduplicated by
 /// location + title normalized for case and whitespace. The first
 /// standing occurrence's full record wins, so no authorship or detail is
 /// lost to the collapse. Deterministic: same log, same output — the
-/// promotion close accepts exactly this as [`INHERITED_FINDINGS`].
+/// promotion close accepts exactly this as the run's own findings
+/// artifact.
 pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut inherited = Vec::new();

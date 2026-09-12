@@ -115,24 +115,22 @@ pub(super) enum RunToolsSetupError {
         source: std::io::Error,
     },
     #[error(
-        "node `{node}` declares a `{kind}` artifact `{name}`, which a session hands over \
+        "node `{node}` declares a `{kind}` artifact, which a session hands over \
          through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
          the document has no way in; pick a runner on an adapter that can be a client of the \
          per-run MCP endpoint"
     )]
     TypedArtifactNeedsRunTools {
         node: yunta_core::NodeId,
-        name: String,
         kind: yunta_core::ArtifactKind,
         adapter: AdapterId,
     },
     #[error(
-        "node `{node}` declares a `{kind}` artifact `{name}`, which a session hands over \
+        "node `{node}` declares a `{kind}` artifact, which a session hands over \
          through the run tools, and its per-run MCP listener failed to start: {source}"
     )]
     TypedArtifactListenerFailed {
         node: yunta_core::NodeId,
-        name: String,
         kind: yunta_core::ArtifactKind,
         #[source]
         source: std::io::Error,
@@ -160,16 +158,10 @@ pub(super) struct RunToolsResolution {
 /// fails the node with it, never emulates.
 /// The first interpreted artifact this node declares, if any: the one a
 /// refusal names, so a reader has somewhere to look.
-fn declared_typed_artifact(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-) -> Option<(String, yunta_core::ArtifactKind)> {
+fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::ArtifactKind> {
     crate::run::node_exec::declared_artifacts(ctx, node)
         .into_iter()
-        .find_map(|spec| match spec {
-            yunta_core::ArtifactSpec::Typed { name, kind } => Some((name, kind)),
-            yunta_core::ArtifactSpec::Plain(_) => None,
-        })
+        .find_map(|spec| spec.kind())
 }
 
 pub(super) async fn open_run_tools(
@@ -197,10 +189,9 @@ pub(super) async fn open_run_tools(
                 adapter: adapter_id.clone(),
             });
         }
-        if let Some((name, kind)) = typed {
+        if let Some(kind) = typed {
             return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
                 node: node.id.clone(),
-                name,
                 kind,
                 adapter: adapter_id.clone(),
             });
@@ -232,10 +223,9 @@ pub(super) async fn open_run_tools(
                     source: e,
                 });
             }
-            if let Some((name, kind)) = typed {
+            if let Some(kind) = typed {
                 return Err(RunToolsSetupError::TypedArtifactListenerFailed {
                     node: node.id.clone(),
-                    name,
                     kind,
                     source: e,
                 });

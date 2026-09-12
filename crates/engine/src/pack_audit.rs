@@ -221,8 +221,8 @@ fn describe_context(spec: &ContextSpec) -> String {
         ContextSpec::Files { files } => format!("files: {}", files.join(", ")),
         ContextSpec::Command { command } => format!("command: {command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
-            Some(node) => format!("artifact: node={node} name={}", artifact.name),
-            None => format!("artifact: name={} (mounted, no producer)", artifact.name),
+            Some(node) => format!("artifact: node={node} {}", artifact.id),
+            None => format!("artifact: {} (mounted, no producer)", artifact.id),
         },
         ContextSpec::Mcp { mcp } => format!("mcp: server={} query={}", mcp.server, mcp.query),
         ContextSpec::RunEvents { run_events } => match &run_events.filter {

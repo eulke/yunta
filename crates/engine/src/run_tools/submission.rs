@@ -9,21 +9,22 @@
 //! verdict it can act on while it still can has to be the verdict that
 //! decides the node, or the first one teaches false confidence.
 //!
-//! What a session may submit is bounded by what its node declares: the
-//! name has to be one of them, under the kind the tool submits, so a
-//! document the close would never look for has no way in.
+//! What a session may submit is bounded by what its node declares: a
+//! tool exists only for a kind that node produces, so a document the
+//! close would never look for has no way in and there is nothing for the
+//! session to choose.
 
 use serde_json::Value;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
-use crate::artifacts::{accept, Declared, VerifiedArtifact};
+use crate::artifacts::{accept, VerifiedArtifact};
 
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{backticked, failure_heading, numbered, read_as, submission_refusal};
+use super::verdicts::{failure_heading, numbered, read_as, submission_refusal};
 
 impl SessionTools {
     /// The verdict this node's close will reach, while the session can
@@ -41,7 +42,7 @@ impl SessionTools {
         let specs: Vec<ArtifactSpec> = self
             .declared
             .iter()
-            .filter(|spec| wanted.is_none_or(|name| spec.name() == name))
+            .filter(|spec| wanted.is_none_or(|name| spec.to_string() == name))
             .cloned()
             .collect();
         if specs.is_empty() {
@@ -58,11 +59,11 @@ impl SessionTools {
     ///
     /// Run tools belong to a session, so this node is one whose typed
     /// artifacts are never files it writes: a document it declares under
-    /// a `kind:` is answered by what the run holds, and an artifact with
-    /// no kind is the file the session writes itself. Those are the two
-    /// answers the close reaches, through these same two functions —
-    /// which is what keeps the verdict a session can still act on and the
-    /// verdict that decides the node one answer.
+    /// a kind is answered by what the run holds, and an opaque artifact
+    /// is the file the session writes itself. Those are the two answers
+    /// the close reaches, through these same two functions — which is
+    /// what keeps the verdict a session can still act on and the verdict
+    /// that decides the node one answer.
     fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
         let verified = match spec.kind() {
             Some(_) => crate::artifacts::held_document(&self.node, spec, held),
@@ -73,7 +74,7 @@ impl SessionTools {
                 self.host.max_artifact_bytes,
             ),
         };
-        render_verdict(spec.name(), verified)
+        render_verdict(&spec.to_string(), verified)
     }
 
     /// Why a check has nothing to look at: a name this node does not
@@ -98,40 +99,26 @@ impl SessionTools {
         kind: ArtifactKind,
         args: serde_json::Map<String, Value>,
     ) -> Result<String, RunToolError> {
-        let spec = self.submitted_spec(kind, &args)?;
+        // The node declared the kind and this tool is that kind's: there
+        // is nothing for the call to name, so the only thing it carries
+        // is the document.
+        let spec = ArtifactSpec::Interpreted(kind);
+        if !self.declared.contains(&spec) {
+            return Err(RunToolError::UndeclaredArtifact {
+                name: kind.to_string(),
+                declared: self.declared_names(),
+            });
+        }
         let Some(document) = args.get("document").filter(|value| value.is_object()) else {
             return Err(self.invalid_submission(kind, "`document` is missing or is not an object"));
         };
-        let name = spec.name().to_string();
         let offered = crate::artifacts::submit(
             &self.node,
-            spec,
+            &spec,
             document.clone(),
             self.host.max_artifact_bytes,
         );
-        self.record(name, kind, offered).await
-    }
-
-    /// Which artifact a submission is about: a name this node declares,
-    /// under the kind this tool submits.
-    fn submitted_spec(
-        &self,
-        kind: ArtifactKind,
-        args: &serde_json::Map<String, Value>,
-    ) -> Result<&ArtifactSpec, RunToolError> {
-        let Some(name) = args.get("name").and_then(Value::as_str) else {
-            return Err(self.invalid_submission(kind, "`name` is missing"));
-        };
-        let Some(spec) = self.declared.iter().find(|spec| spec.name() == name) else {
-            return Err(RunToolError::UndeclaredArtifact {
-                name: name.to_string(),
-                declared: self.declared_names(),
-            });
-        };
-        match self.wrong_kind(spec, kind) {
-            Some(wrong) => Err(wrong),
-            None => Ok(spec),
-        }
+        self.record(kind, offered).await
     }
 
     /// Records the engine's verdict on a submitted document and answers
@@ -148,10 +135,10 @@ impl SessionTools {
     /// what handed it over.
     async fn record(
         &self,
-        name: String,
         kind: ArtifactKind,
         offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
     ) -> Result<String, RunToolError> {
+        let name = ArtifactId::Interpreted { kind }.view_name();
         let (outcome, answer, accepted) = match offered {
             Ok(verified) => (
                 SubmissionOutcome::Accepted {
@@ -185,10 +172,7 @@ impl SessionTools {
                 &self.log(),
                 &self.host.run_dir,
                 Some(&self.node),
-                Declared {
-                    name: &name,
-                    kind: Some(kind),
-                },
+                verified.artifact.clone(),
                 &verified.bytes,
                 ArtifactOrigin::Submitted,
             )
@@ -197,47 +181,17 @@ impl SessionTools {
         answer
     }
 
-    /// The names this node declares under `kind`, in declaration order.
-    pub(super) fn submittable(&self, kind: ArtifactKind) -> impl Iterator<Item = &str> {
-        self.declared.iter().filter_map(move |spec| match spec {
-            ArtifactSpec::Typed {
-                name,
-                kind: declared,
-            } if *declared == kind => Some(name.as_str()),
-            _ => None,
-        })
-    }
-
-    /// The refusal for a name this node declares under something other
-    /// than the kind the tool submits, naming the tool that does take it.
-    fn wrong_kind(&self, spec: &ArtifactSpec, kind: ArtifactKind) -> Option<RunToolError> {
-        let (declared, expected) = match spec {
-            ArtifactSpec::Typed { kind: declared, .. } if *declared == kind => return None,
-            ArtifactSpec::Typed { kind: declared, .. } => (
-                declared.to_string(),
-                declared
-                    .submit_tool()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| ArtifactKind::POST_FINDING_TOOL.to_string()),
-            ),
-            ArtifactSpec::Plain(_) => (
-                "no kind (a file this session writes)".to_string(),
-                String::new(),
-            ),
-        };
-        Some(RunToolError::WrongKind {
-            name: spec.name().to_string(),
-            declared,
-            expected,
-        })
+    /// Whether this node declares a document of `kind` — which is
+    /// whether the tool that submits that kind is offered at all.
+    pub(super) fn submits(&self, kind: ArtifactKind) -> bool {
+        self.declared.contains(&ArtifactSpec::Interpreted(kind))
     }
 
     /// A call this tool cannot even read as a submission, told with the
-    /// names it does take.
+    /// document it does take.
     fn invalid_submission(&self, kind: ArtifactKind, detail: &str) -> RunToolError {
-        let names: Vec<&str> = self.submittable(kind).collect();
         RunToolError::InvalidSubmission {
-            names: backticked(&names),
+            names: format!("`{kind}`"),
             detail: detail.to_string(),
         }
     }
@@ -247,7 +201,7 @@ impl SessionTools {
     fn declared_names(&self) -> String {
         self.declared
             .iter()
-            .map(|spec| format!("`{}`", spec.name()))
+            .map(|spec| format!("`{spec}`"))
             .collect::<Vec<_>>()
             .join(", ")
     }

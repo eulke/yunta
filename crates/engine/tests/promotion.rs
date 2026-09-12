@@ -281,15 +281,13 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
     assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
 
-    let path = closed.run_dir.join("artifacts/findings-inherited.yaml");
+    let path = closed.run_dir.join("artifacts/findings.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
     // Through the same door every findings artifact is read by, so the
     // derived file satisfies the shape and the rules, not just serde.
-    let file = yunta_core::shape::read::<yunta_core::FindingsFile>(
-        &bytes,
-        "artifacts/findings-inherited.yaml",
-    )
-    .expect("the derived file must satisfy the findings door");
+    let file =
+        yunta_core::shape::read::<yunta_core::FindingsFile>(&bytes, "artifacts/findings.yaml")
+            .expect("the derived file must satisfy the findings door");
     assert_eq!(file.findings.len(), 2, "duplicates collapse: {file:?}");
     assert_eq!(file.findings[0].id, "scope-expansion-T001-1");
     assert_eq!(file.findings[1].id, "scope-expansion-T002-1");
@@ -301,10 +299,7 @@ async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
     assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
     assert!(
-        !closed
-            .run_dir
-            .join("artifacts/findings-inherited.yaml")
-            .exists(),
+        !closed.run_dir.join("artifacts/findings.yaml").exists(),
         "no findings, no file — zero noise"
     );
 }
@@ -379,7 +374,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
                 .join(held.content_hash.as_str())
         )
         .expect("the successor holds the bytes"),
-        std::fs::read(closed.run_dir.join("artifacts/findings-inherited.yaml")).unwrap()
+        std::fs::read(closed.run_dir.join("artifacts/findings.yaml")).unwrap()
     );
 }
 

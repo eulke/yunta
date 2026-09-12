@@ -119,8 +119,9 @@ Two environment variables move all of this:
 
 `context:` on a `prompt` or `loop` node assembles what that session sees, beyond the
 prompt text itself: `files: [globs]`, `command: "<cmd>"` (stdout), `artifact: {node,
-name}` (another node's declared output — this also creates the implicit dependency
-edge, no separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
+kind}` or `artifact: {node, name}` (another node's declared output, named the way
+that node declares it — this also creates the implicit dependency edge, no
+separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
 (a read-only query into this run's own log), `tasks: {}` (the tasks document's current
 state), `knowledge: {layers: [...]}` (repo/user-scoped project knowledge — see
 [knowledge layers](#knowledge-layers) below), and `node-output: {node}` (a prior
@@ -133,26 +134,35 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 ### Artifacts the engine reads
 
-Most artifacts are opaque: the engine records that the file exists and what it
-hashes to, and its structure is whatever the session decided. `kind:` says the
-opposite — that the engine reads the document, validates it, and turns its contents
-into events. There are three: `tasks`, `findings` and `questions`.
+A node declares what it produces as a list of bare strings —
+`produces: [tasks, notes.md]`.
+`tasks`, `findings` and `questions` name the three documents the engine reads,
+validates and turns into events. Every other string is the name of a file the
+engine only carries: it records that the file exists and what it hashes to, and
+its structure is whatever the session decided. Those three names are therefore
+not available as file names, and `yunta check` says so when a reference spells
+one as a `name:`.
 
-Declaring a `kind:` is all it takes. The node declares, the engine publishes the
-shape and names the tool that takes the document, the session hands the document
-over, and the engine writes the file. A node with
-`produces: [{ name: plan.yaml, kind: tasks }]` opens its session with the
-shape already in context — annotated field by field, followed by the rules the
-document has to satisfy — and with a `yunta_submit_tasks` run tool whose
-`document` argument is that same schema and whose `name` argument accepts only
-the names this node declares. A `questions` artifact arrives the same way,
+A node produces at most one document of each kind, so the kind is the whole
+identity: `(node, kind)` is what the run answers by, and declaring the same kind
+twice is a check error because there is no second one. Nothing names a file —
+the engine writes the view itself, at `artifacts/<node>/<kind>.yaml`. A fan-out
+that runs the same node once per runner needs no template for that: each sibling
+is a node of its own and holds its own document.
+
+The node declares, the engine publishes the shape and names the tool that takes
+the document, the session hands the document over, and the engine writes the
+file. A node with `produces: [tasks]` opens its session with the shape already in
+context — annotated field by field, followed by the rules the document has to
+satisfy — and with a `yunta_submit_tasks` run tool whose one argument,
+`document`, is that same schema. A `questions` artifact arrives the same way,
 through `yunta_submit_questions`. No session writes an interpreted file itself.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
 
 The tool answers in the same call, with the verdict the node's close reaches: the
 engine reads the object into the same type and runs the same rules. An acceptance
-reports what the engine understood — `plan.yaml — accepted. 6 task(s)
+reports what the engine understood — `tasks.yaml — accepted. 6 task(s)
 registered: ...` — and writes the canonical document itself. A refusal lists every
 rule the document breaks, all at once — or, when the
 object does not read into its kind at all, that one problem and the path where it
@@ -166,8 +176,8 @@ the moment it sees one — validated on its own, so a refusal names what to fix 
 that finding and everything already reported stands. `yunta_update_finding` replaces
 one by id with its whole new content, and `yunta_withdraw_finding` takes one back
 with a reason; a withdrawal is final, and a finding that comes back is a new id. A
-`prompt` or `loop` node that declares `{ name: review.yaml, kind: findings }` gets
-that file written at its close, from every finding it reported that still stands,
+`prompt` or `loop` node that declares `produces: [findings]` gets that document
+written at its close, from every finding it reported that still stands,
 in the order it first reported them — a node that reports nothing gets a file with
 an empty list. A finding outlives the session that found it, so a session that dies
 after reporting loses nothing.

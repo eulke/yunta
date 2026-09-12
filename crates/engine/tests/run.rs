@@ -28,8 +28,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -52,7 +51,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: T001
@@ -295,8 +293,7 @@ nodes:
     runner: planner
     prompt: "Write the plan."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
 "#;
 
     // The session claims success but submits nothing — the engine
@@ -566,8 +563,7 @@ nodes:
     runner: executor
     prompt: "Review the changes."
     artifacts:
-      produces:
-        - { name: findings.yaml, kind: findings }
+      produces: [findings]
 "#;
 
     let fixture = r#"
@@ -707,9 +703,9 @@ name: ingest-typed
 nodes:
   - id: plan
     kind: bash
-    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{node.artifacts}}/plan.yaml"
+    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{node.artifacts}}/tasks.yaml"
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 "#;
     let (terminal, state) = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
@@ -728,11 +724,11 @@ nodes:
     // renders every document of that kind — not the spelling the node
     // happened to write.
     let written =
-        std::fs::read(bench.staging("plan").join("plan.yaml")).expect("the node wrote it");
+        std::fs::read(bench.staging("plan").join("tasks.yaml")).expect("the node wrote it");
     let stored = bench.object(&held[0].content_hash).expect("the object");
     assert_ne!(stored, written, "the file was not canonical to begin with");
     let parsed: yunta_core::TasksFile =
-        yunta_core::shape::read(&stored, "plan.yaml").expect("a canonical tasks document");
+        yunta_core::shape::read(&stored, "tasks.yaml").expect("a canonical tasks document");
     assert_eq!(
         stored,
         yunta_core::shape::render(&parsed).unwrap().into_bytes(),
@@ -829,7 +825,6 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     let run_id = RunId::from("run-with-brief");
     let from = RunId::from("run-predecessor");
     let artifacts = vec![yunta_engine::BirthArtifact {
-        name: "brief/plan.md".to_string(),
         artifact: yunta_core::events::ArtifactId::Opaque {
             name: "brief/plan.md".to_string(),
         },
@@ -1059,9 +1054,9 @@ name: tasks-from-the-log
 nodes:
   - id: plan
     kind: bash
-    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{{{node.artifacts}}}}/plan.yaml"
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{{{node.artifacts}}}}/tasks.yaml"
     artifacts:
-      produces: [{{ name: plan.yaml, kind: tasks }}]
+      produces: [tasks]
   - id: wipe
     kind: bash
     depends_on: [plan]

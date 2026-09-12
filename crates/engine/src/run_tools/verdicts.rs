@@ -52,15 +52,6 @@ pub(super) fn refusal(operation: FindingOperation, report: &Report) -> String {
     numbered(heading.to_string(), report)
 }
 
-/// `` `a`, `b` `` — how a tool lists the names it takes.
-pub(super) fn backticked(names: &[&str]) -> String {
-    names
-        .iter()
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// What the engine read out of an artifact, so a session sees its meaning
 /// survived the parse and not only its syntax.
 pub(super) fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {

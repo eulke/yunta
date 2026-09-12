@@ -226,7 +226,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces: [{ name: tasks.yaml, kind: tasks }]
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -269,7 +269,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: tasks.yaml
           document:
             tasks:
               - id: T001
@@ -636,8 +635,7 @@ nodes:
     runner: planner
     prompt: "Write the plan."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
 "#,
         "plan",
         Failure::artifacts(vec![ArtifactFailure::Undelivered {

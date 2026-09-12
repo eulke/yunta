@@ -302,11 +302,8 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
     }
 }
 
-/// The declared artifact names re-render with the node's own
-/// template vars (`{{runner.role}}` above all), so each fan-out sibling
-/// declares — and verifies — its own file. Nodes without templates in
-/// their names come back unchanged.
-/// The artifacts a node declares, with every templated name rendered.
+/// The artifacts a node declares, with every templated opaque name
+/// rendered.
 ///
 /// These are the specs the node's close will verify, so they are also the
 /// ones a session is allowed to check against: a check that looked at a
@@ -334,10 +331,17 @@ pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_cor
 pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::PathBuf> {
     declared_artifacts(ctx, node)
         .iter()
-        .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Plain(_)))
+        .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Opaque(_)))
         .then(|| crate::run_dir::staging(ctx.run_dir, &node.id))
 }
 
+/// `node` with every opaque artifact name rendered against its own
+/// template vars, so a fan-out sibling that names its file
+/// `report-{{runner.role}}.md` declares — and verifies — its own.
+///
+/// Only an opaque name: an interpreted artifact is identified by its
+/// kind, which is a closed vocabulary with nothing in it to render, and
+/// the run holds one per node whatever the runner is called.
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
@@ -346,11 +350,9 @@ pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Nod
     let mut rendered = node.clone();
     if let Some(artifacts) = &mut rendered.artifacts {
         for spec in &mut artifacts.produces {
-            let name = match spec {
-                yunta_core::ArtifactSpec::Plain(name) => name,
-                yunta_core::ArtifactSpec::Typed { name, .. } => name,
-            };
-            *name = render_template(name, &vars)?;
+            if let yunta_core::ArtifactSpec::Opaque(name) = spec {
+                *name = render_template(name, &vars)?;
+            }
         }
     }
     Ok(rendered)

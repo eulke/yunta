@@ -118,8 +118,7 @@ nodes:
     runner: executor
     prompt: "Review the changes."
     artifacts:
-      produces:
-        - { name: findings.yaml, kind: findings }
+      produces: [findings]
   - id: gate
     kind: check
     builtin: findings_gate
@@ -157,8 +156,7 @@ nodes:
     runner: executor
     prompt: "Review the changes."
     artifacts:
-      produces:
-        - { name: findings.yaml, kind: findings }
+      produces: [findings]
   - id: gate
     kind: check
     builtin: findings_gate
@@ -209,8 +207,7 @@ nodes:
     prompt: "Review the changes."
     description: "Reviews the diff for issues"
     artifacts:
-      produces:
-        - { name: findings.yaml, kind: findings }
+      produces: [findings]
 "#;
 
     let fixture = review_session(&[]);
@@ -437,8 +434,7 @@ nodes:
     runner: planner
     prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor

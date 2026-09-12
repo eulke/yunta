@@ -82,12 +82,13 @@ pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question,
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};
 pub use workflow::{
-    ArtifactContextRef, ArtifactKind, ArtifactSpec, Artifacts, CheckBuiltin, CleanupTarget,
-    ContextSpec, Coordination, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks,
-    JoinPolicy, KnowledgeLayer, KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
-    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
-    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsFilter,
-    RunEventsParams, ScopeExpansion, TasksParams, Workflow, WorkflowIsolation, ARTIFACTS_DIR,
+    ArtifactContextRef, ArtifactKind, ArtifactRefId, ArtifactSpec, Artifacts, CheckBuiltin,
+    CleanupTarget, ContextSpec, Coordination, DistillArtifact, ExternalGate, ForgeKind,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LoopUntil,
+    McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter,
+    NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt,
+    PromptSource, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, Workflow,
+    WorkflowIsolation, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

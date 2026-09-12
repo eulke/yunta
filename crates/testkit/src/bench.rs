@@ -110,21 +110,19 @@ impl Bench {
         yunta_engine::run_dir::staging(&self.run_dir(), &node.into())
     }
 
-    /// The bytes the run holds for one artifact, by the name a node
-    /// declares it under.
+    /// The bytes the run holds for one artifact, by the identity it is
+    /// declared under: a kind name (`tasks`) for a document the engine
+    /// reads, a file name for an opaque one.
     ///
     /// What a reader of the run gets: the acceptance standing last on the
-    /// run's own log for that name, read out of its object store. A test
-    /// asserts on the run's answer rather than on a file that happens to
-    /// sit beside it. `None` when the run's log holds no such artifact.
-    pub fn artifact(&self, name: &str) -> Option<Vec<u8>> {
-        let workflow = self
-            .workflow
-            .lock()
-            .expect("the bench's own lock")
-            .clone()
-            .expect("a run has to happen before its artifacts can be asked about");
-        let id = yunta_core::events::artifacts::declared_identity(&workflow, None, name);
+    /// run's own log for that identity, read out of its object store. A
+    /// test asserts on the run's answer rather than on a file that
+    /// happens to sit beside it. `None` when the run's log holds no such
+    /// artifact.
+    pub fn artifact(&self, declared: &str) -> Option<Vec<u8>> {
+        let spec: yunta_core::ArtifactSpec = yunta_core::yaml::parse(declared)
+            .expect("an artifact is named the way `artifacts.produces` names one");
+        let id = yunta_core::events::ArtifactId::from(&spec);
         let held = crate::events::accepted(&self.events());
         let found = held
             .iter()

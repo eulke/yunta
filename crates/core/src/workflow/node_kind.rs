@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::parse::{describe, nested};
-use super::{LoopUntil, Node, ScopeExpansion};
+use super::parse::{describe, nested, take};
+use super::{ArtifactRefId, ArtifactSpec, LoopUntil, Node, ScopeExpansion};
 use crate::ids::{ExecutorName, NodeId, OptionId};
 use crate::yaml::Value;
 
@@ -219,15 +219,36 @@ pub struct MountSpec {
 /// The mounted artifact: `node` names a node of the *parent's own*
 /// graph — a `kind: workflow` sibling resolves through the recorded
 /// link (`child_run_finished`) to that child run's artifacts, any other
-/// node to the parent's own `run.dir/artifacts/`. `as:` renames the
-/// copy in the child (absent keeps `name`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+/// node to the parent's own artifacts. `as:` gives an opaque artifact
+/// another name in the child, which is what the child holds it as; a
+/// document the engine reads is identified by its kind in either run, so
+/// there is nothing for `as:` to change and declaring it is refused.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct MountArtifact {
     pub node: NodeId,
-    pub name: String,
+    #[serde(flatten)]
+    pub id: ArtifactRefId,
     #[serde(default, rename = "as", skip_serializing_if = "Option::is_none")]
     pub rename: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for MountArtifact {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let mut mapping = crate::yaml::Mapping::deserialize(deserializer)?;
+        let node = take::<D, _>(&mut mapping, "node")?
+            .ok_or_else(|| D::Error::custom("a `mounts:` entry names the `node:` it comes from"))?;
+        let rename = take::<D, _>(&mut mapping, "as")?;
+        let id = ArtifactRefId::from_rest::<D>(mapping, "a `mounts:` entry", &["node", "as"])?;
+        if rename.is_some() && matches!(id, ArtifactRefId::Kind { .. }) {
+            return Err(D::Error::custom(
+                "a `mounts:` entry that names a `kind:` cannot rename it with `as:`: a document \
+                 the engine reads is identified by its kind in every run that holds it",
+            ));
+        }
+        Ok(MountArtifact { node, id, rename })
+    }
 }
 
 fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
@@ -252,9 +273,11 @@ pub enum WorkflowIsolation {
 #[serde(deny_unknown_fields)]
 pub struct ExternalGate {
     pub kind: ForgeKind,
-    /// Paths (relative to `run.dir`) committed to `branch` for review —
-    /// the reference example: `[spec.md]`.
-    pub artifacts: Vec<String>,
+    /// The artifacts of this run committed to `branch` for review, named
+    /// the way `artifacts.produces` names them — the reference example:
+    /// `[spec.md]`. Each is published under the name the run's own view
+    /// carries it by.
+    pub artifacts: Vec<ArtifactSpec>,
     /// Template-rendered branch name the artifacts are pushed to and the
     /// PR is opened from (`{{run.branch}}`, the reference example, resolves
     /// to `yunta/<run_id>` — a fresh push target, not necessarily the

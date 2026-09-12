@@ -28,9 +28,7 @@ nodes:
       Identify the ambiguities in "{{inputs.idea}}" and raise the questions
       you need; don't converse. Once answered, write the brief.
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
-        - brief.md
+      produces: [questions, brief.md]
 
   - id: plan
     kind: prompt
@@ -44,7 +42,7 @@ nodes:
       - command: "git log --oneline -20"
     prompt: { file: prompts/plan.md }
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 
   - id: approve-plan
     kind: gate
@@ -95,7 +93,7 @@ nodes:
     permissions: read-only
     prompt: "Audit the changes and report what you find."
     artifacts:
-      produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
+      produces: [findings]
 
   - id: fix-findings
     kind: prompt
@@ -120,4 +118,4 @@ nodes:
 
 on_finish:
   - cleanup: worktree
-  - distill: [plan.yaml]
+  - distill: [{ node: plan, kind: tasks }]

@@ -561,10 +561,7 @@ async fn dropping_the_session_closes_the_endpoint() {
 // would while it is not.
 
 fn tasks_spec() -> yunta_core::ArtifactSpec {
-    yunta_core::ArtifactSpec::Typed {
-        name: "plan.yaml".to_string(),
-        kind: yunta_core::ArtifactKind::Tasks,
-    }
+    yunta_core::ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Tasks)
 }
 
 /// The node those specs belong to, as the close reads it.
@@ -575,8 +572,7 @@ id: plan
 kind: prompt
 prompt: "Write the tasks document."
 artifacts:
-  produces:
-    - { name: plan.yaml, kind: tasks }
+  produces: [tasks]
 "#,
     )
     .unwrap()
@@ -613,7 +609,7 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(text.contains("tasks — ok"), "{text}");
     assert!(
         text.contains("1 task(s) registered: `t1`"),
         "the session sees its meaning survived, not only its syntax: {text}"
@@ -628,18 +624,13 @@ async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() 
     // it — and the session is told exactly what its close would say,
     // word for word, instead of a confidence the close will not honour.
     std::fs::write(
-        bench.staging("plan").join("plan.yaml"),
+        bench.staging("plan").join("tasks.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
     let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
-    let (_, text) = call(
-        &client,
-        "yunta_check_artifact",
-        json!({"name": "plan.yaml"}),
-    )
-    .await;
+    let (_, text) = call(&client, "yunta_check_artifact", json!({"name": "tasks"})).await;
 
     let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
         .expect_err("the close owes the document nobody handed over");
@@ -661,13 +652,13 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     submit_plan(&client).await;
 
     std::fs::write(
-        bench.staging("plan").join("plan.yaml"),
+        bench.staging("plan").join("tasks.yaml"),
         "not a tasks document at all\n",
     )
     .unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(text.contains("tasks — ok"), "{text}");
     assert!(
         text.contains("1 task(s) registered: `t1`"),
         "the verdict is about the document the run holds: {text}"
@@ -690,7 +681,41 @@ async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares(
         text.contains("`findings.yaml` is not an artifact"),
         "{text}"
     );
-    assert!(text.contains("`plan.yaml`"), "{text}");
+    assert!(text.contains("`tasks`"), "{text}");
+}
+
+/// A node declares the kind, so the tool that submits it is either
+/// mounted or absent: there is no argument left for a session to get
+/// wrong, and a document this node's close will never look for has no
+/// tool to arrive through.
+#[tokio::test]
+async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let tools = client.list_tools(None).await.unwrap();
+    let names: Vec<&str> = tools.tools.iter().map(|t| t.name.as_ref()).collect();
+    assert!(names.contains(&"yunta_submit_tasks"), "{names:?}");
+    assert!(
+        !names.contains(&"yunta_submit_questions"),
+        "a kind this node does not declare has no way in: {names:?}"
+    );
+
+    // And the one that is mounted takes the document alone.
+    let schema = &tools
+        .tools
+        .iter()
+        .find(|t| t.name == "yunta_submit_tasks")
+        .expect("the tool is mounted")
+        .input_schema;
+    let properties = schema["properties"].as_object().expect("an object schema");
+    assert_eq!(
+        properties.keys().collect::<Vec<_>>(),
+        vec!["document"],
+        "the node declared the kind, so nothing names the artifact: {properties:?}"
+    );
+    client.cancel().await.unwrap();
 }
 
 #[tokio::test]

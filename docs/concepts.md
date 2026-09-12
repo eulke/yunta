@@ -65,8 +65,10 @@ the same way it looks up anything else. Nobody has to relay a format by hand.
 
 A session hands a document over rather than writing a file. The engine gives it a
 tool per interpreted kind the node declares — `yunta_submit_tasks`,
-`yunta_submit_questions` — whose argument is that published schema, so the model
-fills in an object instead of transcribing a format. Findings are finer-grained
+`yunta_submit_questions` — whose one argument is that published schema, so the
+model fills in an object instead of transcribing a format. There is nothing else
+to name: a node produces at most one document of each kind, so the kind the node
+declared is the whole identity. Findings are finer-grained
 still: each one is reported on its own with `yunta_post_finding`, corrected with
 `yunta_update_finding` and taken back with `yunta_withdraw_finding`, and the engine
 writes the node's findings file at its close from everything that still stands.

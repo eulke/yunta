@@ -3,8 +3,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::parse::{keyed_entry, nested};
+use super::parse::{keyed_entry, nested, take};
+use super::ArtifactRefId;
 use crate::ids::NodeId;
+use crate::yaml::Mapping;
 
 /// One `context:` entry: a builtin `ContextSource` plus its own
 /// parameters, discriminated by its own field name, exactly matching
@@ -106,6 +108,7 @@ pub struct McpQueryParams {
     pub query: String,
 }
 
+/// `artifact: { node: ..., kind: ... }` or
 /// `artifact: { node: ..., name: ... }` — the referenced node's own
 /// declared artifact. Reading it creates an *implicit* `depends_on` edge
 /// (`build_manifest` expands it into the frozen workflow's own
@@ -113,17 +116,27 @@ pub struct McpQueryParams {
 /// `context:` at all — by the time either runs, the edge is already
 /// ordinary `depends_on`).
 ///
-/// `node` is optional: `artifact: { name }` means "an artifact of
-/// this run's dir, whoever produced it" — a mounted one included. It
+/// `node` is optional: a reference without one means "an artifact of
+/// this run, whoever produced it" — a mounted one included. It
 /// creates no implicit edge (there is no producer to order behind), and
 /// it's what keeps a catalog child parametric: it never has to name a
 /// producer it doesn't have.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct ArtifactContextRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeId>,
-    pub name: String,
+    #[serde(flatten)]
+    pub id: ArtifactRefId,
+}
+
+impl<'de> Deserialize<'de> for ArtifactContextRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut mapping = Mapping::deserialize(deserializer)?;
+        let node = take::<D, _>(&mut mapping, "node")?;
+        let id =
+            ArtifactRefId::from_rest::<D>(mapping, "an `artifact:` context source", &["node"])?;
+        Ok(ArtifactContextRef { node, id })
+    }
 }
 
 /// `run-events: { filter: ... }` — a read-only query into the run's

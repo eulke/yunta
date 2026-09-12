@@ -71,23 +71,25 @@ pub(super) async fn publish_gate(
     let events = ctx.load_events().await?;
     let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
-    for name in &external.artifacts {
-        let Some(artifact) = held.named(&ctx.manifest.workflow, None, name) else {
+    for spec in &external.artifacts {
+        let wanted = yunta_core::events::ArtifactId::from(spec);
+        let Some(artifact) = held.held(&wanted, None) else {
             emit_started(ctx, node).await?;
             fail(
                 ctx,
                 node,
                 format!(
-                    "node `{}` publishes `{name}` with its external gate, and this run holds \
+                    "node `{}` publishes the {} with its external gate, and this run holds \
                      no such artifact — no node produced it",
-                    node.id
+                    node.id,
+                    wanted.label()
                 ),
                 false,
             )
             .await?;
             return Ok(GateStep::Resolved);
         };
-        artifacts.push((name.clone(), held.bytes(artifact)?));
+        artifacts.push((wanted.view_name(), held.bytes(artifact)?));
     }
 
     let summary = format!(

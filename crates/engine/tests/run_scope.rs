@@ -473,8 +473,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor

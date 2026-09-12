@@ -81,7 +81,7 @@ Cada rechazo nombra la tarea, el campo y la expectativa, en el vocabulario del
 documento y nunca en el del parser:
 
 ```
-artifacts/plan.yaml: 3 errors
+artifacts/plan/tasks.yaml: 3 errors
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
   task `parse-events`: `depends_on` names `storage-init`, which no task in this file declares
   task `T004`: every criterion is a `guard`; at least one must be able to fail before the work, or there is nothing the work has to make pass

@@ -1398,7 +1398,7 @@ nodes:
     kind: prompt
     runner: executor
     prompt: "Review it."
-    artifacts: { produces: [{ name: review.yaml, kind: findings }] }
+    artifacts: { produces: [findings] }
 "#,
     )]);
     let parent = r#"
@@ -1407,7 +1407,7 @@ nodes:
   - id: feat
     kind: workflow
     use: reviewer
-    artifacts: { produces: [{ name: inherited.yaml, kind: findings }] }
+    artifacts: { produces: [findings] }
 "#;
     let fixture = r#"
 capabilities: { run_tools: true }

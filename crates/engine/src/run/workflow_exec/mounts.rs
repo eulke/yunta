@@ -14,8 +14,9 @@
 //! dangling behind it.
 
 use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, Failure, StoredEvent};
-use yunta_core::{MountSpec, NodeKind, RunId};
+use yunta_core::{ArtifactRefId, MountSpec, NodeKind, RunId};
 
 use super::runs_root;
 use crate::run::promote::birth_artifact;
@@ -56,36 +57,38 @@ impl From<NotMounted> for Failure {
 #[derive(Debug, thiserror::Error)]
 pub(super) enum MountError {
     #[error(
-        "mount `{name}` from node `{node}`: no linked child run of `{node}` reached a terminal \
-         state in this run — did this run's mode exclude it?"
+        "mount of the {artifact} from node `{node}`: no linked child run of `{node}` reached a \
+         terminal state in this run — did this run's mode exclude it?"
     )]
     NoTerminalChild {
-        name: String,
+        artifact: ArtifactRefId,
         node: yunta_core::NodeId,
     },
-    #[error("mount `{name}` from node `{node}`: run `{run}` cannot hand over its bytes")]
+    #[error("mount of the {artifact} from node `{node}`: run `{run}` cannot hand over its bytes")]
     Unreadable {
-        name: String,
+        artifact: ArtifactRefId,
         node: yunta_core::NodeId,
         run: RunId,
         #[source]
         source: crate::artifacts::ObjectError,
     },
     #[error(
-        "mount `{name}` from node `{node}`: the frozen truth of run `{run}` cannot be read: \
-         {detail}"
+        "mount of the {artifact} from node `{node}`: the frozen truth of run `{run}` cannot be \
+         read: {detail}"
     )]
     Unfrozen {
-        name: String,
+        artifact: ArtifactRefId,
         node: yunta_core::NodeId,
         run: RunId,
         detail: String,
     },
     /// Boxed: a storage failure carries far more than any other mount
     /// problem, and every caller moves this error by value.
-    #[error("mount `{name}` from node `{node}`: the log of run `{run}` cannot be reached")]
+    #[error(
+        "mount of the {artifact} from node `{node}`: the log of run `{run}` cannot be reached"
+    )]
     Unlogged {
-        name: String,
+        artifact: ArtifactRefId,
         node: yunta_core::NodeId,
         run: RunId,
         #[source]
@@ -140,7 +143,7 @@ async fn resolve_one(
                 Some(child_id) => child_id,
                 None => {
                     return Err(MountError::NoTerminalChild {
-                        name: m.name.clone(),
+                        artifact: m.id.clone(),
                         node: m.node.clone(),
                     }
                     .into());
@@ -155,16 +158,12 @@ async fn resolve_one(
     // run answers about itself, so its workflow is the one that
     // reads the name.
     let source_dir = runs_root(ctx).join(source_run.as_str());
-    let (source_events, source_workflow, producer) = if source_run == *ctx.run_id {
-        (
-            events.to_vec(),
-            ctx.manifest.workflow.clone(),
-            Some(m.node.clone()),
-        )
+    let (source_events, producer) = if source_run == *ctx.run_id {
+        (events.to_vec(), Some(m.node.clone()))
     } else {
-        let manifest = read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
+        read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
             MountError::Unfrozen {
-                name: m.name.clone(),
+                artifact: m.id.clone(),
                 node: m.node.clone(),
                 run: source_run.clone(),
                 detail: yunta_core::describe(&source),
@@ -175,39 +174,44 @@ async fn resolve_one(
             .events_for_run(source_run.clone())
             .await
             .map_err(|source| MountError::Unlogged {
-                name: m.name.clone(),
+                artifact: m.id.clone(),
                 node: m.node.clone(),
                 run: source_run.clone(),
                 source: Box::new(source),
             })?;
-        (child_events, manifest.workflow, None)
+        (child_events, None)
     };
     let held = crate::artifacts::RunArtifacts::of(&source_dir, &source_events);
-    // The source run answers by identity, so the failure records the
-    // identity it was asked for rather than the name the mount spells
-    // it with here.
-    let (artifact, found) = held.identified(&source_workflow, producer.as_ref(), &m.name);
-    let found = found
+    // The mount names the identity itself, and a run answers by
+    // identity: the same question in both runs, with nothing in between
+    // to translate.
+    let artifact = ArtifactId::from(&m.id);
+    let found = held
+        .held(&artifact, producer.as_ref())
         .ok_or_else(|| {
             NotMounted::Undelivered(ArtifactFailure::Unheld {
                 run: source_run.clone(),
                 producer: Some(m.node.clone()),
-                artifact,
+                artifact: artifact.clone(),
             })
         })?
         .clone();
     let bytes = held
         .bytes(&found)
         .map_err(|source| MountError::Unreadable {
-            name: m.name.clone(),
+            artifact: m.id.clone(),
             node: m.node.clone(),
             run: source_run.clone(),
             source,
         })?;
-    Ok(birth_artifact(
-        m.rename.clone().unwrap_or_else(|| m.name.clone()),
-        bytes,
-        &source_run,
-        &found,
-    ))
+    // `as:` gives an opaque artifact another name in the child, and a
+    // name is what identifies an opaque artifact — so the child holds
+    // the renamed one. A document the engine reads has no name to
+    // change, which is why `as:` beside a `kind:` is refused when the
+    // workflow is read.
+    let carried = match &m.rename {
+        Some(name) => ArtifactId::Opaque { name: name.clone() },
+        None => artifact,
+    };
+    Ok(birth_artifact(carried, bytes, &source_run, &found))
 }

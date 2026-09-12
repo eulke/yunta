@@ -30,8 +30,9 @@
 
 use serde::Serialize;
 use yunta_core::events::findings::effective;
+use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
-use yunta_core::{Isolation, ModeName, OnFinishStep};
+use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
 
@@ -127,7 +128,7 @@ fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
 /// never un-close a run the log is about to close) — except IO on the
 /// destination, which is a real error before `run_finished` exists.
 pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(), RunError> {
-    let declared: Vec<&String> = ctx
+    let declared: Vec<&DistillArtifact> = ctx
         .manifest
         .workflow
         .on_finish
@@ -158,11 +159,16 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
     let events = ctx.load_events().await?;
     let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
-    for name in &declared {
-        match held.named(&ctx.manifest.workflow, None, name) {
+    for declaration in &declared {
+        let wanted = ArtifactId::from(&declaration.id);
+        // The distilled copy carries the name the run's own view gives
+        // it, so a reader opening the knowledge directory and a reader
+        // opening the run find the same file name.
+        let name = wanted.view_name();
+        match held.held(&wanted, Some(&declaration.node)) {
             Some(artifact) => {
                 let bytes = held.bytes(artifact)?;
-                let dest = dest_dir.join(name.as_str());
+                let dest = dest_dir.join(&name);
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
                         context: format!("create `{}`", parent.display()),
@@ -174,7 +180,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                     source,
                 })?;
                 artifacts.push(ProvenanceArtifact {
-                    name: name.to_string(),
+                    name,
                     content_hash: Some(format!("sha256:{}", artifact.content_hash)),
                     missing: false,
                 });
@@ -186,17 +192,19 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                 // anyway.
                 ctx.engine_finding(
                     None,
-                    &format!("distill-missing-{name}"),
+                    &format!("distill-missing-{}-{}", declaration.node, declaration.id),
                     FindingSeverity::Minor,
-                    format!("distill: declared artifact `{name}` was never produced"),
-                    format!("run.dir/artifacts/{name}"),
+                    format!("distill: declared artifact {declaration} was never produced"),
+                    crate::artifacts::store::view_path(Some(&declaration.node), &name)
+                        .display()
+                        .to_string(),
                     "the workflow's `on_finish.distill` names this artifact \
-                     but no node produced it in this run"
+                     but the node that produces it never did in this run"
                         .to_string(),
                 )
                 .await?;
                 artifacts.push(ProvenanceArtifact {
-                    name: name.to_string(),
+                    name,
                     content_hash: None,
                     missing: true,
                 });

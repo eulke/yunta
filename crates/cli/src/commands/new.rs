@@ -115,8 +115,7 @@ nodes:
     # runner: planner  # uncomment once runners: defines this role
     prompt: \"Plan the work and hand over the tasks document.\"
     artifacts:
-      produces:
-        - { name: tasks.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     # runner: implementer  # uncomment once runners: defines this role

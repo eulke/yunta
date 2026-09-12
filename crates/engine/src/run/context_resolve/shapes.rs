@@ -9,7 +9,6 @@
 use yunta_core::events::ContextSourceRef;
 use yunta_core::Node;
 
-use crate::run::node_exec::render_artifact_names;
 use crate::run::RunCtx;
 
 use super::error::ContextResolveError;
@@ -35,7 +34,7 @@ pub(super) fn mount_artifact_shapes(
     sources: &mut Vec<ContextSourceRef>,
 ) -> Result<(), ContextResolveError> {
     let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
-    for (source_id, content) in artifact_shapes(ctx, node) {
+    for (source_id, content) in artifact_shapes(node) {
         let bytes = content.into_bytes();
         let (path, content_hash) =
             materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
@@ -65,20 +64,9 @@ pub(super) fn mount_artifact_shapes(
 /// nothing — it has no shape to demand.
 ///
 /// The block names the kind and what carries it, never a path: an
-/// interpreted artifact is a document the session hands over, and the
-/// file is the engine's to write.
-///
-/// Names carry templates (`findings-{{runner.role}}`), and what is
-/// published is the rendered name — the one the close will verify
-/// against. A node whose names do not render has no such name to give,
-/// so it publishes nothing and fails at close with the template error
-/// naming the variable; telling a session to write
-/// `findings-{{runner.role}}` would only buy a file verification is
-/// never going to look for.
-pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, String)> {
-    let Ok(node) = render_artifact_names(ctx, node) else {
-        return Vec::new();
-    };
+/// interpreted artifact is a document the session hands over, identified
+/// by its kind, and the file is the engine's to write.
+pub(super) fn artifact_shapes(node: &Node) -> Vec<(String, String)> {
     let Some(artifacts) = &node.artifacts else {
         return Vec::new();
     };
@@ -86,24 +74,24 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
         .produces
         .iter()
         .filter_map(|spec| match spec {
-            yunta_core::ArtifactSpec::Typed { name, kind } => {
+            yunta_core::ArtifactSpec::Interpreted(kind) => {
                 let shape = yunta_core::shape::contract(*kind);
                 let opening = match kind.submit_tool() {
-                    Some(_) => format!(
-                        "This node produces a `{kind}` artifact named `{name}`. It is a \
-                         document this session submits through its run tools; the engine \
-                         validates it and writes the file itself. Do not write the file."
+                    Some(tool) => format!(
+                        "This node produces the `{kind}` document. It is not a file this \
+                         session writes: hand it over with `{tool}`, and the engine \
+                         validates it and writes the file itself."
                     ),
                     None => format!(
-                        "This node produces a `{kind}` artifact named `{name}`. It is not a \
-                         file this session writes: report each finding through its run tools \
-                         the moment you see it, and the engine writes the file at the end \
-                         from everything this node reported. A finding reported before this \
+                        "This node produces the `{kind}` artifact. It is not a file this \
+                         session writes: report each finding through its run tools the \
+                         moment you see it, and the engine writes the file at the end from \
+                         everything this node reported. A finding reported before this \
                          session ends survives whatever happens after."
                     ),
                 };
                 Some((
-                    format!("{SHAPE_KIND}:{name}"),
+                    format!("{SHAPE_KIND}:{kind}"),
                     format!(
                         "{opening}\n\nWhat follows is the whole contract for that \
                          document — the keys, their types, and the rules. Where any other \
@@ -112,7 +100,7 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
                     ),
                 ))
             }
-            yunta_core::ArtifactSpec::Plain(_) => None,
+            yunta_core::ArtifactSpec::Opaque(_) => None,
         })
         .collect()
 }

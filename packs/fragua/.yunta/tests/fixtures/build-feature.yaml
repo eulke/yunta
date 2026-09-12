@@ -9,7 +9,7 @@ capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "ambiguities"
     steps:
-      - { type: run_tool, tool: yunta_submit_questions, arguments: { name: questions.yaml, document: { questions: [] } } }
+      - { type: run_tool, tool: yunta_submit_questions, arguments: { document: { questions: [] } } }
     effects:
       - { path: "{{staging}}/grill/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
     outcome: { type: completed, summary: "brief written" }
@@ -18,7 +18,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: T001

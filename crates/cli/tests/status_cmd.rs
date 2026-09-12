@@ -19,12 +19,10 @@ nodes:
   - id: draft
     kind: bash
     run: |
-      printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{node.artifacts}}/plan.yaml
-      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{node.artifacts}}/notes.yaml
+      printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{node.artifacts}}/tasks.yaml
+      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
-        - { name: notes.yaml, kind: findings }
+      produces: [tasks, findings]
 "#;
 
 /// Runs [`TWO_DOCUMENTS`] and hands back the run id the follow-up
@@ -90,8 +88,8 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "the failing node heads its own detail: {text}"
     );
 
-    let (tasks_heading, tasks_problems) = document_block(&text, &staged("plan.yaml"));
-    let (findings_heading, findings_problems) = document_block(&text, &staged("notes.yaml"));
+    let (tasks_heading, tasks_problems) = document_block(&text, &staged("tasks.yaml"));
+    let (findings_heading, findings_problems) = document_block(&text, &staged("findings.yaml"));
 
     // The §4 block counts what it lists, and says `errors` for more than
     // one — never the `error(s)` hedge.
@@ -103,14 +101,14 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     }
     assert_eq!(
         tasks_heading,
-        format!("{}: {} errors", staged("plan.yaml"), tasks_problems.len()),
+        format!("{}: {} errors", staged("tasks.yaml"), tasks_problems.len()),
         "the heading counts the problems under it: {text}"
     );
     assert_eq!(
         findings_heading,
         format!(
             "{}: {} errors",
-            staged("notes.yaml"),
+            staged("findings.yaml"),
             findings_problems.len()
         ),
         "the heading counts the problems under it: {text}"
@@ -143,7 +141,7 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         .find(|line| line.trim_start().starts_with("draft: failed — "))
         .unwrap_or_else(|| panic!("no one-line verdict for `draft` in:\n{text}"));
     assert!(
-        node_line.contains(&staged("plan.yaml")) && node_line.contains(&staged("notes.yaml")),
+        node_line.contains(&staged("tasks.yaml")) && node_line.contains(&staged("findings.yaml")),
         "the collapsed line still names every document: {node_line}"
     );
 }
@@ -171,11 +169,11 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
 
     let tasks = documents
         .iter()
-        .find(|d| d["path"] == staged("plan.yaml"))
+        .find(|d| d["path"] == staged("tasks.yaml"))
         .unwrap_or_else(|| panic!("the tasks document is named by its path: {state:#}"));
     let findings = documents
         .iter()
-        .find(|d| d["path"] == staged("notes.yaml"))
+        .find(|d| d["path"] == staged("findings.yaml"))
         .unwrap_or_else(|| panic!("the findings artifact is named by its path: {state:#}"));
 
     // The kind a consumer needs to know which shape the file had to meet.

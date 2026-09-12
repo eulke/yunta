@@ -47,7 +47,8 @@ fn check_artifact_tool() -> Tool {
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "The artifact's file name, as the node declares it. \
+                    "description": "The artifact, as the node declares it: a kind for a \
+                                    document the engine reads, a file name otherwise. \
                                     Omit to check them all."
                 }
             }
@@ -132,40 +133,33 @@ fn blackboard_tool() -> Tool {
     )
 }
 
-/// One tool per submittable kind this node declares, offered for
-/// exactly the names of that kind: a session can only submit a
-/// document the close will look for.
+/// One tool per submittable kind this node declares.
+///
+/// A node produces at most one document of each kind, so declaring the
+/// kind is the whole decision: the tool exists exactly when the close
+/// will look for that document, and there is nothing left for the
+/// session to name.
 fn submission_tools(session: &SessionTools) -> Vec<Tool> {
     let mut tools = Vec::new();
     for kind in ArtifactKind::ALL {
-        let Some(tool) = kind.submit_tool() else {
-            continue;
-        };
-        let names: Vec<&str> = session.submittable(kind).collect();
-        if !names.is_empty() {
-            tools.push(submit_tool(tool, kind, &names));
+        if let Some(tool) = kind.submit_tool() {
+            if session.submits(kind) {
+                tools.push(submit_tool(tool, kind));
+            }
         }
     }
     tools
 }
 
-/// The tool a session submits a whole `kind` document through, offered
-/// for exactly the names this node declares under that kind.
+/// The tool a session submits a whole `kind` document through.
 ///
-/// `name` is an enum of those names, so a submission can only be about a
-/// document the close will look for, and `document` is the kind's own
-/// published schema — the model fills in a shape the engine already
-/// validates rather than transcribing a format.
-fn submit_tool(tool: &'static str, kind: ArtifactKind, names: &[&str]) -> Tool {
+/// `document` is the kind's own published schema — the model fills in a
+/// shape the engine already validates rather than transcribing a format
+/// — and it is the only argument: the node declared the kind, so which
+/// document this is was settled before the session started.
+fn submit_tool(tool: &'static str, kind: ArtifactKind) -> Tool {
     let (document, defs) = published(kind);
-    let properties = json!({
-        "name": {
-            "type": "string",
-            "enum": names,
-            "description": "The artifact's file name, as the node declares it.",
-        },
-        "document": document,
-    });
+    let properties = json!({ "document": document });
     Tool::new(
         tool,
         format!(
@@ -178,7 +172,7 @@ fn submit_tool(tool: &'static str, kind: ArtifactKind, names: &[&str]) -> Tool {
         ),
         tool_schema(
             properties.as_object().cloned().unwrap_or_default(),
-            &["name", "document"],
+            &["document"],
             defs,
         ),
     )

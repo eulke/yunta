@@ -96,8 +96,7 @@ id: plan
 kind: bash
 run: "write the tasks document"
 artifacts:
-  produces:
-    - { name: plan.yaml, kind: tasks }
+  produces: [tasks]
 "#;
 
 /// The same declaration on a session node: the document arrives through
@@ -108,8 +107,7 @@ id: plan
 kind: prompt
 prompt: "Write the tasks document."
 artifacts:
-  produces:
-    - { name: plan.yaml, kind: tasks }
+  produces: [tasks]
 "#;
 
 const VALID_TASKS: &str = r#"
@@ -189,7 +187,12 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
 
     let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     assert_eq!(verified.len(), 1);
-    assert_eq!(verified[0].name, "report.md");
+    assert_eq!(
+        verified[0].artifact,
+        ArtifactId::Opaque {
+            name: "report.md".to_string()
+        }
+    );
     assert_eq!(
         verified[0].content_hash,
         sha256_hex("{{{ not : parseable ][".as_bytes())
@@ -201,7 +204,7 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
 #[test]
 fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
-    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
+    write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
     let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
@@ -223,7 +226,7 @@ fn an_invalid_tasks_document_reports_every_violation_together() {
     write_artifact(
         run_dir.path(),
         "plan",
-        "plan.yaml",
+        "tasks.yaml",
         r#"
 tasks:
   - id: T001
@@ -245,7 +248,7 @@ tasks:
     assert_eq!(codes(&failures), ["no-criteria", "empty-scope"]);
     let text = rendered(&failures);
     assert!(
-        text.contains(&format!("{}: 2 errors", staged("plan", "plan.yaml"))),
+        text.contains(&format!("{}: 2 errors", staged("plan", "tasks.yaml"))),
         "{text}"
     );
     assert!(text.contains("task `T001`: no criteria declared"), "{text}");
@@ -258,7 +261,7 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     write_artifact(
         run_dir.path(),
         "plan",
-        "plan.yaml",
+        "tasks.yaml",
         "tasks: [not, a, document",
     );
 
@@ -269,7 +272,7 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     // and which kind's rules were asked.
     let report = failures[0].report().expect("a problem with the content");
     assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks);
-    assert_eq!(report.document.path, staged("plan", "plan.yaml"));
+    assert_eq!(report.document.path, staged("plan", "tasks.yaml"));
     assert_eq!(codes(&failures), ["parse"]);
 }
 
@@ -284,7 +287,7 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
     assert_eq!(
         failures[0].path(),
-        Some(staged("plan", "plan.yaml").as_str())
+        Some(staged("plan", "tasks.yaml").as_str())
     );
 }
 
@@ -329,7 +332,7 @@ fn a_session_node_s_document_is_the_one_it_handed_over_never_a_file_beside_it() 
     write_artifact(
         run_dir.path(),
         "plan",
-        "plan.yaml",
+        "tasks.yaml",
         r#"
 tasks:
   - id: IMPOSTOR
@@ -354,7 +357,7 @@ fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
     // A valid document sits exactly where a command node would write
     // one. This node is not a command node: nobody handed the document
     // over, and nothing on disk changes that.
-    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
+    write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
     let failures =
         close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
@@ -400,7 +403,7 @@ fn a_command_node_that_wrote_no_file_still_names_the_file_it_did_not_write() {
             path,
             problem: FileProblem::Missing { node },
         }] => {
-            assert_eq!(*path, staged("plan", "plan.yaml"));
+            assert_eq!(*path, staged("plan", "tasks.yaml"));
             assert_eq!(node.as_str(), "plan");
         }
         other => panic!("a file the node never wrote: {other:?}"),
@@ -418,13 +421,13 @@ fn a_held_document_whose_bytes_the_store_lost_says_so_instead_of_reading_a_file(
         VALID_TASKS,
     )];
     std::fs::remove_dir_all(run_dir.path().join("objects")).unwrap();
-    write_artifact(run_dir.path(), "plan", "plan.yaml", VALID_TASKS);
+    write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
     let failures =
         close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap_err();
     assert_eq!(codes(&failures), ["artifact-unreadable"]);
     assert!(
-        rendered(&failures).contains("artifacts/plan/plan.yaml"),
+        rendered(&failures).contains("artifacts/plan/tasks.yaml"),
         "the failure names the artifact by the view a reader opens: {}",
         rendered(&failures)
     );
@@ -435,8 +438,7 @@ id: review
 kind: bash
 run: "write the findings"
 artifacts:
-  produces:
-    - { name: findings.yaml, kind: findings }
+  produces: [findings]
 "#;
 
 const VALID_FINDINGS: &str = r#"
@@ -518,8 +520,7 @@ id: ask
 kind: bash
 run: "write the questions"
 artifacts:
-  produces:
-    - { name: questions.yaml, kind: questions }
+  produces: [questions]
 "#;
 
 const VALID_QUESTIONS: &str = r#"

@@ -29,8 +29,7 @@ nodes:
     runner: executor
     prompt: "Ask what you need to know before continuing."
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
+      produces: [questions]
 "#;
 
 /// The session [`QUESTIONS_WORKFLOW`]'s `ask` node runs: it hands two
@@ -43,7 +42,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_questions
         arguments:
-          name: questions.yaml
           document:
             questions:
               - id: q1
@@ -184,7 +182,7 @@ pub fn tasks_session(tasks: &str, summary: &str) -> String {
         .collect();
     format!(
         "  - steps:\n      - type: run_tool\n        tool: yunta_submit_tasks\n\
-         \x20       arguments:\n          name: plan.yaml\n          document:\n{document}\
+         \x20       arguments:\n          document:\n{document}\
          \x20   outcome: {{ type: completed, summary: {summary} }}\n"
     )
 }
@@ -259,8 +257,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - {{ name: plan.yaml, kind: tasks }}
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -330,8 +327,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - {{ name: plan.yaml, kind: tasks }}
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -357,8 +353,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -660,8 +655,7 @@ nodes:
     runner: planner
     prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: tasks }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -833,7 +827,7 @@ nodes:
     artifacts:
       produces: [plan.md]
 on_finish:
-  - distill: [plan.md]
+  - distill: [{ node: plan, name: plan.md }]
 "#;
 
 /// The session `distiller`'s `plan` node runs: it writes the file that

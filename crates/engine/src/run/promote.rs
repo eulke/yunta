@@ -11,8 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactRef;
-use yunta_core::events::{ArtifactOrigin, StoredEvent};
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId, Workflow};
+use yunta_core::events::{ArtifactId, ArtifactOrigin, StoredEvent};
+use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::ObjectError;
@@ -96,12 +96,8 @@ pub async fn create_promotion_successor(
     // What the predecessor's own log says it held, so each inherited
     // artifact keeps the identity and the producer it had there.
     let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
-    let inherited = read_inherited_artifacts(
-        predecessor_run_dir,
-        predecessor_id,
-        &predecessor_manifest.workflow,
-        &predecessor_events,
-    )?;
+    let inherited =
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -133,23 +129,17 @@ pub async fn create_promotion_successor(
 /// so a file lying under its `artifacts/` that no acceptance accounts
 /// for is not an artifact and reaches no successor. Each inherited
 /// artifact keeps the identity and the producer the predecessor held it
-/// under, and travels under the name that run named it by; an
-/// interpreted artifact the predecessor's own workflow names nowhere has
-/// no name to travel under and stays behind.
+/// under, because the identity is all a run needs to answer for it.
 fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
-    from_workflow: &Workflow,
     from_events: &[StoredEvent],
 ) -> Result<Vec<BirthArtifact>, ObjectError> {
     let held = crate::artifacts::RunArtifacts::of(from_run_dir, from_events);
     let mut inherited = Vec::new();
     for artifact in held.ledger().every() {
-        let Some(name) = crate::artifacts::view_name(from_workflow, artifact) else {
-            continue;
-        };
         inherited.push(birth_artifact(
-            name,
+            artifact.artifact.clone(),
             held.bytes(artifact)?,
             from_run,
             artifact,
@@ -158,17 +148,17 @@ fn read_inherited_artifacts(
     Ok(inherited)
 }
 
-/// One artifact as the run receiving it holds it: the name it carries,
-/// and the identity and producer the handing-over log states for it.
+/// One artifact as the run receiving it holds it: the identity it
+/// carries there, and the run and producer the handing-over log states
+/// for it.
 pub(super) fn birth_artifact(
-    name: String,
+    artifact: ArtifactId,
     bytes: Vec<u8>,
     from_run: &RunId,
     held: &ArtifactRef,
 ) -> BirthArtifact {
     BirthArtifact {
-        name,
-        artifact: held.artifact.clone(),
+        artifact,
         origin: ArtifactOrigin::Inherited {
             run: from_run.clone(),
             producer: held.producer.clone(),

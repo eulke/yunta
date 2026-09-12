@@ -24,7 +24,7 @@ nodes:
     runner: executor
     prompt: "Write a tasks document."
     artifacts:
-      produces: [{ name: plan.yaml, kind: tasks }]
+      produces: [tasks]
 "#;
 
 const REVIEW_NODE: &str = r#"
@@ -35,7 +35,7 @@ nodes:
     runner: executor
     prompt: "Review the change."
     artifacts:
-      produces: [{ name: review.yaml, kind: findings }]
+      produces: [findings]
 "#;
 
 /// A `run_tool` step's arguments, as a fixture writes them.
@@ -100,7 +100,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
 {}
     outcome: {{ type: completed, summary: "planned" }}
@@ -111,7 +110,7 @@ sessions:
     let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
-    assert_eq!(submitted(&bench), vec![("plan.yaml".to_string(), true)]);
+    assert_eq!(submitted(&bench), vec![("tasks.yaml".to_string(), true)]);
     assert_eq!(kinds(&bench, "artifact_written"), 0, "nothing writes it");
     assert_eq!(kinds(&bench, "task_registered"), 2);
     assert_eq!(kinds(&bench, "node_failed"), 0);
@@ -142,14 +141,14 @@ sessions:
         "the object is what its name says"
     );
     assert_eq!(
-        std::fs::read(bench.run_dir().join("artifacts/plan/plan.yaml")).expect("the view exists"),
+        std::fs::read(bench.run_dir().join("artifacts/plan/tasks.yaml")).expect("the view exists"),
         stored
     );
 
     // The document is the run's, and it reads back as the document.
-    let bytes = bench.artifact("plan.yaml").expect("the run holds it");
+    let bytes = bench.artifact("tasks").expect("the run holds it");
     let tasks: yunta_core::TasksFile =
-        yunta_core::shape::read(&bytes, "plan.yaml").expect("a canonical tasks document");
+        yunta_core::shape::read(&bytes, "tasks.yaml").expect("a canonical tasks document");
     let ids: Vec<String> = tasks.tasks.iter().map(|t| t.id.to_string()).collect();
     assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
 
@@ -157,7 +156,7 @@ sessions:
     // node writes: the close asked the log, so there was nothing for the
     // engine to write itself and nothing for it to read back.
     assert!(
-        !bench.staging("plan").join("plan.yaml").exists(),
+        !bench.staging("plan").join("tasks.yaml").exists(),
         "a document a session hands over never becomes a file the engine writes for itself"
     );
 }
@@ -173,7 +172,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
 {}
     outcome: {{ type: completed, summary: "planned" }}
@@ -202,7 +200,6 @@ sessions:
         tool: yunta_submit_tasks
         expect: refused
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: alpha
@@ -220,7 +217,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: alpha
@@ -239,8 +235,8 @@ sessions:
     assert_eq!(
         submitted(&bench),
         vec![
-            ("plan.yaml".to_string(), false),
-            ("plan.yaml".to_string(), true)
+            ("tasks.yaml".to_string(), false),
+            ("tasks.yaml".to_string(), true)
         ]
     );
 
@@ -267,7 +263,6 @@ sessions:
         tool: yunta_submit_tasks
         expect: refused
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: alpha
@@ -301,7 +296,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: alpha
@@ -312,7 +306,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - criteria:
@@ -337,47 +330,6 @@ sessions:
         .collect();
     assert_eq!(hashes.len(), 2);
     assert_eq!(hashes[0], hashes[1], "one meaning, one file, one hash");
-}
-
-#[tokio::test]
-async fn a_name_the_node_did_not_declare_is_refused() {
-    let bench = Bench::new();
-    let fixture = format!(
-        r#"
-capabilities: {{ run_tools: true }}
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        expect: refused
-        arguments:
-          name: other.yaml
-          document:
-{}
-    outcome: {{ type: completed, summary: "submitted the wrong name" }}
-"#,
-        tasks_document(&[("alpha", "First")])
-    );
-
-    let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "nothing was submitted, so the node fails on a missing artifact: {state:?}"
-    );
-    assert!(
-        submitted(&bench).is_empty(),
-        "a name the node never declared is not a submission of anything"
-    );
-    match state.nodes.get("plan") {
-        Some(NodeState::Failed { failure, .. }) => {
-            let text = failure.to_string();
-            assert!(
-                text.contains("node `plan`") && text.contains("tasks document"),
-                "got: {text}"
-            );
-        }
-        other => panic!("expected plan failed, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -425,7 +377,7 @@ sessions:
         Some(NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
             assert!(
-                text.contains("run_tools") && text.contains("plan.yaml"),
+                text.contains("run_tools") && text.contains("tasks"),
                 "the refusal names the capability and the artifact: {text}"
             );
         }
@@ -463,9 +415,9 @@ sessions:
     let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
-    let bytes = bench.artifact("review.yaml").expect("the run holds it");
+    let bytes = bench.artifact("findings").expect("the run holds it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     let ids: Vec<String> = file.findings.iter().map(|f| f.id.to_string()).collect();
     assert_eq!(
         ids,
@@ -473,7 +425,7 @@ sessions:
         "in the order they were reported"
     );
     assert!(
-        !bench.staging("review").join("review.yaml").exists(),
+        !bench.staging("review").join("findings.yaml").exists(),
         "a derived document is accepted, not written for the close to read back"
     );
 
@@ -502,9 +454,9 @@ sessions:
     let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
-    let bytes = bench.artifact("review.yaml").expect("the run holds it");
+    let bytes = bench.artifact("findings").expect("the run holds it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     assert!(file.findings.is_empty(), "a review that found nothing");
     assert_eq!(kinds(&bench, "finding_posted"), 0);
     assert_eq!(
@@ -586,9 +538,9 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_posted"), 1);
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("findings").expect("the engine wrote it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     assert_eq!(file.findings.len(), 1);
     assert_eq!(file.findings[0].title, "first telling");
 }
@@ -629,9 +581,9 @@ sessions:
     let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("findings").expect("the engine wrote it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     let rendered: Vec<(String, String)> = file
         .findings
         .iter()
@@ -684,9 +636,9 @@ sessions:
     let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("findings").expect("the engine wrote it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     let ids: Vec<String> = file.findings.iter().map(|f| f.id.to_string()).collect();
     assert_eq!(ids, vec!["real-one".to_string()]);
 
@@ -763,9 +715,9 @@ sessions:
         .collect();
     assert_eq!(operations, vec!["Post", "Update", "Withdraw"]);
 
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("findings").expect("the engine wrote it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     assert!(file.findings.is_empty());
 }
 
@@ -806,9 +758,9 @@ sessions:
     assert_eq!(report.diagnostics[0].problem.code(), "empty-reason");
 
     // The finding it named still stands.
-    let bytes = bench.artifact("review.yaml").expect("the engine wrote it");
+    let bytes = bench.artifact("findings").expect("the engine wrote it");
     let file: yunta_core::FindingsFile =
-        yunta_core::shape::read(&bytes, "review.yaml").expect("a canonical findings file");
+        yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
     assert_eq!(file.findings.len(), 1);
 }
 

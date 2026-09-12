@@ -55,17 +55,11 @@ pub(super) enum RunToolError {
     /// account of itself.
     #[error("{text}")]
     Refused { text: String },
-    #[error("invalid submission — requires `name` (one of {names}) and `document` (an object): {detail}")]
-    InvalidSubmission { names: String, detail: String },
     #[error(
-        "`{name}` is declared by this node with kind `{declared}`, not the kind this tool \
-         submits — use `{expected}`"
+        "invalid submission — requires `document` (an object), the {names} document this node \
+         declares: {detail}"
     )]
-    WrongKind {
-        name: String,
-        declared: String,
-        expected: String,
-    },
+    InvalidSubmission { names: String, detail: String },
     #[error(
         "invalid request — requires paths (list) and reason, with an optional \
          proposed_criterion {{cmd}}: {source}"

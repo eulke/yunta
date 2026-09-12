@@ -26,13 +26,7 @@ fn parses_the_reference_schema_excerpt_without_loss() {
         other => panic!("expected Loop, got {other:?}"),
     }
     let produces = &implement.artifacts.as_ref().unwrap().produces;
-    assert_eq!(
-        produces[0],
-        ArtifactSpec::Typed {
-            name: "tasks.yaml".to_string(),
-            kind: ArtifactKind::Tasks,
-        }
-    );
+    assert_eq!(produces[0], ArtifactSpec::Interpreted(ArtifactKind::Tasks));
 
     let lint = &workflow.nodes[1];
     assert_eq!(lint.depends_on[0].as_str(), "implement");
@@ -673,7 +667,12 @@ context:
     match &node.context[2] {
         ContextSpec::Artifact { artifact } => {
             assert_eq!(artifact.node.as_ref().unwrap().as_str(), "grill");
-            assert_eq!(artifact.name, "brief.md");
+            assert_eq!(
+                artifact.id,
+                yunta_core::ArtifactRefId::Name {
+                    name: "brief.md".to_string()
+                }
+            );
         }
         other => panic!("expected Artifact, got {other:?}"),
     }
@@ -980,7 +979,7 @@ nodes:
     prompt: "Implement."
 on_finish:
   - cleanup: worktree
-  - distill: [plan.yaml]
+  - distill: [{ node: plan, kind: tasks }]
 "#;
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
     assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
@@ -993,7 +992,12 @@ on_finish:
                 cleanup: yunta_core::CleanupTarget::Worktree
             },
             yunta_core::OnFinishStep::Distill {
-                distill: vec!["plan.yaml".to_string()]
+                distill: vec![yunta_core::DistillArtifact {
+                    node: "plan".into(),
+                    id: yunta_core::ArtifactRefId::Kind {
+                        kind: ArtifactKind::Tasks
+                    },
+                }]
             },
         ]
     );

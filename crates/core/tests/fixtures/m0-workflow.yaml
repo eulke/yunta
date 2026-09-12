@@ -11,8 +11,7 @@ nodes:
     prompt: |
       Read your task from the tasks document and implement it within its scope.
     artifacts:
-      produces:
-        - { name: tasks.yaml, kind: tasks }
+      produces: [tasks]
 
   - id: lint
     kind: bash

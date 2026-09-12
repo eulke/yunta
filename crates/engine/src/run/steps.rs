@@ -257,9 +257,8 @@ pub(super) async fn gate_exhausted(
                 &ctx.log(),
                 ctx.run_dir,
                 None,
-                crate::artifacts::Declared {
-                    name: crate::findings::INHERITED_FINDINGS,
-                    kind: Some(yunta_core::ArtifactKind::Findings),
+                yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Findings,
                 },
                 yaml.as_bytes(),
                 yunta_core::events::ArtifactOrigin::Derived,

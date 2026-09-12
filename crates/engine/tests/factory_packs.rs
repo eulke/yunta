@@ -149,7 +149,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_questions
         arguments:
-          name: questions.yaml
           document:
             questions: []
     effects:
@@ -159,7 +158,6 @@ sessions:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
-          name: plan.yaml
           document:
             tasks:
               - id: T001

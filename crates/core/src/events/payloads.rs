@@ -767,14 +767,10 @@ pub enum ArtifactId {
 }
 
 impl ArtifactId {
-    /// What an artifact declared as `name` under `kind` is. A declared
-    /// `kind:` *is* the identity; without one the artifact is opaque and
-    /// the name it was declared under is all that names it.
-    ///
-    /// The one place a declaration becomes an identity, so every door
-    /// that accepts an artifact — a submission, a close, a mount, a
-    /// promotion, a log written before origins existed — asks the same
-    /// question and gets the same answer.
+    /// What an artifact written as `name` under `kind` is, for a log
+    /// written before an acceptance stated the identity itself. A
+    /// recorded `kind` *is* the identity; without one the artifact is
+    /// opaque and the name it was written as is all that names it.
     pub fn of(name: &str, kind: Option<crate::workflow::ArtifactKind>) -> Self {
         match kind {
             Some(kind) => ArtifactId::Interpreted { kind },
@@ -783,9 +779,7 @@ impl ArtifactId {
             },
         }
     }
-}
 
-impl ArtifactId {
     /// How an artifact names itself inside a sentence: an interpreted
     /// one by what it is, an opaque one by the name that is all there
     /// is to call it.
@@ -793,6 +787,52 @@ impl ArtifactId {
         match self {
             ArtifactId::Interpreted { kind } => kind.label().to_string(),
             ArtifactId::Opaque { name } => format!("artifact `{name}`"),
+        }
+    }
+
+    /// The file name the run's `artifacts/` view carries this artifact
+    /// under.
+    ///
+    /// The one place a view is named, so the file a reader opens, the
+    /// path a diagnostic prints and the copy a distillation writes are
+    /// the same name. An interpreted document is named by its kind —
+    /// a run holds one of each per producer, so there is nothing else to
+    /// tell them apart — and an opaque artifact by the name that is all
+    /// that identifies it.
+    pub fn view_name(&self) -> String {
+        match self {
+            ArtifactId::Interpreted { kind } => format!("{kind}.yaml"),
+            ArtifactId::Opaque { name } => name.clone(),
+        }
+    }
+}
+
+/// What a node declares it produces *is* an identity: the one place a
+/// declaration becomes the question a log answers.
+impl From<&crate::workflow::ArtifactSpec> for ArtifactId {
+    fn from(spec: &crate::workflow::ArtifactSpec) -> Self {
+        match spec {
+            crate::workflow::ArtifactSpec::Interpreted(kind) => {
+                ArtifactId::Interpreted { kind: *kind }
+            }
+            crate::workflow::ArtifactSpec::Opaque(name) => {
+                ArtifactId::Opaque { name: name.clone() }
+            }
+        }
+    }
+}
+
+/// And so is what a reference names: the mapping form of the same two
+/// answers.
+impl From<&crate::workflow::ArtifactRefId> for ArtifactId {
+    fn from(id: &crate::workflow::ArtifactRefId) -> Self {
+        match id {
+            crate::workflow::ArtifactRefId::Kind { kind } => {
+                ArtifactId::Interpreted { kind: *kind }
+            }
+            crate::workflow::ArtifactRefId::Name { name } => {
+                ArtifactId::Opaque { name: name.clone() }
+            }
         }
     }
 }

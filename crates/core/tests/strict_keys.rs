@@ -64,7 +64,8 @@ fn a_context_entry_names_its_source_or_is_refused() {
     let text = err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n    context:\n      - artifact: { node: b, name: n, nmae: x }\n");
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: `context[0]`: artifact.nmae: unknown field `nmae`, expected `node` or `name` at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: `context[0]`: artifact: unknown key `nmae` for an \
+         `artifact:` context source; one of `node`, `kind`, `name` at line 3 column 3"
     );
 }
 
@@ -86,10 +87,14 @@ fn an_artifact_and_a_prompt_file_refuse_unknown_keys() {
         text,
         "`nodes[0]`: nodes: node `a`: prompt.fil: unknown field `fil`, expected `file` at line 3 column 3"
     );
-    let text = err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n    artifacts:\n      produces: [{ name: n, kind: findings, knd: x }]\n");
+    // An artifact is one bare string, so anything else is refused with
+    // the two shapes a string can be rather than a key listing.
+    let text = err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n    artifacts:\n      produces: [{ name: n, kind: findings }]\n");
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: `artifacts.produces[0]`: artifact.knd: unknown field `knd`, expected `name` or `kind` at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: `artifacts.produces[0]`: an artifact is a file name, or \
+         one of `tasks`, `findings`, `questions` for a document the engine reads, not a \
+         mapping at line 3 column 3"
     );
 }
 

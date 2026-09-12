@@ -10,5 +10,4 @@ nodes:
     permissions: read-only
     prompt: "Audit the current changes and report what you find."
     artifacts:
-      produces:
-        - { name: "findings-{{runner.role}}.yaml", kind: findings }
+      produces: [findings]
