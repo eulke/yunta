@@ -25,7 +25,7 @@ use crate::inputs::InputSpec;
 use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
 
-pub use artifacts::{ArtifactKind, ArtifactSpec, Artifacts};
+pub use artifacts::{ArtifactKind, ArtifactSpec, Artifacts, ARTIFACTS_DIR};
 pub use context::{
     ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,

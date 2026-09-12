@@ -87,7 +87,7 @@ pub use workflow::{
     JoinPolicy, KnowledgeLayer, KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
     MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
     NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, RunEventsFilter,
-    RunEventsParams, ScopeExpansion, TasksParams, Workflow, WorkflowIsolation,
+    RunEventsParams, ScopeExpansion, TasksParams, Workflow, WorkflowIsolation, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

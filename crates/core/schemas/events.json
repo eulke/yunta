@@ -118,6 +118,26 @@
         "capabilities"
       ]
     },
+    "ArtifactAcceptedPayload": {
+      "description": "One artifact the run holds: what it is, the bytes it is made of, and\nhow the run came by it.\n\nThis is what makes an artifact a fact of the log rather than a file\nsomebody may have replaced: the identity says which artifact, the\nhash says which content, and the envelope's `node_id` says who\nproduced it — absent for what a run acquires without a node of its\nown (a `document` input, a mount, a promotion).\n\nThe field is named `artifact`, not `kind`, for the reason\n[`ArtifactWrittenPayload::artifact_kind`] gives: the event\nenvelope's own internally-tagged discriminant already claims `kind`\nin the serialized JSON, and a colliding field name silently corrupts\nthe payload.",
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactId"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "origin": {
+          "$ref": "#/$defs/ArtifactOrigin"
+        }
+      },
+      "required": [
+        "artifact",
+        "content_hash",
+        "origin"
+      ]
+    },
     "ArtifactFailure": {
       "description": "Why one declared artifact did not close.",
       "oneOf": [
@@ -158,6 +178,43 @@
         }
       ]
     },
+    "ArtifactId": {
+      "description": "What an artifact is, which is what a reader asks for it by.\n\nAn artifact the engine interprets is identified by its kind: a run\nholds one tasks document, whoever produced it, so a reader asks for\nthe kind and never needs to know the file name its workflow chose.\nOne the engine only carries is identified by the name the workflow\ndeclared, which is the only thing that distinguishes it from any\nother opaque artifact.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "type": {
+              "type": "string",
+              "const": "interpreted"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "opaque"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ]
+        }
+      ]
+    },
     "ArtifactKind": {
       "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
@@ -165,6 +222,120 @@
         "tasks",
         "findings",
         "questions"
+      ]
+    },
+    "ArtifactOrigin": {
+      "description": "How the run came by an artifact.\n\nThe origin is what tells apart an artifact a node produced from one\nthe run was handed, which no hash and no name can: two runs holding\nthe same tasks document differ in whether they planned it or\ninherited it, and every rule about who may replace an artifact reads\nthat difference.",
+      "oneOf": [
+        {
+          "description": "A session handed the whole document over through its submission\ntool.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "submitted"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A command node wrote the file and the engine took it as declared.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ingested"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The engine derived the document from the log itself, as it does\nfor a findings artifact.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "derived"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The answers to a questions artifact.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "answered"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A `type: document` input, named by the input it came in as.",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input"
+            }
+          },
+          "required": [
+            "kind",
+            "input"
+          ]
+        },
+        {
+          "description": "Another run's artifact: a mount, a child's output, a promotion.\n`producer` is the node that produced it there, absent when that\nrun acquired it without a node either.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inherited"
+            },
+            "producer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        },
+        {
+          "description": "A log that recorded the artifact without saying where it came\nfrom — every `artifact_written` there is. The honest origin of a\nfact stated before origins were: the run held it, and the log\ndoes not say how.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "legacy"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
       ]
     },
     "ArtifactSubmittedPayload": {
@@ -768,7 +939,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 35 event kinds, internally tagged by `kind`.",
+      "description": "All 36 event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1130,6 +1301,19 @@
             }
           },
           "$ref": "#/$defs/ArtifactSubmittedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "artifact_accepted"
+            }
+          },
+          "$ref": "#/$defs/ArtifactAcceptedPayload",
           "required": [
             "kind"
           ]

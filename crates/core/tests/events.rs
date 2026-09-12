@@ -224,6 +224,16 @@ fn all_kinds() -> Vec<EventPayload> {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },
         }),
+        EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            artifact: ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            },
+            content_hash: yunta_core::sha256_hex(b"plan"),
+            origin: ArtifactOrigin::Inherited {
+                run: RunId::from("run-parent"),
+                producer: Some(yunta_core::NodeId::from("plan")),
+            },
+        }),
         EventPayload::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
             evidence: "criteria log".to_string(),
@@ -301,6 +311,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::FindingWithdrawn(_)
         | EventPayload::FindingRefused(_)
         | EventPayload::ArtifactSubmitted(_)
+        | EventPayload::ArtifactAccepted(_)
         | EventPayload::PromotionSignaled(_)
         | EventPayload::ChildRunCreated(_)
         | EventPayload::ChildRunFinished(_)
@@ -312,12 +323,12 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
 }
 
 #[test]
-fn there_are_exactly_35_kinds_with_distinct_names() {
+fn there_are_exactly_36_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 35);
+    assert_eq!(kinds.len(), 36);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 35, "expected 35 distinct kind names");
+    assert_eq!(names.len(), 36, "expected 36 distinct kind names");
 }
 
 #[test]
@@ -367,6 +378,7 @@ fn kind_names_match_the_spec_exactly() {
         "finding_withdrawn",
         "finding_refused",
         "artifact_submitted",
+        "artifact_accepted",
         "promotion_signaled",
         "child_run_created",
         "child_run_finished",

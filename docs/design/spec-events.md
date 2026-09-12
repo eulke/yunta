@@ -12,9 +12,9 @@ su parser.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 29 filas y **35 `kind` distintos**
-(24 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
-contenido normativo; este documento especifica esos 35 kinds tal como la tabla los
+La tabla de eventos del Contrato del Run tiene 30 filas y **36 `kind` distintos**
+(25 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
+contenido normativo; este documento especifica esos 36 kinds tal como la tabla los
 enumera.
 
 ## 1. Envelope común
@@ -27,7 +27,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 35 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | uno de los 36 nombres de este documento, con su sufijo `_vN` si no es la v1 |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -115,7 +115,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 35 tipos de evento, campo por campo
+## 5. Los 36 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -185,10 +185,16 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 ### 5.7 `artifact_written` — engine
 **Fuente:** node_id, path, content hash
 
+Un lector lo pliega como identidad de artifact cuando el run no tiene
+`artifact_accepted` (§5.21.5): `artifact_kind` presente da la identidad
+interpretada, ausente da la opaca con el nombre bajo `artifacts/`, y el
+origen es `legacy` porque el evento no lo registra.
+
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `path` | string | sí | relativo a `run.dir/artifacts/` |
+| `path` | string | sí | relativo al run dir: `artifacts/<nombre>`, con el nombre que el nodo declara en `artifacts.produces` |
 | `content_hash` | string | sí | los artifacts son inmutables; esto es lo que se verifica en `resume` |
+| `artifact_kind` | enum | no | `tasks` \| `findings` \| `questions` cuando el artifact declara `kind:`; ausente para uno opaco y para un log escrito antes del campo |
 
 ### 5.8 `context_assembled` — engine
 **Fuente:** node_id, fuentes resueltas, hash por segmento de estabilidad
@@ -397,6 +403,41 @@ propio `artifact_written` al cierre del nodo.
 | `artifact_kind` | enum | sí | `tasks` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
 | `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico que el engine escribió |
 | `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
+
+### 5.21.5 `artifact_accepted` — engine
+**Fuente:** node_id del productor, identidad del artifact, content hash y origen
+
+Un artifact es un hecho del log, no un archivo que alguien puede haber
+reemplazado: este evento dice qué artifact es, con qué bytes y cómo el
+run lo obtuvo. La identidad es lo que un lector pregunta —un kind para
+los documentos que el engine interpreta, un nombre para los opacos—, así
+que resolver un artifact no depende de la ruta en que se escribió.
+`artifacts/` es la vista que el engine escribe desde el log, nunca la
+respuesta a él.
+
+El productor es el `node_id` del envelope, ausente para lo que el run
+adquiere sin nodo propio: un input `type: document`, un mount, una
+promoción. Lo que el run tiene de una identidad es la última aceptación
+de esa identidad.
+
+El campo se llama `artifact`, no `kind`, por la misma razón que
+`artifact_written.artifact_kind` (§5.7): el `kind` del envelope ya ocupa
+ese nombre en el objeto. Los discriminantes de `artifact` y de `origin`
+viven un nivel adentro, donde no colisionan con él.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `artifact.type` | enum | sí | `interpreted` \| `opaque` |
+| `artifact.kind` | enum | en `interpreted` | `tasks` \| `findings` \| `questions` |
+| `artifact.name` | string | en `opaque` | el nombre bajo `artifacts/`, anidado incluido |
+| `content_hash` | string | sí | el hash de los bytes aceptados |
+| `origin.kind` | enum | sí | `submitted` (una sesión lo entregó por su tool) \| `ingested` (un nodo de comando escribió el archivo) \| `derived` (el engine lo derivó del log) \| `answered` (respuestas a un `questions`) \| `input` \| `inherited` \| `legacy` |
+| `origin.input` | string | en `input` | el input `type: document` por el que entró |
+| `origin.run` | string | en `inherited` | el run del que viene: mount, salida de hijo, promoción |
+| `origin.producer` | string | no | en `inherited`, el nodo que lo produjo allá; ausente si ese run tampoco lo produjo con un nodo |
+
+`legacy` es el origen de un `artifact_written` plegado (§5.7): el run
+tuvo el artifact y el log no dice cómo.
 
 ### 5.22 `promotion_signaled` — engine
 **Fuente:** razón, evidencia, modo sugerido

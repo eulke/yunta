@@ -59,7 +59,7 @@ Tipos: `string`, `number`, `boolean`, `enum`, `path`. `required` y `default` son
 `description` no es decorativa: es lo que `list_workflows` le muestra a un agente cliente y lo que `--help` muestra a una persona. Un catálogo sin descripciones es una lista de nombres sin sentido.
 Reglas: todo se valida **al crear el run, antes del primer token**; los defaults se resuelven en ese momento y quedan congelados en el manifest (resolverlos por nodo introduciría estado no determinista); y `yunta check` verifica que todo `{{inputs.x}}` de los templates refiera a un input declarado.
 # 3. Modelo de eventos
-El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 30 tipos de evento (24 filas; varias agrupan variantes emparentadas):
+El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 36 tipos de evento (30 filas; varias agrupan variantes emparentadas):
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -83,6 +83,7 @@ El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_j
 | `questions_answered` | engine | node_id, hash del artifact de respuestas, canal (tty\\|mcp\\|pr), respondiente si se conoce |
 | `loop_iteration` | engine | iteración N, evaluación de `until` |
 | `artifact_submitted` | engine | node_id, nombre y kind del artifact, veredicto: aceptado con su content hash, o rechazado con el reporte entero (§4.1) |
+| `artifact_accepted` | engine | node_id del productor (ausente para lo que el run adquiere sin nodo), identidad del artifact (kind interpretado o nombre opaco), content hash y origen |
 | `finding_posted` | engine | autor (nodo), hallazgo: id, severidad, título, location, detalle (§4.1) |
 | `finding_updated` | engine | autor (nodo), el hallazgo entero en su estado nuevo (§4.1) |
 | `finding_withdrawn` | engine | autor (nodo), id del hallazgo y el motivo por el que ya no está en pie (§4.1) |

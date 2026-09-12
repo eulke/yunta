@@ -728,6 +728,81 @@ pub enum SubmissionOutcome {
     },
 }
 
+/// One artifact the run holds: what it is, the bytes it is made of, and
+/// how the run came by it.
+///
+/// This is what makes an artifact a fact of the log rather than a file
+/// somebody may have replaced: the identity says which artifact, the
+/// hash says which content, and the envelope's `node_id` says who
+/// produced it — absent for what a run acquires without a node of its
+/// own (a `document` input, a mount, a promotion).
+///
+/// The field is named `artifact`, not `kind`, for the reason
+/// [`ArtifactWrittenPayload::artifact_kind`] gives: the event
+/// envelope's own internally-tagged discriminant already claims `kind`
+/// in the serialized JSON, and a colliding field name silently corrupts
+/// the payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ArtifactAcceptedPayload {
+    pub artifact: ArtifactId,
+    pub content_hash: ContentHash,
+    pub origin: ArtifactOrigin,
+}
+
+/// What an artifact is, which is what a reader asks for it by.
+///
+/// An artifact the engine interprets is identified by its kind: a run
+/// holds one tasks document, whoever produced it, so a reader asks for
+/// the kind and never needs to know the file name its workflow chose.
+/// One the engine only carries is identified by the name the workflow
+/// declared, which is the only thing that distinguishes it from any
+/// other opaque artifact.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ArtifactId {
+    Interpreted { kind: crate::workflow::ArtifactKind },
+    Opaque { name: String },
+}
+
+/// How the run came by an artifact.
+///
+/// The origin is what tells apart an artifact a node produced from one
+/// the run was handed, which no hash and no name can: two runs holding
+/// the same tasks document differ in whether they planned it or
+/// inherited it, and every rule about who may replace an artifact reads
+/// that difference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ArtifactOrigin {
+    /// A session handed the whole document over through its submission
+    /// tool.
+    Submitted,
+    /// A command node wrote the file and the engine took it as declared.
+    Ingested,
+    /// The engine derived the document from the log itself, as it does
+    /// for a findings artifact.
+    Derived,
+    /// The answers to a questions artifact.
+    Answered,
+    /// A `type: document` input, named by the input it came in as.
+    Input { input: String },
+    /// Another run's artifact: a mount, a child's output, a promotion.
+    /// `producer` is the node that produced it there, absent when that
+    /// run acquired it without a node either.
+    Inherited {
+        run: RunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        producer: Option<NodeId>,
+    },
+    /// A log that recorded the artifact without saying where it came
+    /// from — every `artifact_written` there is. The honest origin of a
+    /// fact stated before origins were: the run held it, and the log
+    /// does not say how.
+    Legacy,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PromotionSignaledPayload {
     pub reason: String,

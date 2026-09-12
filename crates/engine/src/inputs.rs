@@ -124,6 +124,7 @@ fn default_as_string(spec: &InputSpec) -> Option<String> {
         InputSpec::Boolean { default, .. } => default.map(|b| b.to_string()),
         InputSpec::Enum { default, .. } => default.clone(),
         InputSpec::Path { default, .. } => default.clone(),
+        InputSpec::Document { default, .. } => default.clone(),
     }
 }
 
@@ -221,7 +222,12 @@ fn validate(
                 })
             }
         }
-        InputSpec::Path { .. } => {
+        // A document is a path to a file of a declared kind: what is
+        // checked here is that the path exists, the same check a `path`
+        // gets and for the same reason — a missing file fails the run
+        // either way, and failing before the first token is the cheap
+        // place to do it.
+        InputSpec::Path { .. } | InputSpec::Document { .. } => {
             let path = base_dir.join(raw);
             if path.exists() {
                 Ok(raw.to_string())

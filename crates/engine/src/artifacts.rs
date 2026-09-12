@@ -34,13 +34,8 @@ use yunta_core::FindingsFile;
 use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Node, Question, QuestionsFile, TasksFile,
+    ARTIFACTS_DIR,
 };
-
-/// The run directory's own name for where artifacts live. Every path
-/// this module produces is relative to the run directory and starts
-/// here, which is the shape the log, the diagnostics and the run
-/// contract all use.
-const ARTIFACTS_DIR: &str = "artifacts";
 
 /// What the engine appends to a `questions` artifact's name when it
 /// records the answers beside it.

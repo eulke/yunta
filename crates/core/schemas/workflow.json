@@ -544,6 +544,40 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "document"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "kind"
+          ]
         }
       ]
     },

@@ -7,6 +7,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::parse::{describe, nested};
 use crate::yaml::Value;
 
+/// The run directory's own name for where artifacts live. Every path a
+/// run records for an artifact is relative to the run directory and
+/// starts here, which is the shape the log, the diagnostics and the run
+/// contract all use — so writing one and reading one back read the same
+/// name.
+pub const ARTIFACTS_DIR: &str = "artifacts";
+
 /// `artifacts.produces`. `tasks`, `findings` and
 /// `questions` are interpreted. A plain string stays
 /// opaque.
@@ -72,7 +79,19 @@ impl ArtifactSpec {
 /// it only checks for existence. The kind fixes the document's shape, so
 /// it is what every door — the workflow's own `kind:`, `yunta schema`,
 /// the `document_shape` tool, a failed read's report — names it by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactKind {
     // Every door reads the kind through this derive, so an alias declared
