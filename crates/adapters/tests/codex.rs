@@ -690,16 +690,19 @@ async fn a_declared_artifact_directory_is_writable_by_the_session() {
     );
 }
 
-/// A path is arbitrary bytes; TOML's basic string is not. A directory
-/// whose name carries the two characters that end a TOML string reaches
-/// the CLI as one escaped literal, not as three broken tokens.
+/// A path is arbitrary bytes; a TOML string is not. A directory whose
+/// name carries the characters that end one reaches the CLI as a single
+/// value that reads back whole, not as three broken tokens. Which
+/// quoting carries it — basic or literal — is the renderer's call, so
+/// the claim here is what the CLI parses, never how it was spelled.
 #[tokio::test]
-async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_escaped() {
+async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_whole() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join(r#"quote"and\slash"#);
     std::fs::create_dir_all(&artifacts).unwrap();
     let args_file = dir.path().join("args.txt");
 
+    let expected_dir = artifacts.clone();
     let mut req = request(dir.path().to_path_buf());
     req.artifact_dir = Some(artifacts);
     req.env.insert(
@@ -710,15 +713,18 @@ async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_escaped(
     let _ = drain(session).await;
     let args = std::fs::read_to_string(&args_file).unwrap();
 
-    // The tempdir prefix carries nothing to escape; the tail is the
-    // escaped spelling of `quote"and\slash`, written out by hand.
-    let expected = format!(
-        r#"sandbox_workspace_write.writable_roots=["{}/quote\"and\\slash"]"#,
-        dir.path().display()
-    );
-    assert!(
-        args.lines().any(|arg| arg == expected),
-        "the path reaches the CLI as {expected}: {args}"
+    let assignment = args
+        .lines()
+        .find(|arg| arg.starts_with("sandbox_workspace_write.writable_roots="))
+        .unwrap_or_else(|| panic!("the writable roots reach the CLI: {args}"));
+    let table: toml::Table = toml::from_str(assignment)
+        .unwrap_or_else(|e| panic!("`{assignment}` is not readable TOML: {e}"));
+    assert_eq!(
+        table["sandbox_workspace_write"]["writable_roots"],
+        toml::Value::Array(vec![toml::Value::String(
+            expected_dir.display().to_string()
+        )]),
+        "the path the CLI reads is the path it was given: {assignment}"
     );
 }
 
