@@ -12,13 +12,14 @@ use crate::run_log::RunLog;
 
 use super::RunError;
 
-/// An artifact a run carries from birth: what a parent mounts into a
-/// child, or a successor inherits from its predecessor.
+/// An artifact a run carries from birth: a document its `inputs:`
+/// named, what a parent mounts into a child, or what a successor
+/// inherits from its predecessor.
 ///
 /// It carries its own identity and origin because the run that receives
-/// it cannot derive either: only the log the bytes came from says what
-/// artifact they are and who produced it there. A mount that renames an
-/// opaque artifact hands over the renamed identity, which is what the
+/// it cannot derive either: only where the bytes came from says what
+/// artifact they are and how the run came by them. A mount that renames
+/// an opaque artifact hands over the renamed identity, which is what the
 /// receiving run holds it as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BirthArtifact {
@@ -49,7 +50,8 @@ pub struct CreateRunParams<'a> {
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
 /// `scratch/`, the frozen `manifest.yaml`, the `run_created` event, and
-/// then one acceptance per birth artifact. Returns the run directory.
+/// then one acceptance per birth artifact — with the tasks of a document
+/// the run was given registered beside it. Returns the run directory.
 ///
 /// `run_created` comes first because it is the run: replay reads it
 /// before anything else, so an artifact a run is born holding is a fact
@@ -186,7 +188,52 @@ pub async fn create_run(
             artifact.origin.clone(),
         )
         .await?;
+        register_input_tasks(&log, artifact).await?;
     }
 
     Ok(run_dir)
+}
+
+/// Registers every task of a tasks document the run was *given*.
+///
+/// Accepting a document says what the run holds; a `task_registered`
+/// says what the run has to do about it, and until one exists a task is
+/// not a task of this run. A node's close states both for what that node
+/// produced — and a document that came in as an input has no node that
+/// will ever produce it, so its birth is the only place the second fact
+/// can be stated. What a run inherits from another run is left alone:
+/// there the tasks belong to a chain whose own nodes register them where
+/// they produce them.
+async fn register_input_tasks(log: &RunLog<'_>, artifact: &BirthArtifact) -> Result<(), RunError> {
+    if !matches!(artifact.origin, ArtifactOrigin::Input { .. })
+        || artifact.artifact
+            != (ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            })
+    {
+        return Ok(());
+    }
+    // The bytes are what the run accepted, so they read back as the
+    // document they were rendered from; a reading that fails anyway
+    // describes a run whose own birth artifact is not what it says it
+    // is, and says so rather than registering half a document.
+    let tasks: yunta_core::TasksFile =
+        yunta_core::shape::read(&artifact.bytes, artifact.artifact.view_name()).map_err(
+            |report| RunError::Broken {
+                diagnostic: report.to_string(),
+            },
+        )?;
+    for task in &tasks.tasks {
+        log.record(
+            None,
+            EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
+                task_id: task.id.clone(),
+                criteria: task.criteria.iter().map(Into::into).collect(),
+                scope: task.scope.clone(),
+                depends_on: task.depends_on.clone(),
+            }),
+        )
+        .await?;
+    }
+    Ok(())
 }

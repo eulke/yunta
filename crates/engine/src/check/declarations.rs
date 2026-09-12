@@ -143,6 +143,42 @@ pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<
     }
 }
 
+/// A `document` input and a node producing that kind are two producers
+/// of one identity, and nothing orders them.
+///
+/// The input is the answer for a workflow whose document comes from
+/// outside — a person points the run at one, and no node stands in to
+/// hand it over. A node that produces the same kind is a second answer
+/// to the same question, and a reader asking the run for that kind
+/// would get whichever acceptance landed last. Refused here, where both
+/// declarations are in sight, rather than left to a run that silently
+/// reads one of them.
+pub(crate) fn check_input_documents(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for (input, kind) in workflow
+        .inputs
+        .iter()
+        .filter_map(|(name, spec)| match spec {
+            InputSpec::Document { kind, .. } => Some((name, *kind)),
+            _ => None,
+        })
+    {
+        for node in workflow.iter_nodes() {
+            let produces = node
+                .artifacts
+                .iter()
+                .flat_map(|artifacts| &artifacts.produces)
+                .any(|spec| *spec == yunta_core::ArtifactSpec::Interpreted(kind));
+            if produces {
+                errors.push(CheckError::InputDocumentAlsoProduced {
+                    input: input.clone(),
+                    node: node.id.clone(),
+                    kind,
+                });
+            }
+        }
+    }
+}
+
 /// Every `on_finish.distill` entry must be an artifact the node it names
 /// declares.
 pub(crate) fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckError>) {

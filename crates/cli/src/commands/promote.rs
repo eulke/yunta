@@ -190,8 +190,9 @@ nodes:
         let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
-        let manifest =
-            build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new()).unwrap();
+        let manifest = build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new())
+            .unwrap()
+            .manifest;
 
         let run_id = RunId::from("run-parent");
         let worktree = project.worktrees_root.join(run_id.as_str());

@@ -1,7 +1,8 @@
-# A hand-written tasks document with one task runs end to end on a seeded crate:
-# the task's criteria are red before the executor's session and green
-# after it, its guard holds on both sides, and the workspace checks pass
-# on the result.
+# A hand-written tasks document with one task enters the run as its `tasks`
+# input and runs end to end on a seeded crate: the task's criteria are red
+# before the executor's session and green after it, its guard holds on both
+# sides, and the workspace checks pass on the result. No node produces the
+# document — the run is born holding it.
 workflow: run-tasks
 inputs: { tasks: plan/tasks.yaml }
 worktree: worktrees/greeting-crate
@@ -9,7 +10,6 @@ fixture: fixtures/run-tasks.yaml
 expect:
   final_state: finished
   nodes:
-    register: finished
     implement: finished
     verify: finished
   tasks:

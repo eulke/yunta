@@ -70,7 +70,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
 
         let run_dir = create_run(
             CreateRunParams {

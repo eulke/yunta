@@ -303,6 +303,12 @@ que siempre está al día.
   Qué implica declararlo — parser, reglas, corrección de un archivo ilegible — está
   en el Contrato §4.1; la forma de cada kind se lee con `yunta schema <kind>`, y su
   JSON Schema con `--json`.
+- **`inputs:`**: un mapa de nombre a especificación, con `type:` eligiendo la forma
+  — `string`, `number`, `boolean`, `enum`, `path`, `document` —, y solo los campos
+  de ese tipo disponibles. Un `document` declara además el `kind:` con el que el run
+  lee el archivo: el run nace teniéndolo como artifact propio, sin nodo productor, y
+  `{{inputs.<nombre>}}` rinde su identidad (`sha256:<hash>`) y no la ruta. El resto
+  está en el Contrato §2.3.
 - **Referencias a un artifact**: una `context: [{ artifact }]`, una entrada de
   `mounts:` y una de `on_finish.distill` nombran el artifact por lo que lo
   identifica — `kind: <k>` para un documento que el engine lee, `name: <archivo>`

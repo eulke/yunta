@@ -286,7 +286,8 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -416,7 +417,8 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let second_id = RunId::from("run-test-2");
     let run_dir = create_run(
         CreateRunParams {
@@ -746,7 +748,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,

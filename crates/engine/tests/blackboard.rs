@@ -50,8 +50,9 @@ impl Bench {
 
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
         let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest =
-            build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
+        let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+            .unwrap()
+            .manifest;
         let run_dir = create_run(
             CreateRunParams {
                 run_id: &run_id,

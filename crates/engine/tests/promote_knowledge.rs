@@ -62,7 +62,9 @@ fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manif
     .unwrap();
     let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    build_manifest(&workflow, &config, worktree, worktree, inputs).unwrap()
+    build_manifest(&workflow, &config, worktree, worktree, inputs)
+        .unwrap()
+        .manifest
 }
 
 #[test]

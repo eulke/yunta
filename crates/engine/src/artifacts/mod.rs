@@ -17,8 +17,10 @@
 //! opens an artifact by file name.
 //!
 //! [`store`] holds the bytes and writes the view; [`ingest`] judges what
-//! a node produced and renders what the engine writes.
+//! a node produced; [`canonical`] turns a document into the bytes the
+//! run stores for it, whoever wrote it.
 
+mod canonical;
 mod ingest;
 pub mod store;
 
@@ -33,10 +35,9 @@ use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
 use crate::run_log::RunLog;
 use store::ObjectStore;
 
-pub(crate) use ingest::{
-    canonical, derive_findings, held_document, interpreted, submit, verify_one, SubmitError,
-};
+pub(crate) use canonical::{canonical, canonical_document, derive_findings, submit, SubmitError};
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use store::ObjectError;
 
 /// What the engine appends to the `questions` kind's own name when it

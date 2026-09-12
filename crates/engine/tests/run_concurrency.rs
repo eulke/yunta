@@ -45,7 +45,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -111,7 +112,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -174,7 +176,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -268,7 +271,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -504,7 +508,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -839,7 +844,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,

@@ -109,7 +109,9 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let workflow_dir = Path::new(workflow_path).parent().unwrap();
     let inputs = HashMap::from([("idea".to_string(), "add dark mode".to_string())]);
-    let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs).unwrap();
+    let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs)
+        .unwrap()
+        .manifest;
 
     let runs_root = root.path().join("runs");
     let run_dir = runs_root.join(run_id.as_str());

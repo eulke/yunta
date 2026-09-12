@@ -73,8 +73,9 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
     )
     .unwrap();
     let config: ConfigLayer = serde_norway::from_str("runners: {}\n").unwrap();
-    let manifest =
-        build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
+    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .unwrap()
+        .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &run_id,

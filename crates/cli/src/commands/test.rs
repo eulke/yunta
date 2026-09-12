@@ -243,7 +243,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let adapters = mock_adapters(&config, mock);
 
     let provided_inputs: HashMap<String, String> = case.inputs.into_iter().collect();
-    let manifest = yunta_engine::build_manifest(
+    let frozen = yunta_engine::build_manifest(
         &workflow,
         &config,
         workflow_path.parent().unwrap_or(Path::new(".")),
@@ -251,6 +251,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &provided_inputs,
     )
     .map_err(|e| yunta_core::describe(&e))?;
+    let manifest = frozen.manifest;
 
     // The case's `mode` is frozen into the run the way `--mode` is;
     // the default mode runs the whole graph unfiltered.
@@ -262,7 +263,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
             runs_root: &runs_root,
             mode: &mode,
             promoted_from: None,
-            artifacts: &[],
+            // A case's `inputs:` name documents the same way `--input`
+            // does, and the run is born holding each of them.
+            artifacts: &frozen.documents,
         },
         &storage,
         &SystemClock,

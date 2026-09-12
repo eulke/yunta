@@ -175,7 +175,8 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -247,7 +248,8 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -408,7 +410,8 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -613,7 +616,8 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,

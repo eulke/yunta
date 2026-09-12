@@ -2,20 +2,14 @@ name: run-tasks
 description: Executes a hand-written tasks document — every criterion red before the work and green after it, scope clean — then the workspace checks.
 inputs:
   tasks:
-    type: path
+    type: document
+    kind: tasks
     required: true
     description: Tasks document YAML, relative to the repository root.
 nodes:
-  - id: register
-    kind: bash
-    run: "cp {{inputs.tasks}} {{node.artifacts}}/tasks.yaml"
-    artifacts:
-      produces: [tasks]
-
   - id: implement
     kind: loop
     runner: executor
-    depends_on: [register]
     until: all_tasks_complete
     invariant: true
     prompt: |

@@ -108,6 +108,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
     check_artifact_declarations(workflow, &mut errors);
+    check_input_documents(workflow, &mut errors);
     check_reserved_artifact_names(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {

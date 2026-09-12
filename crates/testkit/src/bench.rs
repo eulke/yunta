@@ -222,7 +222,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .expect("build manifest");
+        .expect("build manifest")
+        .manifest;
 
         let run_dir = create_run(
             CreateRunParams {

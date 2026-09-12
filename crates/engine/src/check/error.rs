@@ -98,6 +98,20 @@ pub enum CheckError {
         kind: yunta_core::ArtifactKind,
     },
 
+    /// An input document and a node producing the same kind are two
+    /// producers of one identity with nothing to order them.
+    #[error(
+        "input `{input}` brings in the {label} and node `{node}` produces one too — a run \
+         resolving `{kind}` would get whichever landed last, which nothing in the workflow \
+         decides; drop the input, or `{kind}` from node `{node}`'s `artifacts.produces`",
+        label = .kind.label()
+    )]
+    InputDocumentAlsoProduced {
+        input: String,
+        node: NodeId,
+        kind: yunta_core::ArtifactKind,
+    },
+
     /// The three kind names are how a document the engine reads is
     /// referred to, so none of them is available as a file name.
     #[error(

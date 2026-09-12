@@ -126,8 +126,9 @@ async fn run_with_config(
     let run_id = RunId::from("run-test-1");
 
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let manifest =
-        build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
+    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .unwrap()
+        .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &run_id,

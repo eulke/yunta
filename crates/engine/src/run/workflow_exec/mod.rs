@@ -282,14 +282,17 @@ pub(super) async fn execute_workflow(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.worktree.join(".yunta/workflows"));
-    let mut child_manifest = match crate::manifest::build_manifest(
+    let crate::manifest::FrozenRun {
+        manifest: mut child_manifest,
+        documents,
+    } = match crate::manifest::build_manifest(
         &child_workflow,
         &child_config,
         &workflows_dir,
         ctx.worktree,
         &provided,
     ) {
-        Ok(manifest) => manifest,
+        Ok(frozen) => frozen,
         Err(e) => {
             return fail(
                 ctx,
@@ -361,7 +364,10 @@ pub(super) async fn execute_workflow(
     // artifacts: the promotion inheritance mechanism generalized, files
     // into the child's own `artifacts/`, where its ordinary machinery
     // (context `artifact: {name}`, `{{run.dir}}` templates) already
-    // looks.
+    // looks. The documents its own `inputs:` named join them: both are
+    // artifacts the child holds before any of its nodes runs.
+    let mut born = mounted;
+    born.extend(documents);
     ctx.emit(
         Some(&node.id),
         EventPayload::ChildRunCreated(ChildRunCreatedPayload {
@@ -386,7 +392,7 @@ pub(super) async fn execute_workflow(
             runs_root: &runs,
             mode: &child_mode,
             promoted_from: None,
-            artifacts: &mounted,
+            artifacts: &born,
         },
         ctx.storage,
         ctx.clock.as_ref(),

@@ -25,7 +25,8 @@ fn a_repo_origin_workflow_freezes_no_pack_provenance() {
         repo.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert!(manifest.pack.is_none());
 }
@@ -50,7 +51,8 @@ fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
         repo.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let provenance = manifest.pack.expect("pack-origin workflow freezes pack");
     assert_eq!(provenance.publisher, "acme");
@@ -85,7 +87,8 @@ fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
         repo.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let provenance = manifest.pack.expect("pack-origin workflow freezes pack");
     assert_eq!(
@@ -112,7 +115,8 @@ fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_failing_th
         repo.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert!(manifest.pack.is_none());
 }

@@ -334,7 +334,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
         let run_dir = create_run(
             yunta_engine::CreateRunParams {
                 run_id: &self.run_id,
@@ -447,7 +448,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         yunta_engine::CreateRunParams {
             run_id: &bench.run_id,
@@ -543,7 +545,8 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let events = vec![
         StoredEvent {

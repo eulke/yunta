@@ -82,8 +82,8 @@ pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
-pub use inputs::{resolve_inputs, InputsError};
-pub use manifest::{build_manifest, ManifestError};
+pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
+pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use modes::{dependencies_in_mode, mode_included_nodes};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,

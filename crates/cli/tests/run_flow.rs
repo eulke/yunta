@@ -209,6 +209,91 @@ expect:
 }
 
 #[test]
+fn a_document_input_gives_a_loop_its_tasks_with_no_node_producing_them() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        r#"
+runners:
+  executor:
+    - { adapter: claude-code, model: real-model }
+"#,
+    );
+    // Nothing here produces a tasks document: the run is born holding
+    // the one its `tasks` input named.
+    write(
+        &repo.join(".yunta/workflows/run-a-plan.yaml"),
+        r#"
+name: run-a-plan
+inputs:
+  plan:
+    type: document
+    kind: tasks
+    required: true
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/seed/plan/tasks.yaml"),
+        r#"
+tasks:
+  - id: T001
+    title: "Make it"
+    scope: ["made.txt"]
+    criteria:
+      - cmd: "test -f made.txt"
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/one-task.yaml"),
+        r#"
+sessions:
+  - effects:
+      - { path: made.txt, content: "made" }
+    outcome: { type: completed, summary: "made it" }
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/from-a-document.yaml"),
+        r#"
+workflow: run-a-plan
+inputs: { plan: plan/tasks.yaml }
+worktree: seed
+fixture: fixtures/one-task.yaml
+expect:
+  final_state: finished
+  nodes:
+    implement: finished
+  tasks:
+    T001: done
+"#,
+    );
+
+    let output = yunta_in!(&repo, &home, &["test"]);
+    let text = stdout(&output);
+    assert!(
+        output.status.success(),
+        "stdout: {text}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        text.trim_end(),
+        "case from-a-document ... ok\n1 case, 0 failed",
+        "the loop finds the tasks the input brought in"
+    );
+}
+
+#[test]
 fn a_failing_expectation_fails_yunta_test_naming_the_mismatch() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");

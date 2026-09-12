@@ -347,7 +347,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -771,7 +772,8 @@ impl BirthBench {
             &worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
         BirthBench {
             runs_root: root.path().join("runs"),
             _root: root,
@@ -903,7 +905,8 @@ nodes:
         &bench.worktree,
         &provided,
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -940,6 +943,105 @@ nodes:
     assert_eq!(created.inputs["idea"], "ship it");
 }
 
+/// A hand-written tasks document: what a person points a run at.
+const TASKS_ON_DISK: &str = "tasks:\n  - id: greeting\n    title: 'Add the greeting'\n    \
+     scope: ['src/**']\n    criteria:\n      - {cmd: 'true'}\n";
+
+#[tokio::test]
+async fn a_document_input_is_born_as_an_artifact_and_frozen_as_its_hash() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("plan.yaml"), TASKS_ON_DISK).unwrap();
+    let workflow: Workflow = serde_norway::from_str(
+        r#"
+name: with-a-document
+inputs:
+  tasks:
+    type: document
+    kind: tasks
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#,
+    )
+    .unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let provided = HashMap::from([("tasks".to_string(), "plan.yaml".to_string())]);
+    let frozen = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &provided,
+    )
+    .unwrap();
+    create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &frozen.manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &frozen.documents,
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        matches!(
+            events.first().and_then(|e| e.payload()),
+            Some(yunta_core::events::EventPayload::RunCreated(_))
+        ),
+        "the run exists in the log before the document it holds is stated"
+    );
+    let accepted = yunta_testkit::accepted(&events);
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    assert_eq!(
+        accepted[0].producer, None,
+        "no node of this run produced it: it came in as an input"
+    );
+    assert_eq!(
+        accepted[0].origin,
+        yunta_core::events::ArtifactOrigin::Input {
+            input: "tasks".to_string()
+        }
+    );
+    assert_eq!(
+        accepted[0].artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks
+        }
+    );
+
+    let frozen_value = format!("sha256:{}", accepted[0].content_hash);
+    assert_eq!(
+        frozen.manifest.inputs["tasks"], frozen_value,
+        "the manifest freezes the document the run holds, not the path it was read from"
+    );
+    let created = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::RunCreated(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("run_created is the first event");
+    assert_eq!(created.inputs["tasks"], frozen_value);
+
+    assert_eq!(
+        yunta_engine::derive(&events).tasks,
+        std::collections::HashMap::from([(
+            "greeting".into(),
+            yunta_core::events::TaskStatus::Pending
+        )]),
+        "the tasks of a document the run was given are tasks of the run: no node produces it, \
+         so its birth is where they are registered"
+    );
+}
+
 #[tokio::test]
 async fn run_resumed_records_the_policy_each_orphan_resolved_to() {
     let bench = Bench::new();
@@ -962,7 +1064,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,

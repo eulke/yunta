@@ -70,6 +70,10 @@ fn lower_hex(bytes: &[u8]) -> String {
 /// reads.
 const ABBREVIATED_DIGITS: usize = 12;
 
+/// What names the algorithm in front of a hash, wherever a hash travels
+/// as a value rather than as a field of its own.
+const ALGORITHM: &str = "sha256:";
+
 impl ContentHash {
     /// The SHA-256 of `bytes`, hex-encoded: the one way this workspace
     /// produces a content hash, so every hash it records has this shape.
@@ -81,7 +85,18 @@ impl ContentHash {
     /// `sha256:` and the first twelve digits. Prose, not an identifier —
     /// what compares, and what a log records, is the whole value.
     pub fn abbreviated(&self) -> String {
-        format!("sha256:{}", &self.as_str()[..ABBREVIATED_DIGITS])
+        format!("{ALGORITHM}{}", &self.as_str()[..ABBREVIATED_DIGITS])
+    }
+
+    /// The hash as a value that stands for the content itself:
+    /// `sha256:` and every digit.
+    ///
+    /// What a frozen `document` input carries, where the value *is* the
+    /// document the run holds — a whole hash, so two contents never
+    /// share a value, and an algorithm in front, so a reader can tell
+    /// what the digits are.
+    pub fn qualified(&self) -> String {
+        format!("{ALGORITHM}{self}")
     }
 }
 
@@ -137,6 +152,17 @@ mod tests {
         assert!(hash
             .as_str()
             .starts_with(short.trim_start_matches("sha256:")));
+    }
+
+    #[test]
+    fn a_qualified_hash_keeps_every_digit_of_the_content_it_names() {
+        let hash = sha256_hex(b"content");
+        assert_eq!(hash.qualified(), format!("sha256:{hash}"));
+        assert_ne!(
+            hash.qualified(),
+            sha256_hex(b"other content").qualified(),
+            "a value that stands for content distinguishes two contents"
+        );
     }
 
     #[test]

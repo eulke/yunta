@@ -325,8 +325,9 @@ async fn prepare_loop<'a>(
         let end = fail(
             ctx,
             node,
-            "no tasks document has been registered before this loop — a previous node must \
-             produce an artifact with `kind: tasks`"
+            "this run holds no tasks document — an earlier node declares `produces: [tasks]`, \
+             or the workflow declares a `type: document` input of `kind: tasks` and the run \
+             is given one"
                 .to_string(),
             false,
         )

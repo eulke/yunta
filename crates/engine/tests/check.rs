@@ -1787,6 +1787,62 @@ nodes:
     );
 }
 
+/// A document that enters as an input and a node that produces the same
+/// kind are two producers of one identity, with nothing to order them.
+#[test]
+fn an_input_document_and_a_node_producing_its_kind_are_refused_together() {
+    let yaml = r#"
+name: two-producers
+inputs:
+  plan:
+    type: document
+    kind: tasks
+nodes:
+  - id: plan-it
+    kind: prompt
+    prompt: "plan it"
+    artifacts:
+      produces: [tasks]
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    let clash = errors
+        .iter()
+        .find(|e| matches!(e, CheckError::InputDocumentAlsoProduced { .. }))
+        .unwrap_or_else(|| panic!("got: {errors:?}"));
+    let text = clash.to_string();
+    assert!(
+        text.contains("`plan`") && text.contains("`plan-it`") && text.contains("tasks document"),
+        "the refusal names both producers and the document they claim: {text}"
+    );
+}
+
+/// A document input whose kind no node produces is exactly what the
+/// input is for.
+#[test]
+fn an_input_document_of_a_kind_nobody_produces_is_accepted() {
+    let yaml = r#"
+name: one-producer
+inputs:
+  plan:
+    type: document
+    kind: tasks
+nodes:
+  - id: work
+    kind: loop
+    until: all_tasks_complete
+    prompt: "do the task"
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::InputDocumentAlsoProduced { .. })),
+        "got: {errors:?}"
+    );
+}
+
 /// `tasks`, `findings` and `questions` name the documents the engine
 /// reads, so none of them is available as a file name.
 #[test]

@@ -775,7 +775,8 @@ pub async fn run_with_recording_mock(
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
@@ -886,7 +887,8 @@ pub async fn resume_orphan_with_mock(
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,

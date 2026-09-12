@@ -18,9 +18,12 @@ del mock. `yunta check` lo alcanza antes de gastar un token.
 _Evitar_: YAML de usuario, input.
 
 **YAML de agente**:
-Un documento cuyo contenido nace en un run: el de todo artifact interpretado. No
-existe antes del run, así que ningún `check` lo alcanza. Una sesión lo entrega
-como objeto y el engine rinde el YAML; un nodo de comando escribe el archivo.
+Un documento cuyo contenido nace en un run: el de casi todo artifact
+interpretado. No existe antes del run, así que ningún `check` lo alcanza. Una
+sesión lo entrega como objeto y el engine rinde el YAML; un nodo de comando
+escribe el archivo. La excepción es el documento que una persona escribe y el
+run recibe como input `type: document`: lo lee la misma puerta, y su rechazo
+llega al crear el run en lugar de al cerrar un nodo.
 _Evitar_: output estructurado, artifact de salida.
 
 **YAML persistido**:
@@ -63,8 +66,9 @@ _Evitar_: DocumentKind, tipo de documento, formato.
 **Tasks** (*documento de tareas*):
 El artifact interpretado de `kind: tasks`: la lista de tareas verificables que un
 nodo de planificación entrega o que un input trae escrita a mano, con `tasks:`
-como única clave. Al cerrarse el nodo, cada tarea pasa al event log
-(`task_registered`) y el archivo queda congelado. Nombra al documento y a su
+como única clave. Cada tarea pasa al event log (`task_registered`) donde el
+documento entra —el cierre del nodo que lo produce, o el nacimiento del run que
+lo recibe como input— y el documento queda congelado. Nombra al documento y a su
 kind en el workflow, en `yunta schema`, en la tool de entrega
 (`yunta_submit_tasks`) y en la fuente de contexto `tasks:`.
 _Evitar_: ledger, task-ledger, plan (que es un nombre de archivo, no un kind).
