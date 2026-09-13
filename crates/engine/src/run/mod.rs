@@ -58,7 +58,7 @@ use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
 pub use budget::session_token_budget;
-pub use create::{create_run, BirthArtifact, CreateRunParams};
+pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;

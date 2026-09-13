@@ -830,7 +830,7 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
         artifact: yunta_core::events::ArtifactId::Opaque {
             name: "brief/plan.md".to_string(),
         },
-        origin: yunta_core::events::ArtifactOrigin::Inherited {
+        origin: yunta_engine::BirthOrigin::Inherited {
             run: from.clone(),
             producer: Some("write".into()),
         },
@@ -1220,5 +1220,176 @@ nodes:
         bench.accepted(),
         vec![],
         "nothing a failed attempt left behind becomes the next attempt's artifact"
+    );
+}
+
+// --- a run answers for the tasks of every document it holds ------------
+
+const ONE_TASK: &str = r#"
+tasks:
+  - id: T001
+    title: "Write done.txt"
+    scope: ["done.txt"]
+    criteria: [{cmd: "test -f done.txt"}]
+"#;
+
+/// The tasks document as a run stores it: read through its own door and
+/// rendered canonically.
+fn tasks_document(yaml: &str) -> (yunta_core::TasksFile, Vec<u8>) {
+    let document: yunta_core::TasksFile =
+        yunta_core::shape::read(yaml.as_bytes(), "tasks").expect("a valid tasks document");
+    let bytes = yunta_core::shape::render(&document)
+        .expect("the canonical rendering")
+        .into_bytes();
+    (document, bytes)
+}
+
+#[tokio::test]
+async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_never_created() {
+    let bench = BirthBench::new();
+    let source = RunId::from("run-unreadable-source");
+    // A status about a task nobody registered: a log replay stops at.
+    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    planted.record(yunta_core::events::EventPayload::TaskStatusChanged(
+        yunta_core::events::TaskStatusChangedPayload {
+            task_id: "T001".into(),
+            new_status: yunta_core::events::TaskStatus::Done,
+            caused_by: 1u64.into(),
+        },
+    ));
+
+    let (_document, bytes) = tasks_document(ONE_TASK);
+    let run_id = RunId::from("run-from-a-broken-source");
+    let error = bench
+        .create(
+            &run_id,
+            &[yunta_engine::BirthArtifact {
+                artifact: yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Tasks,
+                },
+                origin: yunta_engine::BirthOrigin::Inherited {
+                    run: source.clone(),
+                    producer: None,
+                },
+                bytes,
+            }],
+        )
+        .await
+        .unwrap_err();
+
+    let yunta_engine::RunError::Broken { diagnostic } = &error else {
+        panic!("a source whose log does not replay refuses the birth: {error:?}");
+    };
+    assert!(
+        diagnostic.contains(source.as_str()),
+        "the diagnostic names the run that cannot answer: {diagnostic}"
+    );
+    assert!(
+        !bench.runs_root.join(run_id.as_str()).exists(),
+        "the run has no directory, because it was never born"
+    );
+    assert!(
+        bench.storage.events_for_run(&run_id).unwrap().is_empty(),
+        "nor a single event"
+    );
+}
+
+const LOOP_ONLY_WORKFLOW: &str = r#"
+name: loop-only
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+
+#[tokio::test]
+async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stuck() {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_norway::from_str(LOOP_ONLY_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap()
+    .manifest;
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    // A document the run holds and never said what to do about — the
+    // one shape that reaches a loop with no registration behind it.
+    let (_document, bytes) = tasks_document(ONE_TASK);
+    let content_hash = yunta_engine::ObjectStore::at(&run_dir).put(&bytes).unwrap();
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: None,
+                payload: yunta_core::events::EventPayload::ArtifactAccepted(
+                    yunta_core::events::ArtifactAcceptedPayload {
+                        artifact: yunta_core::events::ArtifactId::Interpreted {
+                            kind: yunta_core::ArtifactKind::Tasks,
+                        },
+                        content_hash,
+                        origin: yunta_core::events::ArtifactOrigin::Inherited {
+                            run: "run-elsewhere".into(),
+                            producer: None,
+                        },
+                    },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
+        .unwrap();
+
+    let adapters: HashMap<yunta_core::AdapterId, std::sync::Arc<dyn yunta_adapters::Adapter>> =
+        HashMap::from([(
+            "mock".into(),
+            std::sync::Arc::new(yunta_adapters::MockAdapter::from_yaml("sessions: []\n").unwrap())
+                as std::sync::Arc<dyn yunta_adapters::Adapter>,
+        )]);
+    let error = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage.async_handle(),
+        clock: std::sync::Arc::new(FixedClock),
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+        ambient: None,
+    })
+    .await
+    .unwrap_err();
+
+    let yunta_engine::RunError::Broken { diagnostic } = &error else {
+        panic!("a document with no registration behind it is broken: {error:?}");
+    };
+    assert!(
+        diagnostic.contains("tasks.yaml") && diagnostic.contains("T001"),
+        "the diagnostic names the document and every task missing from the log: {diagnostic}"
     );
 }

@@ -7,17 +7,23 @@
 //! in the engine so both drivers of a chain use the identical mechanics: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
+//!
+//! The successor's tree branches from where the predecessor's work left
+//! it, so the tasks that run finished are finished here too: what a
+//! handed-over tasks document means to the run receiving it is
+//! `crate::tasks`'s call, made at birth, and this module only says which
+//! run handed it over.
 
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactRef;
-use yunta_core::events::{ArtifactId, ArtifactOrigin, StoredEvent};
+use yunta_core::events::{ArtifactId, StoredEvent};
 use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::ObjectError;
 
-use super::{create_run, BirthArtifact, CreateRunParams, RunError};
+use super::{create_run, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -158,7 +164,7 @@ pub(super) fn birth_artifact(
 ) -> BirthArtifact {
     BirthArtifact {
         artifact,
-        origin: ArtifactOrigin::Inherited {
+        origin: BirthOrigin::Inherited {
             run: from_run.clone(),
             producer: held.producer.clone(),
         },

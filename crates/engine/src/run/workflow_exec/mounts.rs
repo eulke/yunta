@@ -11,7 +11,10 @@
 //!
 //! Everything resolves in memory, before the child is linked or born, so
 //! a source the run cannot hand over fails the parent's node with nothing
-//! dangling behind it.
+//! dangling behind it. A mount of a tasks document is a document the
+//! child holds from birth like any other: the child registers its tasks
+//! then, `done` the ones the source run finished, which is
+//! `crate::tasks`'s call and not this module's.
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::ArtifactId;

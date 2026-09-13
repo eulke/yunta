@@ -30,7 +30,10 @@ are valid there. A mistyped key never silently becomes a default.
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
   `1`, sequential). See the [tasks schema](design/spec-ledger.md) for what a task looks
   like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
-  you write one by hand while you're still designing the workflow.
+  you write one by hand while you're still designing the workflow. The loop works
+  from whichever tasks document the run holds, however it came by one: produced
+  by a node, given as a `type: document` input, mounted in from a parent, or
+  inherited from the run this one succeeds.
 - **`check`** — automatic verification against data the engine already has: `builtin:
   baseline_compare` (did a passing suite start failing), `builtin: coverage_gate`
   (threshold), `builtin: findings_gate` (fails above a declared `max_severity`). No
@@ -254,7 +257,9 @@ else. Hooks never re-route — that's `on_failure.goto`'s job, not a hook's.
 `modes:` is an open, ordered map — `quick: {include: [...]}`, `standard: {...}`,
 `full: { include: all }`, or any names you choose. `--mode <name>` on `yunta run`
 selects one; promotion only ever moves forward through declaration order (a run
-already in `standard` can't drop back to `quick`). A node marked `invariant: true`
+already in `standard` can't drop back to `quick`). A successor starts with its
+predecessor's tasks, the ones already done still done — it picks the work up
+where that run left it rather than repeating what is already in the tree. A node marked `invariant: true`
 must appear in every declared mode regardless of name or count — a mode narrows how
 much deliberation happens, never how much verification does.
 

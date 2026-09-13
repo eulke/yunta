@@ -114,8 +114,10 @@ impl RunCtx<'_> {
         Ok(self.log().record(node_id, payload).await?)
     }
 
+    /// This run's whole log, read through [`RunLog`] like every other
+    /// read of it.
     pub(crate) async fn load_events(&self) -> Result<Vec<StoredEvent>, RunError> {
-        Ok(self.storage.events_for_run(self.run_id.clone()).await?)
+        Ok(self.log().events().await?)
     }
 
     /// Puts `escalation` to the run's human surface and returns its

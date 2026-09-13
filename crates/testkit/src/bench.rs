@@ -12,8 +12,8 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::StoredEvent;
 use yunta_core::{AdapterId, ConfigLayer, RunId, SeqIdSource, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction,
+    NoInteraction, RunEnv, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -43,6 +43,9 @@ pub struct Bench {
     pub run_id: RunId,
     ids: SeqIdSource,
     ambient: Option<yunta_core::Env>,
+    /// What the run is born holding — a document its `inputs:` named,
+    /// or what another run hands over.
+    birth: Vec<BirthArtifact>,
     /// The adapter the last run used, so a test can ask what each
     /// session was actually handed.
     mock: std::sync::Mutex<Option<Arc<MockAdapter>>>,
@@ -80,6 +83,7 @@ impl Bench {
             run_id: RunId::from(run_id),
             ids: SeqIdSource::new("minted"),
             ambient: None,
+            birth: Vec::new(),
             mock: std::sync::Mutex::new(None),
             workflow: std::sync::Mutex::new(None),
         }
@@ -93,6 +97,14 @@ impl Bench {
             yunta_home: Some(root.into()),
             ..Default::default()
         });
+        self
+    }
+
+    /// Gives the run `artifacts` from birth — what a `type: document`
+    /// input, a mount or a promotion hands a run before any of its nodes
+    /// runs.
+    pub fn born_holding(mut self, artifacts: Vec<BirthArtifact>) -> Self {
+        self.birth = artifacts;
         self
     }
 
@@ -232,7 +244,7 @@ impl Bench {
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
                 promoted_from: None,
-                artifacts: &[],
+                artifacts: &self.birth,
             },
             &self.storage.async_handle(),
             &FixedClock,

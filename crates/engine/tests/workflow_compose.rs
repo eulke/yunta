@@ -1489,3 +1489,268 @@ sessions:
     assert_eq!(effective[0].node, Some("feat".into()));
     assert_eq!(effective[0].finding.id.to_string(), "null-deref");
 }
+
+// --- a run owns the tasks of every tasks document it acquires ---------
+
+/// A command node writing the one-task document the composition works
+/// from, where that node writes the files it declares.
+const WRITES_ONE_TASK: &str = r#"
+  - id: plan
+    kind: bash
+    run: |
+      cat > {{node.artifacts}}/tasks.yaml <<'YAML'
+      tasks:
+        - id: T001
+          title: "Write done.txt"
+          scope: ["done.txt"]
+          criteria:
+            - cmd: "test -f done.txt"
+      YAML
+    artifacts: { produces: [tasks] }
+"#;
+
+/// The one executor session the loop dispatches for `T001`: it writes
+/// what the task's criterion checks for.
+const DOES_ONE_TASK: &str = r#"
+sessions:
+  - match_prompt_contains: "T001"
+    effects:
+      - { path: done.txt, content: "done" }
+    outcome: { type: completed, summary: "did T001" }
+"#;
+
+/// Every `(task_id, status)` a run's log records, in order.
+fn task_statuses(bench: &Bench, run_id: &RunId) -> Vec<(String, yunta_core::events::TaskStatus)> {
+    bench
+        .storage
+        .events_for_run(run_id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::TaskStatusChanged(p)) => Some((p.task_id.to_string(), p.new_status)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `(node_id, task_id)` a run's log registers, in order.
+fn task_registrations(bench: &Bench, run_id: &RunId) -> Vec<(Option<String>, String)> {
+    bench
+        .storage
+        .events_for_run(run_id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::TaskRegistered(p)) => Some((
+                e.node_id.as_ref().map(ToString::to_string),
+                p.task_id.to_string(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_child_born_with_a_mounted_tasks_document_registers_its_tasks_at_birth() {
+    let bench = Bench::new(&[(
+        "implement-them",
+        r#"
+name: implement-them
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#,
+    )]);
+    let parent = format!(
+        r#"
+name: parent
+nodes:
+{WRITES_ONE_TASK}
+  - id: do
+    kind: workflow
+    use: implement-them
+    mounts:
+      - artifact: {{ node: plan, kind: tasks }}
+"#
+    );
+
+    let run_id = RunId::from("run-mounted-tasks");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            &parent,
+            CONFIG,
+            &HashMap::new(),
+            DOES_ONE_TASK,
+            &NoInteraction,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.get("do"),
+        Some(NodeState::Finished { .. })
+    ));
+
+    let child = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "do")
+        .map(|(_, id)| id)
+        .expect("the child is linked on the parent's log");
+    assert_eq!(
+        task_registrations(&bench, &child),
+        vec![(None, "T001".to_string())],
+        "a mounted document's tasks are the child's from birth, with no node behind them"
+    );
+    let child_state = yunta_engine::derive(&bench.storage.events_for_run(&child).unwrap());
+    assert_eq!(
+        child_state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+}
+
+#[tokio::test]
+async fn a_parent_acquiring_its_child_s_tasks_holds_them_done() {
+    let bench = Bench::new(&[(
+        "plan-and-do",
+        &format!(
+            r#"
+name: plan-and-do
+nodes:
+{WRITES_ONE_TASK}
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#
+        ),
+    )]);
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: plan-and-do
+    artifacts: { produces: [tasks] }
+"#;
+
+    let run_id = RunId::from("run-acquires-tasks");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            DOES_ONE_TASK,
+            &NoInteraction,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "what the child finished is finished for the parent that took the document over"
+    );
+    assert_eq!(
+        task_registrations(&bench, &run_id),
+        vec![(Some("feat".to_string()), "T001".to_string())],
+        "the parent registers them under the node that acquired the document"
+    );
+    assert_eq!(
+        task_statuses(&bench, &run_id),
+        vec![("T001".to_string(), yunta_core::events::TaskStatus::Done)],
+    );
+}
+
+#[tokio::test]
+async fn a_promoted_child_s_successor_does_not_redo_what_its_predecessor_finished() {
+    let bench = Bench::new(&[(
+        "promotable-tasks",
+        r#"
+name: promotable-tasks
+modes:
+  quick: { include: [implement, lint, fix-lint] }
+  full:  { include: [implement, ship] }
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+  - id: lint
+    kind: bash
+    depends_on: [implement]
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix-lint, max_reroutes: 0 }
+  - id: fix-lint
+    kind: bash
+    run: "true"
+  - id: ship
+    kind: bash
+    depends_on: [implement]
+    run: "echo shipped > shipped.txt"
+"#,
+    )]);
+    let parent = format!(
+        r#"
+name: parent
+nodes:
+{WRITES_ONE_TASK}
+  - id: feat
+    kind: workflow
+    use: promotable-tasks
+    mounts:
+      - artifact: {{ node: plan, kind: tasks }}
+"#
+    );
+
+    let run_id = RunId::from("run-promoted-tasks");
+    let (terminal, _state) = bench
+        .run(
+            &run_id,
+            &parent,
+            CONFIG,
+            &HashMap::new(),
+            DOES_ONE_TASK,
+            &AlwaysPromote,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let ids: Vec<RunId> = bench
+        .children_created(&run_id)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ids.len(), 2, "the promotion chains into a second child");
+    assert_eq!(
+        bench.children_finished(&run_id),
+        vec![
+            (ids[0].clone(), TerminalState::Promoted),
+            (ids[1].clone(), TerminalState::Done),
+        ]
+    );
+
+    let successor = &ids[1];
+    assert_eq!(
+        task_statuses(&bench, successor),
+        vec![("T001".to_string(), yunta_core::events::TaskStatus::Done)],
+        "the successor is born with the work done, and never dispatches it again"
+    );
+    assert!(
+        bench
+            ._root
+            .path()
+            .join("worktrees")
+            .join(successor.as_str())
+            .join("shipped.txt")
+            .exists(),
+        "the successor's own mode ran past the loop it had nothing left to do"
+    );
+}

@@ -7,7 +7,7 @@
 //! session's tool listener, a run's birth — hands over a payload and
 //! nothing else.
 
-use yunta_core::events::{EventDraft, EventPayload};
+use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 use yunta_core::{Clock, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -46,5 +46,15 @@ impl<'a> RunLog<'a> {
         };
         let at = self.clock.now();
         self.storage.append(draft, at).await
+    }
+
+    /// Every event this run's log holds, in order.
+    ///
+    /// The one read of a run's own log: a site deriving state, looking
+    /// for what a node produced or asking what it already registered
+    /// goes through here, so the log has a single reader the way it has
+    /// a single writer.
+    pub(crate) async fn events(&self) -> Result<Vec<StoredEvent>, StorageError> {
+        self.storage.events_for_run(self.run_id.clone()).await
     }
 }

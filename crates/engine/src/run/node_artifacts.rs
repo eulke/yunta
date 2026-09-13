@@ -7,19 +7,15 @@
 //! than the lifecycle around them: not how a node ends, but what the run
 //! holds once it has.
 
-use std::collections::BTreeMap;
-
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, EventPayload, Failure, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage,
-};
+use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, Failure, TokenUsage};
 use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
 
 use crate::artifacts::{
     accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
+use crate::tasks::Provenance;
 
 use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
@@ -183,6 +179,16 @@ fn resolve_from_child<'a>(
     }
 }
 
+/// What a `kind: workflow` node's close takes over from its child: the
+/// artifacts themselves, and what that child's log leaves standing —
+/// derived once, here, from the events the acquisition already read, so
+/// a document among them is registered against what the child actually
+/// did with it.
+pub(super) struct Acquired {
+    pub verified: Vec<VerifiedArtifact>,
+    pub standing: crate::replay::RunState,
+}
+
 /// Takes over every artifact a `kind: workflow` node declares from the
 /// log of the child run that produced it.
 ///
@@ -196,18 +202,22 @@ pub(super) async fn acquire_from_child(
     ctx: &RunCtx<'_>,
     node: &Node,
     child: ChildRun<'_>,
-) -> Result<Result<Vec<VerifiedArtifact>, NotAcquired>, RunError> {
-    let Some(artifacts) = &node.artifacts else {
-        return Ok(Ok(Vec::new()));
-    };
+) -> Result<Result<Acquired, NotAcquired>, RunError> {
     let events = ctx.storage.events_for_run(child.id.clone()).await?;
+    let standing = crate::tasks::standing_of(child.id, &events)?;
+    let Some(artifacts) = &node.artifacts else {
+        return Ok(Ok(Acquired {
+            verified: Vec::new(),
+            standing,
+        }));
+    };
     let held = RunArtifacts::of(child.run_dir, &events);
     let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id) {
         Ok(resolved) => resolved,
         Err(problem) => return Ok(Err(problem)),
     };
 
-    let mut acquired = Vec::with_capacity(resolved.len());
+    let mut verified = Vec::with_capacity(resolved.len());
     for item in resolved {
         accept(
             &ctx.log(),
@@ -221,9 +231,9 @@ pub(super) async fn acquire_from_child(
             },
         )
         .await?;
-        acquired.push(item.verified);
+        verified.push(item.verified);
     }
-    Ok(Ok(acquired))
+    Ok(Ok(Acquired { verified, standing }))
 }
 
 /// Records every verified artifact on the log, and what its content
@@ -235,35 +245,16 @@ pub(super) async fn acquire_from_child(
 /// it in. What the run stores is the canonical rendering, so an
 /// interpreted document is the same bytes whoever wrote the file.
 ///
-/// A re-plan — this same node producing a tasks document a second time,
-/// whether via a reroute back to it or a resumed run — must not silently
-/// keep a task `done` whose identity actually changed. Identity is same
-/// `id`, same `criteria`, same `scope`; `depends_on` is deliberately not
-/// part of it. The most recent prior registration per task id is all
-/// that is needed, because `TaskRegistered`'s own replay handling
-/// (`or_insert`, never overwriting an existing status) already makes an
-/// identical re-registration a no-op — so only a genuine mismatch needs
-/// an explicit event.
+/// `provenance` is the whole close's, not one artifact's: a node holds
+/// at most one document of each kind and every artifact it closes on
+/// came in through the same door, so where they came from is a fact
+/// about the close.
 pub(super) async fn record_artifacts(
     ctx: &RunCtx<'_>,
     node: &Node,
     verified: &[VerifiedArtifact],
+    provenance: Provenance<'_>,
 ) -> Result<(), RunError> {
-    let previous_registrations: BTreeMap<
-        yunta_core::TaskId,
-        (Vec<yunta_core::events::Criterion>, Vec<String>),
-    > = ctx
-        .load_events()
-        .await?
-        .into_iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) => {
-                Some((p.task_id.clone(), (p.criteria.clone(), p.scope.clone())))
-            }
-            _ => None,
-        })
-        .collect();
-
     for artifact in verified {
         // What the run already holds came in where it was produced,
         // under the origin that produced it: there is nothing left for
@@ -285,40 +276,7 @@ pub(super) async fn record_artifacts(
         }
         match &artifact.content {
             ArtifactContent::Tasks(tasks) => {
-                for task in &tasks.tasks {
-                    let criteria: Vec<yunta_core::events::Criterion> =
-                        task.criteria.iter().map(Into::into).collect();
-                    let registered_seq = ctx
-                        .emit(
-                            Some(&node.id),
-                            EventPayload::TaskRegistered(
-                                yunta_core::events::TaskRegisteredPayload {
-                                    task_id: task.id.clone(),
-                                    criteria: criteria.clone(),
-                                    scope: task.scope.clone(),
-                                    depends_on: task.depends_on.clone(),
-                                },
-                            ),
-                        )
-                        .await?;
-                    let changed_identity =
-                        previous_registrations
-                            .get(&task.id)
-                            .is_some_and(|(previous, scope)| {
-                                *previous != criteria || *scope != task.scope
-                            });
-                    if changed_identity {
-                        ctx.emit(
-                            Some(&node.id),
-                            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                                task_id: task.id.clone(),
-                                new_status: TaskStatus::Pending,
-                                caused_by: registered_seq,
-                            }),
-                        )
-                        .await?;
-                    }
-                }
+                crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
             }
             // A session node's findings are already on this log — they
             // are what the file was derived from. A `kind: workflow`

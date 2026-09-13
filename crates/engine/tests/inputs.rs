@@ -9,9 +9,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin};
+use yunta_core::events::ArtifactId;
 use yunta_core::{ArtifactKind, InputSpec};
-use yunta_engine::{resolve_inputs, InputsError};
+use yunta_engine::{resolve_inputs, BirthOrigin, InputsError};
 
 fn specs(yaml: &str) -> BTreeMap<String, InputSpec> {
     #[derive(serde::Deserialize)]
@@ -286,7 +286,7 @@ fn a_document_input_becomes_an_artifact_the_run_is_born_holding() {
     );
     assert_eq!(
         document.origin,
-        ArtifactOrigin::Input {
+        BirthOrigin::Input {
             input: "tasks".to_string()
         },
         "the run came by it as the input it was given as"

@@ -323,7 +323,8 @@ async fn prepare_loop<'a>(
         node: node.id.clone(),
     };
 
-    let Some(tasks) = load_registered_tasks(ctx).await? else {
+    let view = ctx.run_view().await?;
+    let Some(held) = load_registered_tasks(ctx, &view.events)? else {
         let end = fail(
             ctx,
             node,
@@ -336,6 +337,8 @@ async fn prepare_loop<'a>(
         .await?;
         return Ok(LoopReady::Ended(end));
     };
+    registered_here(&held, &view.state)?;
+    let tasks = held.document;
 
     // Absent means the engine's own default, 1 — sequential, deliberately
     // not config-overridable: token spend multiplies with it, so it's
@@ -413,15 +416,26 @@ fn granted_count(events: &[StoredEvent]) -> u32 {
         .count() as u32
 }
 
-/// The tasks document the run registered: the latest `kind: tasks`
+/// A tasks document the run holds: what it says, and how a diagnostic
+/// names it.
+struct HeldTasks {
+    document: TasksFile,
+    /// Where its view sits, which is the file a reader opens.
+    describe: String,
+}
+
+/// The tasks document the run works from: the latest `kind: tasks`
 /// artifact its log holds, read out of the object store.
 ///
 /// The log is the answer, so a loop resuming long after its planner
 /// finds its tasks whatever became of the `artifacts/` view. `None` when
-/// no node of this run ever produced one.
-async fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, RunError> {
-    let events = ctx.load_events().await?;
-    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+/// the run holds no tasks document at all — no node produced one, no
+/// input named one, and nothing was handed over.
+fn load_registered_tasks(
+    ctx: &RunCtx<'_>,
+    events: &[StoredEvent],
+) -> Result<Option<HeldTasks>, RunError> {
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, events);
     let Some(registered) = held
         .ledger()
         .of_kind(yunta_core::ArtifactKind::Tasks)
@@ -431,11 +445,40 @@ async fn load_registered_tasks(ctx: &RunCtx<'_>) -> Result<Option<TasksFile>, Ru
         return Ok(None);
     };
     let bytes = held.bytes(&registered)?;
+    let describe = crate::artifacts::describe(&registered);
     // The same door `close_artifacts` reads a tasks document through, so
     // a document that stops being readable between the node that wrote
     // it and the loop that consumes it is reported as the document it
     // is, with every problem named.
-    let tasks =
-        yunta_core::shape::read::<TasksFile>(&bytes, crate::artifacts::describe(&registered))?;
-    Ok(Some(tasks))
+    let document = yunta_core::shape::read::<TasksFile>(&bytes, describe.clone())?;
+    Ok(Some(HeldTasks { document, describe }))
+}
+
+/// Refuses a document whose tasks this run never registered, naming
+/// every one of them.
+///
+/// Every door a tasks document enters a run by states what the run has
+/// to do about it, so one the run holds without registrations describes
+/// a log missing what the loop runs on. Said once, here, before the
+/// first batch: the alternative is a loop that forms no batch and
+/// reports that nothing is ready — a sentence about neither the
+/// document nor the tasks.
+fn registered_here(held: &HeldTasks, state: &RunState) -> Result<(), RunError> {
+    let missing: Vec<String> = held
+        .document
+        .tasks
+        .iter()
+        .filter(|task| !state.tasks.contains_key(&task.id))
+        .map(|task| task.id.to_string())
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(RunError::Broken {
+        diagnostic: format!(
+            "this run holds a tasks document ({}) whose tasks it never registered: {}",
+            held.describe,
+            missing.join(", ")
+        ),
+    })
 }

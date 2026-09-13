@@ -584,3 +584,115 @@ nodes:
         "task-a's committed work must survive the re-plan: {commits:?}"
     );
 }
+
+#[tokio::test]
+async fn a_successor_s_replan_keeps_done_what_it_kept_and_resets_what_it_recut() {
+    // A run born holding what another run finished, whose own planner
+    // then hands over a document cutting one of those tasks
+    // differently: the identical one stays done without a session, the
+    // re-cut one starts over.
+    let tasks_v1 = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
+        task_yaml("task-c", "Write c", "c.txt", "test -f nonexistent-marker-c"),
+    );
+    let document: yunta_core::TasksFile =
+        yunta_core::shape::read(tasks_v1.as_bytes(), "tasks").unwrap();
+    let bytes = yunta_core::shape::render(&document).unwrap().into_bytes();
+
+    let source = yunta_core::RunId::from("run-source");
+    let bench = Bench::new().born_holding(vec![yunta_engine::BirthArtifact {
+        artifact: yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks,
+        },
+        origin: yunta_engine::BirthOrigin::Inherited {
+            run: source.clone(),
+            producer: None,
+        },
+        bytes,
+    }]);
+    // The source run's own log: both tasks registered, both done.
+    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    for task in &document.tasks {
+        planted.task(task, yunta_core::events::TaskStatus::Done);
+    }
+
+    let workflow = r#"
+name: replan-successor
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    // `task-a` comes back byte-identical; `task-c` keeps its id and
+    // scope but gets a criterion it can actually satisfy.
+    let tasks_v2 = format!(
+        "tasks:\n{}{}",
+        task_yaml("task-a", "Write a", "a.txt", "test -f a.txt"),
+        task_yaml("task-c", "Write c (fixed)", "c.txt", "test -f c.txt"),
+    );
+    let mut fixture = plan_session(&tasks_v2);
+    // A session for `task-a` the run must never need: it stays
+    // unconsumed exactly because the task crossed over done.
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
+    );
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.get("task-a"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get("task-c"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let statuses_of = |task: &str| -> Vec<yunta_core::events::TaskStatus> {
+        events
+            .iter()
+            .filter_map(|e| match e.payload() {
+                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                    if p.task_id.as_str() == task =>
+                {
+                    Some(p.new_status)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        statuses_of("task-a"),
+        vec![yunta_core::events::TaskStatus::Done],
+        "a task the source finished and the re-plan cut identically is never dispatched here"
+    );
+    assert_eq!(
+        statuses_of("task-c"),
+        vec![
+            yunta_core::events::TaskStatus::Done,
+            yunta_core::events::TaskStatus::Pending,
+            yunta_core::events::TaskStatus::Running,
+            yunta_core::events::TaskStatus::Done,
+        ],
+        "a re-cut task loses the done it crossed with and runs again"
+    );
+    assert!(
+        !commit_subjects(&bench.worktree).contains(&"task task-a: Write a".to_string()),
+        "no session ever ran for task-a here"
+    );
+}

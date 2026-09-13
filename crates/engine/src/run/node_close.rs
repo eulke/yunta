@@ -17,6 +17,7 @@ use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
+use crate::tasks::Provenance;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{
@@ -137,22 +138,37 @@ pub(super) async fn close_node(
     }
     // A `kind: workflow` node writes no file of its own: what it
     // declares is what its child run produced, so the run takes those
-    // over from that log instead of asking its own.
-    let verified = match close.child {
+    // over from that log instead of asking its own. Held by value here
+    // because the provenance below borrows what that child's log leaves
+    // standing.
+    let acquired = match close.child {
         Some(child) => match acquire_from_child(ctx, node, child).await? {
-            Ok(acquired) => acquired,
+            Ok(acquired) => Some(acquired),
             Err(problem) => return fail_with(ctx, node, problem.into(), false, tokens).await,
         },
-        None => match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
-            Ok(verified) => verified,
-            Err(failures) => {
-                return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
-            }
-        },
+        None => None,
+    };
+    let own;
+    let (verified, provenance) = match &acquired {
+        Some(acquired) => (
+            acquired.verified.as_slice(),
+            Provenance::Inherited {
+                standing: &acquired.standing,
+            },
+        ),
+        None => {
+            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
+                Ok(verified) => verified,
+                Err(failures) => {
+                    return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
+                }
+            };
+            (own.as_slice(), Provenance::Fresh)
+        }
     };
 
-    record_artifacts(ctx, node, &verified).await?;
-    let pending = pending_questions(&verified);
+    record_artifacts(ctx, node, verified, provenance).await?;
+    let pending = pending_questions(verified);
     if !pending.is_empty() {
         return fail_with_tokens(
             ctx,

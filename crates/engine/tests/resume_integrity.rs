@@ -12,13 +12,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventDraft, EventPayload,
-    NodeStartedPayload,
+    ArtifactId, ArtifactWrittenPayload, EventDraft, EventPayload, NodeStartedPayload,
 };
 use yunta_core::{sha256_hex, ConfigLayer, ContentHash, Manifest, SystemClock, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, BirthArtifact, CreateRunParams, NoInteraction, RunEnv,
-    RunError, RunReport, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, BirthArtifact, BirthOrigin, CreateRunParams,
+    NoInteraction, RunEnv, RunError, RunReport, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_testkit::{Bench, FixedClock, MOCK_CONFIG};
 
@@ -104,7 +103,7 @@ async fn paused_run() -> Paused {
                 artifact: ArtifactId::Opaque {
                     name: "report.md".to_string(),
                 },
-                origin: ArtifactOrigin::Inherited {
+                origin: BirthOrigin::Inherited {
                     run: "run-predecessor".into(),
                     producer: None,
                 },

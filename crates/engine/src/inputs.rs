@@ -17,10 +17,10 @@ use std::path::Path;
 
 use thiserror::Error;
 use yunta_core::diagnostic::Report;
-use yunta_core::events::{ArtifactId, ArtifactOrigin};
+use yunta_core::events::ArtifactId;
 use yunta_core::{ArtifactKind, InputSpec};
 
-use crate::run::BirthArtifact;
+use crate::run::{BirthArtifact, BirthOrigin};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum InputsError {
@@ -218,7 +218,7 @@ fn read_document(
     })?;
     Ok(BirthArtifact {
         artifact: ArtifactId::Interpreted { kind },
-        origin: ArtifactOrigin::Input {
+        origin: BirthOrigin::Input {
             input: name.to_string(),
         },
         bytes: canonical,

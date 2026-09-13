@@ -1,16 +1,53 @@
 //! Run creation: freezing a run's anatomy on disk and its `run_created`
 //! birth event, before anything executes it.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
-use yunta_core::{Clock, Manifest, ModeName, RunId, ARTIFACTS_DIR};
+use yunta_core::{Clock, Manifest, ModeName, NodeId, RunId, ARTIFACTS_DIR};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
 use crate::run_log::RunLog;
+use crate::tasks::Provenance;
 
 use super::RunError;
+
+/// How a run comes by an artifact before any of its nodes runs: a
+/// document one of its `inputs:` named, or what another run — a
+/// predecessor, a parent, a sibling — hands over. Nothing else exists at
+/// birth, so nothing else is representable here.
+///
+/// Narrower than [`ArtifactOrigin`], which every acceptance of a run's
+/// whole life shares: what a run is born holding it did not produce,
+/// derive or receive an answer to, and a birth that names one of those
+/// is a state nobody can reach.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BirthOrigin {
+    /// A `type: document` input, named by the input it came in as.
+    Input { input: String },
+    /// Another run's artifact. `producer` is the node that produced it
+    /// there, absent when that run acquired it without a node either.
+    Inherited {
+        run: RunId,
+        producer: Option<NodeId>,
+    },
+}
+
+impl From<&BirthOrigin> for ArtifactOrigin {
+    fn from(origin: &BirthOrigin) -> Self {
+        match origin {
+            BirthOrigin::Input { input } => ArtifactOrigin::Input {
+                input: input.clone(),
+            },
+            BirthOrigin::Inherited { run, producer } => ArtifactOrigin::Inherited {
+                run: run.clone(),
+                producer: producer.clone(),
+            },
+        }
+    }
+}
 
 /// An artifact a run carries from birth: a document its `inputs:`
 /// named, what a parent mounts into a child, or what a successor
@@ -25,8 +62,8 @@ use super::RunError;
 pub struct BirthArtifact {
     /// What the artifact is in the run receiving it.
     pub artifact: ArtifactId,
-    /// Which run it comes from, and who produced it there.
-    pub origin: ArtifactOrigin,
+    /// How the run came by it, and from whom.
+    pub origin: BirthOrigin,
     pub bytes: Vec<u8>,
 }
 
@@ -50,8 +87,9 @@ pub struct CreateRunParams<'a> {
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
 /// `scratch/`, the frozen `manifest.yaml`, the `run_created` event, and
-/// then one acceptance per birth artifact — with the tasks of a document
-/// the run was given registered beside it. Returns the run directory.
+/// then one acceptance per birth artifact — with the tasks of every
+/// tasks document among them registered beside it, `done` the ones the
+/// run that handed it over finished. Returns the run directory.
 ///
 /// `run_created` comes first because it is the run: replay reads it
 /// before anything else, so an artifact a run is born holding is a fact
@@ -104,6 +142,11 @@ pub async fn create_run(
             }
         }
     }
+
+    // Everything the run must be able to answer for is resolved before
+    // it exists: a source whose log cannot be read leaves no run
+    // directory and no `run_created` behind.
+    let documents = birth_registrations(artifacts, storage).await?;
 
     let run_dir = runs_root.join(run_id.as_str());
     tokio::fs::create_dir_all(runs_root)
@@ -178,62 +221,99 @@ pub async fn create_run(
     )
     .await?;
 
-    for artifact in artifacts {
-        accept(
-            &log,
-            &run_dir,
-            None,
-            artifact.artifact.clone(),
-            &artifact.bytes,
-            artifact.origin.clone(),
-        )
-        .await?;
-        register_input_tasks(&log, artifact).await?;
-    }
+    register_birth_documents(&log, &run_dir, artifacts, &documents).await?;
 
     Ok(run_dir)
 }
 
-/// Registers every task of a tasks document the run was *given*.
-///
-/// Accepting a document says what the run holds; a `task_registered`
-/// says what the run has to do about it, and until one exists a task is
-/// not a task of this run. A node's close states both for what that node
-/// produced — and a document that came in as an input has no node that
-/// will ever produce it, so its birth is the only place the second fact
-/// can be stated. What a run inherits from another run is left alone:
-/// there the tasks belong to a chain whose own nodes register them where
-/// they produce them.
-async fn register_input_tasks(log: &RunLog<'_>, artifact: &BirthArtifact) -> Result<(), RunError> {
-    if !matches!(artifact.origin, ArtifactOrigin::Input { .. })
-        || artifact.artifact
-            != (ArtifactId::Interpreted {
-                kind: yunta_core::ArtifactKind::Tasks,
-            })
-    {
-        return Ok(());
+/// One birth artifact that is a tasks document: what it says, and what
+/// the run that handed it over leaves standing — `None` when an input
+/// named it, because nobody did anything about those tasks before.
+struct BirthDocument {
+    document: yunta_core::TasksFile,
+    standing: Option<crate::replay::RunState>,
+}
+
+impl BirthDocument {
+    fn provenance(&self) -> Provenance<'_> {
+        match &self.standing {
+            Some(standing) => Provenance::Inherited { standing },
+            None => Provenance::Fresh,
+        }
     }
-    // The bytes are what the run accepted, so they read back as the
-    // document they were rendered from; a reading that fails anyway
-    // describes a run whose own birth artifact is not what it says it
-    // is, and says so rather than registering half a document.
-    let tasks: yunta_core::TasksFile =
-        yunta_core::shape::read(&artifact.bytes, artifact.artifact.view_name()).map_err(
-            |report| RunError::Broken {
+}
+
+/// Reads every tasks document among `artifacts`, and for one another run
+/// hands over, what that run's log leaves standing — one load per source
+/// run. Entries line up with `artifacts` by position, `None` for an
+/// artifact that is not a tasks document.
+///
+/// Before the run has a directory or a `run_created`, for the same
+/// reason an invalid `type: document` input refuses the birth: a run
+/// that cannot answer for what it is born holding is one nobody can
+/// resume, and there is nothing to clean up if it never exists.
+async fn birth_registrations(
+    artifacts: &[BirthArtifact],
+    storage: &AsyncStorage,
+) -> Result<Vec<Option<BirthDocument>>, RunError> {
+    let tasks = ArtifactId::Interpreted {
+        kind: yunta_core::ArtifactKind::Tasks,
+    };
+    let mut standings: BTreeMap<RunId, crate::replay::RunState> = BTreeMap::new();
+    let mut documents = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        if artifact.artifact != tasks {
+            documents.push(None);
+            continue;
+        }
+        // The bytes are what the run accepts, so they read back as the
+        // document they were rendered from; a reading that fails anyway
+        // describes a birth artifact that is not what it says it is, and
+        // says so rather than registering half a document.
+        let document = yunta_core::shape::read(&artifact.bytes, artifact.artifact.view_name())
+            .map_err(|report| RunError::Broken {
                 diagnostic: report.to_string(),
-            },
-        )?;
-    for task in &tasks.tasks {
-        log.record(
+            })?;
+        let standing = match &artifact.origin {
+            BirthOrigin::Input { .. } => None,
+            BirthOrigin::Inherited { run, .. } => {
+                if !standings.contains_key(run) {
+                    let events = storage.events_for_run(run.clone()).await?;
+                    standings.insert(run.clone(), crate::tasks::standing_of(run, &events)?);
+                }
+                standings.get(run).cloned()
+            }
+        };
+        documents.push(Some(BirthDocument { document, standing }));
+    }
+    Ok(documents)
+}
+
+/// Accepts every birth artifact in order and, for each tasks document,
+/// registers what the run has to do about it.
+///
+/// Interleaved rather than accepted in one pass and registered in
+/// another, so a second tasks document is planned against a log that
+/// already holds the first one's registrations.
+async fn register_birth_documents(
+    log: &RunLog<'_>,
+    run_dir: &Path,
+    artifacts: &[BirthArtifact],
+    documents: &[Option<BirthDocument>],
+) -> Result<(), RunError> {
+    for (artifact, birth) in artifacts.iter().zip(documents) {
+        accept(
+            log,
+            run_dir,
             None,
-            EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
-                task_id: task.id.clone(),
-                criteria: task.criteria.iter().map(Into::into).collect(),
-                scope: task.scope.clone(),
-                depends_on: task.depends_on.clone(),
-            }),
+            artifact.artifact.clone(),
+            &artifact.bytes,
+            (&artifact.origin).into(),
         )
         .await?;
+        if let Some(birth) = birth {
+            crate::tasks::register(log, None, &birth.document, birth.provenance()).await?;
+        }
     }
     Ok(())
 }
