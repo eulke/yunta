@@ -196,6 +196,7 @@ impl ChildLedger { pub fn open_under(&self, node: &NodeId) -> Option<&ChildLink>
 // EventMeta { seq, at, node: Option<&NodeId> }
 
 // engine/src/replay.rs
+impl RunState { pub fn apply(&mut self, event: &StoredEvent); }   // derive = fold(apply); chronicle lo usa evento a evento
 pub struct RunState { pub run: RunLedger, pub nodes: NodeLedger, pub sessions: SessionLedger, pub degradations: DegradationLedger, pub tasks: TaskLedger, pub grants: GrantLedger, pub findings: FindingLedger, pub artifacts: ArtifactLedger, pub gates: GateLedger, pub children: ChildLedger, pub unknown: UnknownKinds, pub broken: Option<ReplayError>, pub effective_findings: Vec<Finding> /* calculado una vez al final */ }
 ```
 
@@ -504,6 +505,10 @@ pub struct ArtifactName(String);
 impl ArtifactName { pub fn parse(s: &str) -> Result<Self, Problem>; }   // relativo, sin `..`, sin absoluto, no en ReservedIdentity
 pub enum ReservedIdentity { Kind(ArtifactKind) /* "<kind>.yaml" */, Answers /* "questions.answers.yaml" → desaparece con Answers como kind */ }
 pub enum ArtifactKind { Tasks, Findings, Questions, Answers }
+// core/src/questions/answers.rs: impl Document for AnswersFile; RULES = las reglas que hoy aplica
+// `validate_answers` (toda pregunta `required` tiene respuesta; un `choice` responde uno de sus `values`;
+// un id responde una pregunta que existe; un `boolean` es true/false), publicadas con `code` y `demand`
+// como las de tasks/findings/questions; `validate_answers` desaparece en favor de `shape::accept`.
 // core/src/template.rs
 pub enum TemplateVar { Input(InputName), RunDir, Worktree, Staging, RunnerName, NodeId, … }   // BTreeMap<TemplateVar, String>
 // core/src/ids.rs (string_id!)

@@ -770,7 +770,7 @@ especificación completa en §4.
 | 7-01 | `docs_sync` ata los conjuntos cerrados (§2 M23) | 2-01, 3-04 | pendiente |
 | 7-02 | ADR por archivo, índice generado, recíprocos | 0-01 | pendiente |
 | 7-03 | correcciones de §9 | 7-01 | pendiente |
-| 7-04 | glosario, deuda (P3), `spec-tasks.md` | 7-03 | pendiente |
+| 7-04 | glosario; deuda: `yunta replay/diff` (rfc-0003 §2) y la verificación en vivo (status.md) entran como A-16/A-17 con ids estables; `spec-tasks.md` | 7-03 | pendiente |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
 observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados

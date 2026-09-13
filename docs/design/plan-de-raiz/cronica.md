@@ -100,8 +100,12 @@ pub enum FindingChange { Posted, Updated, Withdrawn { reason: String }, Refused 
 pub fn chronicle(events: &[StoredEvent]) -> Vec<Moment>
 ```
 
-`chronicle` deriva `RunState` una vez (necesita `elapsed` del nodo que
-cierra y sus `children`) y recorre el log con él.
+`chronicle` pliega el log evento a evento con los mismos `apply` de los
+ledgers (`RunState::apply(&mut self, event)`) y emite cada momento con el
+estado **de ese instante**: el `elapsed` de un nodo que cierra y los
+`children` que arrastra son los que el estado tenía en ese `seq`, no al
+final. `RunState` expone `apply` por evento además de `derive` sobre el
+slice; `derive` es `fold(apply)`.
 
 ### Invariantes
 
