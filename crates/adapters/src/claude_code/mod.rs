@@ -138,11 +138,13 @@ impl ClaudeCodeAdapter {
             args.push("--mcp-config".to_string());
             args.push(path.display().to_string());
             // `--tools` selects among built-ins only; an MCP server's
-            // tools are reached by name. Allowing the server rather
-            // than each tool keeps this adapter from having to know
-            // which tools the engine mounts.
+            // tools are reached by name. The wildcard admits every tool
+            // of the one server, which keeps this adapter from having to
+            // know which tools the engine mounts — a bare server prefix
+            // names no tool at all, and the CLI drops such a rule with a
+            // startup warning.
             args.push("--allowedTools".to_string());
-            args.push(format!("mcp__{}", RunToolsEndpoint::SERVER_NAME));
+            args.push(format!("mcp__{}__*", RunToolsEndpoint::SERVER_NAME));
         }
         if let Some(max_turns) = req.budget.max_turns {
             args.push("--max-turns".to_string());

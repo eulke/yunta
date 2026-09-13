@@ -477,7 +477,7 @@ tuvo el artifact y el log no dice cómo.
 |---|---|---|---|
 | `capability` | string (nombre de campo de `Capabilities`) | sí | — |
 | `adapter` | string (`id()` del adapter) | sí | — |
-| `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir— el texto que dice que la sesión corre sin run tools y por qué |
+| `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir, o cuando abrió y la sesión no recibió ninguna de sus tools— el texto que dice que la sesión corre sin run tools y por qué |
 
 ### 5.25 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas

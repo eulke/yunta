@@ -59,10 +59,7 @@ impl ServerHandler for YuntaMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult {
-            tools: tool_definitions(),
-            ..Default::default()
-        })
+        Ok(yunta_engine::mcp::tool_list(tool_definitions()))
     }
 
     async fn call_tool(

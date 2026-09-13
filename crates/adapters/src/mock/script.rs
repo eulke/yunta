@@ -155,6 +155,7 @@ async fn played(
             cached_input_tokens,
         },
         MockStep::Note { text, .. } => AgentEvent::Note { text },
+        MockStep::RunToolsMounted { count, .. } => AgentEvent::RunToolsMounted { count },
         MockStep::RunTool {
             tool,
             arguments,

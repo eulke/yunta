@@ -216,6 +216,14 @@ pub enum AgentEvent {
         session_id: SessionId,
         model: Option<ModelName>,
     },
+    /// How many of the run tools this session actually holds, as its
+    /// CLI reported them. An adapter emits it only when its CLI names
+    /// the session's tool set: silence means the adapter cannot tell,
+    /// never that the count is zero, so a reader degrades only on a
+    /// count it was actually given.
+    RunToolsMounted {
+        count: usize,
+    },
     ToolUse {
         name: String,
         target_digest: String,

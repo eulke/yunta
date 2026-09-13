@@ -157,10 +157,7 @@ impl ServerHandler for SessionTools {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult {
-            tools: super::catalog::mounted(self),
-            ..Default::default()
-        })
+        Ok(crate::mcp::tool_list(super::catalog::mounted(self)))
     }
 
     async fn call_tool(

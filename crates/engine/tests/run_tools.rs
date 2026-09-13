@@ -727,3 +727,223 @@ async fn a_node_with_nothing_to_check_says_so_rather_than_reporting_success() {
     assert!(is_error, "{text}");
     assert!(text.contains("declares no artifacts"), "{text}");
 }
+
+// --- Protocol conformance, at the JSON the wire actually carries -------
+//
+// These read the result as an agent's own MCP client reads it, over raw
+// HTTP: `rmcp`'s client negotiates a revision older than the newest one
+// this server announces, so nothing it round-trips can show whether a
+// result satisfies that newest revision.
+
+/// The newest revision this server announces, and the one a current
+/// coding-agent CLI negotiates.
+const MODERN_REVISION: &str = "2026-07-28";
+
+/// A revision of the era before `server/discover`, whose clients open
+/// with `initialize` and carry a session id afterwards.
+const LEGACY_REVISION: &str = "2025-06-18";
+
+/// The `_meta` a client of [`MODERN_REVISION`] puts on every request:
+/// the revision it speaks, who it is, and what it can do. A request
+/// without them is not a modern one, and the transport routes it to
+/// the session-bearing era instead.
+fn modern_meta() -> serde_json::Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MODERN_REVISION,
+        "io.modelcontextprotocol/clientInfo": {"name": "raw-client", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    })
+}
+
+/// One JSON-RPC POST as a client of `revision` sends it: the session's
+/// own credential, the two content types the streamable-HTTP transport
+/// may answer with, the revision in its header, and the method named in
+/// `Mcp-Method` the way SEP-2243 requires of that revision.
+async fn post(
+    session: &RunToolsSession,
+    revision: &str,
+    method: &str,
+    params: serde_json::Value,
+    mcp_session: Option<&str>,
+) -> reqwest::Response {
+    // A notification carries no id — that is what makes it one, and a
+    // server answers it with an acknowledgement rather than a result.
+    let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
+    if !method.starts_with("notifications/") {
+        body["id"] = json!(1);
+    }
+    let mut request = reqwest::Client::new()
+        .post(&session.endpoint.url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", session.endpoint.token.expose()),
+        )
+        .header("Accept", "application/json, text/event-stream")
+        .header("Content-Type", "application/json")
+        .header("MCP-Protocol-Version", revision)
+        .header("Mcp-Method", method)
+        .body(serde_json::to_string(&body).unwrap());
+    if let Some(id) = mcp_session {
+        request = request.header("Mcp-Session-Id", id);
+    }
+    request.send().await.unwrap()
+}
+
+/// The JSON-RPC result carried by a response body, whichever shape the
+/// transport chose: a bare JSON object, or an event stream whose last
+/// non-empty `data:` line is the answer.
+fn result_of(body: &str) -> serde_json::Value {
+    let message: serde_json::Value = if body.trim_start().starts_with('{') {
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("not JSON: {e}\n{body}"))
+    } else {
+        let data = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or_else(|| panic!("no `data:` line in the event stream:\n{body}"));
+        serde_json::from_str(data).unwrap_or_else(|e| panic!("not JSON: {e}\n{data}"))
+    };
+    assert!(
+        message.get("error").is_none(),
+        "the server refused the request: {message}"
+    );
+    message["result"].clone()
+}
+
+/// Every tool name a list result advertises.
+fn tool_names(result: &serde_json::Value) -> Vec<&str> {
+    result["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list result carries `tools`: {result}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect()
+}
+
+/// The tools every session is served, whatever it declares.
+fn assert_serves_the_session_tools(result: &serde_json::Value) {
+    let names = tool_names(result);
+    for expected in [
+        "yunta_check_artifact",
+        "yunta_post_finding",
+        "yunta_update_finding",
+        "yunta_withdraw_finding",
+        "yunta_task_status",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "`{expected}` is missing: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
+    let bench = Bench::new();
+    let session = bench.listener("solo", None).await;
+
+    let discovered = post(
+        &session,
+        MODERN_REVISION,
+        "server/discover",
+        json!({"_meta": modern_meta()}),
+        None,
+    )
+    .await;
+    assert_eq!(discovered.status(), 200, "discovery is answered");
+    let discovered = result_of(&discovered.text().await.unwrap());
+    let announced: Vec<&str> = discovered["supportedVersions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("discovery announces the revisions served: {discovered}"))
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        announced.contains(&MODERN_REVISION),
+        "the server announces it serves the newest revision: {announced:?}"
+    );
+
+    let listed = post(
+        &session,
+        MODERN_REVISION,
+        "tools/list",
+        json!({"_meta": modern_meta()}),
+        None,
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "the list is answered");
+    let listed = result_of(&listed.text().await.unwrap());
+
+    // What the newest revision requires of every list result: a client
+    // that validates the shape drops the whole list when one is absent,
+    // and the session then has no tool to call.
+    assert_eq!(listed["resultType"], "complete", "{listed}");
+    assert!(
+        listed["ttlMs"].as_u64().is_some(),
+        "`ttlMs` is a number the client can cache against: {listed}"
+    );
+    assert!(
+        matches!(listed["cacheScope"].as_str(), Some("public" | "private")),
+        "`cacheScope` says who may cache the list: {listed}"
+    );
+    assert_serves_the_session_tools(&listed);
+}
+
+#[tokio::test]
+async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
+    let bench = Bench::new();
+    let session = bench.listener("solo", None).await;
+
+    let opened = post(
+        &session,
+        LEGACY_REVISION,
+        "initialize",
+        json!({
+            "protocolVersion": LEGACY_REVISION,
+            "capabilities": {},
+            "clientInfo": {"name": "raw-client", "version": "1"},
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(opened.status(), 200, "the handshake is answered");
+    let mcp_session = opened
+        .headers()
+        .get("mcp-session-id")
+        .expect("the handshake opens a session")
+        .to_str()
+        .unwrap()
+        .to_string();
+    let negotiated = result_of(&opened.text().await.unwrap());
+    assert_eq!(
+        negotiated["protocolVersion"], LEGACY_REVISION,
+        "{negotiated}"
+    );
+
+    let accepted = post(
+        &session,
+        LEGACY_REVISION,
+        "notifications/initialized",
+        json!({}),
+        Some(&mcp_session),
+    )
+    .await;
+    assert!(
+        accepted.status().is_success(),
+        "the notification is accepted: {}",
+        accepted.status()
+    );
+
+    let listed = post(
+        &session,
+        LEGACY_REVISION,
+        "tools/list",
+        json!({}),
+        Some(&mcp_session),
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "the list is answered");
+    let listed = result_of(&listed.text().await.unwrap());
+    assert_serves_the_session_tools(&listed);
+}

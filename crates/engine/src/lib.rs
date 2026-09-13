@@ -44,6 +44,7 @@ mod human_interaction;
 mod inputs;
 pub mod lock;
 mod manifest;
+pub mod mcp;
 mod modes;
 mod pack_audit;
 mod pack_requires;

@@ -102,6 +102,27 @@ pub enum DispatchError {
     Audit(#[source] StorageError),
 }
 
+/// The record of a session that opened holding none of the run tools
+/// the engine gave it a server for.
+///
+/// The server is up and the endpoint reached the session; what did not
+/// survive is the client's own reading of the tool list, which neither
+/// side can work around from here — every tool this node needs to hand
+/// its documents over is simply absent. It goes on the log as the
+/// session opens rather than at the close it dooms, so the cause sits
+/// next to the moment it happened instead of one failed close away,
+/// where the only visible symptom is a document nobody delivered.
+fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
+    EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
+        capability: yunta_core::Capability::RunTools,
+        adapter: adapter.clone(),
+        policy_applied: "the session runs on — its per-run tool server is mounted and the \
+                         session holds none of its tools, so this node ends owing every \
+                         document it declares"
+            .to_string(),
+    })
+}
+
 /// The only shape of a note the log ever carries: its size and
 /// a content-hash prefix — enough to audit a claimed note against,
 /// never enough to reconstruct or leak it.
@@ -135,6 +156,10 @@ pub(crate) async fn dispatch_session(
 ) -> Result<(DispatchOutcome, TokenUsage), DispatchError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
+    // Whether this session was handed a per-run tool server at all: a
+    // session that holds none of those tools only means something went
+    // wrong if it was given a server to hold them from.
+    let run_tools_offered = request.run_tools_endpoint.is_some();
     // `Some` continues an interrupted conversation instead of
     // opening a new one — the caller already verified the capability.
     let mut session = match resume {
@@ -199,6 +224,7 @@ pub(crate) async fn dispatch_session(
                 event,
                 adapter,
                 requested_agent: &requested_agent,
+                run_tools_offered,
                 max_tokens: budget.max_tokens,
                 audit,
                 tokens: &mut tokens,
@@ -233,6 +259,8 @@ struct AgentEventCtx<'a> {
     event: AgentEvent,
     adapter: &'a dyn Adapter,
     requested_agent: &'a Option<yunta_core::AgentName>,
+    /// Whether the engine gave this session a per-run tool server.
+    run_tools_offered: bool,
     max_tokens: Option<u64>,
     audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     tokens: &'a mut TokenUsage,
@@ -253,6 +281,7 @@ async fn apply_agent_event(
         event,
         adapter,
         requested_agent,
+        run_tools_offered,
         max_tokens,
         audit,
         tokens,
@@ -270,6 +299,13 @@ async fn apply_agent_event(
             )
             .await
             .map_err(DispatchError::Audit)?;
+        }
+        AgentEvent::RunToolsMounted { count } => {
+            if run_tools_offered && count == 0 {
+                emit_audit(audit, run_tools_unreachable(adapter.id()))
+                    .await
+                    .map_err(DispatchError::Audit)?;
+            }
         }
         AgentEvent::ToolUse {
             name,

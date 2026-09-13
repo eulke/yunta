@@ -242,6 +242,29 @@ owes. One no run holds carries `artifact` too, plus `run` — the run that was a
 recent failure is a plain message has no entry at all, so what the field shows is
 always the state the node is in now.
 
+## The MCP servers
+
+Yunta serves MCP in two places: the per-session tool server the engine starts on
+loopback HTTP for one node's session, and the control plane `yunta mcp` serves over
+stdio. Both announce every protocol revision the SDK implements — `2024-11-05`
+through `2026-07-28` — and both serve all of them from one set of handlers.
+
+Every result either server builds satisfies the newest revision it announces. A
+list result carries the cache hints `2026-07-28` makes mandatory (`ttlMs: 0`,
+`cacheScope: "private"`) and the `resultType` discriminator; a client of an earlier
+revision ignores the fields it does not know, which is what lets one result answer
+both eras. `ttlMs: 0` is not a placeholder: a session's tool list is built per
+session and per node, so it is stale the moment it is read and a client that caches
+must ask again.
+
+The two lifecycles both work. A client of `2026-07-28` sends `server/discover` and
+then calls straight away, carrying its protocol version, client info and client
+capabilities in each request's `_meta`; a client of an earlier revision opens with
+`initialize`, and against the HTTP server carries the `Mcp-Session-Id` it is given
+on every later request. Which tools a per-session server lists depends on that
+session — its node, its task and the documents it declares — never on the revision
+the client speaks.
+
 ## Message wording
 
 The block that reports what is wrong with a document counts in whole words —

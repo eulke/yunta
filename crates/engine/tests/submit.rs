@@ -788,3 +788,58 @@ sessions:
     // run's: reporting it as it was seen is what makes it survive.
     assert_eq!(kinds(&bench, "finding_posted"), 1);
 }
+
+#[tokio::test]
+async fn a_session_that_holds_none_of_its_run_tools_is_reported_before_it_is_spent() {
+    let bench = Bench::new();
+    // The server is mounted and the session holds not one of its tools —
+    // what a client that refuses the tool list leaves behind. The node
+    // can only end owing the document it declares, so the cause is on
+    // the log while the session is still opening, not one failure later.
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tools_mounted
+        count: 0
+    outcome: { type: completed, summary: "nothing to submit with" }
+"#;
+
+    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
+    assert!(
+        matches!(state.nodes.get("plan"), Some(NodeState::Failed { .. })),
+        "the node owes the document it declares: {state:?}"
+    );
+
+    let events = bench.events();
+    let degraded = events
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::CapabilityDegraded(p))
+                if p.capability == yunta_core::Capability::RunTools =>
+            {
+                Some(p.clone())
+            }
+            _ => None,
+        })
+        .expect("a session with no run tool of its own is degraded, not silently failed");
+    assert!(
+        degraded.policy_applied.contains("none of its tools"),
+        "the record names what was missing: {}",
+        degraded.policy_applied
+    );
+
+    let degraded_at = events
+        .iter()
+        .position(|event| event.body.kind_name() == "capability_degraded")
+        .expect("the event is on the log");
+    let failed_at = events
+        .iter()
+        .position(|event| event.body.kind_name() == "node_failed")
+        .expect("the node ends owing its document");
+    assert!(
+        degraded_at < failed_at,
+        "the cause is recorded while the session runs, not after it ends"
+    );
+}

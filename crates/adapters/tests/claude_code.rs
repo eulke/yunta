@@ -859,8 +859,8 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
     // Mounting a server the profile then forbids would be a tool the
     // agent is told to call and cannot.
     assert!(
-        args.iter().any(|a| a == "mcp__yunta"),
-        "the mounted tools are allowed — by server, so this adapter \
+        args.iter().any(|a| a == "mcp__yunta__*"),
+        "every tool of the mounted server is allowed, so this adapter \
          never has to know which tools the engine mounts: {args:?}"
     );
 }
@@ -872,5 +872,64 @@ async fn no_per_run_endpoint_mounts_no_server() {
     assert!(
         !args.iter().any(|a| a == "--mcp-config"),
         "nothing to mount, nothing mounted: {args:?}"
+    );
+}
+
+// --- What the session actually mounted --------------------------------
+
+/// The events of a session whose init line names `tools`.
+async fn init_with_tools(tools: &str) -> Vec<AgentEvent> {
+    events_of(&[
+        &format!(
+            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta","status":"connected"}}],"tools":{tools}}}"#
+        ),
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ])
+    .await
+}
+
+fn run_tools_mounted(events: &[AgentEvent]) -> Option<usize> {
+    events.iter().find_map(|event| match event {
+        AgentEvent::RunToolsMounted { count } => Some(*count),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
+    let events = init_with_tools(
+        r#"["Bash","mcp__yunta__yunta_check_artifact","mcp__yunta__yunta_post_finding"]"#,
+    )
+    .await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        Some(2),
+        "the CLI named the session's tools: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_session_the_run_tools_never_reached_reports_none_of_them() {
+    // What a `tools/list` the CLI rejected looks like from here: the
+    // server is connected, and not one of its tools is in the set.
+    let events = init_with_tools(r#"["Bash","Read","mcp__other__thing"]"#).await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        Some(0),
+        "a named tool set with no run tool in it is a count, not silence: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_init_line_that_names_no_tool_set_reports_nothing_about_run_tools() {
+    let events = events_of(&[
+        r#"{"type":"system","subtype":"init","session_id":"sess-quiet","model":"claude-sonnet-5"}"#,
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ])
+    .await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        None,
+        "a CLI that says nothing is unknown, never zero: {events:?}"
     );
 }
