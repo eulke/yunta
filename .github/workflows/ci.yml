@@ -11,7 +11,7 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Installs the toolchain `rust-toolchain.toml` pins, with its
       # components, and caches the build.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -68,7 +68,7 @@ jobs:
   musl-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: x86_64-unknown-linux-musl
