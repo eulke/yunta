@@ -28,9 +28,8 @@
 //! so a new append site that skips this boundary fails there.
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{EventDraft, EventPayload};
+use yunta_core::events::EventPayload;
 use yunta_core::{NodeId, RunId, Seq};
-use yunta_storage::{AsyncStorage, StorageError};
 
 /// A live view of a run's log, fed as the engine writes it.
 ///
@@ -97,36 +96,4 @@ pub struct Observed<'a> {
     /// What happened, in the same shape the log row carries. Its
     /// `kind_name` is the discriminant a surface switches on.
     pub payload: &'a EventPayload,
-}
-
-/// Appends `draft` and mirrors it to `observer` — the one place the
-/// display boundary is fed, so every observable append site feeds it
-/// the same way.
-///
-/// The mirror costs one clone of the draft, because
-/// [`AsyncStorage::append`] takes it by value, and that clone is paid
-/// only while something is watching: with no observer the draft goes
-/// straight through, which is what makes the `Option` load-bearing
-/// rather than nullability sugar. The frame goes out only once storage
-/// has accepted the event and named its seq — a frame for an event that
-/// was never written would be a lie.
-pub(crate) async fn append_observed(
-    storage: &AsyncStorage,
-    observer: Option<&dyn RunObserver>,
-    draft: EventDraft,
-    at: DateTime<Utc>,
-) -> Result<Seq, StorageError> {
-    let Some(observer) = observer else {
-        return storage.append(draft, at).await;
-    };
-    let mirrored = draft.clone();
-    let seq = storage.append(draft, at).await?;
-    observer.observe(Observed {
-        run_id: &mirrored.run_id,
-        seq,
-        at,
-        node_id: mirrored.node_id.as_ref(),
-        payload: &mirrored.payload,
-    });
-    Ok(seq)
 }

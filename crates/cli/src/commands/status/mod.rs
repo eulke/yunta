@@ -1,9 +1,9 @@
 //! `yunta status <run_id>`: where a run stands, derived from the event
 //! log alone, never from an estimate or an agent's own report. Two
 //! levels — **flow** (the DAG's nodes, over the ones this run's mode
-//! schedules) and **task** (ledger tasks done/total) — presented as
-//! counters with context, never a percentage: a percentage lies the
-//! moment a reroute grows the denominator.
+//! schedules) and **task** (tasks done/total) — presented as counters
+//! with context, never a percentage: a percentage lies the moment a
+//! reroute grows the denominator.
 //!
 //! A run parked on a person is answerable from here: the decision it
 //! stopped on is rebuilt from its own log ([`decision`]) and printed
@@ -15,7 +15,7 @@ pub(crate) mod progress;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{EventPayload, Failure, StoredEvent, TaskStatus};
+use yunta_core::events::{ArtifactId, EventPayload, Failure, StoredEvent, TaskStatus};
 use yunta_core::{ArtifactFailure, ArtifactKind, Clock, Diagnostic, FileProblem};
 use yunta_core::{Manifest, NodeId, RunId};
 use yunta_engine::{NodeState, RunPhase, WaitingOn};
@@ -167,11 +167,11 @@ pub(crate) struct StatusJson {
     nodes: std::collections::BTreeMap<String, String>,
     tasks: std::collections::BTreeMap<String, &'static str>,
     /// Why each failed node failed, in the form a program can act on
-    /// rather than parse back out of a sentence: one entry per document
-    /// the failure names, carrying that document's own problems. Absent
-    /// when no failing node named a document.
+    /// rather than parse back out of a sentence: one entry per declared
+    /// artifact that did not close, carrying what went wrong with it.
+    /// Absent when no failing node named an artifact.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    diagnostics: std::collections::BTreeMap<String, Vec<DocumentProblems>>,
+    diagnostics: std::collections::BTreeMap<String, Vec<ArtifactProblems>>,
     /// The decision this run is parked on: the node it belongs to, the
     /// escalation under the field names the `gate_waiting` event writes,
     /// and the command that answers it.
@@ -240,43 +240,85 @@ impl WaitingOnJson {
     }
 }
 
-/// One document a node's failure names, with the problems that belong
-/// to it. A node that failed on two artifacts produces two of these, so
-/// a reader attributes a problem to the file it came from instead of
+/// One artifact a node's failure names, with what is wrong with it. A
+/// node that failed on two artifacts produces two of these, so a reader
+/// attributes a problem to the artifact it came from instead of
 /// splitting a sentence.
-#[derive(serde::Serialize)]
-pub(crate) struct DocumentProblems {
+///
+/// Every field is absent when the failure has nothing to put there, so
+/// no consumer ever meets an invented path or an empty code: an artifact
+/// another run owes and a document its node never handed over have no
+/// file to open and no content that was read, and a file that was never
+/// written has no kind its content could have met.
+#[derive(Default, serde::Serialize)]
+pub(crate) struct ArtifactProblems {
+    /// The stable name of what is wrong with the artifact itself —
+    /// `artifact-missing`, `artifact-undelivered`, `artifact-unheld`.
+    /// Absent when the file is there and its content is what failed,
+    /// because that is not one problem: each of the document's own
+    /// carries its code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
     /// As a reader would type it to open the file.
-    path: String,
-    /// The kind whose shape the content had to meet. Absent when the
-    /// file itself is what failed, because nothing read its content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    /// The kind whose shape the content had to meet.
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<ArtifactKind>,
     /// What is wrong with the file itself — never written, empty, past
-    /// the ceiling, refused by the filesystem. Absent when the file is
-    /// there and its content is what failed.
+    /// the ceiling, refused by the filesystem.
     #[serde(skip_serializing_if = "Option::is_none")]
     file: Option<FileProblem>,
+    /// The run that owes this artifact and holds none of it — where a
+    /// reader goes to look. Absent when this run owes it, which is what
+    /// a document its own node never handed over is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run: Option<String>,
+    /// The node the artifact was asked of: of `run` when one is named,
+    /// of this run otherwise. Absent when the question is about a run as
+    /// a whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    producer: Option<String>,
+    /// The identity that was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artifact: Option<ArtifactId>,
     /// Every problem this document's content has, in document order.
-    /// Empty when the file itself is what failed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     diagnostics: Vec<Diagnostic>,
 }
 
-impl From<&ArtifactFailure> for DocumentProblems {
+impl From<&ArtifactFailure> for ArtifactProblems {
     fn from(failure: &ArtifactFailure) -> Self {
+        let code = failure.code();
         match failure {
-            ArtifactFailure::File { path, problem } => DocumentProblems {
-                path: path.clone(),
-                kind: None,
+            ArtifactFailure::File { path, problem } => ArtifactProblems {
+                code,
+                path: Some(path.clone()),
                 file: Some(problem.clone()),
-                diagnostics: Vec::new(),
+                ..ArtifactProblems::default()
             },
-            ArtifactFailure::Content(report) => DocumentProblems {
-                path: report.document.path.clone(),
+            ArtifactFailure::Undelivered { node, artifact } => ArtifactProblems {
+                code,
+                producer: Some(node.to_string()),
+                artifact: Some(artifact.clone()),
+                ..ArtifactProblems::default()
+            },
+            ArtifactFailure::Content(report) => ArtifactProblems {
+                path: Some(report.document.path.clone()),
                 kind: Some(report.document.kind),
-                file: None,
                 diagnostics: report.diagnostics.clone(),
+                ..ArtifactProblems::default()
+            },
+            ArtifactFailure::Unheld {
+                run,
+                producer,
+                artifact,
+            } => ArtifactProblems {
+                code,
+                run: Some(run.to_string()),
+                producer: producer.as_ref().map(NodeId::to_string),
+                artifact: Some(artifact.clone()),
+                ..ArtifactProblems::default()
             },
         }
     }
@@ -343,8 +385,8 @@ fn parked_decision(
     Some(decision::DecisionJson::new(run_id, &node, escalation))
 }
 
-/// The documents each node's most recent failure names, with their
-/// problems, keyed by node.
+/// The artifacts each node's most recent failure names, with what is
+/// wrong with each, keyed by node.
 ///
 /// An entry describes the failure a node is in **now**, never every
 /// failure it has had: a node that failed, repaired and failed again is
@@ -353,7 +395,7 @@ fn parked_decision(
 /// all. A reader asking what is wrong now is not asking for a history.
 fn node_diagnostics(
     events: &[StoredEvent],
-) -> std::collections::BTreeMap<String, Vec<DocumentProblems>> {
+) -> std::collections::BTreeMap<String, Vec<ArtifactProblems>> {
     let mut latest = std::collections::BTreeMap::new();
     for event in events {
         let Some(node_id) = event.node_id.as_ref() else {
@@ -364,7 +406,7 @@ fn node_diagnostics(
                 Failure::Artifacts { artifacts } => {
                     latest.insert(
                         node_id.to_string(),
-                        artifacts.iter().map(DocumentProblems::from).collect(),
+                        artifacts.iter().map(ArtifactProblems::from).collect(),
                     );
                 }
                 // A failure stated in one sentence names no document;

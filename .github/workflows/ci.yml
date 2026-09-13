@@ -87,13 +87,16 @@ jobs:
             exit 1
           }
 
-      # The static binary is a feature; a dependency that grows it shows
-      # up here, not in someone's `curl | sh`. The ceiling is the size
-      # measured with the release profile (19588000 bytes) plus 10 %;
-      # moving it is a recorded decision (D142), never a drift.
+      # The ceiling catches a dependency that is enormous, not the
+      # ordinary growth of the system: reaching for a maintained crate
+      # is the cheaper answer while the project is still stabilizing, so
+      # the number sits far above anything ordinary growth reaches
+      # (32 MiB against 18.75 MiB measured here). The size is reported
+      # on every run either way, which is what keeps the history for the
+      # day a tight ceiling is worth setting again (D155).
       - name: binary size stays under its ceiling
         run: |
-          ceiling=21546800
+          ceiling=33554432
           bytes=$(stat -c %s target/x86_64-unknown-linux-musl/release/yunta)
           echo "yunta (static musl, release): $((bytes / 1024 / 1024)) MiB ($bytes bytes; ceiling $ceiling bytes)" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$bytes" -gt "$ceiling" ]; then

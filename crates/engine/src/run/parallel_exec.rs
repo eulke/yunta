@@ -22,7 +22,6 @@ pub(super) async fn execute_parallel(
     node: &Node,
     join: JoinPolicy,
     children: &[Node],
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let group_cancel = cancel.child_token();
@@ -109,8 +108,6 @@ pub(super) async fn execute_parallel(
                 Close::new(
                     format!("{} child(ren) finished", children.len()),
                     TokenUsage::default(),
-                    attempt,
-                    cancel,
                 ),
             )
             .await
@@ -127,8 +124,6 @@ pub(super) async fn execute_parallel(
                     Close::new(
                         format!("`{}` succeeded first", already_won.id),
                         TokenUsage::default(),
-                        attempt,
-                        cancel,
                     ),
                 )
                 .await;
@@ -191,12 +186,7 @@ pub(super) async fn execute_parallel(
                     close_node(
                         ctx,
                         node,
-                        Close::new(
-                            format!("`{id}` succeeded first"),
-                            TokenUsage::default(),
-                            attempt,
-                            cancel,
-                        ),
+                        Close::new(format!("`{id}` succeeded first"), TokenUsage::default()),
                     )
                     .await
                 }

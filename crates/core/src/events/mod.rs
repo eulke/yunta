@@ -11,8 +11,10 @@
 //! The hash chain over persisted rows lives in `yunta-storage`; nothing
 //! here carries a hash.
 
+pub mod artifacts;
 mod evidence;
 mod failure;
+pub mod findings;
 mod payloads;
 
 pub use evidence::{Evidence, Fact};
@@ -277,7 +279,7 @@ impl schemars::JsonSchema for StoredEvent {
     }
 }
 
-/// All 31 event kinds, internally tagged by `kind`.
+/// All 36 event kinds, internally tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
@@ -305,6 +307,11 @@ pub enum EventPayload {
     QuestionsAnswered(QuestionsAnsweredPayload),
     LoopIteration(LoopIterationPayload),
     FindingPosted(FindingPostedPayload),
+    FindingUpdated(FindingUpdatedPayload),
+    FindingWithdrawn(FindingWithdrawnPayload),
+    FindingRefused(FindingRefusedPayload),
+    ArtifactSubmitted(ArtifactSubmittedPayload),
+    ArtifactAccepted(ArtifactAcceptedPayload),
     PromotionSignaled(PromotionSignaledPayload),
     ChildRunCreated(ChildRunCreatedPayload),
     ChildRunFinished(ChildRunFinishedPayload),
@@ -354,6 +361,11 @@ impl EventPayload {
         "questions_answered",
         "loop_iteration",
         "finding_posted",
+        "finding_updated",
+        "finding_withdrawn",
+        "finding_refused",
+        "artifact_submitted",
+        "artifact_accepted",
         "promotion_signaled",
         "child_run_created",
         "child_run_finished",
@@ -391,6 +403,11 @@ impl EventPayload {
             Self::QuestionsAnswered(_) => "questions_answered",
             Self::LoopIteration(_) => "loop_iteration",
             Self::FindingPosted(_) => "finding_posted",
+            Self::FindingUpdated(_) => "finding_updated",
+            Self::FindingWithdrawn(_) => "finding_withdrawn",
+            Self::FindingRefused(_) => "finding_refused",
+            Self::ArtifactSubmitted(_) => "artifact_submitted",
+            Self::ArtifactAccepted(_) => "artifact_accepted",
             Self::PromotionSignaled(_) => "promotion_signaled",
             Self::ChildRunCreated(_) => "child_run_created",
             Self::ChildRunFinished(_) => "child_run_finished",

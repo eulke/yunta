@@ -244,7 +244,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let adapters = mock_adapters(&config, mock);
 
     let provided_inputs: HashMap<String, String> = case.inputs.into_iter().collect();
-    let manifest = yunta_engine::build_manifest(
+    let frozen = yunta_engine::build_manifest(
         &workflow,
         &config,
         workflow_path.parent().unwrap_or(Path::new(".")),
@@ -252,6 +252,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &provided_inputs,
     )
     .map_err(|e| yunta_core::describe(&e))?;
+    let manifest = frozen.manifest;
 
     // The case's `mode` is frozen into the run the way `--mode` is;
     // the default mode runs the whole graph unfiltered.
@@ -262,8 +263,11 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &mode,
+            worktree: &worktree,
             promoted_from: None,
-            artifacts: &[],
+            // A case's `inputs:` name documents the same way `--input`
+            // does, and the run is born holding each of them.
+            artifacts: &frozen.documents,
         },
         &storage,
         &SystemClock,
@@ -333,9 +337,14 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
 }
 
 /// Reads a mock fixture, renders it with the run's own paths
-/// (`{{run.dir}}`, `{{worktree}}`) and parses it — the one way a
-/// scripted session comes to exist, for `yunta test` and for
+/// (`{{run.dir}}`, `{{worktree}}`, `{{staging}}`) and parses it — the one
+/// way a scripted session comes to exist, for `yunta test` and for
 /// `yunta run --adapter mock --fixture` alike.
+///
+/// `{{staging}}` is where nodes write the files they declare, one
+/// directory per node id: a session scripted to produce an opaque
+/// artifact of node `grill` writes `{{staging}}/grill/<name>`, which is
+/// exactly the directory that session is granted.
 pub(crate) fn load_mock_fixture(
     fixture_path: &Path,
     run_dir: &Path,
@@ -346,6 +355,12 @@ pub(crate) fn load_mock_fixture(
     let vars = BTreeMap::from([
         ("run.dir".to_string(), run_dir.display().to_string()),
         ("worktree".to_string(), worktree.display().to_string()),
+        (
+            "staging".to_string(),
+            yunta_engine::run_dir::staging_root(run_dir)
+                .display()
+                .to_string(),
+        ),
     ]);
     let rendered = yunta_engine::render_template(&fixture_text, &vars)
         .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?;
@@ -435,9 +450,9 @@ mod tests {
     #[test]
     fn a_case_names_the_directory_that_seeds_its_sandbox() {
         let case: TestCase = yunta_core::yaml::parse(
-            "workflow: ledger-task\n\
+            "workflow: run-tasks\n\
              worktree: worktrees/greeting-crate\n\
-             fixture: fixtures/ledger-task.yaml\n\
+             fixture: fixtures/run-tasks.yaml\n\
              expect:\n  final_state: finished\n",
         )
         .unwrap();

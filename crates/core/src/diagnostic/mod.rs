@@ -23,7 +23,7 @@ mod problem;
 mod subject;
 
 pub use artifact::{ArtifactFailure, FileProblem};
-pub use problem::{Malformation, Problem, Rule, RuleCode, ValueShape};
+pub use problem::{Problem, Rule, RuleCode};
 pub use subject::{Named, Subject};
 
 use crate::ArtifactKind;
@@ -33,7 +33,8 @@ use crate::ArtifactKind;
 ///
 /// A document always has a kind. An artifact the engine never
 /// interprets has no shape to demand and therefore no content to report
-/// on; what can go wrong with one is a [`FileProblem`] instead.
+/// on; what can go wrong with one is a [`FileProblem`] instead. An
+/// artifact another run owes has no document at all, and names none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DocumentRef {
     pub kind: ArtifactKind,
@@ -94,8 +95,8 @@ impl fmt::Display for Diagnostic {
 /// Every problem one document has, reported together.
 ///
 /// Collecting them is not a convenience: a reader who corrects one
-/// problem per round pays a round per problem, and a repair cycle that
-/// works that way exhausts its budget before the file is readable.
+/// problem per round pays a round per problem, and a writer who hears
+/// one rule at a time rewrites the document once per rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub document: DocumentRef,

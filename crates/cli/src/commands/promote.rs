@@ -143,14 +143,21 @@ mod tests {
         }
     }
 
+    /// `plan` produces a real artifact before `lint` sends the run to its
+    /// escalation, so the successor has something to inherit.
     const WORKFLOW: &str = r#"
 name: promotable
 modes:
-  quick:  { include: [lint, fix-lint] }
+  quick:  { include: [plan, lint, fix-lint] }
   full:   { include: [ship] }
 nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks: []\n' > {{node.artifacts}}/plan.yaml"
+    artifacts: { produces: [plan.yaml] }
   - id: lint
     kind: bash
+    depends_on: [plan]
     run: "test -f fixed.txt"
     on_failure: { goto: fix-lint, max_reroutes: 0 }
   - id: fix-lint
@@ -168,8 +175,6 @@ nodes:
         let cwd = root.path().join("repo");
         std::fs::create_dir_all(&cwd).unwrap();
         init_repo(&cwd);
-        // A real artifact on the parent — proves inheritance, not just
-        // an empty directory copy succeeding trivially.
         std::fs::create_dir_all(cwd.join(".yunta")).unwrap();
 
         let project = Project {
@@ -182,8 +187,9 @@ nodes:
         let adapters = crate::commands::Adapters::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
-        let manifest =
-            build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new()).unwrap();
+        let manifest = build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new())
+            .unwrap()
+            .manifest;
 
         let run_id = RunId::from("run-parent");
         let worktree = project.worktrees_root.join(run_id.as_str());
@@ -191,7 +197,7 @@ nodes:
             &cwd,
             &worktree,
             &manifest.base_commit,
-            &format!("yunta/{run_id}"),
+            &yunta_engine::run_branch(&run_id),
             manifest.isolation,
         )
         .await
@@ -202,6 +208,7 @@ nodes:
                 manifest: &manifest,
                 runs_root: &project.runs_root,
                 mode: &"quick".into(),
+                worktree: &worktree,
                 promoted_from: None,
                 artifacts: &[],
             },
@@ -210,10 +217,6 @@ nodes:
         )
         .await
         .unwrap();
-
-        // A real artifact file on the parent's own run.dir — what
-        // `copy_inherited_artifacts` is supposed to carry forward.
-        std::fs::write(run_dir.join("artifacts").join("plan.yaml"), "tasks: []\n").unwrap();
 
         let report = execute_run(RunEnv {
             run_id: &run_id,
@@ -280,12 +283,15 @@ nodes:
             .iter()
             .any(|e| matches!(e.payload(), Some(EventPayload::PromotionSignaled(_)))));
 
-        // Inherited artifact actually landed in the successor's own dir.
+        // The artifact the parent's log holds landed in the successor's
+        // own dir, with no producer of the successor's behind it.
         let successor_run_dir = project.runs_root.join(final_id.as_str());
-        assert!(successor_run_dir
-            .join("artifacts")
-            .join("plan.yaml")
-            .exists());
+        // Main's own check on what the successor produced, kept as it
+        // stands: the artifact is there and carries what it should.
+        assert_eq!(
+            std::fs::read_to_string(successor_run_dir.join("artifacts").join("plan.yaml")).unwrap(),
+            "tasks: []\n"
+        );
 
         // One observer spans the chain: the successor is a separate run
         // with its own `execute_run`, and its events reach the same

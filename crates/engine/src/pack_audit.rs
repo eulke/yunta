@@ -215,15 +215,15 @@ fn describe_context(spec: &ContextSpec) -> String {
         ContextSpec::Files { files } => yunta_core::text::detailed("files", &files.join(", ")),
         ContextSpec::Command { command } => format!("command: {command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
-            Some(node) => format!("artifact: node={node} name={}", artifact.name),
-            None => format!("artifact: name={} (mounted, no producer)", artifact.name),
+            Some(node) => format!("artifact: node={node} {}", artifact.id),
+            None => format!("artifact: {} (mounted, no producer)", artifact.id),
         },
         ContextSpec::Mcp { mcp } => format!("mcp: server={} query={}", mcp.server, mcp.query),
         ContextSpec::RunEvents { run_events } => match &run_events.filter {
             Some(filter) => format!("run-events: filter={}", filter.as_str()),
             None => "run-events: (no filter)".to_string(),
         },
-        ContextSpec::Ledger { .. } => "ledger".to_string(),
+        ContextSpec::Tasks { .. } => "tasks".to_string(),
         ContextSpec::Knowledge { knowledge } => {
             if knowledge.layers.is_empty() {
                 "knowledge: (every layer)".to_string()

@@ -14,5 +14,5 @@ end. Everything here goes deeper, organized by what you're trying to do:
 | Know what's safe to rely on across releases | [Compatibility](compatibility.md) |
 
 These documents describe current behavior only. The normative design corpus —
-the run contract, the adapter and ledger specs, and the decision register —
+the run contract, the adapter and tasks specs, and the decision register —
 lives in [`design/`](design/README.md), in Spanish.

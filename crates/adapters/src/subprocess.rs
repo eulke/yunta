@@ -332,6 +332,7 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
 fn describe(event: &AgentEvent) -> &'static str {
     match event {
         AgentEvent::SessionOpened { .. } => "a session opening",
+        AgentEvent::RunToolsMounted { .. } => "the run tools it holds",
         AgentEvent::ToolUse { .. } => "a tool use",
         AgentEvent::Usage { .. } => "token usage",
         AgentEvent::Note { .. } => "a note",

@@ -146,7 +146,9 @@ impl Drop for ProcessRegistry {
 
 /// Where a run's registry lives: `run.dir/scratch/engine.json`.
 pub fn registry_path(run_dir: &Path) -> PathBuf {
-    run_dir.join("scratch").join("engine.json")
+    run_dir
+        .join(crate::run_dir::SCRATCH_DIR)
+        .join("engine.json")
 }
 
 /// Reads a run's registry, if one exists and parses — `None` covers

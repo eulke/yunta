@@ -70,6 +70,16 @@ pub enum InputSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
     },
+    /// A document of a declared kind, given as a path to it. The `kind`
+    /// is what the run reads the file as, so it has no default: a
+    /// document whose shape nobody named is a `path`, not a `document`.
+    Document {
+        kind: crate::workflow::ArtifactKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
 }
 
 impl InputSpec {
@@ -82,6 +92,7 @@ impl InputSpec {
             InputSpec::Boolean { default, .. } => default.is_none(),
             InputSpec::Enum { default, .. } => default.is_none(),
             InputSpec::Path { default, .. } => default.is_none(),
+            InputSpec::Document { default, .. } => default.is_none(),
         }
     }
 
@@ -92,6 +103,7 @@ impl InputSpec {
             InputSpec::Boolean { description, .. } => description.as_deref(),
             InputSpec::Enum { description, .. } => description.as_deref(),
             InputSpec::Path { description, .. } => description.as_deref(),
+            InputSpec::Document { description, .. } => description.as_deref(),
         }
     }
 }
@@ -217,6 +229,15 @@ enum AuthoredInputSpec {
         #[serde(default)]
         description: Option<String>,
     },
+    Document {
+        kind: crate::workflow::ArtifactKind,
+        #[serde(default)]
+        required: Requiredness,
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+    },
 }
 
 /// The schema is the authored form, `required:` included.
@@ -301,6 +322,19 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
             } => {
                 required.check_against(default.is_some())?;
                 InputSpec::Path {
+                    default,
+                    description,
+                }
+            }
+            AuthoredInputSpec::Document {
+                kind,
+                required,
+                default,
+                description,
+            } => {
+                required.check_against(default.is_some())?;
+                InputSpec::Document {
+                    kind,
                     default,
                     description,
                 }

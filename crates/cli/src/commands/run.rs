@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, Workflow};
-use yunta_engine::PriorEstimation;
+use yunta_engine::{FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
 mod attached;
@@ -190,14 +190,14 @@ async fn runnable(
     raw_inputs: &[String],
     adapter: Option<&AdapterId>,
     mock_fixture: Option<&Path>,
-) -> Result<(Manifest, Adapters), CliError> {
+) -> Result<(FrozenRun, Adapters), CliError> {
     let (workflow_path, workflow) = resolve_and_check(ctx, workflow_path)?;
     let adapters = match mock_fixture {
         Some(_) => HashMap::new(),
         None => runnable_adapters(ctx, &workflow, adapter).await?,
     };
-    let manifest = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
-    Ok((manifest, adapters))
+    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
+    Ok((frozen, adapters))
 }
 
 /// The real adapters this workflow can run on, refused before a worktree
@@ -300,7 +300,8 @@ fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Wo
     Ok((resolved, workflow))
 }
 
-/// Builds the run's manifest and freezes its state roots, which
+/// Freezes the run: its manifest, the documents its `inputs:` named,
+/// and its state roots, which
 /// [`FrozenPaths::new`](yunta_core::FrozenPaths::new) requires to be
 /// absolute — `resume`/`status`/`gc` read these back from any directory,
 /// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
@@ -310,21 +311,21 @@ fn build_frozen_manifest(
     workflow: &Workflow,
     workflow_path: &Path,
     raw_inputs: &[String],
-) -> Result<Manifest, CliError> {
+) -> Result<FrozenRun, CliError> {
     let provided_inputs = parse_inputs(raw_inputs).map_err(CliError::msg)?;
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    let mut manifest = yunta_engine::build_manifest(
+    let mut frozen = yunta_engine::build_manifest(
         workflow,
         &ctx.project.config,
         workflow_dir,
         &ctx.cwd,
         &provided_inputs,
     )?;
-    manifest.paths = Some(yunta_core::FrozenPaths::new(
+    frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
         ctx.project.runs_root.clone(),
         ctx.project.worktrees_root.clone(),
     )?);
-    Ok(manifest)
+    Ok(frozen)
 }
 
 /// Enforces the soft concurrency cap, mints the run id from the injected
@@ -334,9 +335,10 @@ fn build_frozen_manifest(
 async fn create_run_from(
     ctx: &Context,
     storage: &AsyncStorage,
-    manifest: &Manifest,
+    frozen: &FrozenRun,
     mode: Option<&ModeName>,
 ) -> Result<Prepared, CliError> {
+    let manifest = &frozen.manifest;
     // A soft budget, not a safety limit — best-effort by design (two
     // simultaneous `yunta run` invocations can both pass the count),
     // checked before anything is created so the refusal costs nothing.
@@ -365,7 +367,7 @@ async fn create_run_from(
         &ctx.cwd,
         &worktree,
         &manifest.base_commit,
-        &format!("yunta/{run_id}"),
+        &yunta_engine::run_branch(&run_id),
         manifest.isolation,
     )
     .await?
@@ -401,8 +403,11 @@ async fn create_run_from(
             manifest,
             runs_root: &ctx.project.runs_root,
             mode: &resolved_mode,
+            worktree: &worktree,
             promoted_from: None,
-            artifacts: &[],
+            // The run is born holding every document its `inputs:`
+            // named, accepted right after `run_created`.
+            artifacts: &frozen.documents,
         },
         storage,
         &ctx.clock,

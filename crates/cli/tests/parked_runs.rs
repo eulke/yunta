@@ -54,9 +54,9 @@ nodes:
     run: "exit 3"
 "#;
 
-/// A node whose session writes a questions artifact and ends: nothing
-/// answers the questions with stdin closed, so the run parks with the
-/// node itself waiting on a person rather than on a failure.
+/// A node whose session hands questions over and ends: nothing answers
+/// them with stdin closed, so the run parks with the node itself
+/// waiting on a person rather than on a failure.
 const ASKING: &str = r#"
 name: asking
 nodes:
@@ -65,23 +65,25 @@ nodes:
     runner: executor
     prompt: "Ask what has to be known before going on."
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
+      produces: [questions]
 "#;
 
-/// The scripted session behind [`ASKING`]: it writes the artifact and
+/// The scripted session behind [`ASKING`]: it submits the document and
 /// closes, so the round with a person is reached with no agent
 /// installed.
 const ASKING_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - path: "{{run.dir}}/artifacts/questions.yaml"
-        content: |
-          questions:
-            - id: summary
-              text: "What changed?"
-              answer_type: text
-              required: true
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions:
+              - id: summary
+                text: "What changed?"
+                answer_type: text
+                required: true
     outcome: { type: completed, summary: asked }
 "#;
 

@@ -5,7 +5,8 @@
 
 use std::path::Path;
 
-use yunta_core::{AdapterId, Manifest, ModeName, RunId};
+use yunta_core::{AdapterId, ModeName, RunId};
+use yunta_engine::FrozenRun;
 use yunta_storage::AsyncStorage;
 
 use super::{create_run_from, estimate, runnable};
@@ -54,9 +55,9 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     } = detaching;
     // No fixture ever reaches here: a detached child resolves the
     // adapters `runners:` names and reads none.
-    let (manifest, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
-    let estimated = estimate(ctx, storage, &manifest, quiet, json).await;
-    let run_id = create_and_detach(ctx, storage, &manifest, mode).await?;
+    let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
+    let estimated = estimate(ctx, storage, &frozen.manifest, quiet, json).await;
+    let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if json {
         return crate::json::print_json(&RunJson::detached(
             &run_id,
@@ -85,13 +86,13 @@ pub(crate) async fn start_detached(
     adapter: Option<&AdapterId>,
     mode: Option<&ModeName>,
 ) -> Result<Started, CliError> {
-    let (manifest, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
+    let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
     // Quiet, because stdout here *is* the control plane's JSON-RPC
     // stream: the distribution line the estimation prints for a person
     // would land in the middle of a response. What it has to say
     // travels in the answer instead.
-    let estimated = estimate(ctx, storage, &manifest, true, false).await;
-    let run_id = create_and_detach(ctx, storage, &manifest, mode).await?;
+    let estimated = estimate(ctx, storage, &frozen.manifest, true, false).await;
+    let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     Ok(Started {
         run_id,
         budget_warning: estimated.budget_warning,
@@ -114,10 +115,11 @@ pub(crate) struct Started {
 async fn create_and_detach(
     ctx: &Context,
     storage: &AsyncStorage,
-    manifest: &Manifest,
+    frozen: &FrozenRun,
     mode: Option<&ModeName>,
 ) -> Result<RunId, CliError> {
-    let prepared = create_run_from(ctx, storage, manifest, mode).await?;
+    let prepared = create_run_from(ctx, storage, frozen, mode).await?;
+    let isolation = frozen.manifest.isolation;
     // `create_run_from` claimed the checkout for *this* process, which is
     // about to leave. Whichever way the hand-off goes, the claim stops
     // describing who is in the tree: the child takes it over, or nobody
@@ -126,11 +128,11 @@ async fn create_and_detach(
     // checkout the child is still working in.
     match spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).await {
         Ok(child) => {
-            yunta_engine::hand_over_worktree(&ctx.cwd, manifest.isolation, child).await?;
+            yunta_engine::hand_over_worktree(&ctx.cwd, isolation, child).await?;
             Ok(prepared.run_id)
         }
         Err(source) => {
-            yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
+            yunta_engine::release_worktree(&ctx.cwd, isolation).await?;
             Err(DetachedResumeError::new(&prepared.run_id, source).into())
         }
     }

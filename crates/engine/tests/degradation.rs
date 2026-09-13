@@ -70,7 +70,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
 
         let run_dir = create_run(
             CreateRunParams {
@@ -78,6 +79,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },
@@ -215,7 +217,7 @@ nodes:
     run: "true"
 on_finish:
   - distill:
-      - notes.md
+      - { node: build, name: notes.md }
 "#;
     let terminal = bench.run(workflow).await;
 

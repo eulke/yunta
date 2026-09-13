@@ -74,12 +74,9 @@
       "minLength": 1
     },
     "ArtifactContextRef": {
-      "description": "`artifact: { node: ..., name: ... }` — the referenced node's own\ndeclared artifact. Reading it creates an *implicit* `depends_on` edge\n(`build_manifest` expands it into the frozen workflow's own\n`depends_on`, so `check`/the scheduler need no separate awareness of\n`context:` at all — by the time either runs, the edge is already\nordinary `depends_on`).\n\n`node` is optional: `artifact: { name }` means \"an artifact of\nthis run's dir, whoever produced it\" — a mounted one included. It\ncreates no implicit edge (there is no producer to order behind), and\nit's what keeps a catalog child parametric: it never has to name a\nproducer it doesn't have.",
+      "description": "`artifact: { node: ..., kind: ... }` or\n`artifact: { node: ..., name: ... }` — the referenced node's own\ndeclared artifact. Reading it creates an *implicit* `depends_on` edge\n(`build_manifest` expands it into the frozen workflow's own\n`depends_on`, so `check`/the scheduler need no separate awareness of\n`context:` at all — by the time either runs, the edge is already\nordinary `depends_on`).\n\n`node` is optional: a reference without one means \"an artifact of\nthis run, whoever produced it\" — a mounted one included. It\ncreates no implicit edge (there is no producer to order behind), and\nit's what keeps a catalog child parametric: it never has to name a\nproducer it doesn't have.",
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string"
-        },
         "node": {
           "anyOf": [
             {
@@ -91,44 +88,55 @@
           ]
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "name"
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
       ]
     },
     "ArtifactKind": {
       "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
       "type": "string",
       "enum": [
-        "task-ledger",
+        "tasks",
         "findings",
         "questions"
       ]
     },
     "ArtifactSpec": {
+      "description": "One artifact named by a bare string: a node's `artifacts.produces`\nentry, or one of the artifacts an external gate publishes.\n\nA node produces at most one document of each kind, so a kind\nidentifies an interpreted artifact on its own and there is no file\nname to choose. An opaque artifact has nothing else to go by, so its\nname is what identifies it — which is why the three kind names are\nnot available as file names.",
       "anyOf": [
         {
-          "type": "string"
+          "description": "A document the engine reads and validates, identified by its\nkind.",
+          "$ref": "#/$defs/ArtifactKind"
         },
         {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "$ref": "#/$defs/ArtifactKind"
-            },
-            "name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "kind"
-          ]
+          "description": "A file the engine only carries, identified by its name.",
+          "type": "string"
         }
       ]
     },
     "Artifacts": {
-      "description": "`artifacts.produces`. `task-ledger`, `findings` and\n`questions` are interpreted. A plain string stays\nopaque.",
+      "description": "`artifacts.produces`. Each entry is one bare string: `tasks`,\n`findings` and `questions` name the documents the engine reads, and\nevery other string is the name of a file it only carries.",
       "type": "object",
       "properties": {
         "produces": {
@@ -213,12 +221,12 @@
         {
           "type": "object",
           "properties": {
-            "ledger": {
-              "$ref": "#/$defs/LedgerParams"
+            "tasks": {
+              "$ref": "#/$defs/TasksParams"
             }
           },
           "required": [
-            "ledger"
+            "tasks"
           ]
         },
         {
@@ -253,6 +261,42 @@
         "blackboard"
       ]
     },
+    "DistillArtifact": {
+      "description": "One `distill:` entry — `{ node: <id>, kind: <kind> }` or\n`{ node: <id>, name: <file> }`.\n\nThe node is part of the reference because a kind identifies an\nartifact within one producer: two reviewing nodes each hold a\nfindings artifact, and a distillation says which one it means.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
+      "required": [
+        "node"
+      ]
+    },
     "ExecutorName": {
       "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -263,10 +307,10 @@
       "type": "object",
       "properties": {
         "artifacts": {
-          "description": "Paths (relative to `run.dir`) committed to `branch` for review —\nthe reference example: `[spec.md]`.",
+          "description": "The artifacts of this run committed to `branch` for review, named\nthe way `artifacts.produces` names them — the reference example:\n`[spec.md]`. Each is published under the name the run's own view\ncarries it by.",
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ArtifactSpec"
           }
         },
         "branch": {
@@ -544,6 +588,40 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "required": {
+              "$ref": "#/$defs/Requiredness"
+            },
+            "type": {
+              "type": "string",
+              "const": "document"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "kind"
+          ]
         }
       ]
     },
@@ -577,13 +655,8 @@
       },
       "additionalProperties": false
     },
-    "LedgerParams": {
-      "description": "`ledger: {}` — no parameters in the current resolution\n(the aggregate ledger/task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
-      "type": "object",
-      "additionalProperties": false
-    },
     "LoopUntil": {
-      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the ledger\nhas no task left to do.",
+      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the tasks document\nhas no task left to do.",
       "type": "string",
       "enum": [
         "all_tasks_complete"
@@ -634,7 +707,7 @@
       ]
     },
     "MountArtifact": {
-      "description": "The mounted artifact: `node` names a node of the *parent's own*\ngraph — a `kind: workflow` sibling resolves through the recorded\nlink (`child_run_finished`) to that child run's artifacts, any other\nnode to the parent's own `run.dir/artifacts/`. `as:` renames the\ncopy in the child (absent keeps `name`).",
+      "description": "The mounted artifact: `node` names a node of the *parent's own*\ngraph — a `kind: workflow` sibling resolves through the recorded\nlink (`child_run_finished`) to that child run's artifacts, any other\nnode to the parent's own artifacts. `as:` gives an opaque artifact\nanother name in the child, which is what the child holds it as; a\ndocument the engine reads is identified by its kind in either run, so\nthere is nothing for `as:` to change and declaring it is refused.",
       "type": "object",
       "properties": {
         "as": {
@@ -643,17 +716,36 @@
             "null"
           ]
         },
-        "name": {
-          "type": "string"
-        },
         "node": {
           "$ref": "#/$defs/NodeId"
         }
       },
-      "additionalProperties": false,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
       "required": [
-        "node",
-        "name"
+        "node"
       ]
     },
     "MountSpec": {
@@ -859,7 +951,7 @@
               "$ref": "#/$defs/PromptSource"
             },
             "scope_expansion": {
-              "description": "The agent never widens its own scope — it requests,\nthe engine (or a person, in `ask`) decides. Absent has the\nsame effect as declaring it with no `mode:` — `deny` (the\ndefault): every request becomes a finding, none are\ngranted. Loop-scoped, not workflow- or config-scoped, because\n`scope_expansion_requested`'s own payload is keyed by\n`task_id` — this is ledger-task machinery, the same rung\n`concurrency:` already occupies on this node kind.",
+              "description": "The agent never widens its own scope — it requests,\nthe engine (or a person, in `ask`) decides. Absent has the\nsame effect as declaring it with no `mode:` — `deny` (the\ndefault): every request becomes a finding, none are\ngranted. Loop-scoped, not workflow- or config-scoped, because\n`scope_expansion_requested`'s own payload is keyed by\n`task_id` — this is task machinery, the same rung\n`concurrency:` already occupies on this node kind.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ScopeExpansion"
@@ -1177,7 +1269,7 @@
             "distill": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/DistillArtifact"
               }
             }
           },
@@ -1295,6 +1387,11 @@
         "ask",
         "deny"
       ]
+    },
+    "TasksParams": {
+      "description": "`tasks: {}` — no parameters in the current resolution\n(the aggregate task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
+      "type": "object",
+      "additionalProperties": false
     },
     "WorkflowIsolation": {
       "description": "A `kind: workflow` node's `isolation:` — deliberately its own\nenum, not [`crate::Isolation`]: `inherit` only exists for workflow\nnodes, and a run-level `none` is not a per-node choice.",

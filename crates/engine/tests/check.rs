@@ -118,7 +118,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
             on: Default::default(),
             external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
-                artifacts: vec!["spec.md".to_string()],
+                artifacts: vec![yunta_core::ArtifactSpec::Opaque("spec.md".to_string())],
                 branch: "{{run.branch}}".to_string(),
             }),
         },
@@ -845,8 +845,8 @@ fn context_on_a_bash_node_is_a_check_error() {
 #[test]
 fn context_on_a_prompt_node_is_never_an_error() {
     let mut node = prompt("plan", "planner", &[]);
-    node.context = vec![yunta_core::ContextSpec::Ledger {
-        ledger: yunta_core::LedgerParams::default(),
+    node.context = vec![yunta_core::ContextSpec::Tasks {
+        tasks: yunta_core::TasksParams::default(),
     }];
     let wf = workflow(vec![node]);
     let errors = check(
@@ -876,14 +876,18 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
     a.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
             node: Some("b".into()),
-            name: "b.md".into(),
+            id: yunta_core::ArtifactRefId::Name {
+                name: "b.md".into(),
+            },
         },
     }];
     let mut b = prompt("b", "planner", &[]);
     b.context = vec![yunta_core::ContextSpec::Artifact {
         artifact: yunta_core::ArtifactContextRef {
             node: Some("a".into()),
-            name: "a.md".into(),
+            id: yunta_core::ArtifactRefId::Name {
+                name: "a.md".into(),
+            },
         },
     }];
     let wf = workflow(vec![a, b]);
@@ -1122,7 +1126,7 @@ nodes:
     artifacts:
       produces: [plan.md]
 on_finish:
-  - distill: [plan.md, ghost.md]
+  - distill: [{ node: plan, name: plan.md }, { node: plan, name: ghost.md }]
 "#;
     let wf: Workflow = serde_norway::from_str(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
@@ -1133,7 +1137,7 @@ on_finish:
         "got: {errors:?}"
     );
 
-    let yaml_ok = yaml.replace(", ghost.md", "");
+    let yaml_ok = yaml.replace(", { node: plan, name: ghost.md }", "");
     let wf: Workflow = serde_norway::from_str(&yaml_ok).unwrap();
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
 }
@@ -1753,12 +1757,129 @@ nodes:
 
 // --- artifact names stay under run.dir/artifacts/ ------------------------------
 
+/// The identity of an interpreted artifact is `(node, kind)`, so there
+/// is no second one of a kind for a node to declare.
+#[test]
+fn a_node_declaring_the_same_kind_twice_is_refused() {
+    let yaml = r#"
+name: twice
+nodes:
+  - id: plan
+    kind: prompt
+    prompt: "plan it"
+    artifacts:
+      produces: [tasks, tasks]
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::DuplicateArtifactKind { node, kind }
+                if node.as_str() == "plan" && *kind == yunta_core::ArtifactKind::Tasks
+        )),
+        "got: {errors:?}"
+    );
+    let text = errors[0].to_string();
+    assert!(
+        text.contains("at most one") && text.contains("identified by its kind"),
+        "the refusal names the rule: {text}"
+    );
+}
+
+/// A document that enters as an input and a node that produces the same
+/// kind are two producers of one identity, with nothing to order them.
+#[test]
+fn an_input_document_and_a_node_producing_its_kind_are_refused_together() {
+    let yaml = r#"
+name: two-producers
+inputs:
+  plan:
+    type: document
+    kind: tasks
+nodes:
+  - id: plan-it
+    kind: prompt
+    prompt: "plan it"
+    artifacts:
+      produces: [tasks]
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    let clash = errors
+        .iter()
+        .find(|e| matches!(e, CheckError::InputDocumentAlsoProduced { .. }))
+        .unwrap_or_else(|| panic!("got: {errors:?}"));
+    let text = clash.to_string();
+    assert!(
+        text.contains("`plan`") && text.contains("`plan-it`") && text.contains("tasks document"),
+        "the refusal names both producers and the document they claim: {text}"
+    );
+}
+
+/// A document input whose kind no node produces is exactly what the
+/// input is for.
+#[test]
+fn an_input_document_of_a_kind_nobody_produces_is_accepted() {
+    let yaml = r#"
+name: one-producer
+inputs:
+  plan:
+    type: document
+    kind: tasks
+nodes:
+  - id: work
+    kind: loop
+    until: all_tasks_complete
+    prompt: "do the task"
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, CheckError::InputDocumentAlsoProduced { .. })),
+        "got: {errors:?}"
+    );
+}
+
+/// `tasks`, `findings` and `questions` name the documents the engine
+/// reads, so none of them is available as a file name.
+#[test]
+fn a_reference_naming_a_kind_as_a_file_name_is_refused() {
+    let yaml = r#"
+name: reserved
+nodes:
+  - id: review
+    kind: prompt
+    prompt: "review it"
+    artifacts:
+      produces: [findings]
+  - id: fix
+    kind: prompt
+    prompt: "fix it"
+    context:
+      - artifact: { node: review, name: findings }
+"#;
+    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let errors = check(&wf, &ConfigLayer::default());
+    let reserved = errors
+        .iter()
+        .find(|e| matches!(e, CheckError::ReservedArtifactName { name, .. } if name == "findings"))
+        .unwrap_or_else(|| panic!("got: {errors:?}"));
+    let text = reserved.to_string();
+    assert!(
+        text.contains("kind: findings") && text.contains("`fix`"),
+        "the refusal names the form that works and where it was written: {text}"
+    );
+}
+
 #[test]
 fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
     for name in ["../escape.md", "/tmp/escape.md", "notes/../../escape.md"] {
         let mut node = bash("a", "true", &[]);
         node.artifacts = Some(yunta_core::Artifacts {
-            produces: vec![yunta_core::ArtifactSpec::Plain(name.to_string())],
+            produces: vec![yunta_core::ArtifactSpec::Opaque(name.to_string())],
         });
         let errors = check(&workflow(vec![node]), &ConfigLayer::default());
         assert!(
@@ -1773,8 +1894,8 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
 
     let mut node = bash("a", "true", &[]);
     node.artifacts = Some(yunta_core::Artifacts {
-        produces: vec![yunta_core::ArtifactSpec::Plain(
-            "reports/findings-{{runner.role}}.yaml".to_string(),
+        produces: vec![yunta_core::ArtifactSpec::Opaque(
+            "reports/report-{{runner.role}}.md".to_string(),
         )],
     });
     assert!(
@@ -1807,4 +1928,42 @@ nodes:
         msg.contains("bogus") || msg.contains("failed"),
         "the rejection names the bad filter or the valid vocabulary: {msg}"
     );
+}
+
+// --- any node may declare an interpreted artifact -----------------------------
+
+/// A workflow whose single node `plan` produces a tasks document, with the
+/// node's own kind lines spliced in.
+fn producing_tasks(node_kind: &str) -> Workflow {
+    let yaml = format!(
+        r#"
+name: tasks
+nodes:
+  - id: plan
+{node_kind}
+    artifacts:
+      produces: [tasks]
+"#
+    );
+    serde_norway::from_str(&yaml).expect("the fixture parses")
+}
+
+#[test]
+fn every_node_kind_may_declare_an_interpreted_artifact() {
+    // A session hands its document to the run tools; a command writes
+    // the file, as `run-tasks` does when it stages a tasks document a person
+    // wrote. Both end at the same close, reading the same file through
+    // the same door, so neither is a kind of node the declaration is
+    // wrong on.
+    for node_kind in [
+        "    kind: prompt\n    prompt: \"plan it\"",
+        "    kind: workflow\n    use: planner",
+        "    kind: bash\n    run: \"cp tasks.yaml {{node.artifacts}}/tasks.yaml\"",
+    ] {
+        assert_eq!(
+            check(&producing_tasks(node_kind), &ConfigLayer::default()),
+            Vec::new(),
+            "`{node_kind}` may declare a tasks document"
+        );
+    }
 }

@@ -330,6 +330,7 @@ fn each_loop_nodes_tasks_keep_the_node_that_registered_them() {
                 task_id: "t2".into(),
                 new_status: TaskStatus::Running,
                 caused_by: 4.into(),
+                commit: None,
             }),
         ),
     ];

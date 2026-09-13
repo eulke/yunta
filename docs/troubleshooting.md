@@ -58,26 +58,76 @@ the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissi
 ## A node failed on an artifact it declared
 
 ```
-artifacts/plan.yaml: 2 errors
-  the document: unknown key `taks`; the only top-level key is `tasks`
+artifacts/plan/tasks.yaml: 2 errors
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+  task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
 ```
 
-A node that declares `artifacts.produces: [{ name: ..., kind: ... }]` has to leave
-behind a file the engine can read. The heading names the file and how many problems
-it has; each line below names one problem and the entry it belongs to, in the
-document's own words. The node then gets one repair session
-(`limits.max_artifact_repairs`, default 1): its own runner, the shape it already
-had, exactly those problems, and nothing to do but rewrite the file — and the node
-fails if that session does not land it. A node that resolves no runner (`bash`,
-`check`, `gate`) gets no repair session: there is nobody to instruct.
-`yunta schema <kind>` prints the shape the file is read against.
+A node that declares a kind under `artifacts.produces` — `tasks`, `findings` or
+`questions` — has to leave behind a document the engine can read. The heading names the file and how many
+problems it has; each line below names one problem and the entry it belongs to, in
+the document's own words. `yunta schema <kind>` prints the shape the document is
+read against.
+
+For a `prompt` or `loop` node, the document arrives through a run tool and the
+engine takes it into the run. A session that never handed one over closes the
+node on a failure of its own, headed by the node rather than by a file:
+
+```
+node `plan`: 1 error
+  handed over no tasks document — produce it before the node ends, or stop declaring it here
+```
+
+No path is named because none was ever going to be there: such a document is
+never a file on its way in, and a file left in the node's directory is not one
+either, because no acceptance explains it. The run's log carries every submission
+the session made, accepted or refused, under `artifact_submitted`. There is no
+second session: a node that produces nothing fails once, and the failure is not
+retryable.
+
+For a `bash`, `check`, `gate` or `executor` node, the command writes the file
+itself. Check that it writes the name the node declared, under
+`{{node.artifacts}}` — the node's own directory, which the engine empties at the
+start of every attempt.
 
 A file that was never written, is empty, is past `limits.max_artifact_bytes`, or
-that the filesystem refuses is a different failure and gets no second attempt:
-nothing a rewrite of the content can do reaches it. Check that the node writes the
-path it declared; the session is given the absolute path the engine verifies,
-which is in the run's directory and not in the worktree it works in.
+that the filesystem refuses is reported as a failure of the file rather than of the
+document, and names which of those it is.
+
+## The engine refused a document or a finding a session offered
+
+```
+The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
+
+  1. task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
+
+  2. task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
+```
+
+This is the engine answering `yunta_submit_tasks`, `yunta_submit_questions`,
+`yunta_post_finding`, `yunta_update_finding` or `yunta_withdraw_finding` inside the
+session, with the verdict the node's close reaches. It is not a failure: the
+session reads the numbered list, fixes exactly those problems, and calls the tool
+again. A correction costs one call, not a session, and there is no limit on how
+many times a session tries.
+
+A document that reads into its kind is refused with every rule it breaks, all at
+once. A document that does not read into its kind is refused with that one problem
+and the path where it sits:
+
+```
+  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+```
+
+A value of the wrong type stops the read, and the rules only hold over a document
+that parsed, so fixing the structure and submitting again is what surfaces them. A
+refused finding leaves every other finding the node reported standing; only the one
+in that call is rejected.
+
+The refusal also lands in the run's log — `artifact_submitted` with a `refused`
+outcome, or `finding_refused`, each carrying the whole report — so how often a run
+gets a document wrong is a fact about the run and not something only the session
+saw.
 
 ## A node's criteria never turn green
 
@@ -118,16 +168,121 @@ outside](guide.md#gates-from-the-outside).
   printed audit, or is `deny` and refuses outright regardless of `--yes`.
   See [packs](packs.md#installing-and-using-a-pack).
 
+## `resume` says the run is broken because of an artifact
+
+```
+run is broken: run `01J...` no longer holds the bytes its log accepted for 1
+of the 3 artifact(s) it names: `artifacts/plan/tasks.yaml`: object
+`a1b2...` holds content that hashes to `c3d4...` — the bytes under
+`objects/` are not the bytes the run accepted
+```
+
+Waking a run reads back every artifact its log accepted, because the log
+names bytes by their hash and the run keeps them under `objects/`. That
+message means one of those objects is gone, or its content no longer hashes
+to its own name — somebody edited or replaced a file under `objects/`, or
+the filesystem lost part of it. The run stops before doing any further work:
+its own history says it holds something it can no longer hand to a node.
+
+What to do:
+
+- **Put the bytes back.** If the run's directory came from a backup or a
+  copy, restore `objects/` from it — the object's name *is* its sha256, so
+  any copy of the right content is the right object, wherever it comes from.
+- **Editing an artifact is not how you change one.** The file under
+  `artifacts/` is a view the engine writes and never reads; deleting it is
+  harmless, and editing it changes nothing. `objects/` is the run's
+  evidence, and nothing outside the engine writes there.
+- **If the bytes are gone for good**, the run cannot be resumed — its
+  artifacts are part of what it is. Start a new run from the same inputs.
+
+`yunta verify <run_id>` reports the same check on demand, without resuming.
+
+A run created by a Yunta older than the object store reports instead that it
+holds artifacts this binary cannot verify — a `minor` finding, not a break.
+That log names files rather than objects; see [compatibility](compatibility.md).
+
+## `resume` says the run is broken because of its worktree
+
+```
+run is broken: run `01J...` works in `/home/me/.yunta/worktrees/01J...`, whose
+HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
+task, scope check and criterion this run's log records was established against
+a tree that this one is not a continuation of. Put it back on the run's own
+branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/01J...`), or
+on any commit that still descends from `4a77...` — ...
+```
+
+Waking a run asks its worktree two questions, and this is the second one
+failing. The run branched from a commit, and everything on its log — each
+task marked done, each `scope_checked`, each green criterion — was
+established against a tree descending from it. A `git reset --hard` behind
+the run's own commits, a rebase, or a checkout of an unrelated branch takes
+that commit out of the tree's history, and from then on the state derived
+from the log describes a tree that is not there. The run stops before doing
+any more work on it.
+
+What to do:
+
+- **Put the tree back.** `git -C <worktree> reflog` shows every commit that
+  tree has been on, including where the run left it. `git -C <worktree>
+  checkout yunta/<run_id>` returns it to the run's own branch; any commit
+  that still descends from the base commit works.
+- **Under `isolation: none`** the run works directly on your checkout, so a
+  `git pull --rebase` or a rebase while the run was paused is the usual way
+  this happens. The remedy is the same — the reflog, then back onto a commit
+  that still descends from the base.
+- **If that history is gone for good**, this run's is too: start a new run
+  against the tree as it is now. The work in the tree is not lost by this —
+  only the run's claim to have verified it.
+
+**What is *not* a problem: a changed tree.** New commits on top, or
+uncommitted edits you made by hand during the pause, are the expected case
+and the run resumes over them without a word. The worktree is the work; its
+content is never verified against a snapshot. What answers a changed tree is
+the criteria memo, which is keyed on a hash of the tree, so the run re-runs
+its criteria against what is there instead of trusting a result about a tree
+that is gone.
+
+## `resume` cannot find the run's worktree
+
+```
+the run's branch `yunta/01J...` has no worktree at
+`/home/me/.yunta/worktrees/01J...` (there is nothing at that path) — the
+run's history and artifacts are intact; bring the checkout back with `git
+worktree add /home/me/.yunta/worktrees/01J... yunta/01J...`, run from the
+repository the run was created in, and resume again
+```
+
+The first of the two questions. The run is not broken: its event log and the
+objects under `objects/` — everything that is its evidence — are untouched,
+and git still holds its branch with every commit the run made. Only the
+checkout is missing, and the command in the message brings it back exactly.
+Run it from the repository the run was created against (the one whose
+`.git/worktrees/` holds the entry), then resume.
+
+If the run has `isolation: none` the message is different — it says the
+directory is not a git working tree at all. That run works on the checkout it
+was created in rather than on one of its own, so resume it from there.
+
 ## Something looks corrupted, or a replay disagrees with what you remember
 
 ```bash
 yunta verify <run_id>
 ```
 
-Recomputes the event log's hash chain end to end and reports exactly where
-it breaks, if it does. This is the mechanical way to confirm (or rule out)
-log tampering or corruption — never guess from `status` output alone if you
-suspect this.
+Checks a run's two mechanical guarantees and reports them apart:
+
+- **the event chain** — every link recomputed from the log as persisted, so
+  an altered payload or a deleted, inserted or reordered event is named with
+  the seq it begins at;
+- **the objects** — every artifact the log accepted, read back and hashed
+  against its own name.
+
+The two are independent: a corrupt object leaves the chain intact, and an
+altered event leaves the objects alone. Either one failing exits non-zero.
+This is the mechanical way to confirm (or rule out) tampering or corruption —
+never guess from `status` output alone if you suspect this.
 
 ## Still stuck
 

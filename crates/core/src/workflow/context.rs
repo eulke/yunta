@@ -3,8 +3,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::parse::{keyed_entry, nested};
+use super::parse::{keyed_entry, nested, take};
+use super::ArtifactRefId;
 use crate::ids::NodeId;
+use crate::yaml::Mapping;
 
 /// One `context:` entry: a builtin `ContextSource` plus its own
 /// parameters, discriminated by its own field name, exactly matching
@@ -30,8 +32,8 @@ pub enum ContextSpec {
         #[serde(rename = "run-events")]
         run_events: RunEventsParams,
     },
-    Ledger {
-        ledger: LedgerParams,
+    Tasks {
+        tasks: TasksParams,
     },
     Knowledge {
         knowledge: KnowledgeParams,
@@ -49,15 +51,20 @@ impl ContextSpec {
         "artifact",
         "mcp",
         "run-events",
-        "ledger",
+        "tasks",
         "knowledge",
         "node-output",
     ];
+
+    /// Spellings an earlier workflow may carry, each read as the key
+    /// it stands for and never listed as one an author writes today.
+    const ALIASES: &'static [(&'static str, &'static str)] = &[("ledger", "tasks")];
 }
 
 impl<'de> Deserialize<'de> for ContextSpec {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (key, value) = keyed_entry(deserializer, "a context source", Self::KEYS)?;
+        let (key, value) =
+            keyed_entry(deserializer, "a context source", Self::KEYS, Self::ALIASES)?;
         let spec = match key.as_str() {
             "files" => ContextSpec::Files {
                 files: nested::<D, _>(&key, value)?,
@@ -74,8 +81,8 @@ impl<'de> Deserialize<'de> for ContextSpec {
             "run-events" => ContextSpec::RunEvents {
                 run_events: nested::<D, _>(&key, value)?,
             },
-            "ledger" => ContextSpec::Ledger {
-                ledger: nested::<D, _>(&key, value)?,
+            "tasks" => ContextSpec::Tasks {
+                tasks: nested::<D, _>(&key, value)?,
             },
             "knowledge" => ContextSpec::Knowledge {
                 knowledge: nested::<D, _>(&key, value)?,
@@ -101,6 +108,7 @@ pub struct McpQueryParams {
     pub query: String,
 }
 
+/// `artifact: { node: ..., kind: ... }` or
 /// `artifact: { node: ..., name: ... }` — the referenced node's own
 /// declared artifact. Reading it creates an *implicit* `depends_on` edge
 /// (`build_manifest` expands it into the frozen workflow's own
@@ -108,17 +116,27 @@ pub struct McpQueryParams {
 /// `context:` at all — by the time either runs, the edge is already
 /// ordinary `depends_on`).
 ///
-/// `node` is optional: `artifact: { name }` means "an artifact of
-/// this run's dir, whoever produced it" — a mounted one included. It
+/// `node` is optional: a reference without one means "an artifact of
+/// this run, whoever produced it" — a mounted one included. It
 /// creates no implicit edge (there is no producer to order behind), and
 /// it's what keeps a catalog child parametric: it never has to name a
 /// producer it doesn't have.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct ArtifactContextRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeId>,
-    pub name: String,
+    #[serde(flatten)]
+    pub id: ArtifactRefId,
+}
+
+impl<'de> Deserialize<'de> for ArtifactContextRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut mapping = Mapping::deserialize(deserializer)?;
+        let node = take::<D, _>(&mut mapping, "node")?;
+        let id =
+            ArtifactRefId::from_rest::<D>(mapping, "an `artifact:` context source", &["node"])?;
+        Ok(ArtifactContextRef { node, id })
+    }
 }
 
 /// `run-events: { filter: ... }` — a read-only query into the run's
@@ -154,13 +172,13 @@ impl RunEventsFilter {
     }
 }
 
-/// `ledger: {}` — no parameters in the current resolution
-/// (the aggregate ledger/task-status view; see the node's own doc
+/// `tasks: {}` — no parameters in the current resolution
+/// (the aggregate task-status view; see the node's own doc
 /// comment on `context` for the task-scoped variant this doesn't cover
 /// yet).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LedgerParams {}
+pub struct TasksParams {}
 
 /// One layer of `knowledge:`, most to least local. `Org` resolves
 /// as the union of every installed knowledge pack's declared contents

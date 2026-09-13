@@ -5,18 +5,17 @@
 //! anything takes or on what a clock says.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactWrittenPayload,
-    Capabilities, CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload,
-    DiscardedCandidate, EventBody, EventPayload, Evidence, Fact, Failure, GateWaitingPayload,
-    NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload,
-    PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics,
-    RunPausedPayload, RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
+    AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, Capabilities,
+    CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload, DiscardedCandidate,
+    EventBody, EventPayload, Evidence, Fact, Failure, GateWaitingPayload, NodeFailedPayload,
+    NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload, PromotionSignaledPayload,
+    RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
+    RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
 use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
@@ -151,6 +150,7 @@ fn task_now(task: &str, new_status: TaskStatus) -> EventPayload {
         task_id: task.into(),
         new_status,
         caused_by: 1.into(),
+        commit: None,
     })
 }
 
@@ -510,20 +510,24 @@ nodes:
 }
 
 #[test]
-fn a_node_carries_every_artifact_it_wrote_in_log_order() {
+fn a_node_carries_every_artifact_it_produced_in_log_order() {
     let workflow = chain();
-    let wrote = |path: &str| {
-        EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-            path: PathBuf::from(path),
-            content_hash: ContentHash::sha256(path.as_bytes()),
-            artifact_kind: None,
+    // An acceptance is what makes an artifact a fact of the log; the
+    // file the engine writes from it is a view of the store.
+    let produced = |name: &str| {
+        EventPayload::ArtifactAccepted(yunta_core::events::ArtifactAcceptedPayload {
+            artifact: ArtifactId::Opaque {
+                name: name.to_string(),
+            },
+            content_hash: ContentHash::sha256(name.as_bytes()),
+            origin: yunta_core::events::ArtifactOrigin::Ingested,
         })
     };
     let events = log(vec![
         (0, None, created("standard")),
         (1, Some("build"), started(1)),
-        (2, Some("build"), wrote("plan.md")),
-        (3, Some("build"), wrote("report.md")),
+        (2, Some("build"), produced("plan.md")),
+        (3, Some("build"), produced("report.md")),
         (4, Some("plan"), started(1)),
     ]);
 
@@ -539,12 +543,19 @@ fn a_node_carries_every_artifact_it_wrote_in_log_order() {
     };
     assert_eq!(
         artifacts("build"),
-        vec![PathBuf::from("plan.md"), PathBuf::from("report.md")]
+        vec![
+            ArtifactId::Opaque {
+                name: "plan.md".to_string()
+            },
+            ArtifactId::Opaque {
+                name: "report.md".to_string()
+            }
+        ]
     );
     assert_eq!(
         artifacts("plan"),
-        Vec::<PathBuf>::new(),
-        "a node that wrote nothing carries nothing"
+        Vec::<ArtifactId>::new(),
+        "a node that produced nothing carries nothing"
     );
 }
 

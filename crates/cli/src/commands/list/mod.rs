@@ -210,5 +210,6 @@ fn input_type_label(spec: &InputSpec) -> &'static str {
         InputSpec::Boolean { .. } => "boolean",
         InputSpec::Enum { .. } => "enum",
         InputSpec::Path { .. } => "path",
+        InputSpec::Document { .. } => "document",
     }
 }

@@ -62,7 +62,9 @@ fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manif
     .unwrap();
     let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    build_manifest(&workflow, &config, worktree, worktree, inputs).unwrap()
+    build_manifest(&workflow, &config, worktree, worktree, inputs)
+        .unwrap()
+        .manifest
 }
 
 #[test]
@@ -98,6 +100,7 @@ async fn an_approved_gate_publishes_the_new_version() {
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"default".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -107,7 +110,8 @@ async fn an_approved_gate_publishes_the_new_version() {
     .await
     .unwrap();
 
-    let notes_path = run_dir.join("artifacts/promotion-notes.md");
+    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
+        .join("promotion-notes.md");
     let fixture = format!(
         r##"
 sessions:
@@ -186,6 +190,7 @@ async fn an_unresolved_gate_never_publishes_anything() {
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"default".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -195,7 +200,8 @@ async fn an_unresolved_gate_never_publishes_anything() {
     .await
     .unwrap();
 
-    let notes_path = run_dir.join("artifacts/promotion-notes.md");
+    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
+        .join("promotion-notes.md");
     let fixture = format!(
         r##"
 sessions:

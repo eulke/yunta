@@ -91,7 +91,7 @@ pub fn over_budget_escalation(
 
 /// The escalation object and pause reason for a loop that hit
 /// `limits.max_loop_iterations` — the same continue/abort mechanism as the
-/// token cap, and the only net under a ledger whose state oscillates
+/// token cap, and the only net under a tasks document whose state oscillates
 /// forever. Node-scoped, unlike the run budget: [`escalate`] records its
 /// pair on the loop node.
 pub fn loop_overrun_escalation(
@@ -110,7 +110,7 @@ pub fn loop_overrun_escalation(
                 (iteration - 1).to_string(),
             ),
             Fact::labelled("limits.max_loop_iterations", cap.to_string()),
-            Fact::bare("the ledger still has ready tasks"),
+            Fact::bare("the tasks document still has ready tasks"),
         ]
         .into(),
         options: vec![

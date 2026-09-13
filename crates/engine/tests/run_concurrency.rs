@@ -45,13 +45,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -112,13 +114,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -176,13 +180,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -271,13 +277,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -344,7 +352,6 @@ nodes:
 #[tokio::test]
 async fn a_blocked_task_fails_the_loop_and_pauses_the_run() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: blocked-task
@@ -352,10 +359,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -366,18 +372,15 @@ nodes:
 
     // One task whose criterion the executor never satisfies; with
     // DEFAULT_MAX_RETRIES=2 that's three executor sessions, then blocked.
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Impossible\"\n    scope: [\"missing.txt\"]\n    criteria:\n      - cmd: \"test -f missing.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - outcome: {{ type: completed, summary: "attempt 1" }}
-  - outcome: {{ type: completed, summary: "attempt 2" }}
-  - outcome: {{ type: completed, summary: "attempt 3" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let mut fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "Impossible", "missing.txt", "test -f missing.txt")
+    ));
+    for attempt in 1..=(DEFAULT_MAX_RETRIES + 1) {
+        fixture.push_str(&format!(
+            "  - outcome: {{ type: completed, summary: \"attempt {attempt}\" }}\n"
+        ));
+    }
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
 
@@ -513,13 +516,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -608,11 +613,11 @@ nodes:
 #[tokio::test]
 async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
     // Same final state, same commit sequence, regardless of
-    // concurrency — the batch mechanism integrates strictly in ledger
+    // concurrency — the batch mechanism integrates strictly in declaration
     // declaration order no matter how many tasks dispatch at once.
     let sequential = Bench::new();
     let workflow_seq = concurrency_workflow(1);
-    let fixture_seq = eight_tasks_fixture(&sequential.run_dir().join("artifacts"));
+    let fixture_seq = eight_tasks_fixture();
     let (terminal_seq, state_seq) = sequential
         .run_with_config(&workflow_seq, &fixture_seq, CONCURRENCY_CONFIG)
         .await;
@@ -620,7 +625,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
 
     let parallel = Bench::new();
     let workflow_par = concurrency_workflow(4);
-    let fixture_par = eight_tasks_fixture(&parallel.run_dir().join("artifacts"));
+    let fixture_par = eight_tasks_fixture();
     let (terminal_par, state_par) = parallel
         .run_with_config(&workflow_par, &fixture_par, CONCURRENCY_CONFIG)
         .await;
@@ -648,7 +653,7 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     );
     assert_eq!(
         commits_seq, commits_par,
-        "the same ledger must produce the same commit sequence at any concurrency"
+        "the same tasks document must produce the same commit sequence at any concurrency"
     );
     // Declaration order, not finishing order.
     let expected: Vec<String> = (1..=8)
@@ -665,7 +670,6 @@ async fn a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns
     // onto — exactly "pasa en su worktree pero rompe tras la integración
     // de otra". B must go back to `ready` without touching A.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: integration-conflict
@@ -673,20 +677,19 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: 2
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
 "#;
 
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-a", "Create a", "a.txt", "test -f a.txt"),
         task_yaml(
@@ -697,11 +700,7 @@ nodes:
         ),
     );
 
-    let mut fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n",
-        artifacts_dir.display(),
-        ledger,
-    );
+    let mut fixture = plan_session(&tasks);
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
@@ -798,18 +797,16 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
     // against anything but task-x's own isolated diff, task-y's write
     // would spuriously violate it.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = concurrency_workflow(2);
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-x", "x", "x.txt", "test -f x.txt"),
         task_yaml("task-y", "y", "y.txt", "test -f y.txt"),
     );
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/plan.yaml\", content: {:?} }}\n    outcome: {{ type: completed, summary: planned }}\n  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
-        artifacts_dir.display(),
-        ledger,
+        "{}  - match_prompt_contains: \"task-x\"\n    effects:\n      - {{ path: x.txt, content: \"x\" }}\n    outcome: {{ type: completed, summary: did-x }}\n  - match_prompt_contains: \"task-y\"\n    effects:\n      - {{ path: y.txt, content: \"y\" }}\n    outcome: {{ type: completed, summary: did-y }}\n",
+        plan_session(&tasks),
     );
 
     let (terminal, state) = bench
@@ -857,13 +854,15 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -873,26 +872,31 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     .await
     .unwrap();
 
-    let ledger = format!(
+    let tasks = format!(
         "tasks:\n{}{}",
         task_yaml("task-p", "p", "p.txt", "test -f p.txt"),
         task_yaml("task-q", "q", "q.txt", "test -f q.txt"),
     );
     std::fs::create_dir_all(&artifacts_dir).unwrap();
-    std::fs::write(artifacts_dir.join("plan.yaml"), &ledger).unwrap();
+    std::fs::write(artifacts_dir.join("plan.yaml"), &tasks).unwrap();
+    // The bytes the crashed run accepted, where it kept them: the loop
+    // reads its tasks from the run's own store, not from the view.
+    let tasks_hash = yunta_core::sha256_hex(tasks.as_bytes());
+    std::fs::create_dir_all(run_dir.join("objects")).unwrap();
+    std::fs::write(run_dir.join("objects").join(tasks_hash.as_str()), &tasks).unwrap();
 
     // Simulate the crash by hand-writing the log up through: plan already
     // registered, the loop started, task-p already Done and committed,
     // and task-q left `Running` with no terminal event — an orphan.
-    git(&bench.worktree, &["checkout", "-b", "yunta/task/task-p/1"]);
+    // The same branch the loop's own dispatch would have made for this
+    // run's attempt at `task-p`, composed the one way the engine does.
+    let task_p_branch = yunta_engine::task_branch(&bench.run_id, &"task-p".into(), 1);
+    git(&bench.worktree, &["checkout", "-b", &task_p_branch]);
     std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
     git(&bench.worktree, &["add", "-A"]);
     git(&bench.worktree, &["commit", "-q", "-m", "task task-p: p"]);
     git(&bench.worktree, &["checkout", "-"]);
-    git(
-        &bench.worktree,
-        &["merge", "--ff-only", "yunta/task/task-p/1"],
-    );
+    git(&bench.worktree, &["merge", "--ff-only", &task_p_branch]);
 
     for event in [
         yunta_core::events::EventDraft {
@@ -905,11 +909,13 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("plan".into()),
+            // A log written before `artifact_accepted` existed: the
+            // fold reads it as the same artifact under the same hash.
             payload: yunta_core::events::EventPayload::ArtifactWritten(
                 yunta_core::events::ArtifactWrittenPayload {
                     path: "artifacts/plan.yaml".into(),
-                    content_hash: yunta_core::sha256_hex(b"irrelevant"),
-                    artifact_kind: None,
+                    content_hash: tasks_hash.clone(),
+                    artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
                 },
             ),
         },
@@ -962,6 +968,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                     task_id: "task-p".into(),
                     new_status: yunta_core::events::TaskStatus::Running,
                     caused_by: 1.into(),
+                    commit: None,
                 },
             ),
         },
@@ -973,6 +980,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                     task_id: "task-q".into(),
                     new_status: yunta_core::events::TaskStatus::Running,
                     caused_by: 1.into(),
+                    commit: None,
                 },
             ),
         },
@@ -984,6 +992,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                     task_id: "task-p".into(),
                     new_status: yunta_core::events::TaskStatus::Done,
                     caused_by: 1.into(),
+                    commit: None,
                 },
             ),
         },
@@ -1045,7 +1054,6 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_loop_child_when_a_sibling_wins() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: race-loop
@@ -1053,10 +1061,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: race
     kind: parallel
     depends_on: [plan]
@@ -1076,16 +1083,11 @@ nodes:
     // cancelling the loser ends it. Were the loser not cancelled the run
     // would hang here, so it finishing at all is the proof the loop was cut
     // short — no wall-clock assertion needed.
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"slow\"\n    scope: [\"slow.txt\"]\n    criteria:\n      - cmd: \"test -f slow.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - outcome: {{ type: hang }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+    let mut fixture = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("T001", "slow", "slow.txt", "test -f slow.txt")
+    ));
+    fixture.push_str("  - outcome: { type: hang }\n");
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);

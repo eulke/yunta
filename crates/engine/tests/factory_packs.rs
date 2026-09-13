@@ -109,7 +109,9 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let workflow_dir = Path::new(workflow_path).parent().unwrap();
     let inputs = HashMap::from([("idea".to_string(), "add dark mode".to_string())]);
-    let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs).unwrap();
+    let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs)
+        .unwrap()
+        .manifest;
 
     let runs_root = root.path().join("runs");
     let run_dir = runs_root.join(run_id.as_str());
@@ -120,6 +122,7 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"quick".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -134,27 +137,37 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     // task, then lint/tests/ship/pr run for real against the sandbox
     // crate above (no mock involved — cargo and git are the real
     // things being exercised, exactly as they would be in production).
-    // A session's own cwd is the worktree, not run.dir — artifacts
-    // (unlike the loop's own scope-relative edits below) need the
-    // absolute run.dir path, the same one a real agent would be given
-    // in its rendered prompt.
-    let artifacts = run_dir.join("artifacts");
+    // The two interpreted documents go over the run tools, so the
+    // sessions name them by the name the node declares; `brief.md` is
+    // the session's own file, and lands in `grill`'s own directory —
+    // the absolute path that session is granted, the same way a real
+    // agent reads it from its rendered prompt, since a session's cwd is
+    // the worktree.
+    let grill_staging = yunta_engine::run_dir::staging(&run_dir, &"grill".into());
     let fixture = format!(
         r##"
+capabilities: {{ run_tools: true }}
 sessions:
-  - effects:
-      - {{ path: {questions:?}, content: "questions: []\n" }}
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions: []
+    effects:
       - {{ path: {brief:?}, content: "# Brief\n\nAdd dark mode.\n" }}
     outcome: {{ type: completed, summary: "grilled" }}
-  - effects:
-      - path: {plan:?}
-        content: |
-          tasks:
-            - id: T001
-              title: "Document the sandbox crate"
-              scope: ["src/lib.rs"]
-              criteria:
-                - cmd: "grep -q '//! sandbox' src/lib.rs"
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Document the sandbox crate"
+                scope: ["src/lib.rs"]
+                criteria:
+                  - cmd: "grep -q '//! sandbox' src/lib.rs"
     outcome: {{ type: completed, summary: "planned" }}
   - effects:
       - path: "src/lib.rs"
@@ -166,9 +179,7 @@ sessions:
           }}
     outcome: {{ type: completed, summary: "did T001" }}
 "##,
-        questions = artifacts.join("questions.yaml"),
-        brief = artifacts.join("brief.md"),
-        plan = artifacts.join("plan.yaml"),
+        brief = grill_staging.join("brief.md"),
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();

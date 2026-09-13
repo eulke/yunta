@@ -49,11 +49,14 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         json,
     } = attaching;
 
-    let (manifest, real_adapters) =
+    let (frozen, real_adapters) =
         runnable(ctx, workflow_path, raw_inputs, adapter, mock_fixture).await?;
-    let estimated = estimate(ctx, storage, &manifest, quiet, json).await;
+    let estimated = estimate(ctx, storage, &frozen.manifest, quiet, json).await;
 
-    let prepared = create_run_from(ctx, storage, &manifest, mode).await?;
+    let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
+    // The documents the run was born with are on its log now; what the
+    // rest of the run needs is the manifest.
+    let manifest = frozen.manifest;
     if !json {
         println!(
             "run {}: created at {}",

@@ -2,64 +2,60 @@
 //! refreshing `progress.md` either way.
 //!
 //! Every kind closes through [`close_node`], so every kind gets the same
-//! after-hooks, the same scope check, the same artifact verification and
-//! the same repair cycle — none of them can forget one. Every node
-//! failure the engine records goes through the `fail*` family here, so
-//! `node_failed` is written in one place and a new field on the event is
-//! a change to one function rather than to every kind of node.
+//! after-hooks, the same scope check and the same artifact verification
+//! — none of them can forget one. Every node failure the engine records
+//! goes through the `fail*` family here, so `node_failed` is written in
+//! one place and a new field on the event is a change to one function
+//! rather than to every kind of node.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use tokio_util::sync::CancellationToken;
-use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage,
+    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
 };
-use yunta_core::{HookFailurePolicy, Node};
+use yunta_core::{HookFailurePolicy, Node, RunId};
 
-use crate::artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
+use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
+use super::node_artifacts::{
+    acquire_from_child, derive_findings, pending_questions, record_artifacts,
+};
 use super::node_exec::{render_artifact_names, NodeEnd};
-use super::repair;
 use super::{RunCtx, RunError};
+
+/// The child run a `kind: workflow` node closes on: what it produced is
+/// what that node produced, and the run's log is where that is stated.
+#[derive(Clone, Copy)]
+pub(super) struct ChildRun<'a> {
+    pub(super) id: &'a RunId,
+    pub(super) run_dir: &'a Path,
+}
 
 /// What a node's close needs beyond the node itself.
 ///
 /// Grouped rather than passed loose because every field answers a
-/// question only the caller can: how the node ended, what it spent,
-/// which attempt it is closing (a repair announces the next one), what
-/// the adapter declared it wrote for itself, and which cancellation a
-/// repair session runs under.
+/// question only the caller can: how the node ended, what it spent, what
+/// the adapter declared it wrote for itself, and — for a composition —
+/// which run actually did the work.
 pub(super) struct Close<'a> {
     outcome: String,
     tokens: TokenUsage,
-    /// The attempt being closed. A repair announces the next one.
-    pub(super) attempt: u32,
-    /// The cancellation a repair session runs under.
-    pub(super) cancel: &'a CancellationToken,
     staged: &'a [PathBuf],
+    child: Option<ChildRun<'a>>,
 }
 
 impl<'a> Close<'a> {
     /// A close that staged nothing in the worktree — every kind but an
     /// agent session, whose adapter writes files of its own that the
     /// scope diff must leave out.
-    pub(super) fn new(
-        outcome: impl Into<String>,
-        tokens: TokenUsage,
-        attempt: u32,
-        cancel: &'a CancellationToken,
-    ) -> Self {
+    pub(super) fn new(outcome: impl Into<String>, tokens: TokenUsage) -> Self {
         Close {
             outcome: outcome.into(),
             tokens,
-            attempt,
-            cancel,
             staged: &[],
+            child: None,
         }
     }
 
@@ -69,12 +65,24 @@ impl<'a> Close<'a> {
         self.staged = staged;
         self
     }
+
+    /// The child run this node's declared artifacts come from, for a
+    /// `kind: workflow` node whose child reached its end.
+    pub(super) fn child(mut self, child: ChildRun<'a>) -> Self {
+        self.child = Some(child);
+        self
+    }
 }
 
 /// Closes a node: its `after` hooks run, its scope is checked over the
 /// whole diff — hook edits included, staged paths left out — its
-/// declared artifacts are verified (repaired, if their content is wrong
-/// and it resolves a runner to fix them), and it finishes.
+/// declared artifacts are verified, and it finishes.
+///
+/// Where those artifacts come from is the one thing that differs by
+/// kind: a `kind: workflow` node's are acquired from the log of the
+/// child run named in [`Close::child`], and every other node's are what
+/// this run answers for — a document already accepted under that node,
+/// or a file it wrote in its staging.
 pub(super) async fn close_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -104,9 +112,10 @@ pub(super) async fn close_node(
         return Ok(end);
     }
 
-    // Artifact names are templates too (`findings-{{runner.role}}`
-    // in the reference workflow) — rendered per node so every fan-out
-    // sibling verifies its own file.
+    // An opaque artifact's name can carry a template
+    // (`report-{{runner.role}}.md`) — rendered per node so every fan-out
+    // sibling verifies its own file. A document the engine reads has no
+    // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
         Err(error) => return fail_with_tokens(ctx, node, error.to_string(), false, tokens).await,
@@ -119,34 +128,41 @@ pub(super) async fn close_node(
         .limits
         .as_ref()
         .and_then(|limits| limits.max_artifact_bytes);
-    let mut tokens = tokens;
-    let mut spent = 0;
-    let verified = loop {
-        match close_artifacts(node, ctx.run_dir, ceiling) {
-            Ok(verified) => break verified,
-            // Every `node_failed` on the way is recorded by the cycle,
-            // including the one that ends it.
-            Err(failures) => {
-                match repair::next(ctx, node, &close, spent, tokens, failures).await? {
-                    repair::Next::Ended(end) => return Ok(end),
-                    repair::Next::Wrote(spend) => {
-                        tokens = spend;
-                        spent += 1;
-                        // A repair session is a session like any other, so
-                        // what it wrote sits inside the same scope guard as
-                        // what the node wrote: the diff is checked again
-                        // before its files are read.
-                        if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
-                            return Ok(end);
-                        }
-                    }
+    // A session node's findings artifact is what that node reported, so
+    // the run derives and accepts it here — before the close asks what
+    // this node produced, because the acceptance is what the answer to
+    // that question is made of.
+    if let Some(end) = derive_findings(ctx, node, ceiling, tokens).await? {
+        return Ok(end);
+    }
+    // A `kind: workflow` node writes no file of its own: what it
+    // declares is what its child run produced, so the run takes those
+    // over from that log instead of asking its own. Held by value here
+    // because the close below borrows what that child's log leaves
+    // standing.
+    let acquired = match close.child {
+        Some(child) => match acquire_from_child(ctx, node, child).await? {
+            Ok(acquired) => Some(acquired),
+            Err(problem) => return fail_with(ctx, node, problem.into(), false, tokens).await,
+        },
+        None => None,
+    };
+    let own;
+    let (verified, standing) = match &acquired {
+        Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
+        None => {
+            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
+                Ok(verified) => verified,
+                Err(failures) => {
+                    return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
                 }
-            }
+            };
+            (own.as_slice(), None)
         }
     };
 
-    record_artifacts(ctx, node, &verified).await?;
-    let pending = pending_questions(&verified);
+    record_artifacts(ctx, node, verified, standing).await?;
+    let pending = pending_questions(verified);
     if !pending.is_empty() {
         return fail_with_tokens(
             ctx,
@@ -180,18 +196,20 @@ pub(super) async fn close_node(
 /// `staged` is what the adapter declared it wrote for itself, which is
 /// not the node's doing and so is not the node's diff.
 ///
-/// `None` when the node declares no scope, or when its diff is inside
-/// it — a node that declares nothing constrains nothing.
+/// `None` when the node owes no audit at all, or when its diff is
+/// inside what it may touch. Which scope that is — a declared one, or
+/// nothing whatsoever for a `read-only` node — is
+/// [`audited_scope`](crate::audited_scope)'s call, not this one's.
 async fn scope_violation(
     ctx: &RunCtx<'_>,
     node: &Node,
     staged: &[PathBuf],
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
-    if node.scope.is_empty() {
+    let Some(scope) = crate::audited_scope(node) else {
         return Ok(None);
-    }
-    let result = scope_check(ctx.worktree, &node.scope, staged).await?;
+    };
+    let result = scope_check(ctx.worktree, scope, staged).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
@@ -217,126 +235,6 @@ async fn scope_violation(
         )
         .await?,
     ))
-}
-
-/// Records every verified artifact on the log, and what its content
-/// means to the run: a ledger's tasks registered, a findings file's
-/// entries posted.
-///
-/// A re-plan — this same node producing a task ledger a second time,
-/// whether via a reroute back to it or a resumed run — must not silently
-/// keep a task `done` whose identity actually changed. Identity is same
-/// `id`, same `criteria`, same `scope`; `depends_on` is deliberately not
-/// part of it. The most recent prior registration per task id is all
-/// that is needed, because `TaskRegistered`'s own replay handling
-/// (`or_insert`, never overwriting an existing status) already makes an
-/// identical re-registration a no-op — so only a genuine mismatch needs
-/// an explicit event.
-async fn record_artifacts(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    verified: &[VerifiedArtifact],
-) -> Result<(), RunError> {
-    let previous_registrations: BTreeMap<
-        yunta_core::TaskId,
-        (Vec<yunta_core::events::Criterion>, Vec<String>),
-    > = ctx
-        .load_events()
-        .await?
-        .into_iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) => {
-                Some((p.task_id.clone(), (p.criteria.clone(), p.scope.clone())))
-            }
-            _ => None,
-        })
-        .collect();
-
-    for artifact in verified {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::ArtifactWritten(yunta_core::events::ArtifactWrittenPayload {
-                path: artifact.path.clone(),
-                content_hash: artifact.content_hash.clone(),
-                artifact_kind: artifact.content.kind(),
-            }),
-        )
-        .await?;
-        match &artifact.content {
-            ArtifactContent::TaskLedger(ledger) => {
-                for task in &ledger.tasks {
-                    let criteria: Vec<yunta_core::events::Criterion> =
-                        task.criteria.iter().map(Into::into).collect();
-                    let registered_seq = ctx
-                        .emit(
-                            Some(&node.id),
-                            EventPayload::TaskRegistered(
-                                yunta_core::events::TaskRegisteredPayload {
-                                    task_id: task.id.clone(),
-                                    criteria: criteria.clone(),
-                                    scope: task.scope.clone(),
-                                    depends_on: task.depends_on.clone(),
-                                },
-                            ),
-                        )
-                        .await?;
-                    let changed_identity =
-                        previous_registrations
-                            .get(&task.id)
-                            .is_some_and(|(previous, scope)| {
-                                *previous != criteria || *scope != task.scope
-                            });
-                    if changed_identity {
-                        ctx.emit(
-                            Some(&node.id),
-                            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                                task_id: task.id.clone(),
-                                new_status: TaskStatus::Pending,
-                                caused_by: registered_seq,
-                            }),
-                        )
-                        .await?;
-                    }
-                }
-            }
-            ArtifactContent::Findings(findings) => {
-                for finding in findings {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                            finding: finding.clone(),
-                        }),
-                    )
-                    .await?;
-                }
-            }
-            ArtifactContent::Questions(_) | ArtifactContent::Opaque => {}
-        }
-    }
-    Ok(())
-}
-
-/// Every question this node's artifacts ask, by id.
-///
-/// A `kind: questions` artifact's own session has already closed by the
-/// time it is read (the same "artifact read only at node close" ordering
-/// `task-ledger` and `findings` rely on), so nothing renders
-/// mid-session. Questions left here close the node waiting-shaped — a
-/// `node_failed` that replay derives as `Waiting` from the typed
-/// `kind: questions` on the artifact event — and the asking happens in
-/// ONE place, the scheduler's own `AskQuestions` step
-/// (`questions_exec`), which serves the first invocation and every
-/// resume through the identical path.
-fn pending_questions(verified: &[VerifiedArtifact]) -> Vec<String> {
-    verified
-        .iter()
-        .filter_map(|artifact| match &artifact.content {
-            ArtifactContent::Questions(questions) => Some(questions),
-            _ => None,
-        })
-        .flatten()
-        .map(|question| question.id.to_string())
-        .collect()
 }
 
 pub(super) async fn fail(
@@ -371,25 +269,14 @@ pub(super) async fn fail_with_tokens(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    record(ctx, node, Failure::message(outcome), retryable, tokens).await
+    fail_with(ctx, node, Failure::message(outcome), retryable, tokens).await
 }
 
-/// Fails a node with the artifacts that did not close, each keeping the
-/// document its problems belong to. The prose a reader sees is produced
-/// from this on read, so no surface can disagree with the facts behind
-/// it.
-pub(super) async fn fail_artifacts(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    failures: Vec<ArtifactFailure>,
-    retryable: bool,
-    tokens: TokenUsage,
-) -> Result<NodeEnd, RunError> {
-    record(ctx, node, Failure::artifacts(failures), retryable, tokens).await
-}
-
-/// The one place `node_failed` is written.
-async fn record(
+/// The one place `node_failed` is written. The failure reaches the log
+/// as the data it is — one sentence, or the declared artifacts that did
+/// not close — and every surface produces its own prose from that, so
+/// none of them can disagree with the facts behind it.
+pub(super) async fn fail_with(
     ctx: &RunCtx<'_>,
     node: &Node,
     failure: Failure,

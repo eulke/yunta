@@ -1,0 +1,26 @@
+name: run-tasks
+description: Executes a hand-written tasks document — every criterion red before the work and green after it, scope clean — then the workspace checks.
+inputs:
+  tasks:
+    type: document
+    kind: tasks
+    required: true
+    description: Tasks document YAML, relative to the repository root.
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    invariant: true
+    prompt: |
+      Read your task from the tasks document. Implement it inside its own scope and
+      make every criterion pass; the engine verifies both.
+
+  - id: verify
+    kind: bash
+    invariant: true
+    depends_on: [implement]
+    run: |
+      cargo fmt --all -- --check
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo test --workspace

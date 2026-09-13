@@ -40,6 +40,8 @@ fn request(cwd: PathBuf) -> SessionRequest {
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
         run_tools_endpoint: None,
+        artifact_dir: None,
+        scratch_dir: None,
     }
 }
 
@@ -83,7 +85,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
     assert!(!caps.edit_hooks);
-    assert!(!caps.run_tools);
+    assert!(caps.run_tools);
 }
 
 #[tokio::test]
@@ -425,6 +427,120 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
     assert_eq!(args[resume_pos + 1], "thread-to-resume");
 }
 
+/// `codex exec resume` takes the thread id, `--last`, `--all` and
+/// `--image`; `exec`'s own options are declared on the parent command
+/// and are not `global`, so clap reads one that follows the subcommand
+/// as an unexpected argument and the invocation dies before a session
+/// opens.
+#[tokio::test]
+async fn resume_places_every_parent_option_before_the_subcommand() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+
+    let mut req = request(dir.path().to_path_buf());
+    req.model = Some("gpt-5-codex".into());
+    req.permissions = PermissionProfile::Edit;
+    req.artifact_dir = Some(artifacts);
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter()
+        .resume(&SessionId::from("thread-to-resume"), req)
+        .await
+        .unwrap();
+    let events = drain(session).await;
+
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Failed { .. })),
+        "the CLI accepts the invocation: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SessionOpened { .. })),
+        "the resumed session opens: {events:?}"
+    );
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let position = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("`{flag}` reaches the CLI: {args:?}"))
+    };
+    let resume_pos = position("resume");
+    assert!(
+        resume_pos > position("--model"),
+        "the model is the parent command's option: {args:?}"
+    );
+    assert!(
+        resume_pos > position("--sandbox"),
+        "the sandbox is the parent command's option: {args:?}"
+    );
+    for (at, arg) in args.iter().enumerate() {
+        assert!(
+            arg != "-c" || resume_pos > at,
+            "every config override precedes the subcommand: {args:?}"
+        );
+    }
+    assert_eq!(
+        args[resume_pos + 1..].to_vec(),
+        vec!["thread-to-resume".to_string(), "-".to_string()],
+        "the subcommand takes the thread id and the stdin prompt, nothing else: {args:?}"
+    );
+}
+
+/// The stub stands in for the CLI's own parser, so what clap rejects it
+/// rejects too: a stub that accepted any argument order would let an
+/// invocation the real binary refuses pass the suite.
+#[test]
+fn the_stub_refuses_a_parent_option_after_resume_like_clap_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+    let run = |args: [&str; 7]| {
+        std::process::Command::new(stub_path())
+            .args(args)
+            .env("CODEX_STUB_LINES_FILE", &lines)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    let refused = run(["exec", "--json", "resume", "x", "--model", "m", "-"]);
+    assert_eq!(refused.status.code(), Some(2), "the parse fails");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("unexpected argument"),
+        "the diagnostic names the argument: {}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(
+        refused.stdout.is_empty(),
+        "no session opens: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+
+    let accepted = run(["exec", "--json", "--model", "m", "resume", "x", "-"]);
+    assert_eq!(accepted.status.code(), Some(0), "the parse succeeds");
+    assert!(
+        String::from_utf8_lossy(&accepted.stdout).contains("thread.started"),
+        "the session streams its events: {}",
+        String::from_utf8_lossy(&accepted.stdout)
+    );
+}
+
 #[tokio::test]
 async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let dir = tempfile::tempdir().unwrap();
@@ -655,4 +771,191 @@ async fn a_fatal_error_event_ends_the_session_as_failed() {
         }
         other => panic!("expected Failed, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_declared_artifact_directory_is_writable_by_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts.clone());
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    // `workspace-write` confines writes to the workspace, and the run's
+    // artifact directory is never inside it. The expectation spells the
+    // TOML out rather than deriving it the way the adapter does, so a
+    // wrong rendering cannot agree with itself.
+    let expected = format!(
+        "sandbox_workspace_write.writable_roots=[\"{}/run/artifacts\"]",
+        dir.path().display()
+    );
+    assert!(
+        args.lines().any(|arg| arg == expected),
+        "the artifact directory joins the writable roots as {expected}: {args}"
+    );
+}
+
+/// A path is arbitrary bytes; a TOML string is not. A directory whose
+/// name carries the characters that end one reaches the CLI as a single
+/// value that reads back whole, not as three broken tokens. Which
+/// quoting carries it — basic or literal — is the renderer's call, so
+/// the claim here is what the CLI parses, never how it was spelled.
+#[tokio::test]
+async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join(r#"quote"and\slash"#);
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let expected_dir = artifacts.clone();
+    let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts);
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    let assignment = args
+        .lines()
+        .find(|arg| arg.starts_with("sandbox_workspace_write.writable_roots="))
+        .unwrap_or_else(|| panic!("the writable roots reach the CLI: {args}"));
+    let table: toml::Table = toml::from_str(assignment)
+        .unwrap_or_else(|e| panic!("`{assignment}` is not readable TOML: {e}"));
+    assert_eq!(
+        table["sandbox_workspace_write"]["writable_roots"],
+        toml::Value::Array(vec![toml::Value::String(
+            expected_dir.display().to_string()
+        )]),
+        "the path the CLI reads is the path it was given: {assignment}"
+    );
+}
+
+#[tokio::test]
+async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let env_file = dir.path().join("env.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_ENV_FILE".to_string(),
+        env_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+    let env = std::fs::read_to_string(&env_file).unwrap();
+
+    assert!(
+        args.contains("mcp_servers.yunta.url=\"http://127.0.0.1:54321/mcp\""),
+        "the per-run server is configured: {args}"
+    );
+    // The CLI reads the credential from a named variable rather than
+    // from its own config, which is what keeps it out of argv.
+    assert!(
+        args.contains("mcp_servers.yunta.bearer_token_env_var=\"YUNTA_RUN_TOOLS_TOKEN\""),
+        "the credential is named, not inlined: {args}"
+    );
+    assert!(
+        env.contains("YUNTA_RUN_TOOLS_TOKEN=s3cr3t-token-value"),
+        "the token reaches the child by environment"
+    );
+    assert!(
+        !args.contains("s3cr3t-token-value"),
+        "the token must never reach the process list: {args}"
+    );
+}
+
+#[tokio::test]
+async fn no_per_run_endpoint_configures_no_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    assert!(
+        !std::fs::read_to_string(&args_file)
+            .unwrap()
+            .contains("mcp_servers"),
+        "nothing to configure, nothing configured"
+    );
+}
+
+/// The CLI reads a server as streamable HTTP from the `url` key alone.
+/// Every override this adapter sends is one the CLI's configuration
+/// reference defines, so a key the CLI does not know cannot ride along
+/// and silently do nothing.
+#[tokio::test]
+async fn no_dead_config_override_reaches_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.contains("experimental_use_rmcp_client")),
+        "no key outside the CLI's configuration reference: {args:?}"
+    );
+    let server: Vec<&String> = args
+        .iter()
+        .filter(|a| a.starts_with("mcp_servers.yunta."))
+        .collect();
+    assert_eq!(
+        server.len(),
+        2,
+        "the per-run server takes its url and its credential's variable, nothing more: {args:?}"
+    );
+    assert!(
+        server
+            .iter()
+            .any(|a| a.starts_with("mcp_servers.yunta.url=")),
+        "the url selects streamable HTTP: {args:?}"
+    );
+    assert!(
+        server
+            .iter()
+            .any(|a| a.starts_with("mcp_servers.yunta.bearer_token_env_var=")),
+        "the credential is named, not inlined: {args:?}"
+    );
 }

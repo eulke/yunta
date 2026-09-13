@@ -1,6 +1,6 @@
-//! The task cycle — the part of the ledger cycle
+//! The task cycle — the part of the tasks cycle
 //! that actually runs a task through pre-check, dispatch, post-check and
-//! scope check. `yunta_engine::register` validates a ledger before
+//! scope check. `yunta_engine::register` validates a tasks document before
 //! any of this; this module is what happens once a task is `ready`.
 //!
 //! The engine, never the agent, decides `done`: [`run_task`] always

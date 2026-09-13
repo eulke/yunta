@@ -24,10 +24,8 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
     // es el único camino: el run pausa citando las preguntas, no panickea
     // ni queda colgado.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
-    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, &fixture).await;
+    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
 
     match &terminal {
         RunTerminal::Paused { reason } => {
@@ -41,11 +39,13 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
-        events.iter().any(|e| matches!(
-            e.payload(),
-            Some(yunta_core::events::EventPayload::ArtifactWritten(p)) if p.path.to_string_lossy().contains("questions.yaml")
-        )),
-        "the questions artifact must still be recorded as written"
+        yunta_testkit::accepted(&events)
+            .iter()
+            .any(|held| held.artifact
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Questions
+                }),
+        "the questions artifact must still be an artifact the run holds"
     );
     assert!(
         !events.iter().any(|e| matches!(
@@ -65,7 +65,6 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     // volver a despachar el nodo, fallaría por "fixture exhausted" en vez
     // de devolver la misma pausa.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
     let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
@@ -75,13 +74,15 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -91,7 +92,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     .await
     .unwrap();
 
-    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
     let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first_report = execute_run(RunEnv {
@@ -155,14 +156,12 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // following node can mount, and `questions_answered` records hash,
     // channel and responder.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")], // q2 is not required
     };
     let (terminal, state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -187,23 +186,49 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
 
     // The answers are a real artifact next to the questions, with
     // the given values, consumable by a later node via `artifact:`.
-    let answers_path = artifacts_dir.join("questions.yaml.answers.yaml");
-    let raw = std::fs::read_to_string(&answers_path).expect("answers artifact must exist");
+    let raw = String::from_utf8(
+        bench
+            .projection(Some("ask"), "questions.answers.yaml")
+            .expect("the answers artifact has a view"),
+    )
+    .unwrap();
     let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
+
+    // The answers are the run's too, with the origin that says the
+    // engine materialized them from what a person replied.
+    let held = yunta_testkit::accepted(&events)
+        .into_iter()
+        .find(|held| {
+            held.artifact
+                == yunta_core::events::ArtifactId::Opaque {
+                    name: "questions.answers.yaml".to_string(),
+                }
+        })
+        .expect("the answers are an artifact the run holds");
+    assert_eq!(held.origin, yunta_core::events::ArtifactOrigin::Answered);
+    assert_eq!(held.content_hash, answered.answers_hash);
+    assert_eq!(
+        std::fs::read(
+            bench
+                .run_dir()
+                .join("objects")
+                .join(held.content_hash.as_str())
+        )
+        .expect("the bytes are in the store"),
+        raw.as_bytes()
+    );
 }
 
 #[tokio::test]
 async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q2", "just a note")], // q1 (required) missing
     };
     let (terminal, _state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {
@@ -228,7 +253,6 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     // invocation (yunta resume with a TTY) re-asks and continues — no
     // conversational state, no new agent session.
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
     let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
     let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
     let manifest = build_manifest(
@@ -238,13 +262,15 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -255,7 +281,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     .unwrap();
 
     // First invocation: headless — asks, pauses.
-    let first_adapter = MockAdapter::from_yaml(&questions_fixture(&artifacts_dir)).unwrap();
+    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
     let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
     first_adapters.insert("mock".into(), Arc::new(first_adapter));
     let first = execute_run(RunEnv {
@@ -321,7 +347,12 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         resumed.state.nodes.get("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
-    let raw = std::fs::read_to_string(artifacts_dir.join("questions.yaml.answers.yaml")).unwrap();
+    let raw = String::from_utf8(
+        bench
+            .projection(Some("ask"), "questions.answers.yaml")
+            .unwrap(),
+    )
+    .unwrap();
     let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "production")]);
 }
@@ -329,14 +360,12 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
 #[tokio::test]
 async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = questions_fixture(&artifacts_dir);
 
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "qa")], // not in [staging, production]
     };
     let (terminal, _state) = bench
-        .run_with_interaction(QUESTIONS_WORKFLOW, &fixture, &interaction)
+        .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {

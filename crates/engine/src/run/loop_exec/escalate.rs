@@ -124,6 +124,7 @@ pub(super) async fn resolve_escalations(
                     task_id: pending.task_id.clone(),
                     new_status: TaskStatus::Pending,
                     caused_by: resolved_seq,
+                    commit: None,
                 }),
             )
             .await?;

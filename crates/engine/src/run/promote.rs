@@ -1,20 +1,30 @@
 //! Creating a promotion successor: a run that closed
 //! `run_finished: promoted` gets a fresh run in `suggested_mode`,
-//! `promoted_from` it, inheriting its `artifacts/` wholesale at birth
-//! (the successor's initial context automatically includes the
-//! predecessor's artifacts, ledger, and findings — all three are files
-//! under `artifacts/`, so one directory covers them). Lives in the
-//! engine so both drivers of a chain use the identical mechanics: the
+//! `promoted_from` it, inheriting every artifact the predecessor's log
+//! holds at birth (the successor's initial context automatically
+//! includes the predecessor's artifacts, tasks document and findings —
+//! all three are artifacts of that run, so one rule covers them). Lives
+//! in the engine so both drivers of a chain use the identical mechanics: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
+//!
+//! The successor's tree branches from where the predecessor's work left
+//! it, so every commit that run integrated is an ancestor of the
+//! successor's HEAD and the tasks it finished are finished here too.
+//! What a handed-over tasks document means to the run receiving it is
+//! `crate::tasks`'s call, made at birth against that tree; this module
+//! only says which run handed it over and which tree it lands in.
 
 use std::path::{Path, PathBuf};
 
+use yunta_core::events::artifacts::ArtifactRef;
+use yunta_core::events::{ArtifactId, StoredEvent};
 use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
-use super::{create_run, BirthArtifact, CreateRunParams, RunError};
-use yunta_core::{CommitSha, InvalidId};
+use crate::artifacts::ObjectError;
+
+use super::{create_run, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -71,7 +81,7 @@ pub async fn create_promotion_successor(
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
-    manifest.base_commit = head_commit(predecessor_worktree)?;
+    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree).await?;
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => {
@@ -80,7 +90,7 @@ pub async fn create_promotion_successor(
                 repo,
                 &worktree,
                 &manifest.base_commit,
-                &format!("yunta/{successor_id}"),
+                &crate::worktree::run_branch(&successor_id),
                 Isolation::Worktree,
             )
             .await?;
@@ -89,17 +99,18 @@ pub async fn create_promotion_successor(
         Isolation::None => predecessor_worktree.to_path_buf(),
     };
 
+    // What the predecessor's own log says it held, so each inherited
+    // artifact keeps the identity and the producer it had there.
+    let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
     let inherited =
-        read_inherited_artifacts(predecessor_run_dir).map_err(|source| RunError::Io {
-            context: format!("inherit artifacts from `{predecessor_id}`"),
-            source,
-        })?;
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
             manifest: &manifest,
             runs_root: roots.runs,
             mode: suggested_mode,
+            worktree: &worktree,
             promoted_from: Some(predecessor_id),
             artifacts: &inherited,
         },
@@ -116,46 +127,49 @@ pub async fn create_promotion_successor(
     })
 }
 
-/// Automatic inheritance: every file directly under the predecessor's
-/// `artifacts/` is carried into the successor at birth. Deliberately
-/// narrower than the general linked-run mounting a composed workflow
-/// run uses.
-fn read_inherited_artifacts(from_run_dir: &Path) -> std::io::Result<Vec<BirthArtifact>> {
-    let from = from_run_dir.join("artifacts");
-    if !from.exists() {
-        return Ok(Vec::new());
-    }
+/// Automatic inheritance: every artifact the predecessor's log holds is
+/// carried into the successor at birth. Deliberately narrower than the
+/// general linked-run mounting a composed workflow run uses.
+///
+/// What the predecessor holds is what its log accepted — the standing
+/// acceptance of each identity, with the bytes out of its object store —
+/// so a file lying under its `artifacts/` that no acceptance accounts
+/// for is not an artifact and reaches no successor. Each inherited
+/// artifact keeps the identity and the producer the predecessor held it
+/// under, because the identity is all a run needs to answer for it.
+fn read_inherited_artifacts(
+    from_run_dir: &Path,
+    from_run: &RunId,
+    from_events: &[StoredEvent],
+) -> Result<Vec<BirthArtifact>, ObjectError> {
+    let held = crate::artifacts::RunArtifacts::of(from_run_dir, from_events);
     let mut inherited = Vec::new();
-    for entry in std::fs::read_dir(&from)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let name = entry.file_name().into_string().map_err(|name| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("artifact name `{}` is not UTF-8", name.to_string_lossy()),
-            )
-        })?;
-        inherited.push(BirthArtifact {
-            name,
-            bytes: std::fs::read(entry.path())?,
-        });
+    for artifact in held.ledger().every() {
+        inherited.push(birth_artifact(
+            artifact.artifact.clone(),
+            held.bytes(artifact)?,
+            from_run,
+            artifact,
+        ));
     }
     Ok(inherited)
 }
 
-fn head_commit(worktree: &Path) -> Result<CommitSha, RunError> {
-    let context = || format!("resolve HEAD in `{}`", worktree.display());
-    crate::git::output_blocking(worktree, &["rev-parse", "HEAD"])
-        .map_err(|e| RunError::Git {
-            context: context(),
-            detail: e.detail(),
-        })?
-        .trim()
-        .parse()
-        .map_err(|e: InvalidId| RunError::Git {
-            context: context(),
-            detail: e.to_string(),
-        })
+/// One artifact as the run receiving it holds it: the identity it
+/// carries there, and the run and producer the handing-over log states
+/// for it.
+pub(super) fn birth_artifact(
+    artifact: ArtifactId,
+    bytes: Vec<u8>,
+    from_run: &RunId,
+    held: &ArtifactRef,
+) -> BirthArtifact {
+    BirthArtifact {
+        artifact,
+        origin: BirthOrigin::Inherited {
+            run: from_run.clone(),
+            producer: held.producer.clone(),
+        },
+        bytes,
+    }
 }

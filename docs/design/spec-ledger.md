@@ -1,6 +1,6 @@
-# Spec — Schema del ledger de tareas
+# Spec — Schema del documento de tareas
 
-**Estado:** normativo v0.1 · **Alcance:** schema formal del artifact `kind: task-ledger`,
+**Estado:** normativo v0.1 · **Alcance:** schema formal del artifact `kind: tasks`,
 sus reglas de validación y sus errores. Se escribe antes del código que lo parsea,
 por la misma razón que la spec de payloads de eventos precede a los tipos de Rust
 del event log — es el formato con el que se le da trabajo al sistema, y va a
@@ -8,7 +8,7 @@ escribirse a mano desde el primer día.
 
 ## 1. Estructura
 
-Un ledger es un documento YAML con una única clave de nivel superior:
+Un documento de tareas es un documento YAML con una única clave de nivel superior:
 
 ```yaml
 tasks:
@@ -31,7 +31,7 @@ en el event log.
 
 | Campo | Tipo | Obligatorio | Notas |
 |---|---|---|---|
-| `id` | string `^[A-Za-z][A-Za-z0-9_-]*$` | sí | único en el ledger. **Sin patrón impuesto**: `T001` es convención, no regla — un id descriptivo (`graph-cmd`) sobrevive mejor a un re-plan que un número de orden. |
+| `id` | string `^[A-Za-z][A-Za-z0-9_-]*$` | sí | único en el documento. **Sin patrón impuesto**: `T001` es convención, no regla — un id descriptivo (`graph-cmd`) sobrevive mejor a un re-plan que un número de orden. |
 | `title` | string no vacío | sí | qué se hace, en una línea |
 | `scope` | lista de globs, ≥1 | sí | qué puede tocar la tarea |
 | `criteria` | lista de objetos, ≥1 | sí | ver la tabla de `criteria[]` más abajo |
@@ -52,7 +52,7 @@ estar en rojo antes del trabajo, y el pre-check pierde sentido.
 
 ## 3. Validación al registrar
 
-El engine rechaza el ledger completo — y falla el nodo que lo produjo — si:
+El engine rechaza el documento completo — y falla el nodo que lo produjo — si:
 
 1. Un `id` se repite, o no cumple el patrón.
 2. Un `depends_on` referencia un id inexistente.
@@ -66,7 +66,7 @@ El engine rechaza el ledger completo — y falla el nodo que lo produjo — si:
 7. Un campo obligatorio falta o está vacío.
 
 Estas reglas corren como parte de la lectura del documento, no como un paso aparte
-que un llamador pueda saltear: quien obtiene un ledger obtiene uno que las cumple.
+que un llamador pueda saltear: quien obtiene un documento de tareas obtiene uno que las cumple.
 Y se publican antes de que el documento se escriba: la lista que las aplica es la
 misma que el contrato le entrega a la sesión, así que ninguna de estas siete llega
 por primera vez como un fallo (D143).
@@ -81,7 +81,7 @@ Cada rechazo nombra la tarea, el campo y la expectativa, en el vocabulario del
 documento y nunca en el del parser:
 
 ```
-artifacts/plan.yaml: 3 errors
+artifacts/plan/tasks.yaml: 3 errors
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
   task `parse-events`: `depends_on` names `storage-init`, which no task in this file declares
   task `T004`: every criterion is a `guard`; at least one must be able to fail before the work, or there is nothing the work has to make pass
@@ -91,7 +91,7 @@ El encabezado nombra el archivo que se leyó y cuántos problemas tiene; debajo 
 línea por problema, con su sujeto adelante. Una tarea cuyo `id` es justamente lo que
 no se pudo leer se nombra por su posición (`the first task`), nunca por un índice del
 parser. Este bloque es el formato único con el que toda superficie muestra los
-problemas de un documento —un ledger, un artifact de findings, un workflow— y vive
+problemas de un documento —un documento de tareas, un artifact de findings, un workflow— y vive
 en un solo lugar (D133).
 
 Todos los problemas del documento se reportan juntos, no de a uno: quien lo escribió
@@ -109,7 +109,7 @@ tasks:
       - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Materializar en context/<hash>/; fuente caída = nodo failed."
+    notes: "Materializar el contenido efectivo en objects/<hash>; fuente caída = nodo failed."
 
   - id: context-assembly
     title: "Stable-first context assembly with per-segment hashes"

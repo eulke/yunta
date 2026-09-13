@@ -126,14 +126,16 @@ async fn run_with_config(
     let run_id = RunId::from("run-test-1");
 
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let manifest =
-        build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
+    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .unwrap()
+        .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"default".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -217,9 +219,8 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
     assert_eq!(sources[0].kind, "mcp");
 
     let materialized = run_dir
-        .join("context")
-        .join(sources[0].content_hash.as_str())
-        .join("content");
+        .join("objects")
+        .join(sources[0].content_hash.as_str());
     let bytes = std::fs::read(&materialized).expect("materialized mcp response");
     assert_eq!(yunta_core::sha256_hex(&bytes), sources[0].content_hash);
     assert!(String::from_utf8_lossy(&bytes).contains("MARKER-MCP-RESPONSE"));

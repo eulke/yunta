@@ -15,8 +15,8 @@ use std::path::Path;
 use yunta_core::text::indent;
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
-/// A node that asks: the session writes the questions artifact and
-/// ends, and the round with the person happens after it closes.
+/// A node that asks: the session hands the questions over and ends, and
+/// the round with the person happens after it closes.
 const ASKING: &str = "\
 name: asking
 nodes:
@@ -25,17 +25,19 @@ nodes:
     runner: executor
     prompt: \"Ask what has to be known before going on.\"
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
+      produces: [questions]
 ";
 
-/// The session that writes the artifact, scripted — the round a person
-/// answers is reached with no agent installed.
-const WROTE_THEM: &str = r#"
+/// The session that hands the questions over, scripted — the round a
+/// person answers is reached with no agent installed.
+const HANDED_THEM_OVER: &str = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - path: "{{run.dir}}/artifacts/questions.yaml"
-        content: |
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
 QUESTIONS
     outcome: { type: completed, summary: asked }
 "#;
@@ -54,21 +56,13 @@ fn home(root: &Path) -> std::path::PathBuf {
     root.join("state")
 }
 
-/// The answers artifact the run under `root` recorded, or `None` while
-/// it has recorded none.
+/// The answers the run under `root` recorded for its `ask` node, or
+/// `None` while it has recorded none. The run's artifact view keeps a
+/// producer's documents under its node, and the answers to a node's
+/// questions are a document of that same node.
 fn answers(root: &Path) -> Option<String> {
-    let runs = std::fs::read_dir(runs_root(&home(root))).ok()?;
-    runs.flatten()
-        .flat_map(|run| std::fs::read_dir(run.path().join("artifacts")))
-        .flatten()
-        .flatten()
-        .find(|artifact| {
-            artifact
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".answers.yaml")
-        })
-        .and_then(|artifact| std::fs::read_to_string(artifact.path()).ok())
+    let run = run_dir(root)?;
+    std::fs::read_to_string(run.join("artifacts/ask/questions.answers.yaml")).ok()
 }
 
 /// The directory the run started under `root` keeps its own state in,
@@ -89,7 +83,7 @@ fn asking(root: &Path, questions: &str) -> Terminal {
         .workflow("wf", ASKING)
         .file(
             "fixture.yaml",
-            &WROTE_THEM.replace("QUESTIONS", &indent(questions, &" ".repeat(10))),
+            &HANDED_THEM_OVER.replace("QUESTIONS", &indent(questions, &" ".repeat(12))),
         )
         .committed();
     let (repo, home) = (checkout.repo, checkout.home);

@@ -220,7 +220,7 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
 
 /// Static half of the runtime permissions rule: every literal command in
 /// the workflow — bash `run`, hook steps — against the merged model,
-/// parallel children included. Criteria live in the runtime ledger and
+/// parallel children included. Criteria live in the runtime tasks document and
 /// executors resolve through config, so both are runtime-moment
 /// territory.
 pub(crate) fn check_commands(

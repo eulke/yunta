@@ -46,6 +46,7 @@ mod inputs;
 mod live;
 pub mod lock;
 mod manifest;
+pub mod mcp;
 mod modes;
 mod observer;
 mod pack_audit;
@@ -58,19 +59,27 @@ mod receipt;
 mod replay;
 mod reserved;
 mod run;
+pub mod run_dir;
+mod run_log;
 mod run_tools;
 mod runner;
 mod scope;
 pub mod scope_expansion;
+mod session_dir;
 mod skills;
 mod stats;
 mod task_cycle;
+mod tasks;
 mod template;
 mod verification_effectiveness;
 mod view;
 mod worktree;
 
-pub use artifacts::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub use artifacts::store::{ObjectError, ObjectStore};
+pub use artifacts::{
+    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity,
+    VerifiedArtifact,
+};
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
@@ -86,12 +95,12 @@ pub use history::{
     MIN_SAMPLES_FOR_ESTIMATION,
 };
 pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
-pub use inputs::{resolve_inputs, InputsError};
+pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use live::{
     last_event_age, live_total_tokens, open_sessions, recent_tool_calls, running_since,
     OpenSession, ToolCall,
 };
-pub use manifest::{build_manifest, ManifestError};
+pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use modes::{dependencies_in_mode, mode_included_nodes};
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
@@ -112,16 +121,19 @@ pub use replay::{
 };
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, read_manifest,
-    record_pause_after_crash, resolve_gate, session_token_budget, BirthArtifact, CreateRunParams,
-    ManifestReadError, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError,
-    RunReport, RunRoots, RunTerminal,
+    record_pause_after_crash, resolve_gate, session_token_budget, BirthArtifact, BirthOrigin,
+    CreateRunParams, ManifestReadError, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
+    RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, RunToolsAccess, RunToolsHost, RunToolsSession,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
-pub use scope::{scope_check, ScopeCheckError, ScopeCheckResult};
-pub use stats::{compute_run_stats, compute_run_stats_at, median, NodeStat, RunStats};
+pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
+pub use stats::{
+    compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
+    Submissions,
+};
 pub use task_cycle::{
     post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,
     Memo, PreCheckOutcome, ScopeGovernance, SessionObserver, SessionSetup, TaskCycleError,
@@ -138,6 +150,7 @@ pub use view::{
     RunPhase, WaitingOn,
 };
 pub use worktree::{
-    cleanup_worktree, hand_over_worktree, prepare_worktree, release_worktree, WorktreeCleanup,
-    WorktreeError, WorktreePrepared,
+    cleanup_worktree, hand_over_worktree, head_commit, prepare_worktree, release_worktree,
+    run_branch, task_branch, RunWorktree, WorktreeCleanup, WorktreeError, WorktreeIntegrity,
+    WorktreePrepared,
 };

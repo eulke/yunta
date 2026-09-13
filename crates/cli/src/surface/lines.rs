@@ -74,6 +74,11 @@ impl Lines {
 /// never by a separator with nothing behind it: a kind whose whole
 /// detail is that field answers `None`, and one that joins the field to
 /// a headline drops the colon.
+/// How many problems a refusal found, for the one line an event gets.
+fn counted_problems(n: usize) -> String {
+    format!("{n} problem{}", if n == 1 { "" } else { "s" })
+}
+
 fn detail(payload: &EventPayload) -> Option<String> {
     match payload {
         EventPayload::RunCreated(p) => Some(format!("mode `{}` off {}", p.mode, p.base_branch)),
@@ -105,6 +110,30 @@ fn detail(payload: &EventPayload) -> Option<String> {
         EventPayload::GateWaiting(p) => Some(p.summary.clone()),
         EventPayload::GateResolved(p) => Some(resolution(p)),
         EventPayload::LoopIteration(p) => Some(format!("iteration {}", p.iteration)),
+        // What a session did to a finding after posting it, and what
+        // the engine answered when it refused the call.
+        EventPayload::FindingUpdated(p) => Some(detailed(
+            format!("{:?}", p.finding.severity),
+            &p.finding.title,
+        )),
+        EventPayload::FindingWithdrawn(p) => Some(detailed(format!("`{}`", p.id), &p.reason)),
+        EventPayload::FindingRefused(p) => Some(detailed(
+            match &p.id {
+                Some(id) => format!("{:?} `{id}`", p.operation),
+                None => format!("{:?}", p.operation),
+            },
+            &counted_problems(p.report.diagnostics.len()),
+        )),
+        // A document a session offered as a whole, and whether the
+        // engine took it.
+        EventPayload::ArtifactSubmitted(p) => Some(detailed(
+            format!("{:?} {}", p.artifact_kind, p.name),
+            match &p.outcome {
+                yunta_core::events::SubmissionOutcome::Accepted { .. } => "accepted",
+                yunta_core::events::SubmissionOutcome::Refused { .. } => "refused",
+            },
+        )),
+        EventPayload::ArtifactAccepted(p) => Some(format!("{}", p.artifact)),
         EventPayload::FindingPosted(p) => Some(detailed(
             format!("{:?}", p.finding.severity),
             &p.finding.title,

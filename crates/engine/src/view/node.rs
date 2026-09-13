@@ -3,12 +3,13 @@
 //! the caller reads it.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{NodeReroutedPayload, RerouteOrigin, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::{
+    ArtifactId, NodeReroutedPayload, RerouteOrigin, StoredEvent, TaskStatus, TokenUsage,
+};
 use yunta_core::{Node, NodeId, TaskId};
 
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
@@ -51,8 +52,13 @@ pub struct NodeFrame {
     /// retries alike. The attempt now running reports into the run's own
     /// live total instead, so these never add up to it.
     pub tokens: TokenUsage,
-    /// Every `artifact_written` path, in log order.
-    pub artifacts: Vec<PathBuf>,
+    /// Every artifact this node produced, by the identity the log holds
+    /// it under, in the order the log accepted them.
+    ///
+    /// An identity rather than a path: the bytes live in the run's store
+    /// by hash and the directory is a view of it, so what a node
+    /// produced is a fact of the log and not of the filesystem.
+    pub artifacts: Vec<ArtifactId>,
     /// The ledger tasks this node has in `running`, by id.
     pub running_tasks: Vec<TaskId>,
     /// The sessions open on the attempt now running, oldest first — one
@@ -148,9 +154,9 @@ impl Reading<'_> {
             artifacts: self
                 .state
                 .artifacts
-                .get(&node.id)
-                .cloned()
-                .unwrap_or_default(),
+                .by_producer(&node.id)
+                .map(|artifact| artifact.artifact.clone())
+                .collect(),
             running_tasks: self.running_tasks(&node.id),
             sessions: open_sessions(self.events, &node.id),
             // No cap here: the frame carries the attempt's calls and the

@@ -17,11 +17,11 @@ name: bootstrap
 nodes:
   - id: plan
     kind: bash
-    run: "cp ledger.yaml artifacts/plan.yaml"
+    run: "cp tasks.yaml artifacts/plan.yaml"
   - id: implement
     kind: loop
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     depends_on: [plan]
 "#;
 
@@ -43,7 +43,8 @@ fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let b = build_manifest(
         &workflow(WORKFLOW),
         &config(CONFIG),
@@ -51,7 +52,8 @@ fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(a.manifest_hash(), b.manifest_hash());
     assert_eq!(a.workflow_hash, b.workflow_hash);
@@ -82,7 +84,8 @@ nodes:
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     assert_eq!(
         frozen.prompts.get("plan").map(String::as_str),
         Some("first version")
@@ -102,7 +105,8 @@ nodes:
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     assert_ne!(frozen.manifest_hash(), rebuilt.manifest_hash());
 }
 
@@ -118,7 +122,8 @@ fn an_inline_prompt_freezes_nothing_from_disk() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert!(manifest.prompts.is_empty());
 }
@@ -169,7 +174,8 @@ fn base_commit_is_the_repository_head() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(manifest.base_commit.as_str(), head);
 }
@@ -201,7 +207,8 @@ fn each_content_hash_reacts_only_to_its_own_content() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let other_config = config(
         r#"
@@ -217,7 +224,8 @@ runners:
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(base.workflow_hash, changed.workflow_hash);
     assert_ne!(base.config_hash, changed.config_hash);
@@ -236,7 +244,8 @@ fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let yaml = serde_norway::to_string(&manifest).unwrap();
     let reread: yunta_core::Manifest = serde_norway::from_str(&yaml).unwrap();
@@ -257,7 +266,8 @@ fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(manifest.isolation, yunta_core::Isolation::Worktree);
 }
@@ -275,7 +285,8 @@ fn an_explicit_none_isolation_freezes_as_none() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(manifest.isolation, yunta_core::Isolation::None);
 }
@@ -292,7 +303,8 @@ fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(manifest.max_parallel_nodes, 1);
 }
@@ -310,7 +322,8 @@ fn an_explicit_max_parallel_nodes_freezes_that_value() {
         dir.path(),
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(manifest.max_parallel_nodes, 4);
 }
@@ -360,7 +373,8 @@ fn a_provided_input_value_freezes_into_the_manifest() {
         dir.path(),
         &provided,
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     assert_eq!(
         manifest.inputs.get("idea").map(String::as_str),
@@ -405,7 +419,8 @@ nodes:
         dir.path(),
         &std::collections::HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
 
     let ids: Vec<&str> = manifest
         .workflow

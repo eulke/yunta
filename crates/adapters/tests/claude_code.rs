@@ -43,6 +43,8 @@ fn request(cwd: PathBuf) -> SessionRequest {
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
         run_tools_endpoint: None,
+        artifact_dir: None,
+        scratch_dir: None,
     }
 }
 
@@ -89,7 +91,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     // is no live edit-hook blocking for the real CLI, only the engine's
     // post-hoc scope check.
     assert!(!caps.edit_hooks);
-    assert!(!caps.run_tools);
+    assert!(caps.run_tools);
 }
 
 #[tokio::test]
@@ -236,7 +238,10 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
         .iter()
         .position(|a| a == "--tools")
         .expect("ReadOnly restricts the tools");
-    assert_eq!(args[tools_pos + 1], "Read,Grep,Glob,WebFetch,WebSearch");
+    assert_eq!(
+        args[tools_pos + 1],
+        "Read,Grep,Glob,WebFetch,WebSearch,Write"
+    );
     let mode_pos = args
         .iter()
         .position(|a| a == "--permission-mode")
@@ -749,4 +754,182 @@ async fn an_event_before_the_session_opens_fails_the_session() {
         "the failure says what came before the session opened: {message}"
     );
     assert_eq!(events.len(), 1, "got: {events:?}");
+}
+
+/// Helper: spawn with the stub, return the argv it was launched with.
+async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String> {
+    let args_file = dir.join("args.txt");
+    let lines = write_lines(dir, "lines.jsonl", &[]);
+    req.env.insert(
+        "CLAUDE_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_declared_artifact_directory_is_writable_by_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+
+    let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts.clone());
+    let args = argv_for(dir.path(), req).await;
+
+    // The CLI confines writes to its working directory, and the run's
+    // artifact directory is never inside it: without this the agent is
+    // told to write a file it is then refused permission to create.
+    let pos = args
+        .iter()
+        .position(|a| a == "--add-dir")
+        .expect("a declared artifact directory is added to the writable set");
+    assert_eq!(args[pos + 1], artifacts.display().to_string());
+}
+
+#[tokio::test]
+async fn no_declared_artifact_widens_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(
+        !args.iter().any(|a| a == "--add-dir"),
+        "a node that declares no artifact needs no widening: {args:?}"
+    );
+}
+
+#[tokio::test]
+async fn read_only_still_writes_its_own_declared_artifact() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = PermissionProfile::ReadOnly;
+    let args = argv_for(dir.path(), req).await;
+
+    // `read-only` means the node does not touch the project. Its own
+    // declared artifact is the node's output, not the project.
+    let pos = args.iter().position(|a| a == "--tools").unwrap();
+    assert!(
+        args[pos + 1].split(',').any(|t| t == "Write"),
+        "read-only must still be able to produce what it declares: {}",
+        args[pos + 1]
+    );
+}
+
+#[tokio::test]
+async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let scratch = dir.path().join("run/scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut req = request(dir.path().to_path_buf());
+    req.scratch_dir = Some(scratch.clone());
+    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    let args = argv_for(dir.path(), req).await;
+
+    let pos = args
+        .iter()
+        .position(|a| a == "--mcp-config")
+        .expect("the per-run MCP server is mounted");
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&args[pos + 1]).unwrap()).unwrap();
+    let server = &config["mcpServers"]["yunta"];
+    assert_eq!(server["url"], "http://127.0.0.1:54321/mcp");
+    assert_eq!(
+        server["headers"]["Authorization"], "Bearer s3cr3t-token-value",
+        "the listener authenticates every call"
+    );
+
+    // The token is secret material: argv is world-readable through `ps`.
+    assert!(
+        !args.iter().any(|a| a.contains("s3cr3t-token-value")),
+        "the token must never reach the process list: {args:?}"
+    );
+    // Mounting a server the profile then forbids would be a tool the
+    // agent is told to call and cannot.
+    assert!(
+        args.iter().any(|a| a == "mcp__yunta__*"),
+        "every tool of the mounted server is allowed, so this adapter \
+         never has to know which tools the engine mounts: {args:?}"
+    );
+}
+
+#[tokio::test]
+async fn no_per_run_endpoint_mounts_no_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(
+        !args.iter().any(|a| a == "--mcp-config"),
+        "nothing to mount, nothing mounted: {args:?}"
+    );
+}
+
+// --- What the session actually mounted --------------------------------
+
+/// The events of a session whose init line names `tools`.
+async fn init_with_tools(tools: &str) -> Vec<AgentEvent> {
+    events_of(&[
+        &format!(
+            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta","status":"connected"}}],"tools":{tools}}}"#
+        ),
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ])
+    .await
+}
+
+fn run_tools_mounted(events: &[AgentEvent]) -> Option<usize> {
+    events.iter().find_map(|event| match event {
+        AgentEvent::RunToolsMounted { count } => Some(*count),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
+    let events = init_with_tools(
+        r#"["Bash","mcp__yunta__yunta_check_artifact","mcp__yunta__yunta_post_finding"]"#,
+    )
+    .await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        Some(2),
+        "the CLI named the session's tools: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_session_the_run_tools_never_reached_reports_none_of_them() {
+    // What a `tools/list` the CLI rejected looks like from here: the
+    // server is connected, and not one of its tools is in the set.
+    let events = init_with_tools(r#"["Bash","Read","mcp__other__thing"]"#).await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        Some(0),
+        "a named tool set with no run tool in it is a count, not silence: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_init_line_that_names_no_tool_set_reports_nothing_about_run_tools() {
+    let events = events_of(&[
+        r#"{"type":"system","subtype":"init","session_id":"sess-quiet","model":"claude-sonnet-5"}"#,
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ])
+    .await;
+    assert_eq!(
+        run_tools_mounted(&events),
+        None,
+        "a CLI that says nothing is unknown, never zero: {events:?}"
+    );
 }

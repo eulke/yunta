@@ -1,19 +1,14 @@
 //! Publishing the shape of every interpreted artifact a node declares.
 //!
-//! A node that declared `kind: task-ledger` has already said everything
+//! A node that declared `kind: tasks` has already said everything
 //! needed to know this: publishing the shape is the consequence of that
 //! declaration, not a second key an author has to remember. It is the
 //! only context block the engine adds on its own, which is why it lives
 //! apart from resolving what the author asked for.
-//!
-//! Publishing it here, once, is also what keeps it out of the repair
-//! instruction: a session that gets the shape in its stable prefix does
-//! not need it again appended to the problems its last attempt left.
 
 use yunta_core::events::ContextSourceRef;
 use yunta_core::Node;
 
-use crate::run::node_exec::render_artifact_names;
 use crate::run::RunCtx;
 
 use super::error::ContextResolveError;
@@ -39,7 +34,7 @@ pub(super) fn mount_artifact_shapes(
     sources: &mut Vec<ContextSourceRef>,
 ) -> Result<(), ContextResolveError> {
     let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
-    for (source_id, content) in artifact_shapes(ctx, node) {
+    for (source_id, content) in artifact_shapes(node) {
         let bytes = content.into_bytes();
         let (path, content_hash) =
             materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
@@ -68,22 +63,10 @@ pub(super) fn mount_artifact_shapes(
 /// mount ahead of the author's own context. An opaque artifact yields
 /// nothing — it has no shape to demand.
 ///
-/// The path is spelled out because the engine knows it and the session
-/// does not: its working directory is the worktree, not the run
-/// directory, so an agent told only to "write an artifact" has nowhere
-/// to put it.
-///
-/// Names carry templates (`findings-{{runner.role}}`), and what is
-/// published is the rendered name — the one the close will verify
-/// against. A node whose names do not render has no such name to give,
-/// so it publishes nothing and fails at close with the template error
-/// naming the variable; telling a session to write
-/// `findings-{{runner.role}}` would only buy a file verification is
-/// never going to look for.
-pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, String)> {
-    let Ok(node) = render_artifact_names(ctx, node) else {
-        return Vec::new();
-    };
+/// The block names the kind and what carries it, never a path: an
+/// interpreted artifact is a document the session hands over, identified
+/// by its kind, and the file is the engine's to write.
+pub(super) fn artifact_shapes(node: &Node) -> Vec<(String, String)> {
     let Some(artifacts) = &node.artifacts else {
         return Vec::new();
     };
@@ -91,24 +74,33 @@ pub(super) fn artifact_shapes(ctx: &RunCtx<'_>, node: &Node) -> Vec<(String, Str
         .produces
         .iter()
         .filter_map(|spec| match spec {
-            yunta_core::ArtifactSpec::Typed { name, kind } => {
-                let path = ctx.run_dir.join("artifacts").join(name);
+            yunta_core::ArtifactSpec::Interpreted(kind) => {
                 let shape = yunta_core::shape::contract(*kind);
+                let opening = match kind.submit_tool() {
+                    Some(tool) => format!(
+                        "This node produces the `{kind}` document. It is not a file this \
+                         session writes: hand it over with `{tool}`, and the engine \
+                         validates it and writes the file itself."
+                    ),
+                    None => format!(
+                        "This node produces the `{kind}` artifact. It is not a file this \
+                         session writes: report each finding through its run tools the \
+                         moment you see it, and the engine writes the file at the end from \
+                         everything this node reported. A finding reported before this \
+                         session ends survives whatever happens after."
+                    ),
+                };
                 Some((
-                    format!("{SHAPE_KIND}:{name}"),
+                    format!("{SHAPE_KIND}:{kind}"),
                     format!(
-                        "This node produces an artifact the engine reads and validates. \
-                         Write it at {}.\n\nWhat follows is the whole contract for that \
-                         file — the keys, their types, and the rules. Where any other \
-                         instruction describes this file differently, this is what the \
-                         engine enforces.\n\nWhen you have written it, call \
-                         `yunta_check_artifact` — it runs this node's own verification \
-                         and answers while you can still fix what it names.\n\n{shape}",
-                        path.display()
+                        "{opening}\n\nWhat follows is the whole contract for that \
+                         document — the keys, their types, and the rules. Where any other \
+                         instruction describes it differently, this is what the engine \
+                         enforces.\n\n{shape}"
                     ),
                 ))
             }
-            yunta_core::ArtifactSpec::Plain(_) => None,
+            yunta_core::ArtifactSpec::Opaque(_) => None,
         })
         .collect()
 }

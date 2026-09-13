@@ -51,3 +51,67 @@ fn broken_chain_exits_nonzero_naming_the_seq() {
         stderr(&broken)
     );
 }
+
+/// A workflow whose one node leaves an artifact behind, so the run's log
+/// names an object `verify` can check.
+const ONE_ARTIFACT: &str = "name: one-artifact
+nodes:
+  - id: only
+    kind: bash
+    run: \"echo the-bytes > {{node.artifacts}}/report.md\"
+    artifacts:
+      produces: [report.md]
+";
+
+#[test]
+fn a_corrupt_object_is_reported_beside_an_intact_chain() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(&repo.join("wf.yaml"), ONE_ARTIFACT);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    // Out of the box both guarantees hold and the command exits 0.
+    let intact = yunta_in!(&repo, &home, &["verify", &run_id]);
+    assert!(intact.status.success(), "stderr: {}", stderr(&intact));
+    let text = stdout(&intact);
+    assert!(text.contains("chain intact"), "got: {text}");
+    assert!(
+        text.contains("objects intact") && text.contains("1 artifact"),
+        "the objects are their own report: {text}"
+    );
+
+    // Replace the bytes of the run's one object. The chain covers the
+    // log, not the store, so it stays intact — and the two are reported
+    // apart.
+    let objects = home.join("runs").join(&run_id).join("objects");
+    let object = std::fs::read_dir(&objects)
+        .unwrap()
+        .next()
+        .expect("the run stored its artifact")
+        .unwrap()
+        .path();
+    std::fs::write(&object, b"not what the run accepted").unwrap();
+
+    let broken = yunta_in!(&repo, &home, &["verify", &run_id]);
+    assert!(
+        !broken.status.success(),
+        "an object that is not its own bytes must exit non-zero: {}",
+        stderr(&broken)
+    );
+    assert!(
+        stdout(&broken).contains("chain intact"),
+        "a corrupt object does not break the chain: {}",
+        stdout(&broken)
+    );
+    let reported = stderr(&broken);
+    assert!(
+        reported.contains("objects BROKEN") && reported.contains("report.md"),
+        "the failing artifact is named: {reported}"
+    );
+}

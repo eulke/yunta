@@ -50,7 +50,7 @@ pub struct Capabilities {
     /// (habilita la tasa de cache de Contrato §8.4).
     pub usage_reporting: bool,
     /// Puede conectarse al servidor MCP por-run de Yunta como cliente
-    /// (blackboard, ledger, findings, solicitud de ampliación de scope).
+    /// (blackboard, tareas, findings, solicitud de ampliación de scope).
     pub run_tools: bool,
 }
 
@@ -220,6 +220,7 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado |
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout y max_turns; warning por run |
 | `run_tools` | nodos que requieren blackboard/findings en caliente fallan en check; findings solo vía artifacts |
+| `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla |
 
 ## 6. Adapters builtin
 

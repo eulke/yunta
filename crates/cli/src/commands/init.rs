@@ -240,7 +240,7 @@ fn mechanism_skill_content() -> String {
      none covers it, proceed as you normally would; nothing here requires \
      using Yunta for work it has no workflow for.\n\n\
      ## Writing a document Yunta reads\n\n\
-     A task ledger, a findings artifact and a questions artifact are \
+     A tasks document, a findings artifact and a questions artifact are \
      validated strictly: a key that is not in the shape fails the node \
      that produced it. Never guess the format — ask for it:\n\n\
      - From a shell: `yunta schema <kind>`, or `yunta schema` to list the \

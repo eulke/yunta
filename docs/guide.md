@@ -25,12 +25,15 @@ are valid there. A mistyped key never silently becomes a default.
   longer ones). Opens one agent session. `runner:` picks which role from `runners:`
   in config resolves it; `permissions: read-only|edit|full` caps what that session's
   adapter profile allows.
-- **`loop`** — drives a task ledger (`until: all_tasks_complete`, plus a `prompt:`
+- **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [ledger schema](design/spec-ledger.md) for what a task looks
-  like — it's written by an earlier `prompt` node as a `kind: task-ledger` artifact,
-  or by hand while you're still designing the workflow.
+  `1`, sequential). See the [tasks schema](design/spec-ledger.md) for what a task looks
+  like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
+  you write one by hand while you're still designing the workflow. The loop works
+  from whichever tasks document the run holds, however it came by one: produced
+  by a node, given as a `type: document` input, mounted in from a parent, or
+  inherited from the run this one succeeds.
 - **`check`** — automatic verification against data the engine already has: `builtin:
   baseline_compare` (did a passing suite start failing), `builtin: coverage_gate`
   (threshold), `builtin: findings_gate` (fails above a declared `max_severity`). No
@@ -39,9 +42,11 @@ are valid there. A mistyped key never silently becomes a default.
   target}` to re-route on a choice exactly like `on_failure.goto` does. Renders
   through the console when attended, or as the same structured escalation object via
   `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
-  into a forge round-trip instead: the listed paths (relative to `run.dir`) get
-  committed to `branch` and opened as a PR for review there — the same relative paths
-  the run's own worktree used, so a reviewer sees exactly what the run produced.
+  into a forge round-trip instead: `artifacts:` names artifacts of this run the same
+  way `produces:` does — a kind, or an opaque file name — and the engine commits the
+  bytes the run holds for each to `branch` and opens a PR for review there, under the
+  name that artifact's identity gives it. A run that holds none of one fails the node
+  instead of publishing a partial review.
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)
@@ -119,9 +124,10 @@ Two environment variables move all of this:
 
 `context:` on a `prompt` or `loop` node assembles what that session sees, beyond the
 prompt text itself: `files: [globs]`, `command: "<cmd>"` (stdout), `artifact: {node,
-name}` (another node's declared output — this also creates the implicit dependency
-edge, no separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
-(a read-only query into this run's own log), `ledger: {}` (the task ledger's current
+kind}` or `artifact: {node, name}` (another node's declared output, named the way
+that node declares it — this also creates the implicit dependency edge, no
+separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
+(a read-only query into this run's own log), `tasks: {}` (the tasks document's current
 state), `knowledge: {layers: [...]}` (repo/user-scoped project knowledge — see
 [knowledge layers](#knowledge-layers) below), and `node-output: {node}` (a prior
 node's own captured output, e.g. what a `parallel` group's blackboard consolidated
@@ -133,44 +139,97 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 ### Artifacts the engine reads
 
-Most artifacts are opaque: the engine records that the file exists and what it
-hashes to, and its structure is whatever the session decided. `kind:` says the
-opposite — that the engine parses the file, validates it, and turns its contents
-into events. There are three: `task-ledger`, `findings` and `questions`.
+A node declares what it produces as a list of bare strings —
+`produces: [tasks, notes.md]`.
+`tasks`, `findings` and `questions` name the three documents the engine reads,
+validates and turns into events. Every other string is the name of a file the
+engine only carries: it records that the file exists and what it hashes to, and
+its structure is whatever the session decided. Those three names are therefore
+not available as file names, and `yunta check` says so when a reference spells
+one as a `name:`.
 
-Declaring a `kind:` is all it takes to have its shape published to whoever must
-write the file. A node with `produces: [{ name: plan.yaml, kind: task-ledger }]`
-opens its session with the shape already in context, annotated field by field,
-and with the absolute path the engine will verify — the session's working
-directory is the worktree, not the run directory, so it has no way to guess
-that. Nothing else to declare, and an opaque artifact mounts nothing because it
-has no shape to demand.
+A node produces at most one document of each kind, so the kind is the whole
+identity: `(node, kind)` is what the run answers by, and declaring the same kind
+twice is a check error because there is no second one. Nothing names a file —
+the engine writes the view itself, at `artifacts/<node>/<kind>.yaml`. A fan-out
+that runs the same node once per runner needs no template for that: each sibling
+is a node of its own and holds its own document.
+
+The node declares, the engine publishes the shape and names the tool that takes
+the document, the session hands the document over, and the engine takes it into
+the run. A node with `produces: [tasks]` opens its session with the shape already in
+context — annotated field by field, followed by the rules the document has to
+satisfy — and with a `yunta_submit_tasks` run tool whose one argument,
+`document`, is that same schema. A `questions` artifact arrives the same way,
+through `yunta_submit_questions`. No session writes an interpreted file itself.
+Nothing else to declare, and an opaque artifact mounts nothing because it has no
+shape to demand.
+
+The tool answers in the same call, with the verdict the node's close reaches: the
+engine reads the object into the same type and runs the same rules. An acceptance
+reports what the engine understood — `tasks.yaml — accepted. 6 task(s)
+registered: ...` — and puts the canonical document into the run: the bytes under
+`objects/`, the acceptance on the log. A refusal lists every
+rule the document breaks, all at once — or, when the
+object does not read into its kind at all, that one problem and the path where it
+sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
+before any rule can hold. Either way the session fixes it and submits again: a
+refused document costs a call, not a session. The document the node holds is the
+last one it got accepted, and the node's close asks the log for it — no file
+stands in for one that never arrived.
+
+Findings are reported one at a time instead. A session calls `yunta_post_finding`
+the moment it sees one — validated on its own, so a refusal names what to fix in
+that finding and everything already reported stands. `yunta_update_finding` replaces
+one by id with its whole new content, and `yunta_withdraw_finding` takes one back
+with a reason; a withdrawal is final, and a finding that comes back is a new id. A
+`prompt` or `loop` node that declares `produces: [findings]` gets that document
+derived at its close, from every finding it reported that still stands,
+in the order it first reported them — a node that reports nothing gets a document
+with an empty list. A finding outlives the session that found it, so a session
+that dies after reporting loses nothing.
+
+A document nobody submits fails the node, named by the node that owes it and the
+document it owes rather than by a file — there was never going to be one — and
+there is no second session to instruct. A file a command node declared and never
+wrote fails the node too, named by the path the close went looking at, as does one
+that is empty, past `limits.max_artifact_bytes`, or refused by the filesystem. An adapter that
+mounts no run tools fails a node that declares an interpreted artifact before the
+session is dispatched — the document has no way in.
+
+A `bash`, `check`, `gate` or `executor` node can declare an interpreted artifact
+too. It writes the file itself, under `{{node.artifacts}}`, and the close reads it
+with the same code and holds it to the same rules. When such a file does not read
+back, the node fails with every
+rule problem in it named at once — by task and field, in the document's own words —
+and a node that declares several interpreted artifacts gets each file reported under
+its own path.
+
+An opaque artifact is a file its session writes: a node that declares one gets a
+directory of its own added to what its session may write, and can call
+`yunta_check_artifact` to confirm the file is there before the session ends. That
+directory is `{{node.artifacts}}` in the node's own templates — which is how a
+`bash`, `check` or `executor` node names it too. It belongs to that node alone, so
+two nodes that declare the same name never write over each other. The directory
+belongs to the session rather than to the attempt: a node picking a session back
+up under `on_interrupt: resume_session` keeps what that session wrote there,
+because it is work that session did, and every other attempt — a command node, or
+a fresh session replacing an interrupted one — opens on an empty directory, so no
+earlier attempt's file closes this one as work it never did. A node that declares
+only interpreted artifacts is granted nothing outside its worktree.
+`yunta_check_artifact` also reads back the document the run already holds for that
+node, so a session can see its meaning survived the parse.
 
 The same shape is available anywhere else you need it:
 
 ```
 yunta schema                    # the kinds
-yunta schema task-ledger        # the shape to write
+yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
 ```
 
 and through the `document_shape` tool on `yunta mcp`, so an agent connected to
 the control plane finds it without anyone passing the format along.
-
-When a file still comes back unreadable, the node fails with every problem in it
-named at once — by task and field, never by a parser's path into the document —
-and a node that declares several interpreted artifacts gets each file reported
-under its own path. The node then gets one repair session against
-`limits.max_artifact_repairs` (default 1): the node's own runner, the shape it
-already mounts, those problems, and nothing to do but rewrite the declared files —
-the malformed file is still on disk for the session to read and correct. Every node
-that resolves a runner has this, whatever its kind, so a `loop` node's ledger is
-repaired like a `prompt` node's plan. A node with no runner behind it — `bash`,
-`check`, `gate` — has no repair cycle: there is no agent to instruct, and running
-a command again is a retry, not a repair. Verification does not soften either way:
-the node still fails if the repair does not land. What a rewrite cannot fix — an
-artifact never produced, an empty one, one past `limits.max_artifact_bytes`, one
-the filesystem refuses — fails straight away.
 
 ### Knowledge layers
 
@@ -198,7 +257,9 @@ else. Hooks never re-route — that's `on_failure.goto`'s job, not a hook's.
 `modes:` is an open, ordered map — `quick: {include: [...]}`, `standard: {...}`,
 `full: { include: all }`, or any names you choose. `--mode <name>` on `yunta run`
 selects one; promotion only ever moves forward through declaration order (a run
-already in `standard` can't drop back to `quick`). A node marked `invariant: true`
+already in `standard` can't drop back to `quick`). A successor starts with its
+predecessor's tasks, the ones already done still done — it picks the work up
+where that run left it rather than repeating what is already in the tree. A node marked `invariant: true`
 must appear in every declared mode regardless of name or count — a mode narrows how
 much deliberation happens, never how much verification does.
 
@@ -246,8 +307,11 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   run keeps going independent of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
-  `yunta_task_status`, `yunta_request_scope_expansion` for every such session, plus
-  `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
+  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact`,
+  `yunta_task_status` and `yunta_request_scope_expansion` for every such session;
+  a `yunta_submit_<kind>` tool for each submittable kind the node declares under
+  `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
+  and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
   children (scoped to that group, and only visible after `join` — never mid-flight
   cross-talk that would anchor the group's judgments on each other).
 
@@ -258,17 +322,17 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A ledger task's `criteria` (see the [ledger schema](design/spec-ledger.md#21-criteria)) run
+A task's `criteria` (see the [tasks schema](design/spec-ledger.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire
 test suite on every single task in a loop is both slow (multiplied by every task in
-the ledger) and a weak signal (a broad suite failing doesn't say *what* broke).
+the tasks document) and a weak signal (a broad suite failing doesn't say *what* broke).
 
 For the suite-wide, no-regression concern, use a `type: guard` criterion — checked
 before and after, never counted as the thing this task proves — sparingly, on the
 tasks where it matters, or once at the workflow's close via a `kind: check` node
-(`builtin: baseline_compare`) shared by every task in the ledger instead of repeated
+(`builtin: baseline_compare`) shared by every task in the tasks document instead of repeated
 per task. `lint-fix.yaml` in the quickstart is this pattern in miniature: `lint`
 verifies the whole workspace once, not per file changed.
 

@@ -105,7 +105,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
         let run_id = RunId::from(run_id);
         let run_dir = create_run(
             CreateRunParams {
@@ -113,6 +114,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &ModeName::from(mode),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },

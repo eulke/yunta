@@ -163,6 +163,16 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// What a CLI reports about the per-run tools the session holds:
+    /// how many of them it actually mounted. A fixture scripts it to
+    /// put a session in the state a client that could not read the
+    /// server's tool list leaves behind — the server mounted, the
+    /// session holding nothing from it.
+    RunToolsMounted {
+        count: usize,
+        #[serde(default)]
+        after_ms: u64,
+    },
     /// Performs a REAL MCP `tools/call` against the session's own
     /// `run_tools_endpoint` — the mock as a genuine client of the
     /// engine's per-run listener, over the wire. A fixture using this
@@ -173,8 +183,25 @@ pub enum MockStep {
         #[serde(default)]
         arguments: serde_json::Map<String, serde_json::Value>,
         #[serde(default)]
+        expect: ToolExpectation,
+        #[serde(default)]
         after_ms: u64,
     },
+}
+
+/// What a scripted tool call expects the engine to answer.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExpectation {
+    /// The call succeeds. A tool error fails the session, which is what
+    /// a fixture that scripted a working call means by scripting it.
+    #[default]
+    Accepted,
+    /// The engine refuses the call and the session goes on — the shape
+    /// every refusal has: a diagnostic the session can act on, not the
+    /// end of it. A success fails the session instead, so a fixture
+    /// cannot claim a refusal it did not get.
+    Refused,
 }
 
 impl MockStep {
@@ -183,6 +210,7 @@ impl MockStep {
             MockStep::ToolUse { after_ms, .. }
             | MockStep::Usage { after_ms, .. }
             | MockStep::Note { after_ms, .. }
+            | MockStep::RunToolsMounted { after_ms, .. }
             | MockStep::RunTool { after_ms, .. } => *after_ms,
         }
     }

@@ -146,10 +146,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Hand over the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -158,15 +157,24 @@ nodes:
     prompt: "Implement your task."
 "#,
     );
-    // The fixture is rendered with {{run.dir}} before parsing — the
-    // scripted planner writes its artifact where a real agent would.
+    // The scripted planner hands its tasks document over the way a real one
+    // does: a tool call the engine answers, and a file the engine writes.
     write(
         &repo.join(".yunta/tests/fixtures/happy.yaml"),
         r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - path: "{{run.dir}}/artifacts/plan.yaml"
-        content: "tasks:\n  - id: T001\n    title: \"Make it\"\n    scope: [\"made.txt\"]\n    criteria:\n      - cmd: \"test -f made.txt\"\n"
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Make it"
+                scope: ["made.txt"]
+                criteria:
+                  - cmd: "test -f made.txt"
     outcome: { type: completed, summary: "planned" }
   - effects:
       - { path: made.txt, content: "made" }
@@ -199,6 +207,91 @@ expect:
         text.trim_end(),
         "case happy-path ... ok\n1 case, 0 failed",
         "the one case runs against the mock adapter and every expectation holds"
+    );
+}
+
+#[test]
+fn a_document_input_gives_a_loop_its_tasks_with_no_node_producing_them() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        r#"
+runners:
+  executor:
+    - { adapter: claude-code, model: real-model }
+"#,
+    );
+    // Nothing here produces a tasks document: the run is born holding
+    // the one its `tasks` input named.
+    write(
+        &repo.join(".yunta/workflows/run-a-plan.yaml"),
+        r#"
+name: run-a-plan
+inputs:
+  plan:
+    type: document
+    kind: tasks
+    required: true
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/seed/plan/tasks.yaml"),
+        r#"
+tasks:
+  - id: T001
+    title: "Make it"
+    scope: ["made.txt"]
+    criteria:
+      - cmd: "test -f made.txt"
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/one-task.yaml"),
+        r#"
+sessions:
+  - effects:
+      - { path: made.txt, content: "made" }
+    outcome: { type: completed, summary: "made it" }
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/from-a-document.yaml"),
+        r#"
+workflow: run-a-plan
+inputs: { plan: plan/tasks.yaml }
+worktree: seed
+fixture: fixtures/one-task.yaml
+expect:
+  final_state: finished
+  nodes:
+    implement: finished
+  tasks:
+    T001: done
+"#,
+    );
+
+    let output = yunta_in!(&repo, &home, &["test"]);
+    let text = stdout(&output);
+    assert!(
+        output.status.success(),
+        "stdout: {text}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        text.trim_end(),
+        "case from-a-document ... ok\n1 case, 0 failed",
+        "the loop finds the tasks the input brought in"
     );
 }
 
@@ -1810,11 +1903,11 @@ name: distill-none
 nodes:
   - id: plan
     kind: bash
-    run: "echo durable > {{run.dir}}/artifacts/plan.md"
+    run: "echo durable > {{node.artifacts}}/plan.md"
     artifacts:
       produces: [plan.md]
 on_finish:
-  - distill: [plan.md]
+  - distill: [{ node: plan, name: plan.md }]
 "#,
     );
     git(&repo, &["add", "."]);
@@ -2722,7 +2815,7 @@ fn adapter_mock_with_fixture_runs() {
     );
     write(
         &repo.join("fixture.yaml"),
-        "sessions:\n  - effects:\n      - { path: \"{{run.dir}}/artifacts/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
+        "sessions:\n  - effects:\n      - { path: \"{{staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
     );
 
     let refused = yunta_in!(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);

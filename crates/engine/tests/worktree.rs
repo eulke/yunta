@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::signal::Liveness;
 use yunta_core::{CommitSha, Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
-use yunta_engine::{prepare_worktree, release_worktree, WorktreeError};
+use yunta_engine::{prepare_worktree, release_worktree, run_branch, task_branch, WorktreeError};
 use yunta_testkit::{git_output, init_repo};
 
 fn head(dir: &Path) -> CommitSha {
@@ -469,4 +469,69 @@ async fn both_locks_share_one_protocol() {
         !mutation_lock_file(&repo).exists(),
         "the mutation lock is released once the mutation is done"
     );
+}
+
+/// A run's own branch and the branches of its task worktrees share a
+/// repository's ref namespace, and git refuses a ref that is a directory
+/// of another: `refs/heads/a` and `refs/heads/a/b` cannot both exist. The
+/// two shapes have to be siblings, whatever a run is called.
+#[tokio::test]
+async fn a_run_branch_and_its_task_branches_coexist() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+    let run = yunta_core::RunId::from("01JBRANCHCOEXISTENCE0000AB");
+
+    prepare_worktree(
+        &repo,
+        &root.path().join("trees/run"),
+        &base_commit,
+        &run_branch(&run),
+        Isolation::Worktree,
+    )
+    .await
+    .expect("the run's own branch");
+    prepare_worktree(
+        &repo,
+        &root.path().join("trees/task"),
+        &base_commit,
+        &task_branch(&run, &"T001".into(), 1),
+        Isolation::Worktree,
+    )
+    .await
+    .expect("a task branch of the same run, beside it and not under it");
+}
+
+/// A task branch names the run that made it: the worktree it belongs to
+/// is the run's, but a ref belongs to the whole repository, so two runs
+/// working the same task id in one checkout would otherwise ask git for
+/// the same branch — and the second one fails.
+#[tokio::test]
+async fn two_runs_working_the_same_task_get_their_own_branches() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let base_commit = head(&repo);
+    let first = yunta_core::RunId::from("01JBRANCHFIRSTRUN00000000A");
+    let second = yunta_core::RunId::from("01JBRANCHSECONDRUN0000000B");
+    let task = yunta_core::TaskId::from("T001");
+
+    assert_ne!(
+        task_branch(&first, &task, 1),
+        task_branch(&second, &task, 1)
+    );
+    for (run, tree) in [(&first, "trees/first"), (&second, "trees/second")] {
+        prepare_worktree(
+            &repo,
+            &root.path().join(tree),
+            &base_commit,
+            &task_branch(run, &task, 1),
+            Isolation::Worktree,
+        )
+        .await
+        .expect("each run's own task branch");
+    }
 }

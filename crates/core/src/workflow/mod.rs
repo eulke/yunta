@@ -25,10 +25,10 @@ use crate::inputs::InputSpec;
 use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
 
-pub use artifacts::{ArtifactKind, ArtifactSpec, Artifacts};
+pub use artifacts::{ArtifactKind, ArtifactRefId, ArtifactSpec, Artifacts, ARTIFACTS_DIR};
 pub use context::{
-    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, LedgerParams, McpQueryParams,
-    NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion,
+    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
+    NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
 pub use node::{LoopUntil, Node, NodeDefaults, NodePermissions, OnInterrupt};
@@ -154,8 +154,42 @@ pub enum OnFinishStep {
     /// Run artifacts the workflow declares durable: distilled
     /// deterministically into `.yunta/knowledge/` at close.
     Distill {
-        distill: Vec<String>,
+        distill: Vec<DistillArtifact>,
     },
+}
+
+/// One `distill:` entry — `{ node: <id>, kind: <kind> }` or
+/// `{ node: <id>, name: <file> }`.
+///
+/// The node is part of the reference because a kind identifies an
+/// artifact within one producer: two reviewing nodes each hold a
+/// findings artifact, and a distillation says which one it means.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+pub struct DistillArtifact {
+    pub node: NodeId,
+    #[serde(flatten)]
+    pub id: ArtifactRefId,
+}
+
+impl<'de> Deserialize<'de> for DistillArtifact {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let mut mapping = crate::yaml::Mapping::deserialize(deserializer)?;
+        let node = parse::take::<D, _>(&mut mapping, "node")?.ok_or_else(|| {
+            D::Error::custom("an `on_finish.distill` entry names the `node:` that produces it")
+        })?;
+        let id = ArtifactRefId::from_rest::<D>(mapping, "an `on_finish.distill` entry", &["node"])?;
+        Ok(DistillArtifact { node, id })
+    }
+}
+
+/// How a distillation names its artifact to a reader: the node, then
+/// what that node produces.
+impl std::fmt::Display for DistillArtifact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}` of node `{}`", self.id, self.node)
+    }
 }
 
 impl OnFinishStep {
@@ -164,7 +198,7 @@ impl OnFinishStep {
 
 impl<'de> Deserialize<'de> for OnFinishStep {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (key, value) = keyed_entry(deserializer, "an `on_finish` step", Self::KEYS)?;
+        let (key, value) = keyed_entry(deserializer, "an `on_finish` step", Self::KEYS, &[])?;
         match key.as_str() {
             "cleanup" => Ok(OnFinishStep::Cleanup {
                 cleanup: nested::<D, _>(&key, value)?,

@@ -76,6 +76,17 @@ pub(super) async fn execute_node(
     )
     .await?;
 
+    // A node that continues no session opens on an empty directory of
+    // its own, and `node_started` is the one point every one of its
+    // attempts passes through — a command, a check, a composition alike.
+    // A `kind: prompt` node may instead go on writing into the staging
+    // of the session it resumes, and whether that resume happens is only
+    // settled once its runner resolves, so that node opens its own
+    // staging at dispatch (`prompt_exec::execute_prompt`).
+    if !node.kind.opens_resumable_session() {
+        open_staging(ctx, node, crate::run_dir::Opening::Fresh).await?;
+    }
+
     // hooks.before: a failing before aborts without spending a
     // token; a failing after fails the node before verification. Either
     // phase's step can opt into `on_failure: warn` instead of the default
@@ -99,19 +110,19 @@ pub(super) async fn execute_node(
     }
 
     let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run, attempt, cancel).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, attempt, cancel).await?,
+        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
+        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
         NodeKind::Loop {
             until: yunta_core::LoopUntil::AllTasksComplete,
             prompt,
             ..
-        } => super::loop_exec::execute_loop(ctx, node, prompt, attempt, cancel).await?,
+        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
         NodeKind::Parallel {
             join,
             coordination,
             nodes,
         } => {
-            let end = execute_parallel(ctx, node, *join, nodes, attempt, cancel).await?;
+            let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
             // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
             // the posts are findings either way), as the group's
@@ -136,7 +147,7 @@ pub(super) async fn execute_node(
             end
         }
         NodeKind::Check(builtin) => {
-            super::check_exec::execute_check(ctx, node, builtin, attempt, cancel).await?
+            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
         }
         NodeKind::Executor {
             executor,
@@ -149,7 +160,6 @@ pub(super) async fn execute_node(
                 executor,
                 with,
                 *timeout_seconds,
-                attempt,
                 cancel,
             )
             .await?
@@ -169,7 +179,6 @@ pub(super) async fn execute_node(
                     isolation: *isolation,
                     mounts,
                 },
-                attempt,
                 cancel,
             )
             .await?
@@ -195,8 +204,29 @@ pub(super) async fn execute_node(
     Ok(end)
 }
 
+/// Prepares the directory `node` writes the files it declares into, for
+/// the work about to run.
+///
+/// The one door onto [`crate::run_dir::open_staging`] from a running
+/// node, so a directory that cannot be prepared reaches the run as one
+/// error naming the node, wherever the opening was decided.
+pub(super) async fn open_staging(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    opening: crate::run_dir::Opening,
+) -> Result<(), RunError> {
+    crate::run_dir::open_staging(ctx.run_dir, &node.id, opening)
+        .await
+        .map(|_| ())
+        .map_err(|source| RunError::Io {
+            context: format!("open the staging directory of node `{}`", node.id),
+            source,
+        })
+}
+
 /// Template variables for one node's own rendering: `run.*`
-/// is always present; `runner.role` is the node's own declared `runner:`
+/// and `node.artifacts` — this node's own writable directory — are
+/// always present; `runner.role` is the node's own declared `runner:`
 /// (the role name itself, known statically from the workflow — never the
 /// adapter/model a later resolution step picks, so no ordering
 /// dependency on `resolve_node_runner`); `project.*` mirrors whatever
@@ -216,7 +246,19 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
         // run id, not necessarily the worktree's own local checkout
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
-        ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
+        (
+            "run.branch".to_string(),
+            crate::worktree::run_branch(ctx.run_id),
+        ),
+        // Where this node's own files go. A command node has no run tool
+        // to be told through, so the one way it can write what it
+        // declares is to render this.
+        (
+            "node.artifacts".to_string(),
+            crate::run_dir::staging(ctx.run_dir, &node.id)
+                .display()
+                .to_string(),
+        ),
     ]);
     if let Some(role) = &node.runner {
         vars.insert("runner.role".to_string(), role.to_string());
@@ -263,11 +305,8 @@ pub(super) fn session_profile(node: &Node) -> PermissionProfile {
     }
 }
 
-/// The declared artifact names re-render with the node's own
-/// template vars (`{{runner.role}}` above all), so each fan-out sibling
-/// declares — and verifies — its own file. Nodes without templates in
-/// their names come back unchanged.
-/// The artifacts a node declares, with every templated name rendered.
+/// The artifacts a node declares, with every templated opaque name
+/// rendered.
 ///
 /// These are the specs the node's close will verify, so they are also the
 /// ones a session is allowed to check against: a check that looked at a
@@ -281,6 +320,31 @@ pub(crate) fn declared_artifacts(ctx: &RunCtx<'_>, node: &Node) -> Vec<yunta_cor
         .unwrap_or_default()
 }
 
+/// Where this node's own files land, when it declares any.
+///
+/// This node's staging, never the worktree and never the run's
+/// `artifacts/`: the worktree is the work and its diff is what the scope
+/// check reads, and `artifacts/` is the view the run writes from what it
+/// already holds. A directory of its own is what keeps two nodes that
+/// declare the same name out of each other's way. Only an artifact the
+/// session writes itself needs this — an interpreted one the engine
+/// writes from what the session submits — so a node that declares none
+/// needs no write access outside the worktree at all, and saying so
+/// keeps an adapter from widening a sandbox for nothing.
+pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::PathBuf> {
+    declared_artifacts(ctx, node)
+        .iter()
+        .any(|spec| matches!(spec, yunta_core::ArtifactSpec::Opaque(_)))
+        .then(|| crate::run_dir::staging(ctx.run_dir, &node.id))
+}
+
+/// `node` with every opaque artifact name rendered against its own
+/// template vars, so a fan-out sibling that names its file
+/// `report-{{runner.role}}.md` declares — and verifies — its own.
+///
+/// Only an opaque name: an interpreted artifact is identified by its
+/// kind, which is a closed vocabulary with nothing in it to render, and
+/// the run holds one per node whatever the runner is called.
 pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
@@ -289,11 +353,9 @@ pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Nod
     let mut rendered = node.clone();
     if let Some(artifacts) = &mut rendered.artifacts {
         for spec in &mut artifacts.produces {
-            let name = match spec {
-                yunta_core::ArtifactSpec::Plain(name) => name,
-                yunta_core::ArtifactSpec::Typed { name, .. } => name,
-            };
-            *name = render_template(name, &vars)?;
+            if let yunta_core::ArtifactSpec::Opaque(name) = spec {
+                *name = render_template(name, &vars)?;
+            }
         }
     }
     Ok(rendered)

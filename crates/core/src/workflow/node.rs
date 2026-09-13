@@ -351,7 +351,7 @@ impl OnInterrupt {
 /// The node kinds built so far. `gate` and
 /// `workflow` are the rest of the full catalogue and stay out until
 /// their own turn.
-/// What a `kind: loop` runs until. One condition exists: the ledger
+/// What a `kind: loop` runs until. One condition exists: the tasks document
 /// has no task left to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

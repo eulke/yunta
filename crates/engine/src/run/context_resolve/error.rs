@@ -60,17 +60,20 @@ pub(super) enum ContextResolveError {
         cmd: String,
     },
     #[error(
-        "context `{source_id}` on node `{node}`: artifact `{name}`{} was never produced — \
-         nothing wrote it into this run's `artifacts/`",
+        "context `{source_id}` on node `{node}`: the {}{} was never produced — \
+         this run's log holds no such artifact",
+        .artifact.label(),
         .referenced.as_ref().map(|r| format!(" (declared by node `{r}`)")).unwrap_or_default()
     )]
     MissingArtifact {
         node: NodeId,
         source_id: String,
-        /// `None` for the node-less form: the read is against
-        /// this run's own `artifacts/`, producer unnamed on purpose.
+        /// `None` for the node-less form: the question is about the run
+        /// rather than about one node, producer unnamed on purpose.
         referenced: Option<NodeId>,
-        name: String,
+        /// What the source asked for: the identity, which is what a log
+        /// answers by.
+        artifact: yunta_core::events::ArtifactId,
     },
     #[error(
         "context `{source_id}` on node `{node}`: node `{referenced}` has no captured output \
