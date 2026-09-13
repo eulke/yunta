@@ -133,6 +133,6 @@ pub use verification_effectiveness::{
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
 pub use worktree::{
-    cleanup_worktree, head_commit, prepare_worktree, release_worktree, run_branch, RunWorktree,
-    WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
+    cleanup_worktree, head_commit, prepare_worktree, release_worktree, run_branch, task_branch,
+    RunWorktree, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

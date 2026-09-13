@@ -883,15 +883,15 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     // Simulate the crash by hand-writing the log up through: plan already
     // registered, the loop started, task-p already Done and committed,
     // and task-q left `Running` with no terminal event — an orphan.
-    git(&bench.worktree, &["checkout", "-b", "yunta/task/task-p/1"]);
+    // The same branch the loop's own dispatch would have made for this
+    // run's attempt at `task-p`, composed the one way the engine does.
+    let task_p_branch = yunta_engine::task_branch(&bench.run_id, &"task-p".into(), 1);
+    git(&bench.worktree, &["checkout", "-b", &task_p_branch]);
     std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
     git(&bench.worktree, &["add", "-A"]);
     git(&bench.worktree, &["commit", "-q", "-m", "task task-p: p"]);
     git(&bench.worktree, &["checkout", "-"]);
-    git(
-        &bench.worktree,
-        &["merge", "--ff-only", "yunta/task/task-p/1"],
-    );
+    git(&bench.worktree, &["merge", "--ff-only", &task_p_branch]);
 
     for event in [
         yunta_core::events::EventDraft {

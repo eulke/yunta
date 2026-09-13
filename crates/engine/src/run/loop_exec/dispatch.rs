@@ -90,7 +90,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         .run_dir
         .join("task-worktrees")
         .join(format!("{}-{attempt}", task.id));
-    let branch = format!("yunta/task/{}/{attempt}", task.id);
+    let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
     prepare_worktree(
         ctx.worktree,
         &task_worktree,

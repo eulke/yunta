@@ -25,16 +25,18 @@
 //! [`WorktreeIntegrity`] is where that lives, together with why the
 //! answer is never about the tree's content.
 
+mod branches;
 mod integrity;
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_adapters::signal::Liveness;
-use yunta_core::{CommitSha, InvalidId, Isolation, Pid, RunId, SystemClock};
+use yunta_core::{CommitSha, InvalidId, Isolation, Pid, SystemClock};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
+pub use branches::{run_branch, task_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 
 #[derive(Debug, Error)]
@@ -260,15 +262,6 @@ pub async fn cleanup_worktree(
     // Best-effort by design: `-d` refusing is the branch's protection.
     let _ = run_git(&main_repo, &["branch", "-d", branch]).await;
     Ok(WorktreeCleanup::Removed)
-}
-
-/// The branch a run's own commits live on: the branch its worktree is
-/// created on, what `{{run.branch}}` renders, what the run's cleanup
-/// deletes, and what a diagnostic names when the checkout has to be
-/// brought back. One name, composed here, so every one of those is the
-/// same string.
-pub fn run_branch(run_id: &RunId) -> String {
-    format!("yunta/{run_id}")
 }
 
 /// The commit `repo`'s HEAD is on — the one place the engine asks a
