@@ -75,6 +75,20 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
+**A-13 · Hooks de edición en los adapters.** Ningún adapter declara `edit_hooks`;
+el scope se verifica después de la sesión por diff, y el engine lo dice con
+`capability_degraded(PostCheckOnly)` una vez por run. Lo resolvería un adapter
+que instale un hook de pre-edición y lo declare (D167).
+
+**A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
+un `kind: questions` se responde por consola o por la tool MCP. Lo resolvería
+una forja que publique las preguntas y lea las respuestas, con su evento y su
+`Channel::Pr` (D167).
+
+**A-15 · Fuentes de contexto provistas por executors.** `ContextSpec` es una
+enum cerrada de ocho fuentes. Lo resolvería un extension point con contrato
+propio (entrada, salida, hash de lo materializado) y su ADR (D167).
+
 ## Riesgos conocidos
 
 - **Dependencia de flags headless de los CLIs.** Mitigada por diseño (todo flag

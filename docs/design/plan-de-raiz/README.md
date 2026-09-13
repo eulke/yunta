@@ -17,6 +17,7 @@ por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos.
 | [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
 | [`mecanismos.md`](mecanismos.md) | los 24 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
 | [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
+| [`artefactos/yunta-de-raiz.html`](artefactos/yunta-de-raiz.html), [`artefactos/cronica-del-run.html`](artefactos/cronica-del-run.html) | las dos propuestas tal como fueron aprobadas, con sus diagramas; el README y `mecanismos.md` son su forma normativa | quien quiera la versión legible |
 | [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
 
 Ningún ítem se empieza sin haber leído este README entero, el mecanismo que el
@@ -624,19 +625,22 @@ lo `FailAtCheck`.
 
 ## 6. Decisiones que van antes (paso 2)
 
-Ninguna se toma sola. Cada una es un ADR en `docs/design/adr/` (formato de
-M23, estrenado acá) antes de que empiece el ítem que depende de ella.
+Registradas el 2026-09-13, con la recomendación como decisión, por
+aprobación explícita del dueño del repo: D165 (P1), D166 (P2), D167 (P3),
+D168 (P4), D169 (P5), D164 (P6, dentro de la crónica), D170 (P7), D171 (P8).
+Viven en `docs/design/adr/` y las indexa `adrs.md`. Un ítem que quiera
+apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 
-| id | pregunta | recomendación | bloquea |
+| id | pregunta | decisión | ADR · desbloquea |
 |---|---|---|---|
-| P1 | ¿El puerto vive en `yunta_core::port` o en un crate `yunta-port`? | `core::port` | fase 1 |
-| P2 | ¿La reestructura de eventos se hace antes del primer tag? | sí, y es lo primero después de P1 (D141) | fase 2 |
-| P3 | Build-or-register para: baseline al crear el run (D18, §7.2); hooks de edición (spec-adapter §6); preguntas por PR (§3, §4.1); orden de criterios aprendido del log (D62); fuentes de contexto por executor (D19) | construir baseline eager y orden desde el log; registrar como deuda los otros tres | M09, M24, fase 3 |
+| P1 | ¿El puerto vive en `yunta_core::port` o en un crate `yunta-port`? | `core::port` | D165 · fase 1 |
+| P2 | ¿La reestructura de eventos se hace antes del primer tag? | sí, y es lo primero después de P1 (D141) | D166 · fase 2 |
+| P3 | Build-or-register para: baseline al crear el run (D18, §7.2); hooks de edición (spec-adapter §6); preguntas por PR (§3, §4.1); orden de criterios aprendido del log (D62); fuentes de contexto por executor (D19) | construir baseline eager y orden desde el log; registrar como deuda A-13/A-14/A-15 los otros tres | D167 · M09, M24, fase 3 |
 | P4 | `#[serde(alias = "task-ledger")]` en YAML de autor y CLI | alias solo al leer lo persistido; rechazo con diagnóstico en YAML de autor; ADR | M12, fase 4 |
-| P5 | exit code de un run "finished, holding N blocking findings" | `Reported` (1) | M16, fase 5 |
-| P6 | qué conserva una terminal observada (`kept`) | lo que cierra algo o pide algo a una persona | M19, fase 5 |
+| P5 | exit code de un run "finished, holding N blocking findings" | `Reported` (1) | D169 · M16, fase 5 |
+| P6 | qué conserva una terminal observada (`kept`) | lo que cierra algo o pide algo a una persona | D164 · M19, fase 5 |
 | P7 | umbrales sin ADR: `WAIT_DEADLINE`, stagger 60 ms, `QUEUE_DEPTH`, `REDRAW_CEILING_HZ`, `MIN_SAMPLES_FOR_ESTIMATION` | un ADR "umbrales de superficie y arnés"; el ratchet rechaza `const` numérico nuevo sin referencia a ADR | M22, fase 6 |
-| P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | W-01…W-08 |
+| P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | D171 · W-01…W-08 |
 
 ---
 
@@ -721,48 +725,48 @@ especificación completa en §4.
 
 | ítem | qué | depende de | estado |
 |---|---|---|---|
-| W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `prepare_loop` por `open_run_tools` | P8 | bloqueado(P8) |
-| W-02 | `ArtifactName::parse` después de renderizar | P8 | bloqueado(P8) |
-| W-03 | `target_digest` siempre hash | P8 | bloqueado(P8) |
-| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | bloqueado(P8) |
-| W-05 | `git.rs` por `spawn_governed` | P8 | bloqueado(P8) |
-| W-06 | `parallel_exec` por `resume_policies` | P8 | bloqueado(P8) |
-| W-07 | `MockSession` con handle y `Drop` | P8 | bloqueado(P8) |
-| W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | bloqueado(P8) |
+| W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `prepare_loop` por `open_run_tools` | P8 | pendiente |
+| W-02 | `ArtifactName::parse` después de renderizar | P8 | pendiente |
+| W-03 | `target_digest` siempre hash | P8 | pendiente |
+| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | pendiente |
+| W-05 | `git.rs` por `spawn_governed` | P8 | pendiente |
+| W-06 | `parallel_exec` por `resume_policies` | P8 | pendiente |
+| W-07 | `MockSession` con handle y `Drop` | P8 | pendiente |
+| W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | pendiente |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | pendiente |
 | W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | pendiente |
-| 0-01 | ADRs P1–P8 en `docs/design/adr/` con front-matter; `xtask adr --check` | — | pendiente |
+| 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | pendiente |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
-| 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | bloqueado(P1) |
-| 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | bloqueado(P1) |
-| 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | bloqueado(P1) |
-| 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | bloqueado(P1) |
-| 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico | P2, 1-01 | bloqueado(P2) |
-| 2-02 | constructores M03 en cada dominio; todos los emisores los usan | 2-01 | bloqueado(P2) |
-| 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados | 2-01 | bloqueado(P2) |
-| 2-04 | `derive` por dominio, `apply` exhaustivo, `Audit` por nombre; `phase.rs` por `RunLedger` | 2-03 | bloqueado(P2) |
-| 3-01 | `PauseReason`, `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | bloqueado(P3) |
-| 3-02 | `decide` en cinco; `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | bloqueado(P3) |
-| 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman | 2-02 | bloqueado(P3) |
-| 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | bloqueado(P3) |
-| 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | bloqueado(P3) |
-| 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | bloqueado(P3) |
-| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `ReadOnly` sin `Write` | 1-01 | bloqueado(P3) |
-| 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | bloqueado(P4) |
-| 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | bloqueado(P4) |
-| 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | bloqueado(P4) |
-| 4-04 | `PersistedDoc<T>` en manifest, lock, engine.json, lock de aislamiento, receipt | 4-01 | bloqueado(P4) |
-| 5-01 | `Context::open_run`; `collect_history` único | 4-04 | bloqueado(P5) |
-| 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::` | 5-01 | bloqueado(P5) |
-| 5-03 | `CliError` en MCP/promote/test; `ask::Console` en init/new; `Diagnostics` en `Console::open` | 5-01 | bloqueado(P5) |
-| 5-04 | `test`/`promote` por `runnable`+`drive`; `mcp::resolve_gate` único; `graph` por `ctx.storage()`; `Env` una vez | 5-01 | bloqueado(P5) |
-| 5-05 | crónica: `view/chronicle.rs`, `surface/chronicle.rs`, `Lines::moment`, `Region::record`, borrados, `Layout::advice`, tests | 2-01, P6 | bloqueado(P6) |
-| 6-01 | `Log` builder; 10 `fn event()` borrados; `SourceLog` con clock | 1-03 | bloqueado(P7) |
-| 6-02 | un `Bench` con las cinco capacidades; 46 `execute_run` y 8 sombra migrados; `common/mod.rs` a literales | 6-01 | bloqueado(P7) |
-| 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async` | 6-01 | bloqueado(P7) |
-| 6-04 | cuatro propiedades sobre generador completo | 2-01 | bloqueado(P7) |
-| 6-05 | ratchet: 11 contadores nuevos sobre `src`+`tests`; `[workspace.lints]`; CI `workflow_call`, macOS, glob de packs, timeouts, `--release`; CONTRIBUTING | — | bloqueado(P7) |
+| 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | pendiente |
+| 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | pendiente |
+| 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
+| 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | pendiente |
+| 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico | P2, 1-01 | pendiente |
+| 2-02 | constructores M03 en cada dominio; todos los emisores los usan | 2-01 | pendiente |
+| 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados | 2-01 | pendiente |
+| 2-04 | `derive` por dominio, `apply` exhaustivo, `Audit` por nombre; `phase.rs` por `RunLedger` | 2-03 | pendiente |
+| 3-01 | `PauseReason`, `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | pendiente |
+| 3-02 | `decide` en cinco; `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | pendiente |
+| 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman | 2-02 | pendiente |
+| 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | pendiente |
+| 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | pendiente |
+| 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | pendiente |
+| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `ReadOnly` sin `Write` | 1-01 | pendiente |
+| 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | pendiente |
+| 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | pendiente |
+| 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | pendiente |
+| 4-04 | `PersistedDoc<T>` en manifest, lock, engine.json, lock de aislamiento, receipt | 4-01 | pendiente |
+| 5-01 | `Context::open_run`; `collect_history` único | 4-04 | pendiente |
+| 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::` | 5-01 | pendiente |
+| 5-03 | `CliError` en MCP/promote/test; `ask::Console` en init/new; `Diagnostics` en `Console::open` | 5-01 | pendiente |
+| 5-04 | `test`/`promote` por `runnable`+`drive`; `mcp::resolve_gate` único; `graph` por `ctx.storage()`; `Env` una vez | 5-01 | pendiente |
+| 5-05 | crónica: `view/chronicle.rs`, `surface/chronicle.rs`, `Lines::moment`, `Region::record`, borrados, `Layout::advice`, tests | 2-01, P6 | pendiente |
+| 6-01 | `Log` builder; 10 `fn event()` borrados; `SourceLog` con clock | 1-03 | pendiente |
+| 6-02 | un `Bench` con las cinco capacidades; 46 `execute_run` y 8 sombra migrados; `common/mod.rs` a literales | 6-01 | pendiente |
+| 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async` | 6-01 | pendiente |
+| 6-04 | cuatro propiedades sobre generador completo | 2-01 | pendiente |
+| 6-05 | ratchet: 11 contadores nuevos sobre `src`+`tests`; `[workspace.lints]`; CI `workflow_call`, macOS, glob de packs, timeouts, `--release`; CONTRIBUTING | — | pendiente |
 | 7-01 | `docs_sync` ata los conjuntos cerrados (§2 M23) | 2-01, 3-04 | pendiente |
 | 7-02 | ADR por archivo, índice generado, recíprocos | 0-01 | pendiente |
 | 7-03 | correcciones de §9 | 7-01 | pendiente |
