@@ -65,7 +65,6 @@ pub(super) async fn execute_executor(
     executor: &ExecutorName,
     with: &serde_json::Map<String, serde_json::Value>,
     timeout_seconds: Option<u64>,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(registration) = ctx
@@ -147,12 +146,7 @@ pub(super) async fn execute_executor(
             .ok()
             .and_then(|output| output.summary)
             .unwrap_or_else(|| format!("executor `{executor}` exited 0"));
-        close_node(
-            ctx,
-            node,
-            Close::new(summary, TokenUsage::default(), attempt, cancel),
-        )
-        .await
+        close_node(ctx, node, Close::new(summary, TokenUsage::default())).await
     } else {
         let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
             .lines()

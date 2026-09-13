@@ -9,11 +9,14 @@ use crate::yaml::{self, Mapping, Value, YamlError};
 
 /// Reads a mapping that holds exactly one entry whose key is one of
 /// `keys` — the shape of every value this schema discriminates by a
-/// field name. `what` names the value in the error.
+/// field name. `what` names the value in the error. An entry written
+/// under one of `aliases` comes back under the key it stands for; the
+/// error lists `keys` alone, so an alias is read but never advertised.
 pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
     deserializer: D,
     what: &str,
     keys: &[&str],
+    aliases: &[(&str, &str)],
 ) -> Result<(String, Value), D::Error> {
     use serde::de::Error;
 
@@ -33,6 +36,10 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
             list(keys)
         )));
     };
+    let key = aliases
+        .iter()
+        .find(|(alias, _)| *alias == key)
+        .map_or(key, |(_, canonical)| canonical);
     if !keys.contains(&key) {
         return Err(D::Error::custom(format!(
             "unknown key `{key}` for {what}; one of {}",
@@ -40,6 +47,22 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
         )));
     }
     Ok((key.to_string(), value))
+}
+
+/// Takes the value of `key` out of `mapping`, parsed, leaving every
+/// other entry for whoever owns it.
+///
+/// How a container reads its own keys before handing the rest to the
+/// part of the mapping that is not its own — so an unknown key is named
+/// by the one listing that knows every key the whole shape has.
+pub(super) fn take<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    mapping: &mut Mapping,
+    key: &str,
+) -> Result<Option<T>, D::Error> {
+    match mapping.remove(key) {
+        Some(value) => nested::<D, _>(key, value).map(Some),
+        None => Ok(None),
+    }
 }
 
 /// Parses the value found under `key`, keeping `key` in the error's

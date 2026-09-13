@@ -6,10 +6,11 @@ use yunta_adapters::SessionRequest;
 use yunta_core::events::EventPayload;
 use yunta_core::{Node, PromptSource};
 
+use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
-use super::node_exec::{cancelled_end, render_or_fail, session_profile, NodeEnd};
+use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -118,15 +119,10 @@ async fn resume_target(
 
 /// One `kind: prompt` node: its context, its prompt, one session, and
 /// the close that verifies what it declared.
-///
-/// Repairing an artifact the close cannot read is not this function's
-/// business any more than it is any other kind's — the close owns it and
-/// dispatches a session of its own for it (see [`super::repair`]).
 pub(super) async fn execute_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
-    attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let rendered = match assemble_prompt(ctx, node, prompt, cancel).await? {
@@ -196,6 +192,16 @@ pub(super) async fn execute_prompt(
         }
         Err(error) => return fail(ctx, node, error.to_string(), false).await,
     };
+    // The tool sentence is produced by the mount, so a session is never
+    // told to call something this adapter did not give it.
+    let mut rendered = rendered;
+    if let Some(notice) = crate::run_tools::submission_notice(
+        run_tools.as_ref(),
+        &super::node_exec::declared_artifacts(ctx, node),
+        super::node_exec::artifact_dir(ctx, node).as_deref(),
+    ) {
+        rendered.push_str(&notice);
+    }
     let request = SessionRequest {
         prompt: rendered,
         cwd: ctx.worktree.to_path_buf(),
@@ -208,9 +214,26 @@ pub(super) async fn execute_prompt(
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         skills,
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
+        artifact_dir: super::node_exec::artifact_dir(ctx, node),
+        scratch_dir: Some(crate::session_dir::SessionSlot::Node(&node.id).scratch_dir(ctx.run_dir)),
     };
 
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    // The staging is the session's. A session continuing here already
+    // wrote in it and what it left is work it did; a fresh session —
+    // including one replacing an interrupted session the adapter cannot
+    // resume — opens on nothing, so no earlier attempt's file closes
+    // this one. Only here is the answer known: it takes the node's
+    // policy, the log, AND the runner this node just resolved.
+    open_staging(
+        ctx,
+        node,
+        match resume_session {
+            Some(_) => Opening::ContinuedSession,
+            None => Opening::Fresh,
+        },
+    )
+    .await?;
 
     let staged = adapter.staged_paths(&request);
     let (outcome, tokens) = dispatch_session(
@@ -231,12 +254,7 @@ pub(super) async fn execute_prompt(
 
     match outcome {
         DispatchOutcome::Completed { summary } => {
-            close_node(
-                ctx,
-                node,
-                Close::new(summary, tokens, attempt, cancel).staged(&staged),
-            )
-            .await
+            close_node(ctx, node, Close::new(summary, tokens).staged(&staged)).await
         }
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await

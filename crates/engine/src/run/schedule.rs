@@ -174,15 +174,10 @@ fn is_external_gate(node: &Node) -> bool {
 /// orphan-style restart.
 fn declares_questions(node: &Node) -> bool {
     node.artifacts.as_ref().is_some_and(|artifacts| {
-        artifacts.produces.iter().any(|spec| {
-            matches!(
-                spec,
-                yunta_core::ArtifactSpec::Typed {
-                    kind: yunta_core::ArtifactKind::Questions,
-                    ..
-                }
-            )
-        })
+        artifacts
+            .produces
+            .iter()
+            .any(|spec| spec.kind() == Some(yunta_core::ArtifactKind::Questions))
     })
 }
 

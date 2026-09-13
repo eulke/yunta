@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, RunId, Workflow};
-use yunta_engine::{RunEnv, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{FrozenRun, RunEnv, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
 use super::status::progress_summary;
@@ -199,7 +199,7 @@ pub async fn run(
         super::probe_or_refuse(&real_adapters).await?;
     }
 
-    let manifest = build_frozen_manifest(&ctx, &workflow, &workflow_path, raw_inputs)?;
+    let frozen = build_frozen_manifest(&ctx, &workflow, &workflow_path, raw_inputs)?;
 
     // Informative, never blocking — suppressed under `--json` so the
     // document is the only thing on stdout. The history a run's own log
@@ -225,7 +225,8 @@ pub async fn run(
             println!("{}", super::stats::format_estimation_line(estimation));
         }
         if let Some(warning) = yunta_engine::budget_p90_warning(
-            manifest
+            frozen
+                .manifest
                 .config
                 .limits
                 .as_ref()
@@ -240,7 +241,10 @@ pub async fn run(
         run_id,
         run_dir,
         worktree,
-    } = create_run_from(&ctx, &storage, &manifest, mode).await?;
+    } = create_run_from(&ctx, &storage, &frozen, mode).await?;
+    // The documents the run was born with are on its log now; what the
+    // rest of the run needs is the manifest.
+    let manifest = frozen.manifest;
     if !json {
         println!("run {run_id}: created at {}", run_dir.display());
     }
@@ -348,7 +352,8 @@ fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Wo
     Ok((resolved, workflow))
 }
 
-/// Builds the run's manifest and freezes its state roots, which
+/// Freezes the run: its manifest, the documents its `inputs:` named,
+/// and its state roots, which
 /// [`FrozenPaths::new`](yunta_core::FrozenPaths::new) requires to be
 /// absolute — `resume`/`status`/`gc` read these back from any directory,
 /// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
@@ -358,21 +363,21 @@ fn build_frozen_manifest(
     workflow: &Workflow,
     workflow_path: &Path,
     raw_inputs: &[String],
-) -> Result<Manifest, CliError> {
+) -> Result<FrozenRun, CliError> {
     let provided_inputs = parse_inputs(raw_inputs).map_err(CliError::msg)?;
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    let mut manifest = yunta_engine::build_manifest(
+    let mut frozen = yunta_engine::build_manifest(
         workflow,
         &ctx.project.config,
         workflow_dir,
         &ctx.cwd,
         &provided_inputs,
     )?;
-    manifest.paths = Some(yunta_core::FrozenPaths::new(
+    frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
         ctx.project.runs_root.clone(),
         ctx.project.worktrees_root.clone(),
     )?);
-    Ok(manifest)
+    Ok(frozen)
 }
 
 /// A created run's identity and the paths it lives at — what both the
@@ -390,9 +395,10 @@ struct Prepared {
 async fn create_run_from(
     ctx: &Context,
     storage: &AsyncStorage,
-    manifest: &Manifest,
+    frozen: &FrozenRun,
     mode: Option<&ModeName>,
 ) -> Result<Prepared, CliError> {
+    let manifest = &frozen.manifest;
     // A soft budget, not a safety limit — best-effort by design (two
     // simultaneous `yunta run` invocations can both pass the count),
     // checked before anything is created so the refusal costs nothing.
@@ -421,7 +427,7 @@ async fn create_run_from(
         &ctx.cwd,
         &worktree,
         &manifest.base_commit,
-        &format!("yunta/{run_id}"),
+        &yunta_engine::run_branch(&run_id),
         manifest.isolation,
     )
     .await?
@@ -457,8 +463,11 @@ async fn create_run_from(
             manifest,
             runs_root: &ctx.project.runs_root,
             mode: &resolved_mode,
+            worktree: &worktree,
             promoted_from: None,
-            artifacts: &[],
+            // The run is born holding every document its `inputs:`
+            // named, accepted right after `run_created`.
+            artifacts: &frozen.documents,
         },
         storage,
         &ctx.clock,
@@ -493,8 +502,8 @@ pub(crate) async fn start_detached(
     }
     super::probe_or_refuse(&adapters).await?;
 
-    let manifest = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
-    let prepared = create_run_from(ctx, storage, &manifest, mode).await?;
+    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
+    let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
     super::spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd)
         .await
         .map_err(|source| {

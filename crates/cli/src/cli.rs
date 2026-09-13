@@ -163,8 +163,9 @@ enum Command {
         #[arg(long, value_name = "path")]
         dir: Option<PathBuf>,
     },
-    /// Verifies a run's event hash chain: integrity and order,
-    /// recomputed from the log as persisted.
+    /// Verifies a run's evidence: the event hash chain, recomputed from
+    /// the log as persisted, and the bytes of every artifact that log
+    /// accepted, read back and hashed against its own name.
     Verify {
         /// The run id to verify.
         run_id: RunId,
@@ -211,7 +212,7 @@ enum Command {
     /// Prints the shape of a document Yunta reads and validates, so
     /// nobody has to guess it. With no arguments, lists the kinds.
     Schema {
-        /// Which document: `task-ledger`, `findings` or `questions`.
+        /// Which document: `tasks`, `findings` or `questions`.
         kind: Option<String>,
         /// Emits the JSON Schema instead of the annotated example — what
         /// an editor's language server validates against.
@@ -223,7 +224,7 @@ enum Command {
     New {
         /// The workflow's name — becomes `.yunta/workflows/<name>.yaml`.
         name: String,
-        /// Which skeleton to start from: one-node, lint-fix or ledger.
+        /// Which skeleton to start from: one-node, lint-fix or tasks.
         #[arg(long)]
         shape: Option<String>,
         /// Prompts to choose a shape when `--shape` is omitted (degrades

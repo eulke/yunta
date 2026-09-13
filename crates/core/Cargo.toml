@@ -49,3 +49,4 @@ testkit = []
 
 [dev-dependencies]
 yunta-core = { path = ".", features = ["testkit"] }
+proptest.workspace = true

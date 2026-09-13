@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta questions",
-  "description": "A `kind: questions` artifact's document — sole top-level key\n`questions:`, mirroring `Ledger`'s `tasks:`-only shape and\n`FindingsFile`'s `findings:`-only shape.",
+  "description": "A `kind: questions` artifact's document — sole top-level key\n`questions:`, mirroring `TasksFile`'s `tasks:`-only shape and\n`FindingsFile`'s `findings:`-only shape.",
   "type": "object",
   "properties": {
     "questions": {

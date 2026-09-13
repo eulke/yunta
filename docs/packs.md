@@ -15,7 +15,7 @@ not a prerequisite for writing one.
 
 This repo ships two example packs at [`packs/`](../packs/) — `yunta/starter`
 (two minimal workflows: a one-node `fix` and a fan-out `review`) and
-`yunta/fragua` (the full reference pipeline: grill, a verified task ledger,
+`yunta/fragua` (the full reference pipeline: grill, a verified tasks document,
 lint→fix, a baseline check, multi-runner review, PR). Both install and remove
 like any third-party pack; the engine treats them no differently, and
 they're worth reading as concrete, working examples of everything below.

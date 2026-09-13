@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta findings",
-  "description": "The artifact's document — sole top-level key `findings:`, mirroring\na ledger's `tasks:`-only shape.",
+  "description": "The artifact's document — sole top-level key `findings:`, mirroring\na tasks document's `tasks:`-only shape.",
   "type": "object",
   "properties": {
     "findings": {

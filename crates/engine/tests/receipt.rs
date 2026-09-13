@@ -10,11 +10,15 @@
 //! doesn't need to reprint an entire golden blob.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{StoredEvent, TerminalState, TokenUsage};
+use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::{
+    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
+    RunMetrics, StoredEvent, TerminalState, TokenUsage,
+};
 use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
@@ -209,7 +213,7 @@ baseline:
   suite: "true"
 "#;
 
-/// Exercises every receipt section in one run: a ledger task with two
+/// Exercises every receipt section in one run: a task with two
 /// criteria (`plan`/`implement`), a baseline capture-then-compare pair
 /// (`capture`/`compare`), a re-route (`lint` fails once, `fix-lint`
 /// corrects it), and a fan-out review (`runners: [reviewer,
@@ -220,9 +224,9 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/ledger.yaml."
+    prompt: "Write the tasks document."
     artifacts:
-      produces: [{ name: ledger.yaml, kind: task-ledger }]
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
@@ -254,38 +258,42 @@ nodes:
     prompt: "review the change"
 "#;
 
-/// `{artifacts}` is substituted with the run's own absolute
-/// `run.dir/artifacts` before parsing — the same convention
-/// `tests/run.rs`'s own ledger fixtures use, since a mock effect's
-/// `path` is relative to the worktree, not `run.dir`.
-fn fixture(artifacts_dir: &Path) -> String {
-    format!(
-        r#"
+/// The tasks document reaches the run through the run tools, so the planning
+/// session names no path at all; every other session's `path` is
+/// relative to the worktree, which is a session's own cwd.
+const FIXTURE: &str = r#"
+capabilities: { run_tools: true }
 sessions:
-  - match_prompt_contains: "Write the ledger"
-    effects:
-      - {{ path: "{artifacts}/ledger.yaml", content: "tasks:\n  - id: T001\n    title: \"Say hello\"\n    scope: [\"hello.txt\"]\n    criteria:\n      - cmd: \"test -f hello.txt\"\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
+  - match_prompt_contains: "Write the tasks document"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Say hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+    outcome: { type: completed, summary: "planned" }
   - match_prompt_contains: "implement your task"
     effects:
-      - {{ path: hello.txt, content: "hi" }}
-    outcome: {{ type: completed, summary: "done" }}
+      - { path: hello.txt, content: "hi" }
+    outcome: { type: completed, summary: "done" }
   - match_prompt_contains: "fix the lint failure"
     effects:
-      - {{ path: fixed.txt, content: "fixed" }}
-    outcome: {{ type: completed, summary: "fixed it" }}
+      - { path: fixed.txt, content: "fixed" }
+    outcome: { type: completed, summary: "fixed it" }
   - match_prompt_contains: "review the change"
     effects:
-      - {{ path: notes/reviewer.md, content: "looks good" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
+      - { path: notes/reviewer.md, content: "looks good" }
+    outcome: { type: completed, summary: "reviewed" }
   - match_prompt_contains: "review the change"
     effects:
-      - {{ path: notes/reviewer-alt.md, content: "also good" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display(),
-    )
-}
+      - { path: notes/reviewer-alt.md, content: "also good" }
+    outcome: { type: completed, summary: "reviewed" }
+"#;
 
 struct Bench {
     _root: tempfile::TempDir,
@@ -312,10 +320,6 @@ impl Bench {
         }
     }
 
-    fn run_dir(&self) -> PathBuf {
-        self.runs_root.join(self.run_id.as_str())
-    }
-
     async fn run(
         &self,
         workflow_yaml: &str,
@@ -330,13 +334,15 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
         let run_dir = create_run(
             yunta_engine::CreateRunParams {
                 run_id: &self.run_id,
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },
@@ -377,8 +383,7 @@ impl Bench {
 #[tokio::test]
 async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let bench = Bench::new();
-    let fixture_yaml = fixture(&bench.run_dir().join("artifacts"));
-    let (manifest, events) = bench.run(WORKFLOW, &fixture_yaml).await;
+    let (manifest, events) = bench.run(WORKFLOW, FIXTURE).await;
 
     let chain = EventChainStatus::Intact {
         events: events.len(),
@@ -444,13 +449,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         yunta_engine::CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -498,16 +505,16 @@ nodes:
 /// back unreadable" becomes a number on the receipt instead of a grep
 /// over free text.
 #[test]
-fn the_receipt_counts_document_problems_by_their_stable_code() {
+fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
-            code: "unknown-key".to_string(),
+            kind: Some(ArtifactKind::Tasks),
+            code: "parse".to_string(),
             occurrences: 2,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
+            kind: Some(ArtifactKind::Tasks),
             code: "no-criteria".to_string(),
             occurrences: 1,
         },
@@ -515,22 +522,157 @@ fn the_receipt_counts_document_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "document problem(s) reported during the run: `unknown-key` in the task ledger \u{d7}2, \
-             `no-criteria` in the task ledger \u{d7}1"
+            "artifact problem(s) reported during the run: `parse` in the tasks document \u{d7}2, \
+             `no-criteria` in the tasks document \u{d7}1"
         ),
         "{markdown}"
     );
 }
 
+/// The receipt a run of `workflow_yaml` earns when its one node failed
+/// on `failure` and the run ended.
+///
+/// Derived from a log built here rather than from a run: a node that
+/// fails on an artifact leaves its run paused, and a receipt certifies
+/// closed work only. What is under test is the derivation from
+/// `node_failed`, and that is exactly what the log carries.
+fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap()
+    .manifest;
+
+    let events = vec![
+        StoredEvent {
+            run_id: bench.run_id.clone(),
+            seq: 1_u64.into(),
+            timestamp: yunta_core::Clock::now(&FixedClock),
+            node_id: Some(NodeId::from(node)),
+            body: EventBody::Known(EventPayload::NodeFailed(NodeFailedPayload::new(
+                failure,
+                false,
+                TokenUsage::default(),
+            ))),
+        },
+        StoredEvent {
+            run_id: bench.run_id.clone(),
+            seq: 2_u64.into(),
+            timestamp: yunta_core::Clock::now(&FixedClock),
+            node_id: None,
+            body: EventBody::Known(EventPayload::RunFinished(RunFinishedPayload {
+                terminal_state: TerminalState::Failed,
+                metrics: RunMetrics {
+                    cptv: None,
+                    tokens: TokenUsage::default(),
+                },
+            })),
+        },
+    ];
+
+    build_receipt(
+        &bench.run_id,
+        &manifest,
+        &events,
+        EventChainStatus::Intact {
+            events: events.len(),
+        },
+    )
+    .unwrap()
+}
+
+/// A `kind: workflow` node declaring what its child run never produced
+/// fails on the artifact itself, and the receipt counts that like any
+/// other artifact failure — by its stable code, with no document kind,
+/// because nothing ever read a document.
+#[test]
+fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+    let receipt = receipt_of_failure(
+        r#"
+name: unheld-fixture
+nodes:
+  - id: compose
+    kind: workflow
+    use: producer
+    artifacts: { produces: [report.md] }
+"#,
+        "compose",
+        Failure::artifacts(vec![ArtifactFailure::Unheld {
+            run: RunId::from("run-child-1"),
+            producer: None,
+            artifact: ArtifactId::of("report.md", None),
+        }]),
+    );
+
+    assert_eq!(
+        receipt.diagnostics,
+        vec![DiagnosticCount {
+            kind: None,
+            code: "artifact-unheld".to_string(),
+            occurrences: 1,
+        }],
+        "an artifact no run holds is counted by its own code, under no kind"
+    );
+    assert!(
+        render_receipt_markdown(&receipt).contains("`artifact-unheld` \u{d7}1"),
+        "{receipt:?}"
+    );
+}
+
+/// A session node that ended owing the document it declared fails on the
+/// artifact itself too: the receipt counts it by its own code, under no
+/// kind, because nothing ever read a document either.
+#[test]
+fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
+    let receipt = receipt_of_failure(
+        r#"
+name: undelivered-fixture
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the plan."
+    artifacts:
+      produces: [tasks]
+"#,
+        "plan",
+        Failure::artifacts(vec![ArtifactFailure::Undelivered {
+            node: NodeId::from("plan"),
+            artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
+        }]),
+    );
+
+    assert_eq!(
+        receipt.diagnostics,
+        vec![DiagnosticCount {
+            kind: None,
+            code: "artifact-undelivered".to_string(),
+            occurrences: 1,
+        }],
+        "a document nobody handed over is counted by its own code, under no kind"
+    );
+    assert!(
+        render_receipt_markdown(&receipt).contains("`artifact-undelivered` \u{d7}1"),
+        "{receipt:?}"
+    );
+}
+
 /// `duplicate-id` is one rule asked of three documents. Counting it by
-/// code alone cannot say whether a run hit three broken ledgers or one
+/// code alone cannot say whether a run hit three broken tasks documents or one
 /// of each, so the count carries the kind and the two never merge.
 #[test]
 fn the_same_rule_in_two_documents_counts_as_two_facts() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::TaskLedger),
+            kind: Some(ArtifactKind::Tasks),
             code: "duplicate-id".to_string(),
             occurrences: 3,
         },
@@ -547,7 +689,7 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     ];
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("`duplicate-id` in the task ledger \u{d7}3"),
+        markdown.contains("`duplicate-id` in the tasks document \u{d7}3"),
         "{markdown}"
     );
     assert!(
@@ -568,21 +710,21 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
 fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
-        kind: Some(ArtifactKind::TaskLedger),
-        code: "not-yaml".to_string(),
+        kind: Some(ArtifactKind::Tasks),
+        code: "parse".to_string(),
         occurrences: 3,
     }];
     let rendered = render_receipt_json(&receipt).expect("the receipt renders");
     let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
-    assert_eq!(json["diagnostics"][0]["kind"], "task-ledger");
-    assert_eq!(json["diagnostics"][0]["code"], "not-yaml");
+    assert_eq!(json["diagnostics"][0]["kind"], "tasks");
+    assert_eq!(json["diagnostics"][0]["code"], "parse");
     assert_eq!(json["diagnostics"][0]["occurrences"], 3);
 }
 
 /// A clean run says nothing about problems, rather than a zero line —
 /// the same rule the baseline section already follows.
 #[test]
-fn a_run_with_no_document_problems_prints_no_line_about_them() {
+fn a_run_with_no_artifact_problems_prints_no_line_about_them() {
     let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    assert!(!render_receipt_markdown(&receipt).contains("document problem"));
+    assert!(!render_receipt_markdown(&receipt).contains("artifact problem"));
 }

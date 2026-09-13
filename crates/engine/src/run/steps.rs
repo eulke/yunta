@@ -65,8 +65,11 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
         )
     });
     if wants_cleanup && ctx.manifest.isolation == yunta_core::Isolation::Worktree {
-        match crate::worktree::cleanup_worktree(ctx.worktree, &format!("yunta/{}", ctx.run_id))
-            .await
+        match crate::worktree::cleanup_worktree(
+            ctx.worktree,
+            &crate::worktree::run_branch(ctx.run_id),
+        )
+        .await
         {
             Ok(crate::worktree::WorktreeCleanup::Removed) => {}
             Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
@@ -250,11 +253,20 @@ pub(super) async fn gate_exhausted(
             let yaml = yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
                 diagnostic: format!("failed to serialize inherited findings: {e}"),
             })?;
-            let path = ctx.run_dir.join("artifacts/findings-inherited.yaml");
-            std::fs::write(&path, yaml).map_err(|source| RunError::Io {
-                context: format!("write `{}`", path.display()),
-                source,
-            })?;
+            // The run's own artifact, not any node's: it is what this
+            // log adds up to, and the successor inherits it as it does
+            // every other artifact this run holds.
+            crate::artifacts::accept(
+                &ctx.log(),
+                ctx.run_dir,
+                None,
+                yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Findings,
+                },
+                yaml.as_bytes(),
+                yunta_core::events::ArtifactOrigin::Derived,
+            )
+            .await?;
         }
         let state = derive(&events_for_close);
         ctx.emit(

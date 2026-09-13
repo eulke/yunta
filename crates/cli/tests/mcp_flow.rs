@@ -9,7 +9,7 @@ use std::path::Path;
 use rmcp::model::CallToolRequestParams;
 use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
-use serde_json::json;
+use serde_json::{json, Value};
 use yunta_adapters::signal::{signal_process, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{git, init_repo, stderr, wait_until_async, write, yunta_in};
@@ -655,7 +655,7 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
         .find(|t| t.name.as_ref() == "document_shape")
         .expect("document_shape is advertised");
     let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
-    for kind in ["task-ledger", "findings", "questions"] {
+    for kind in ["tasks", "findings", "questions"] {
         assert!(
             advertised.contains(kind),
             "{kind} missing from {advertised}"
@@ -665,7 +665,7 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "task-ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "tasks"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
@@ -677,11 +677,12 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "plan"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
-    assert!(tool_text(&result).contains("task-ledger"));
+    assert!(tool_text(&result).contains("`plan`"));
+    assert!(tool_text(&result).contains("`tasks`"));
 
     client.cancel().await.ok();
 }
@@ -711,14 +712,14 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("document_shape")
-                .with_arguments(json!({"kind": "ledger"}).as_object().unwrap().clone()),
+                .with_arguments(json!({"kind": "plan"}).as_object().unwrap().clone()),
         )
         .await
         .unwrap();
     let from_control_plane = tool_text(&result).trim().to_string();
     client.cancel().await.ok();
 
-    let output = yunta_in!(&repo, &home, &["schema", "ledger"]);
+    let output = yunta_in!(&repo, &home, &["schema", "plan"]);
     assert!(!output.status.success(), "an unknown kind has no shape");
     let from_shell = stderr(&output);
 
@@ -728,13 +729,175 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
         "the same mistake gets the same sentence at either door"
     );
     assert!(
-        from_control_plane.contains("`ledger`"),
+        from_control_plane.contains("`plan`"),
         "the sentence names what was asked for: {from_control_plane}"
     );
-    for kind in ["`task-ledger`", "`findings`", "`questions`"] {
+    for kind in ["`tasks`", "`findings`", "`questions`"] {
         assert!(
             from_control_plane.contains(kind),
             "the sentence names {kind}, which does exist: {from_control_plane}"
         );
     }
+}
+
+// --- Protocol conformance, at the JSON the pipe actually carries -------
+//
+// These read the result the way an agent's own MCP client reads it,
+// straight off the child's stdout: `rmcp`'s client negotiates a revision
+// older than the newest one this server announces, so nothing it
+// round-trips can show whether a result satisfies that newest revision.
+
+/// The newest revision this server announces, and the one a current
+/// coding-agent CLI negotiates.
+const MODERN_REVISION: &str = "2026-07-28";
+
+/// A revision of the era before `server/discover`, whose clients open
+/// with `initialize`.
+const LEGACY_REVISION: &str = "2025-06-18";
+
+/// A raw JSON-RPC conversation with `yunta mcp` over its own stdio: one
+/// line out, one line back, with no client library between the test and
+/// the bytes.
+struct RawStdio {
+    child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    stdout: tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+}
+
+impl RawStdio {
+    fn spawn(cwd: &Path, home: &Path) -> Self {
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+            .arg("mcp")
+            .current_dir(cwd)
+            .env("YUNTA_HOME", home)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(
+            child.stdout.take().unwrap(),
+        ));
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+
+    /// Sends one request and returns its JSON-RPC result.
+    async fn request(&mut self, id: u32, method: &str, params: serde_json::Value) -> Value {
+        use tokio::io::AsyncWriteExt;
+        let line = serde_json::to_string(
+            &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+        )
+        .unwrap();
+        self.stdin.write_all(line.as_bytes()).await.unwrap();
+        self.stdin.write_all(b"\n").await.unwrap();
+        self.stdin.flush().await.unwrap();
+        let answer = self
+            .stdout
+            .next_line()
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("`{method}` got no answer before the server closed"));
+        let message: Value =
+            serde_json::from_str(&answer).unwrap_or_else(|e| panic!("not JSON: {e}\n{answer}"));
+        assert!(
+            message.get("error").is_none(),
+            "the server refused `{method}`: {message}"
+        );
+        message["result"].clone()
+    }
+}
+
+impl Drop for RawStdio {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
+/// Every tool name a list result advertises.
+fn listed_tools(result: &Value) -> Vec<&str> {
+    result["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list result carries `tools`: {result}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect()
+}
+
+fn assert_serves_the_control_plane_tools(result: &Value) {
+    let names = listed_tools(result);
+    for expected in [
+        "document_shape",
+        "list_workflows",
+        "run_workflow",
+        "workflow_status",
+        "resume_run",
+        "resolve_gate",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "`{expected}` is missing: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_modern_client_lists_the_control_plane_tools_without_a_handshake() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server = RawStdio::spawn(root.path(), &root.path().join("state"));
+
+    // The `_meta` a client of the newest revision puts on every request:
+    // the revision it speaks, who it is, and what it can do. Without
+    // them the request is not a modern one and the server expects a
+    // handshake instead.
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": MODERN_REVISION,
+        "io.modelcontextprotocol/clientInfo": {"name": "raw-client", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    });
+    let listed = server
+        .request(1, "tools/list", json!({"_meta": meta}))
+        .await;
+
+    // What the newest revision requires of every list result: a client
+    // that validates the shape drops the whole list when one is absent,
+    // and the session then has no tool to call.
+    assert_eq!(listed["resultType"], "complete", "{listed}");
+    assert!(
+        listed["ttlMs"].as_u64().is_some(),
+        "`ttlMs` is a number the client can cache against: {listed}"
+    );
+    assert!(
+        matches!(listed["cacheScope"].as_str(), Some("public" | "private")),
+        "`cacheScope` says who may cache the list: {listed}"
+    );
+    assert_serves_the_control_plane_tools(&listed);
+}
+
+#[tokio::test]
+async fn a_legacy_client_still_initializes_and_lists_the_same_control_plane_tools() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server = RawStdio::spawn(root.path(), &root.path().join("state"));
+
+    let negotiated = server
+        .request(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": LEGACY_REVISION,
+                "capabilities": {},
+                "clientInfo": {"name": "raw-client", "version": "1"},
+            }),
+        )
+        .await;
+    assert_eq!(
+        negotiated["protocolVersion"], LEGACY_REVISION,
+        "{negotiated}"
+    );
+
+    let listed = server.request(2, "tools/list", json!({})).await;
+    assert_serves_the_control_plane_tools(&listed);
 }

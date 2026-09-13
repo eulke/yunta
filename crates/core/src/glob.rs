@@ -33,7 +33,7 @@ pub fn scope_globset(patterns: &[String]) -> Result<GlobSet, (String, globset::E
 /// job is to stop two tasks editing the same file, a false alarm an
 /// author adjusts is the right side to err on; a silent miss is not.
 ///
-/// One heuristic with two callers — the ledger's own scope rule and the
+/// One heuristic with two callers — the tasks document's own scope rule and the
 /// workflow's `parallel` scope-collision check — rather than two copies
 /// drifting apart.
 pub fn might_overlap(a: &str, b: &str) -> bool {

@@ -65,14 +65,27 @@ nodes:
     run: "true"
 "#;
 
+/// A run that has already closed, with everything a test needs to ask
+/// about it — and to build its successor on top.
+struct Promoted {
+    terminal: RunTerminal,
+    events: Vec<yunta_core::events::StoredEvent>,
+    run_id: RunId,
+    run_dir: std::path::PathBuf,
+    worktree: std::path::PathBuf,
+    runs_root: std::path::PathBuf,
+    manifest: yunta_core::Manifest,
+    storage: Storage,
+    _root: tempfile::TempDir,
+}
+
 async fn run_with_mode(
     workflow_yaml: &str,
     mode: &str,
     interaction: &dyn HumanInteraction,
 ) -> (RunTerminal, Vec<yunta_core::events::StoredEvent>) {
-    let (terminal, events, _run_dir, _root) =
-        run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
-    (terminal, events)
+    let closed = run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
+    (closed.terminal, closed.events)
 }
 
 /// Same, but with engine findings planted on the log after creation (the
@@ -83,12 +96,39 @@ async fn run_with_mode_and_findings(
     mode: &str,
     interaction: &dyn HumanInteraction,
     findings: &[yunta_core::events::Finding],
-) -> (
-    RunTerminal,
-    Vec<yunta_core::events::StoredEvent>,
-    std::path::PathBuf,
-    tempfile::TempDir,
-) {
+) -> Promoted {
+    run_planted(
+        workflow_yaml,
+        mode,
+        interaction,
+        Planted {
+            findings,
+            ..Planted::default()
+        },
+    )
+    .await
+}
+
+/// What a test states about the predecessor before it executes: engine
+/// findings on its log, and a tasks document it is born holding with
+/// some of those tasks already done.
+#[derive(Default)]
+struct Planted<'a> {
+    findings: &'a [yunta_core::events::Finding],
+    /// The tasks document the run is born holding, as a person writes
+    /// one.
+    tasks: Option<&'a str>,
+    /// The ids of `tasks` the predecessor's log leaves `done`.
+    done: &'a [&'a str],
+}
+
+/// Runs one workflow to its close with `planted` already true of it.
+async fn run_planted(
+    workflow_yaml: &str,
+    mode: &str,
+    interaction: &dyn HumanInteraction,
+    planted: Planted<'_>,
+) -> Promoted {
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
@@ -99,16 +139,31 @@ async fn run_with_mode_and_findings(
 
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest =
-        build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new()).unwrap();
+    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .unwrap()
+        .manifest;
+    let born: Vec<yunta_engine::BirthArtifact> = planted
+        .tasks
+        .into_iter()
+        .map(|tasks| yunta_engine::BirthArtifact {
+            artifact: yunta_core::events::ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            },
+            origin: yunta_engine::BirthOrigin::Input {
+                input: "tasks".to_string(),
+            },
+            bytes: canonical_tasks(tasks),
+        })
+        .collect();
     let run_dir = create_run(
         CreateRunParams {
             run_id: &run_id,
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &ModeName::from(mode),
+            worktree: &worktree,
             promoted_from: None,
-            artifacts: &[],
+            artifacts: &born,
         },
         &storage.async_handle(),
         &FixedClock,
@@ -116,7 +171,32 @@ async fn run_with_mode_and_findings(
     .await
     .unwrap();
 
-    for finding in findings {
+    // Where the planted work landed: this run's own tree, which is what
+    // a successor branches from, so the `done` answers there too.
+    let landed: yunta_core::CommitSha =
+        yunta_testkit::git_output(&worktree, &["rev-parse", "HEAD"])
+            .parse()
+            .unwrap();
+    for task in planted.done {
+        let caused_by = registration_of(&storage.events_for_run(&run_id).unwrap(), task);
+        storage
+            .append(
+                &yunta_core::events::EventDraft {
+                    run_id: run_id.clone(),
+                    node_id: None,
+                    payload: yunta_testkit::task_status_changed(
+                        &(*task).into(),
+                        yunta_core::events::TaskStatus::Done,
+                        Some(&landed),
+                        caused_by,
+                    ),
+                },
+                &yunta_core::SystemClock,
+            )
+            .unwrap();
+    }
+
+    for finding in planted.findings {
         storage
             .append(
                 &yunta_core::events::EventDraft {
@@ -157,7 +237,17 @@ async fn run_with_mode_and_findings(
     .unwrap();
 
     let events = storage.events_for_run(&run_id).unwrap();
-    (report.terminal, events, run_dir, root)
+    Promoted {
+        terminal: report.terminal,
+        events,
+        run_id,
+        run_dir,
+        worktree,
+        runs_root,
+        manifest,
+        storage,
+        _root: root,
+    }
 }
 
 #[tokio::test]
@@ -259,19 +349,17 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
             "tasks/T002",
         ),
     ];
-    let (terminal, _events, run_dir, _root) =
+    let closed =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
-    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
 
-    let path = run_dir.join("artifacts/findings-inherited.yaml");
+    let path = closed.run_dir.join("artifacts/findings.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
     // Through the same door every findings artifact is read by, so the
     // derived file satisfies the shape and the rules, not just serde.
-    let file = yunta_core::shape::read::<yunta_core::FindingsFile>(
-        &bytes,
-        "artifacts/findings-inherited.yaml",
-    )
-    .expect("the derived file must satisfy the findings door");
+    let file =
+        yunta_core::shape::read::<yunta_core::FindingsFile>(&bytes, "artifacts/findings.yaml")
+            .expect("the derived file must satisfy the findings door");
     assert_eq!(file.findings.len(), 2, "duplicates collapse: {file:?}");
     assert_eq!(file.findings[0].id, "scope-expansion-T001-1");
     assert_eq!(file.findings[1].id, "scope-expansion-T002-1");
@@ -280,11 +368,381 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 #[tokio::test]
 async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     let interaction = ScriptedInteraction::choose("promote");
-    let (terminal, _events, run_dir, _root) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
-    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
     assert!(
-        !run_dir.join("artifacts/findings-inherited.yaml").exists(),
+        !closed.run_dir.join("artifacts/findings.yaml").exists(),
         "no findings, no file — zero noise"
     );
+}
+
+#[tokio::test]
+async fn a_successor_is_born_naming_every_artifact_it_inherits() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
+    let closed =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    assert!(
+        matches!(
+            events.first().and_then(|e| e.payload()),
+            Some(EventPayload::RunCreated(_))
+        ),
+        "the successor exists in its log before anything is said about it"
+    );
+    let inherited = yunta_testkit::accepted(&events);
+    assert_eq!(
+        inherited.len(),
+        1,
+        "one acceptance per inherited file: {inherited:?}"
+    );
+    let held = &inherited[0];
+    assert_eq!(
+        held.producer, None,
+        "no node of the successor produced it — it was handed over"
+    );
+    assert_eq!(
+        held.artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Findings
+        },
+        "the identity the predecessor held it under, not the file name"
+    );
+    assert_eq!(
+        held.origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: closed.run_id.clone(),
+            producer: None,
+        },
+        "the predecessor derived it as the run's own, with no node behind it"
+    );
+    assert_eq!(
+        std::fs::read(
+            successor
+                .run_dir
+                .join("objects")
+                .join(held.content_hash.as_str())
+        )
+        .expect("the successor holds the bytes"),
+        std::fs::read(closed.run_dir.join("artifacts/findings.yaml")).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
+    // A file nobody declared is not an artifact: no acceptance accounts
+    // for it, so the predecessor does not hold it and the successor is
+    // not born with it.
+    let interaction = ScriptedInteraction::choose("promote");
+    let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
+    let closed =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    std::fs::write(
+        closed.run_dir.join("artifacts/stray.md"),
+        "nobody declared this\n",
+    )
+    .unwrap();
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let inherited = yunta_testkit::accepted(&events);
+    assert_eq!(
+        inherited
+            .iter()
+            .map(|held| held.artifact.to_string())
+            .collect::<Vec<_>>(),
+        vec!["findings".to_string()],
+        "only what the predecessor's log holds is inherited: {inherited:?}"
+    );
+    assert!(
+        !successor.run_dir.join("artifacts/stray.md").exists(),
+        "a stray file is not a fact of the predecessor, so it reaches no successor"
+    );
+}
+
+// --- a successor owns the tasks its predecessor was working on --------
+
+/// The tasks document a run is born holding, rendered the way the run
+/// stores it: canonical, so the successor inherits the same bytes.
+fn canonical_tasks(yaml: &str) -> Vec<u8> {
+    let document: yunta_core::TasksFile =
+        yunta_core::shape::read(yaml.as_bytes(), "tasks").expect("a valid tasks document");
+    yunta_core::shape::render(&document)
+        .expect("the canonical rendering")
+        .into_bytes()
+}
+
+/// The position of `task`'s registration on `events` — what a
+/// `task_status_changed` about it points back to.
+fn registration_of(events: &[yunta_core::events::StoredEvent], task: &str) -> yunta_core::Seq {
+    events
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::TaskRegistered(p)) if p.task_id.as_str() == task => Some(event.seq),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no task_registered for `{task}`: {events:?}"))
+}
+
+const TWO_TASKS: &str = r#"
+tasks:
+  - id: T001
+    title: "Write a"
+    scope: ["a.txt"]
+    criteria: [{cmd: "test -f a.txt"}]
+  - id: T002
+    title: "Write b"
+    scope: ["b.txt"]
+    criteria: [{cmd: "test -f b.txt"}]
+"#;
+
+#[tokio::test]
+async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_done() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let closed = run_planted(
+        PROMOTABLE_WORKFLOW,
+        "quick",
+        &interaction,
+        Planted {
+            tasks: Some(TWO_TASKS),
+            done: &["T001"],
+            ..Planted::default()
+        },
+    )
+    .await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let inherited = yunta_testkit::accepted(&events);
+    assert_eq!(
+        inherited
+            .iter()
+            .map(|held| held.artifact.to_string())
+            .collect::<Vec<_>>(),
+        vec!["tasks".to_string()],
+    );
+    assert_eq!(
+        inherited[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: closed.run_id.clone(),
+            producer: None,
+        },
+        "the predecessor held the document with no node behind it"
+    );
+
+    let registered: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::TaskRegistered(p)) => Some(p.task_id.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        registered,
+        vec!["T001".to_string(), "T002".to_string()],
+        "the successor says what it has to do about every task it was handed"
+    );
+
+    let changes: Vec<(String, yunta_core::events::TaskStatus, yunta_core::Seq)> = events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::TaskStatusChanged(p)) => {
+                Some((p.task_id.to_string(), p.new_status, p.caused_by))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes.len(),
+        1,
+        "only what the predecessor finished crosses: {changes:?}"
+    );
+    assert_eq!(changes[0].0, "T001");
+    assert_eq!(changes[0].1, yunta_core::events::TaskStatus::Done);
+    assert_eq!(
+        changes[0].2,
+        registration_of(&events, "T001"),
+        "the registration is what caused the status the successor is born with"
+    );
+
+    let state = yunta_engine::derive(&events);
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get("T002"),
+        Some(&yunta_core::events::TaskStatus::Pending)
+    );
+}
+
+#[tokio::test]
+async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let closed = run_planted(
+        PROMOTABLE_WORKFLOW,
+        "quick",
+        &interaction,
+        Planted {
+            tasks: Some(TWO_TASKS),
+            done: &["T001"],
+            ..Planted::default()
+        },
+    )
+    .await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    let worktrees = closed.runs_root.parent().unwrap().join("worktrees");
+
+    let first = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &worktrees,
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the first successor is created");
+
+    // The second link of the chain: the run the first successor was
+    // born as is itself promoted, and what it says about T001 is only
+    // what it was born saying.
+    let second = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &first.run_id,
+            manifest: &first.manifest,
+            worktree: &first.worktree,
+            run_dir: &first.run_dir,
+        },
+        &first.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &worktrees,
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the second successor is created");
+
+    let landed = done_at(
+        &closed.storage.events_for_run(&first.run_id).unwrap(),
+        "T001",
+    );
+    assert_eq!(
+        done_at(
+            &closed.storage.events_for_run(&second.run_id).unwrap(),
+            "T001"
+        ),
+        landed,
+        "a done that crossed names the same commit further down the chain, which is what          lets the third link answer the question the first one did"
+    );
+    assert!(
+        landed.is_some(),
+        "the commit the work landed at is what the crossing is made of"
+    );
+
+    let state = yunta_engine::derive(&closed.storage.events_for_run(&second.run_id).unwrap());
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get("T002"),
+        Some(&yunta_core::events::TaskStatus::Pending)
+    );
+}
+
+/// The commit the last `done` about `task` on `events` names.
+fn done_at(
+    events: &[yunta_core::events::StoredEvent],
+    task: &str,
+) -> Option<yunta_core::CommitSha> {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::TaskStatusChanged(p))
+                if p.task_id.as_str() == task
+                    && p.new_status == yunta_core::events::TaskStatus::Done =>
+            {
+                Some(p.commit.clone())
+            }
+            _ => None,
+        })
+        .flatten()
 }

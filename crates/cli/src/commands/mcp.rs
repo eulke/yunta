@@ -59,10 +59,7 @@ impl ServerHandler for YuntaMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult {
-            tools: tool_definitions(),
-            ..Default::default()
-        })
+        Ok(yunta_engine::mcp::tool_list(tool_definitions()))
     }
 
     async fn call_tool(
@@ -139,7 +136,7 @@ fn tool_definitions() -> Vec<Tool> {
         Tool::new(
             "document_shape",
             "The exact shape of a document Yunta reads and validates. Call this BEFORE \
-             writing a task ledger, a findings artifact or a questions artifact — they are \
+             writing a tasks document, a findings artifact or a questions artifact — they are \
              validated strictly, a key that is not in the shape fails the node that produced \
              it, and there is no other way to learn the format. Returns a complete, valid \
              example with every field annotated.",

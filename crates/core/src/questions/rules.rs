@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{AnswerType, QuestionId, QuestionsFile};
 
-/// Every rule this document is held to — see `crate::ledger::rules` for what
+/// Every rule this document is held to — see `crate::tasks::rules` for what
 /// this list is for and what holds it true.
 pub(super) const RULES: &[Rule] = &[
     Rule {

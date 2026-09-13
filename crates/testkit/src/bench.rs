@@ -12,8 +12,8 @@ use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::events::StoredEvent;
 use yunta_core::{AdapterId, ConfigLayer, RunId, SeqIdSource, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
+    build_manifest, create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction,
+    NoInteraction, RunEnv, RunState, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
 
@@ -43,6 +43,15 @@ pub struct Bench {
     pub run_id: RunId,
     ids: SeqIdSource,
     ambient: Option<yunta_core::Env>,
+    /// What the run is born holding — a document its `inputs:` named,
+    /// or what another run hands over.
+    birth: Vec<BirthArtifact>,
+    /// The adapter the last run used, so a test can ask what each
+    /// session was actually handed.
+    mock: std::sync::Mutex<Option<Arc<MockAdapter>>>,
+    /// The workflow the last run was driven with, which is what reads a
+    /// declared artifact name as the identity the log holds it under.
+    workflow: std::sync::Mutex<Option<Workflow>>,
 }
 
 impl Default for Bench {
@@ -74,6 +83,9 @@ impl Bench {
             run_id: RunId::from(run_id),
             ids: SeqIdSource::new("minted"),
             ambient: None,
+            birth: Vec::new(),
+            mock: std::sync::Mutex::new(None),
+            workflow: std::sync::Mutex::new(None),
         }
     }
 
@@ -88,6 +100,14 @@ impl Bench {
         self
     }
 
+    /// Gives the run `artifacts` from birth — what a `type: document`
+    /// input, a mount or a promotion hands a run before any of its nodes
+    /// runs.
+    pub fn born_holding(mut self, artifacts: Vec<BirthArtifact>) -> Self {
+        self.birth = artifacts;
+        self
+    }
+
     /// The absolute run dir this bench's run uses — known before the run
     /// exists, so a fixture can embed the absolute artifact paths a real
     /// agent would write after reading `{{run.dir}}`.
@@ -95,7 +115,70 @@ impl Bench {
         self.runs_root.join(self.run_id.as_str())
     }
 
+    /// The directory one node writes the files it declares into — known
+    /// before the run exists, so a fixture can embed the absolute paths a
+    /// session is granted and writes to.
+    pub fn staging(&self, node: &str) -> std::path::PathBuf {
+        yunta_engine::run_dir::staging(&self.run_dir(), &node.into())
+    }
+
+    /// The bytes the run holds for one artifact, by the identity it is
+    /// declared under: a kind name (`tasks`) for a document the engine
+    /// reads, a file name for an opaque one.
+    ///
+    /// What a reader of the run gets: the acceptance standing last on the
+    /// run's own log for that identity, read out of its object store. A
+    /// test asserts on the run's answer rather than on a file that
+    /// happens to sit beside it. `None` when the run's log holds no such
+    /// artifact.
+    pub fn artifact(&self, declared: &str) -> Option<Vec<u8>> {
+        let spec: yunta_core::ArtifactSpec = yunta_core::yaml::parse(declared)
+            .expect("an artifact is named the way `artifacts.produces` names one");
+        let id = yunta_core::events::ArtifactId::from(&spec);
+        let held = crate::events::accepted(&self.events());
+        let found = held
+            .iter()
+            .filter(|a| a.artifact == id)
+            .max_by_key(|a| a.seq)?;
+        self.object(&found.content_hash).ok()
+    }
+
+    /// The bytes of one artifact's `artifacts/` view — a producer's under
+    /// its node, what the run acquired without one at the root.
+    ///
+    /// For a test about the projection itself, or about what a session
+    /// left in the run's `artifacts/` directory; every test about what
+    /// the run holds asks [`artifact`](Self::artifact).
+    pub fn projection(&self, producer: Option<&str>, name: &str) -> std::io::Result<Vec<u8>> {
+        let mut path = self.run_dir().join(yunta_core::ARTIFACTS_DIR);
+        if let Some(node) = producer {
+            path.push(node);
+        }
+        std::fs::read(path.join(name))
+    }
+
+    /// The bytes the run stored under `hash` — what an acceptance names,
+    /// read straight out of the object store.
+    pub fn object(&self, hash: &yunta_core::ContentHash) -> std::io::Result<Vec<u8>> {
+        std::fs::read(self.run_dir().join("objects").join(hash.as_str()))
+    }
+
+    /// Every artifact this run's log says it accepted, in log order.
+    pub fn accepted(&self) -> Vec<yunta_core::events::artifacts::ArtifactRef> {
+        crate::events::accepted(&self.events())
+    }
+
     /// Every event this bench's run has appended.
+    /// The adapter the last run used — what a test asks about the
+    /// requests the engine actually made.
+    pub fn mock(&self) -> Arc<MockAdapter> {
+        self.mock
+            .lock()
+            .expect("the bench's own lock")
+            .clone()
+            .expect("a run has to happen before its sessions can be asked about")
+    }
+
     pub fn events(&self) -> Vec<StoredEvent> {
         self.storage
             .events_for_run(&self.run_id)
@@ -142,6 +225,7 @@ impl Bench {
         human_interaction: &dyn HumanInteraction,
     ) -> (RunTerminal, RunState) {
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
+        *self.workflow.lock().expect("the bench's own lock") = Some(workflow.clone());
         let config: ConfigLayer = serde_norway::from_str(config_yaml).expect("parse config");
         let manifest = build_manifest(
             &workflow,
@@ -150,7 +234,8 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
-        .expect("build manifest");
+        .expect("build manifest")
+        .manifest;
 
         let run_dir = create_run(
             CreateRunParams {
@@ -158,8 +243,9 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
-                artifacts: &[],
+                artifacts: &self.birth,
             },
             &self.storage.async_handle(),
             &FixedClock,
@@ -167,9 +253,10 @@ impl Bench {
         .await
         .expect("create run");
 
-        let adapter = MockAdapter::from_yaml(fixture_yaml).expect("parse mock fixture");
+        let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).expect("parse mock fixture"));
+        *self.mock.lock().expect("the bench's own lock") = Some(adapter.clone());
         let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
+        adapters.insert("mock".into(), adapter);
 
         let report = execute_run(RunEnv {
             run_id: &self.run_id,

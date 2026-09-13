@@ -66,7 +66,7 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             .map(DiagnosticCount::to_string)
             .collect();
         out.push_str(&format!(
-            "- {} document problem(s) reported during the run: {}\n",
+            "- {} artifact problem(s) reported during the run: {}\n",
             mark(false),
             counted.join(", ")
         ));

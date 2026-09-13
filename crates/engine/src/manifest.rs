@@ -13,6 +13,7 @@ use yunta_core::{
 };
 
 use crate::inputs::{resolve_inputs, InputsError};
+use crate::run::BirthArtifact;
 
 /// Version of the manifest's own schema.
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
@@ -42,26 +43,46 @@ pub enum ManifestError {
     Inputs(#[from] InputsError),
 }
 
-/// Freezes a manifest from already-parsed sources.
+/// Everything a run is frozen with before it exists: the manifest it
+/// carries, and the artifacts it is born holding.
+///
+/// The two halves travel to different places — the manifest to
+/// `manifest.yaml` and `run_created`, the documents to the run's log as
+/// acceptances — so they are two fields rather than one value with a
+/// part nobody reads. Whoever creates the run hands both to
+/// [`create_run`](crate::create_run), which is where the order between
+/// them is settled.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrozenRun {
+    pub manifest: Manifest,
+    /// One per `document` input, in declaration order.
+    pub documents: Vec<BirthArtifact>,
+}
+
+/// Freezes a manifest from already-parsed sources, with the documents
+/// its `inputs:` named.
 ///
 /// `workflow_dir` is the directory of the workflow file — `prompt:
 /// {file: ...}` paths resolve relative to it. `repo` is the
 /// working tree whose `HEAD` becomes the base commit, and also the base
-/// a `path`-typed input in `provided_inputs` resolves against:
-/// inputs are validated before any worktree exists, so there is nowhere
-/// else for a relative path to mean.
+/// a `path`- or `document`-typed input in `provided_inputs` resolves
+/// against: inputs are validated before any worktree exists, so there is
+/// nowhere else for a relative path to mean. A `document` input is read
+/// and held to its kind here, before the base commit is even asked for,
+/// so a document nobody can use costs no worktree and no baseline.
 pub fn build_manifest(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_dir: &Path,
     repo: &Path,
     provided_inputs: &HashMap<String, String>,
-) -> Result<Manifest, ManifestError> {
+) -> Result<FrozenRun, ManifestError> {
     let mut workflow = workflow.clone();
     expand_runner_fanout(&mut workflow);
     expand_implicit_dependencies(&mut workflow);
 
-    let inputs = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
+    let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
+    let inputs = resolved.values;
 
     let mut prompts = BTreeMap::new();
     for node in workflow.iter_nodes() {
@@ -77,7 +98,7 @@ pub fn build_manifest(
             })?;
     let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
 
-    Ok(Manifest {
+    let manifest = Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         yunta_version: env!("CARGO_PKG_VERSION").to_string(),
         workflow_hash: content_hash(&workflow),
@@ -97,6 +118,10 @@ pub fn build_manifest(
         // path, which is also the tolerant reading of old manifests.
         paths: None,
         pack: pack_provenance(repo, workflow_dir),
+    };
+    Ok(FrozenRun {
+        manifest,
+        documents: resolved.documents,
     })
 }
 

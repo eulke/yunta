@@ -21,6 +21,10 @@ tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "process
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+# `codex exec -c key=value` takes TOML values on the command line, and a
+# path or a URL that carries a `"` or a `\` has to reach the CLI escaped.
+# Rendering only — the parser stays out of the binary.
+toml = { workspace = true }
 # `GitHubForge`: the REST calls that publish artifacts, open a PR and
 # poll its review state — same TLS backend `yunta-engine` already
 # selects for its own outbound HTTP (rustls, not native-tls).
@@ -47,6 +51,9 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# The tests read back what `config.rs` renders, which needs the parser
+# the adapter itself has no use for.
+toml = { workspace = true, features = ["parse"] }
 yunta-core = { workspace = true, features = ["testkit"] }
 # The GitHub forge's tests answer its HTTP calls from a local stub of
 # the API — the same crate the engine's per-run MCP listener already

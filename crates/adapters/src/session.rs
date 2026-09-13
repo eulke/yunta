@@ -79,6 +79,29 @@ pub struct SessionRequest {
     /// `capabilities().run_tools` (same rule: never claim more than is
     /// actually built).
     pub run_tools_endpoint: Option<RunToolsEndpoint>,
+    /// The one directory outside `cwd` this session may write, and where
+    /// the files this node declares belong. It is never inside `cwd`:
+    /// the worktree is the work, the run directory is the record. It
+    /// belongs to this node alone, so a file written here is never a
+    /// file another node produced. An adapter whose CLI confines writes
+    /// to the working directory has to widen it to this path, or a node
+    /// that declares a file can never produce one. `None` whenever the
+    /// node has no file of its own to write — every document the engine
+    /// itself writes from what the session hands over — and a session
+    /// then reaches nothing outside its worktree.
+    pub artifact_dir: Option<PathBuf>,
+    /// This session's own scratch directory, for scaffolding it needs on
+    /// disk — an MCP config file, say. It sits outside `cwd` because the
+    /// worktree's diff is what the engine's scope check reads, and a
+    /// file the adapter dropped there would read as the agent's work.
+    ///
+    /// It belongs to this session alone: sessions of one run that can be
+    /// alive at the same moment each get their own, so an adapter may
+    /// name a file inside it for what the file is rather than having to
+    /// make the name unique. The engine creates the path; an adapter
+    /// creates the directory when it has something to put there. `None`
+    /// leaves an adapter that needs one to degrade explicitly.
+    pub scratch_dir: Option<PathBuf>,
 }
 
 /// Where a session's per-run MCP server listens: a loopback URL plus
@@ -91,6 +114,15 @@ pub struct SessionRequest {
 pub struct RunToolsEndpoint {
     pub url: String,
     pub token: Secret<String>,
+}
+
+impl RunToolsEndpoint {
+    /// The name a CLI's own configuration gives this server. Every
+    /// adapter uses the one name: a CLI prefixes the tools it mounts
+    /// with it, so this is also what an allow-rule names to admit all
+    /// of them without any adapter knowing which tools the engine
+    /// mounted.
+    pub const SERVER_NAME: &'static str = "yunta";
 }
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:
@@ -183,6 +215,14 @@ pub enum AgentEvent {
     SessionOpened {
         session_id: SessionId,
         model: Option<ModelName>,
+    },
+    /// How many of the run tools this session actually holds, as its
+    /// CLI reported them. An adapter emits it only when its CLI names
+    /// the session's tool set: silence means the adapter cannot tell,
+    /// never that the count is zero, so a reader degrades only on a
+    /// count it was actually given.
+    RunToolsMounted {
+        count: usize,
     },
     ToolUse {
         name: String,

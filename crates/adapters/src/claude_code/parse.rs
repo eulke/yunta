@@ -17,14 +17,14 @@ use serde_json::Value;
 use yunta_core::{sha256_hex, ModelName, SessionId};
 
 use crate::failure;
-use crate::session::{AgentError, AgentEvent, AgentOutcome};
+use crate::session::{AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
 
 pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
     match value.get("type").and_then(Value::as_str) {
-        Some("system") if is_init(&value) => vec![session_opened(&value)],
+        Some("system") if is_init(&value) => opened(&value),
         Some("assistant") => assistant_message(&value),
         Some("result") => result_events(&value),
         _ => Vec::new(),
@@ -33,6 +33,38 @@ pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
 
 fn is_init(value: &Value) -> bool {
     value.get("subtype").and_then(Value::as_str) == Some("init")
+}
+
+/// Everything the init line reports: the session it opens, and — when
+/// the CLI also names the set of tools that session holds — how many of
+/// the run tools are in it. A line that does not open a session reports
+/// nothing else: there is no session for a tool to belong to.
+fn opened(value: &Value) -> Vec<AgentEvent> {
+    let opened = session_opened(value);
+    if matches!(opened, AgentEvent::Failed { .. }) {
+        return vec![opened];
+    }
+    match run_tools_mounted(value) {
+        Some(count) => vec![opened, AgentEvent::RunToolsMounted { count }],
+        None => vec![opened],
+    }
+}
+
+/// How many of the per-run server's tools the init line's own tool set
+/// names. `None` when the line names no tool set at all: what this CLI
+/// does not report is unknown, never zero, and a reader must be able to
+/// tell the two apart before it acts on a count.
+fn run_tools_mounted(value: &Value) -> Option<usize> {
+    let prefix = format!("mcp__{}__", RunToolsEndpoint::SERVER_NAME);
+    Some(
+        value
+            .get("tools")?
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|name| name.starts_with(&prefix))
+            .count(),
+    )
 }
 
 /// The init line names the session, and the model when the CLI says

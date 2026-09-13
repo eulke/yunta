@@ -1,5 +1,5 @@
 //! Cycle detection over a `depends_on` graph — the one deterministic
-//! three-color DFS the ledger's task graph and `check`'s node graph both
+//! three-color DFS the tasks document's task graph and `check`'s node graph both
 //! walk, so the two can never disagree about what counts as a cycle.
 
 use std::collections::BTreeMap;

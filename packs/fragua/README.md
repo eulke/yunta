@@ -1,7 +1,7 @@
 # yunta/fragua
 
 The full reference pipeline, end to end: an ambiguity-resolving grill, a
-plan registered as a verified task ledger, implementation checked task by
+plan registered as a verified tasks document, implementation checked task by
 task, a lint→fix cycle, a baseline check, a two-runner review, and a PR.
 Open modes throughout (`quick`/`standard`/`full`) and the plan distilled to
 knowledge on finish. Installable and removable like any third-party pack —

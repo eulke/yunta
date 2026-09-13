@@ -1,0 +1,36 @@
+# A tasks document: one task per independently-verifiable unit of work.
+# Written strictly — any key not listed here fails the node.
+
+tasks:                                  # required, at least one
+  - id: add-dark-mode                   # required, unique. A letter, then
+                                        #   letters, digits, `_` or `-`.
+    title: "Add the dark mode toggle"   # required, non-empty
+    scope: ["src/theme/**"]             # required, at least one glob: the
+                                        #   only paths this task may touch
+    criteria:                           # required, at least one
+      - cmd: "cargo test -p ui dark_mode"   # required, non-empty. Must FAIL
+                                            #   before the work and pass after.
+      - cmd: "cargo clippy -- -D warnings"
+        type: guard                     # optional. A guard passes before AND
+                                        #   after the work, rather than failing
+                                        #   first.
+
+  - id: document-dark-mode
+    title: "Document the toggle in the README"
+    scope: ["README.md"]
+    depends_on: [add-dark-mode]         # optional, ids declared in this file
+    notes: "Link the screenshot the first task adds."   # optional, one line of
+                                        #   context for a runner with no history
+    criteria:
+      - cmd: "grep -q 'dark mode' README.md"
+
+  - id: review-contrast
+    title: "Check the dark palette reads at AA contrast"
+    scope: ["src/theme/tokens.css"]
+    depends_on: [add-dark-mode]
+    manual_review: true              # optional. An audit node judges whether
+                                     #   this task is complete.
+    justification: "Contrast against the new palette is a judgement no command makes."
+                                     #   say why a command cannot settle it
+    criteria:
+      - cmd: "test -f src/theme/tokens.css"

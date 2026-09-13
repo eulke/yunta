@@ -20,9 +20,11 @@
 //! that point is still returned.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
-use yunta_core::events::{EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::artifacts::ArtifactLedger;
+use yunta_core::events::{
+    ArtifactId, EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage,
+};
 use yunta_core::{NodeId, Seq, TaskId};
 
 /// One node's derived lifecycle state. An enum, not booleans:
@@ -61,16 +63,17 @@ pub struct RunState {
     pub nodes: HashMap<NodeId, NodeState>,
     pub tasks: HashMap<TaskId, TaskStatus>,
     pub total_tokens: TokenUsage,
-    /// Every `finding_posted` entry, in log order, never deduplicated
-    /// here — the raw log keeps every contributing posting ("without
-    /// losing authorship"); [`dedup_findings`] is the query-side view for
-    /// counting/display, not something replay bakes in.
+    /// Every finding that stands: the last state of each id nobody
+    /// withdrew, in the order each was first posted. Never deduplicated
+    /// here — two nodes that find the same thing each keep their own
+    /// posting ("without losing authorship"); [`dedup_findings`] is the
+    /// query-side view for counting and display.
     pub findings: Vec<Finding>,
-    /// Every `artifact_written` path, grouped by the node that wrote it,
-    /// in log order (`progress.md`'s own "what each node produced"). A
-    /// node with no artifact has no entry here at all, not an empty
-    /// `Vec`.
-    pub artifacts: HashMap<NodeId, Vec<PathBuf>>,
+    /// Every artifact the run holds, folded from its acceptances: what
+    /// each one is, the hash of its bytes and how the run came by it.
+    /// The one fold — a surface that lists, resolves or counts artifacts
+    /// reads it here rather than walking the log again.
+    pub artifacts: ArtifactLedger,
     /// `Some(diagnostic)` once the log has proven insufficient to derive
     /// further state — the point where a `yunta resume`/`status` would
     /// report the run as `broken`.
@@ -109,6 +112,9 @@ impl RunView {
 struct Aux {
     pre_gate: HashMap<NodeId, Option<NodeState>>,
     pending_questions: std::collections::HashSet<NodeId>,
+    /// Folds the run's finding events, so `RunState.findings` is what
+    /// stands rather than what was ever posted.
+    findings: yunta_core::events::findings::FindingLedger,
 }
 
 /// How many events a log carries under one `kind` this binary does not
@@ -162,6 +168,25 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             .push((event.seq, event.body.kind_name().to_string()));
         return Ok(());
     };
+    // Which kinds state an artifact is `ArtifactLedger`'s to know, and
+    // its fold is total — so every event goes through it and this
+    // derivation never names an artifact event at all. A node holding
+    // questions nobody has answered closes waiting: the identity the
+    // acceptance states is the signal, never the diagnostic the close
+    // writes.
+    let asks_questions = state
+        .artifacts
+        .apply(event.node_id.as_ref(), event.seq, payload)
+        .is_some_and(|held| {
+            held.artifact
+                == ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Questions,
+                }
+        });
+    if asks_questions {
+        aux.pending_questions.insert(require_node_id(event)?);
+    }
+
     match payload {
         EventPayload::NodeStarted(p) => {
             let node_id = require_node_id(event)?;
@@ -295,20 +320,19 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             state.tasks.insert(p.task_id.clone(), p.new_status);
             Ok(())
         }
-        EventPayload::FindingPosted(p) => {
-            state.findings.push(p.finding.clone());
-            Ok(())
-        }
-        EventPayload::ArtifactWritten(p) => {
-            let node_id = require_node_id(event)?;
-            if p.artifact_kind == Some(yunta_core::ArtifactKind::Questions) {
-                aux.pending_questions.insert(node_id.clone());
-            }
-            state
-                .artifacts
-                .entry(node_id)
-                .or_default()
-                .push(p.path.clone());
+        // The three finding events fold together or not at all: what a
+        // run holds is the last state of every id nobody withdrew, and
+        // `FindingLedger` is the one place that says so.
+        EventPayload::FindingPosted(_)
+        | EventPayload::FindingUpdated(_)
+        | EventPayload::FindingWithdrawn(_) => {
+            aux.findings.apply(event.node_id.as_ref(), payload);
+            state.findings = aux
+                .findings
+                .effective()
+                .into_iter()
+                .map(|posted| posted.finding)
+                .collect();
             Ok(())
         }
         EventPayload::ChildRunFinished(p) => {
@@ -320,7 +344,8 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             Ok(())
         }
         // Every other kind is run-scoped bookkeeping that does not
-        // change node/task/budget state (runner_resolved, baseline_captured,
+        // change node/task/budget state (artifact_accepted — already
+        // folded above, runner_resolved, baseline_captured,
         // agent_session_opened, agent_message,
         // context_assembled, criteria_checked, scope_checked, scope
         // expansion, hook_executed, node_rerouted, promotion_signaled,

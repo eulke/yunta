@@ -114,6 +114,27 @@ pub(super) enum RunToolsSetupError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "node `{node}` declares a `{kind}` artifact, which a session hands over \
+         through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
+         the document has no way in; pick a runner on an adapter that can be a client of the \
+         per-run MCP endpoint"
+    )]
+    TypedArtifactNeedsRunTools {
+        node: yunta_core::NodeId,
+        kind: yunta_core::ArtifactKind,
+        adapter: AdapterId,
+    },
+    #[error(
+        "node `{node}` declares a `{kind}` artifact, which a session hands over \
+         through the run tools, and its per-run MCP listener failed to start: {source}"
+    )]
+    TypedArtifactListenerFailed {
+        node: yunta_core::NodeId,
+        kind: yunta_core::ArtifactKind,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// What [`open_run_tools`] resolved. `session` is the listener when one
@@ -135,6 +156,14 @@ pub(super) struct RunToolsResolution {
 /// `coordination: blackboard` and this session cannot carry it
 /// (capability missing, or the listener failed to bind) — the caller
 /// fails the node with it, never emulates.
+/// The first interpreted artifact this node declares, if any: the one a
+/// refusal names, so a reader has somewhere to look.
+fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::ArtifactKind> {
+    crate::run::node_exec::declared_artifacts(ctx, node)
+        .into_iter()
+        .find_map(|spec| spec.kind())
+}
+
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -144,6 +173,12 @@ pub(super) async fn open_run_tools(
 ) -> Result<RunToolsResolution, RunToolsSetupError> {
     let host = &ctx.run_tools_host;
     let needs_blackboard = host.is_blackboard_member(&node.id);
+    // An interpreted artifact reaches the engine through these tools and
+    // nowhere else, so a node that declares one and cannot mount them
+    // fails before a session opens rather than after one produced
+    // nothing. The blackboard's own reason comes first: it is the older
+    // one, and a node can owe both.
+    let typed = declared_typed_artifact(ctx, node);
     if !adapter
         .capabilities()
         .declares(yunta_core::Capability::RunTools)
@@ -151,6 +186,13 @@ pub(super) async fn open_run_tools(
         if needs_blackboard {
             return Err(RunToolsSetupError::NoRunToolsCapability {
                 node: node.id.clone(),
+                adapter: adapter_id.clone(),
+            });
+        }
+        if let Some(kind) = typed {
+            return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
+                node: node.id.clone(),
+                kind,
                 adapter: adapter_id.clone(),
             });
         }
@@ -178,6 +220,13 @@ pub(super) async fn open_run_tools(
             if needs_blackboard {
                 return Err(RunToolsSetupError::ListenerFailed {
                     node: node.id.clone(),
+                    source: e,
+                });
+            }
+            if let Some(kind) = typed {
+                return Err(RunToolsSetupError::TypedArtifactListenerFailed {
+                    node: node.id.clone(),
+                    kind,
                     source: e,
                 });
             }

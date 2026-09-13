@@ -90,7 +90,14 @@ impl Bench {
             )
             .unwrap();
         let run_dir = root.path().join("run");
-        std::fs::create_dir_all(run_dir.join("artifacts")).unwrap();
+        // The directories `create_run` gives every run: the view the
+        // engine writes, and the working space every node stages in.
+        for dir in [
+            yunta_core::ARTIFACTS_DIR,
+            yunta_engine::run_dir::SCRATCH_DIR,
+        ] {
+            std::fs::create_dir_all(run_dir.join(dir)).unwrap();
+        }
         let host = Arc::new(RunToolsHost::new(
             storage.async_handle(),
             run_id.clone(),
@@ -106,6 +113,14 @@ impl Bench {
             run_id,
             host,
         }
+    }
+
+    /// Where `node` writes what it declares, created as an attempt of
+    /// that node would create it.
+    fn staging(&self, node: &str) -> std::path::PathBuf {
+        let dir = yunta_engine::run_dir::staging(&self.run_dir, &node.into());
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     async fn listener(&self, node: &str, task: Option<&str>) -> RunToolsSession {
@@ -369,10 +384,10 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
     client.cancel().await.unwrap();
 }
 
-// --- yunta_task_status (read-only ledger view) -------------------------------
+// --- yunta_task_status (read-only tasks view) -------------------------------
 
 #[tokio::test]
-async fn task_status_reflects_the_ledger_derived_from_the_log() {
+async fn task_status_reflects_the_task_state_derived_from_the_log() {
     let bench = Bench::new();
     bench
         .storage
@@ -471,7 +486,7 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert!(is_error);
     assert_eq!(
         text,
-        "scope expansion is ledger-task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+        "scope expansion is task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
     );
     client.cancel().await.unwrap();
 }
@@ -541,30 +556,60 @@ async fn dropping_the_session_closes_the_endpoint() {
 // --- the verdict a session can ask for, before it ends -------------------
 //
 // The point of the tool is that its answer and the node's close are the
-// same code. These name the two halves of that: what it says when the file
-// is right, and that it names the same problems a failed close would.
+// same code. These name the two halves of that: what it says once the
+// document is handed over, and that it says exactly what a failed close
+// would while it is not.
 
-fn ledger_spec() -> yunta_core::ArtifactSpec {
-    yunta_core::ArtifactSpec::Typed {
-        name: "plan.yaml".to_string(),
-        kind: yunta_core::ArtifactKind::TaskLedger,
-    }
+fn tasks_spec() -> yunta_core::ArtifactSpec {
+    yunta_core::ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Tasks)
+}
+
+/// The node those specs belong to, as the close reads it.
+fn plan_node() -> yunta_core::Node {
+    serde_norway::from_str(
+        r#"
+id: plan
+kind: prompt
+prompt: "Write the tasks document."
+artifacts:
+  produces: [tasks]
+"#,
+    )
+    .unwrap()
+}
+
+/// Hands one valid tasks document over, the way the node's own session
+/// does.
+async fn submit_plan(client: &rmcp::service::RunningService<rmcp::RoleClient, ()>) {
+    let (is_error, text) = call(
+        client,
+        "yunta_submit_tasks",
+        json!({
+            "name": "plan.yaml",
+            "document": {
+                "tasks": [{
+                    "id": "t1",
+                    "title": "Work",
+                    "scope": ["src/**"],
+                    "criteria": [{"cmd": "cargo test"}],
+                }],
+            },
+        }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
 }
 
 #[tokio::test]
 async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
     let bench = Bench::new();
-    std::fs::write(
-        bench.run_dir.join("artifacts").join("plan.yaml"),
-        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
-    )
-    .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
-    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    submit_plan(&client).await;
 
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("plan.yaml — ok"), "{text}");
+    assert!(text.contains("tasks — ok"), "{text}");
     assert!(
         text.contains("1 task(s) registered: `t1`"),
         "the session sees its meaning survived, not only its syntax: {text}"
@@ -572,36 +617,58 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 }
 
 #[tokio::test]
-async fn a_check_names_the_same_problems_the_close_would() {
+async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() {
     let bench = Bench::new();
-    // The failure that motivated the tool: a quoted boolean, and the rule
-    // that a repair round would have discovered next.
+    // A tasks document written by hand where a command node writes one.
+    // This node's document arrives through the tool, so the file is not
+    // it — and the session is told exactly what its close would say,
+    // word for word, instead of a confidence the close will not honour.
     std::fs::write(
-        bench.run_dir.join("artifacts").join("plan.yaml"),
-        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: \"true\"\n    criteria:\n      - cmd: \"cargo test\"\n",
+        bench.staging("plan").join("tasks.yaml"),
+        "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
-    let (_, text) = call(
-        &client,
-        "yunta_check_artifact",
-        json!({"name": "plan.yaml"}),
-    )
-    .await;
+    let (_, text) = call(&client, "yunta_check_artifact", json!({"name": "tasks"})).await;
 
-    assert!(text.contains("could not be read"), "{text}");
-    assert!(text.contains("task `t1`"), "{text}");
+    let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
+        .expect_err("the close owes the document nobody handed over");
     assert!(
-        text.contains("expected true or false"),
-        "the same diagnostic the close produces: {text}"
+        text.contains(&close[0].to_string()),
+        "the two answers are one: the check said `{text}`, the close says `{}`",
+        close[0]
+    );
+}
+
+#[tokio::test]
+async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() {
+    // Once a document is handed over it is a fact of the run. The verdict
+    // is about that document, so a file somebody wrote over afterwards
+    // does not change what the session is told.
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+    submit_plan(&client).await;
+
+    std::fs::write(
+        bench.staging("plan").join("tasks.yaml"),
+        "not a tasks document at all\n",
+    )
+    .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("tasks — ok"), "{text}");
+    assert!(
+        text.contains("1 task(s) registered: `t1`"),
+        "the verdict is about the document the run holds: {text}"
     );
 }
 
 #[tokio::test]
 async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
     let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![ledger_spec()]).await;
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(
         &client,
@@ -614,7 +681,41 @@ async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares(
         text.contains("`findings.yaml` is not an artifact"),
         "{text}"
     );
-    assert!(text.contains("`plan.yaml`"), "{text}");
+    assert!(text.contains("`tasks`"), "{text}");
+}
+
+/// A node declares the kind, so the tool that submits it is either
+/// mounted or absent: there is no argument left for a session to get
+/// wrong, and a document this node's close will never look for has no
+/// tool to arrive through.
+#[tokio::test]
+async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
+    let bench = Bench::new();
+    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let tools = client.list_tools(None).await.unwrap();
+    let names: Vec<&str> = tools.tools.iter().map(|t| t.name.as_ref()).collect();
+    assert!(names.contains(&"yunta_submit_tasks"), "{names:?}");
+    assert!(
+        !names.contains(&"yunta_submit_questions"),
+        "a kind this node does not declare has no way in: {names:?}"
+    );
+
+    // And the one that is mounted takes the document alone.
+    let schema = &tools
+        .tools
+        .iter()
+        .find(|t| t.name == "yunta_submit_tasks")
+        .expect("the tool is mounted")
+        .input_schema;
+    let properties = schema["properties"].as_object().expect("an object schema");
+    assert_eq!(
+        properties.keys().collect::<Vec<_>>(),
+        vec!["document"],
+        "the node declared the kind, so nothing names the artifact: {properties:?}"
+    );
+    client.cancel().await.unwrap();
 }
 
 #[tokio::test]
@@ -625,4 +726,224 @@ async fn a_node_with_nothing_to_check_says_so_rather_than_reporting_success() {
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(is_error, "{text}");
     assert!(text.contains("declares no artifacts"), "{text}");
+}
+
+// --- Protocol conformance, at the JSON the wire actually carries -------
+//
+// These read the result as an agent's own MCP client reads it, over raw
+// HTTP: `rmcp`'s client negotiates a revision older than the newest one
+// this server announces, so nothing it round-trips can show whether a
+// result satisfies that newest revision.
+
+/// The newest revision this server announces, and the one a current
+/// coding-agent CLI negotiates.
+const MODERN_REVISION: &str = "2026-07-28";
+
+/// A revision of the era before `server/discover`, whose clients open
+/// with `initialize` and carry a session id afterwards.
+const LEGACY_REVISION: &str = "2025-06-18";
+
+/// The `_meta` a client of [`MODERN_REVISION`] puts on every request:
+/// the revision it speaks, who it is, and what it can do. A request
+/// without them is not a modern one, and the transport routes it to
+/// the session-bearing era instead.
+fn modern_meta() -> serde_json::Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": MODERN_REVISION,
+        "io.modelcontextprotocol/clientInfo": {"name": "raw-client", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    })
+}
+
+/// One JSON-RPC POST as a client of `revision` sends it: the session's
+/// own credential, the two content types the streamable-HTTP transport
+/// may answer with, the revision in its header, and the method named in
+/// `Mcp-Method` the way SEP-2243 requires of that revision.
+async fn post(
+    session: &RunToolsSession,
+    revision: &str,
+    method: &str,
+    params: serde_json::Value,
+    mcp_session: Option<&str>,
+) -> reqwest::Response {
+    // A notification carries no id — that is what makes it one, and a
+    // server answers it with an acknowledgement rather than a result.
+    let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
+    if !method.starts_with("notifications/") {
+        body["id"] = json!(1);
+    }
+    let mut request = reqwest::Client::new()
+        .post(&session.endpoint.url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", session.endpoint.token.expose()),
+        )
+        .header("Accept", "application/json, text/event-stream")
+        .header("Content-Type", "application/json")
+        .header("MCP-Protocol-Version", revision)
+        .header("Mcp-Method", method)
+        .body(serde_json::to_string(&body).unwrap());
+    if let Some(id) = mcp_session {
+        request = request.header("Mcp-Session-Id", id);
+    }
+    request.send().await.unwrap()
+}
+
+/// The JSON-RPC result carried by a response body, whichever shape the
+/// transport chose: a bare JSON object, or an event stream whose last
+/// non-empty `data:` line is the answer.
+fn result_of(body: &str) -> serde_json::Value {
+    let message: serde_json::Value = if body.trim_start().starts_with('{') {
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("not JSON: {e}\n{body}"))
+    } else {
+        let data = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or_else(|| panic!("no `data:` line in the event stream:\n{body}"));
+        serde_json::from_str(data).unwrap_or_else(|e| panic!("not JSON: {e}\n{data}"))
+    };
+    assert!(
+        message.get("error").is_none(),
+        "the server refused the request: {message}"
+    );
+    message["result"].clone()
+}
+
+/// Every tool name a list result advertises.
+fn tool_names(result: &serde_json::Value) -> Vec<&str> {
+    result["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list result carries `tools`: {result}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect()
+}
+
+/// The tools every session is served, whatever it declares.
+fn assert_serves_the_session_tools(result: &serde_json::Value) {
+    let names = tool_names(result);
+    for expected in [
+        "yunta_check_artifact",
+        "yunta_post_finding",
+        "yunta_update_finding",
+        "yunta_withdraw_finding",
+        "yunta_task_status",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "`{expected}` is missing: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
+    let bench = Bench::new();
+    let session = bench.listener("solo", None).await;
+
+    let discovered = post(
+        &session,
+        MODERN_REVISION,
+        "server/discover",
+        json!({"_meta": modern_meta()}),
+        None,
+    )
+    .await;
+    assert_eq!(discovered.status(), 200, "discovery is answered");
+    let discovered = result_of(&discovered.text().await.unwrap());
+    let announced: Vec<&str> = discovered["supportedVersions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("discovery announces the revisions served: {discovered}"))
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        announced.contains(&MODERN_REVISION),
+        "the server announces it serves the newest revision: {announced:?}"
+    );
+
+    let listed = post(
+        &session,
+        MODERN_REVISION,
+        "tools/list",
+        json!({"_meta": modern_meta()}),
+        None,
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "the list is answered");
+    let listed = result_of(&listed.text().await.unwrap());
+
+    // What the newest revision requires of every list result: a client
+    // that validates the shape drops the whole list when one is absent,
+    // and the session then has no tool to call.
+    assert_eq!(listed["resultType"], "complete", "{listed}");
+    assert!(
+        listed["ttlMs"].as_u64().is_some(),
+        "`ttlMs` is a number the client can cache against: {listed}"
+    );
+    assert!(
+        matches!(listed["cacheScope"].as_str(), Some("public" | "private")),
+        "`cacheScope` says who may cache the list: {listed}"
+    );
+    assert_serves_the_session_tools(&listed);
+}
+
+#[tokio::test]
+async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
+    let bench = Bench::new();
+    let session = bench.listener("solo", None).await;
+
+    let opened = post(
+        &session,
+        LEGACY_REVISION,
+        "initialize",
+        json!({
+            "protocolVersion": LEGACY_REVISION,
+            "capabilities": {},
+            "clientInfo": {"name": "raw-client", "version": "1"},
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(opened.status(), 200, "the handshake is answered");
+    let mcp_session = opened
+        .headers()
+        .get("mcp-session-id")
+        .expect("the handshake opens a session")
+        .to_str()
+        .unwrap()
+        .to_string();
+    let negotiated = result_of(&opened.text().await.unwrap());
+    assert_eq!(
+        negotiated["protocolVersion"], LEGACY_REVISION,
+        "{negotiated}"
+    );
+
+    let accepted = post(
+        &session,
+        LEGACY_REVISION,
+        "notifications/initialized",
+        json!({}),
+        Some(&mcp_session),
+    )
+    .await;
+    assert!(
+        accepted.status().is_success(),
+        "the notification is accepted: {}",
+        accepted.status()
+    );
+
+    let listed = post(
+        &session,
+        LEGACY_REVISION,
+        "tools/list",
+        json!({}),
+        Some(&mcp_session),
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "the list is answered");
+    let listed = result_of(&listed.text().await.unwrap());
+    assert_serves_the_session_tools(&listed);
 }

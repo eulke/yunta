@@ -73,7 +73,9 @@ pub(crate) async fn spawn_detached_resume(
     run_id: &str,
     cwd: &Path,
 ) -> std::io::Result<()> {
-    let log_path = run_dir.join("scratch/detached.log");
+    let log_path = run_dir
+        .join(yunta_engine::run_dir::SCRATCH_DIR)
+        .join("detached.log");
     let log = std::fs::File::create(&log_path)?;
     let log_err = log.try_clone()?;
     let mut child_cmd = tokio::process::Command::new(

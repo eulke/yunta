@@ -31,9 +31,16 @@ use crate::session::PermissionProfile;
 
 /// The tools a profile allows, as the CLI names them; `None` leaves the
 /// CLI's whole tool set available.
+/// `Write` is in every profile, `ReadOnly` included, because a profile
+/// says what the session may do to *the project*, and a node's declared
+/// artifact is not the project: it is the node's own output, written to
+/// the run directory, which `--add-dir` is what actually opens. Leaving
+/// `Write` out of `ReadOnly` made a read-only node that declares an
+/// artifact unable to produce one — the node then failed at close for a
+/// file its session was never permitted to create.
 pub(super) fn tools(profile: PermissionProfile) -> Option<&'static str> {
     match profile {
-        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch"),
+        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch,Write"),
         PermissionProfile::Edit => Some("Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"),
         PermissionProfile::Full => None,
     }

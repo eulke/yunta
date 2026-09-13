@@ -1,5 +1,5 @@
 # quick mode: no plan approval and no review. The executor completes the
-# ledger's one task, lint and the baseline check pass on the crate it
+# tasks document's one task, lint and the baseline check pass on the crate it
 # bootstrapped, and the run pauses at `ship` — the first human decision
 # this mode keeps — before anything is pushed.
 workflow: build-feature

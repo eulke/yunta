@@ -189,7 +189,7 @@ sessions:
 #[tokio::test]
 async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let bench = Bench::new();
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -240,7 +240,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
     artifacts:
       produces: [plan.md]
   - id: notes
@@ -251,7 +251,7 @@ nodes:
     artifacts:
       produces: [notes.md]
 on_finish:
-  - distill: [plan.md, notes.md]
+  - distill: [{ node: plan, name: plan.md }, { node: notes, name: notes.md }]
 "#;
     // `notes` fails before producing its artifact — but with a re-route
     // budget of zero the run pauses... instead: notes produces, then we
@@ -266,7 +266,6 @@ on_finish:
         "on_finish:",
         "modes:\n  quick: { include: [plan] }\n  full: { include: all }\non_finish:",
     );
-    let artifacts = bench.run_dir().join("artifacts");
     let fixture = format!(
         r#"
 sessions:
@@ -274,7 +273,7 @@ sessions:
       - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
     outcome: {{ type: completed, summary: "planned" }}
 "#,
-        artifacts = artifacts.display()
+        artifacts = bench.staging("plan").display()
     );
     // Run in `quick` mode: `notes` never runs, its artifact never
     // exists, but distill declares it.
@@ -287,13 +286,15 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"quick".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -365,7 +366,7 @@ nodes:
   - id: plan
     kind: prompt
     runner: executor
-    prompt: "Write the plan to {{run.dir}}/artifacts/plan.md."
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
     artifacts:
       produces: [plan.md]
   - id: boom
@@ -373,9 +374,9 @@ nodes:
     depends_on: [plan]
     run: "false"
 on_finish:
-  - distill: [plan.md]
+  - distill: [{ node: plan, name: plan.md }]
 "#;
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(workflow, &fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
@@ -387,7 +388,7 @@ on_finish:
 #[tokio::test]
 async fn a_later_run_mounts_the_distilled_knowledge() {
     let bench = Bench::new();
-    let fixture = distill_fixture(&bench.run_dir().join("artifacts"));
+    let fixture = distill_fixture(&bench);
     let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -417,7 +418,8 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let second_id = RunId::from("run-test-2");
     let run_dir = create_run(
         CreateRunParams {
@@ -425,6 +427,7 @@ sessions:
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -472,7 +475,7 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}}; write {{run.dir}}/artifacts/findings-{{runner.role}}.md"
+    prompt: "Audit as {{runner.role}}; write {{node.artifacts}}/findings-{{runner.role}}.md"
     artifacts:
       produces: ["findings-{{runner.role}}.md"]
 "#;
@@ -483,20 +486,22 @@ runners:
   reviewer-alt:
     - { adapter: mock, model: mock-model }
 "#;
-    let artifacts = bench.run_dir().join("artifacts");
+    // Each fan-out sibling is a node of its own, so each writes in a
+    // directory of its own.
     let fixture = format!(
         r#"
 sessions:
   - match_prompt_contains: "Audit as reviewer;"
     effects:
-      - {{ path: "{artifacts}/findings-reviewer.md", content: "r1\n" }}
+      - {{ path: "{reviewer}/findings-reviewer.md", content: "r1\n" }}
     outcome: {{ type: completed, summary: "reviewed" }}
   - match_prompt_contains: "Audit as reviewer-alt"
     effects:
-      - {{ path: "{artifacts}/findings-reviewer-alt.md", content: "r2\n" }}
+      - {{ path: "{alt}/findings-reviewer-alt.md", content: "r2\n" }}
     outcome: {{ type: completed, summary: "reviewed-alt" }}
 "#,
-        artifacts = artifacts.display()
+        reviewer = bench.staging("review@reviewer").display(),
+        alt = bench.staging("review@reviewer-alt").display()
     );
 
     let (terminal, state) = bench.run_with_config(workflow, &fixture, config).await;
@@ -508,9 +513,104 @@ sessions:
             state.nodes.get(node)
         );
     }
-    // The templated artifact names rendered per expanded node.
-    assert!(artifacts.join("findings-reviewer.md").exists());
-    assert!(artifacts.join("findings-reviewer-alt.md").exists());
+    // The templated artifact names rendered per expanded node, each
+    // held by the sibling that produced it.
+    for role in ["reviewer", "reviewer-alt"] {
+        assert!(
+            bench
+                .projection(
+                    Some(&format!("review@{role}")),
+                    &format!("findings-{role}.md")
+                )
+                .is_ok(),
+            "`review@{role}` holds its own rendered artifact"
+        );
+    }
+}
+
+/// Two fan-out siblings each declare `findings` — the same kind, with no
+/// template between them — and each holds its own.
+///
+/// The identity is `(node, kind)` and a fan-out sibling is a node of its
+/// own, so nothing has to be spelled per role for the two documents to
+/// stay apart: the template the reference workflows carried existed only
+/// because `artifacts/` was flat.
+#[tokio::test]
+async fn two_fanout_siblings_each_hold_their_own_document_of_one_kind() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: fanout-findings
+nodes:
+  - id: review
+    kind: prompt
+    runners: [reviewer, reviewer-alt]
+    prompt: "Audit as {{runner.role}} and report what you find."
+    artifacts:
+      produces: [findings]
+"#;
+    let config = r#"
+runners:
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }
+"#;
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "Audit as reviewer and"
+    steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments: { id: f-one, severity: minor, title: One, location: src/a.rs, detail: "the first" }
+    outcome: { type: completed, summary: "reviewed" }
+  - match_prompt_contains: "Audit as reviewer-alt and"
+    steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments: { id: f-two, severity: minor, title: Two, location: src/b.rs, detail: "the second" }
+    outcome: { type: completed, summary: "reviewed-alt" }
+"#;
+
+    let (terminal, state) = bench.run_with_config(workflow, fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    // One acceptance per sibling, under the same identity and different
+    // producers — and each view sits under its own node, named by the
+    // kind.
+    let held = bench.accepted();
+    let findings: Vec<_> = held
+        .iter()
+        .filter(|a| {
+            a.artifact
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Findings,
+                }
+        })
+        .collect();
+    assert_eq!(findings.len(), 2, "one per sibling: {held:?}");
+    for (role, id) in [("reviewer", "f-one"), ("reviewer-alt", "f-two")] {
+        let node = format!("review@{role}");
+        assert!(
+            findings
+                .iter()
+                .any(|a| a.producer.as_ref().map(|n| n.as_str()) == Some(node.as_str())),
+            "`{node}` holds its own findings artifact: {findings:?}"
+        );
+        let bytes = bench
+            .projection(Some(&node), "findings.yaml")
+            .unwrap_or_else(|e| panic!("`{node}`'s view is named by its kind: {e}"));
+        let file: yunta_core::FindingsFile =
+            yunta_core::shape::read(&bytes, "findings.yaml").expect("a canonical findings file");
+        assert_eq!(
+            file.findings
+                .iter()
+                .map(|f| f.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![id],
+            "each sibling's document is its own"
+        );
+    }
 }
 
 #[tokio::test]
@@ -552,7 +652,6 @@ async fn max_per_run_holds_exactly_under_a_fully_concurrent_batch() {
     // count is deterministic — exactly 2 granted, 2 escalated — never
     // "up to concurrency - 1 over".
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: capped-concurrency
@@ -560,25 +659,24 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
     concurrency: 4
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: rules
       within: ["extra-*.txt"]
       max_per_run: 2
 "#;
-    let mut ledger = String::from("tasks:\n");
+    let mut tasks = String::from("tasks:\n");
     for n in 1..=4 {
-        ledger.push_str(&task_yaml(
+        tasks.push_str(&task_yaml(
             &format!("task-{n}"),
             &format!("t{n}"),
             &format!("a{n}.txt"),
@@ -586,7 +684,7 @@ nodes:
         ));
     }
 
-    let mut fixture = plan_session(&artifacts_dir, &ledger);
+    let mut fixture = plan_session(&tasks);
     for n in 1..=4 {
         let request_yaml = format!(
             "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"
@@ -652,13 +750,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -736,8 +836,13 @@ capabilities: { resume_session: true }
 sessions:
   - outcome: { type: completed, summary: "picked up where it left off" }
 "#;
-    let (terminal, events, adapter) =
-        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -760,8 +865,13 @@ async fn resume_session_without_the_capability_degrades_to_restart_with_an_event
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
-    let (terminal, events, adapter) =
-        resume_orphan_with_mock(RESUME_WORKFLOW, fixture, Some("mock-session-orig")).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(adapter.resumes_seen().is_empty());
@@ -782,7 +892,13 @@ capabilities: { resume_session: true }
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
-    let (terminal, events, adapter) = resume_orphan_with_mock(RESUME_WORKFLOW, fixture, None).await;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_WORKFLOW,
+        fixture,
+        session: None,
+        staged: &[],
+    })
+    .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(adapter.resumes_seen().is_empty());
@@ -813,6 +929,96 @@ sessions:
         e.payload(),
         Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
     )));
+}
+
+/// A resumable `prompt` node that owes a file of its own: what the
+/// session writes is what the close reads back.
+const RESUME_ARTIFACT_WORKFLOW: &str = r#"
+name: resumable-artifact
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    on_interrupt: resume_session
+    prompt: "Write the report."
+    artifacts: { produces: [report.md] }
+"#;
+
+/// What the cut session had already written before the interruption.
+const REPORT_LEFT_BY_THE_CUT_SESSION: &[(&str, &str, &str)] =
+    &[("work", "report.md", "the report the cut session wrote\n")];
+
+#[tokio::test]
+async fn a_continued_session_keeps_the_artifact_it_had_already_written() {
+    // The staging belongs to the session, not to the attempt: the
+    // session picked back up is the one that wrote `report.md`, so that
+    // file is work it did. It does not write it again, and the node
+    // closes on it.
+    let fixture = r#"
+capabilities: { resume_session: true }
+sessions:
+  - outcome: { type: completed, summary: "finished what it had started" }
+"#;
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_ARTIFACT_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+    })
+    .await;
+
+    assert_eq!(
+        adapter.resumes_seen(),
+        vec![yunta_core::SessionId::from("mock-session-orig")],
+        "the cut session must be resumed, not replaced"
+    );
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "what the continued session already wrote closes the node"
+    );
+    let accepted: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::ArtifactAccepted(p)) => {
+                Some(p.artifact.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        accepted,
+        vec!["report.md".to_string()],
+        "the run holds the artifact the continued session wrote"
+    );
+}
+
+#[tokio::test]
+async fn a_fresh_session_replacing_an_interrupted_one_opens_on_an_empty_staging() {
+    // The adapter declares no session resume, so the interrupted session
+    // is replaced rather than continued. This session wrote nothing:
+    // what the one before it left is not its work, and the node owes an
+    // artifact it never produced.
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "started over" }
+"#;
+    let (terminal, _events, adapter) = resume_orphan_with_mock(Orphan {
+        workflow: RESUME_ARTIFACT_WORKFLOW,
+        fixture,
+        session: Some("mock-session-orig"),
+        staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+    })
+    .await;
+
+    assert!(adapter.resumes_seen().is_empty());
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("a fresh session is judged on what it produced: {terminal:?}");
+    };
+    assert!(
+        reason.contains("report.md") && reason.contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason}"
+    );
 }
 
 /// A `prompt` node that declares `network: false` — the policy no adapter
@@ -911,5 +1117,99 @@ sessions:
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an adapter that declares network isolation leaves nothing to degrade"
+    );
+}
+
+#[tokio::test]
+async fn distill_carries_the_hash_the_log_names_never_a_rehash_of_the_view() {
+    // The view is a projection, and a node that overwrites one changes
+    // no fact of the run: what distill copies and what it records as the
+    // content hash both come from the artifact the log holds.
+    let bench = Bench::new();
+    // The view belongs to the engine, so the node that overwrites one
+    // names it by its absolute path rather than through a template no
+    // workflow has for it.
+    let workflow = format!(
+        r#"
+name: distiller
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{{{node.artifacts}}}}/plan.md."
+    artifacts:
+      produces: [plan.md]
+  - id: tamper
+    kind: bash
+    depends_on: [plan]
+    run: "echo TAMPERED-VIEW > {view}/plan/plan.md"
+on_finish:
+  - distill: [{{ node: plan, name: plan.md }}]
+"#,
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+    );
+    let fixture = distill_fixture(&bench);
+    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let dest = bench
+        .worktree
+        .join(".yunta/knowledge/distilled/distiller")
+        .join(bench.run_id.as_str());
+    assert_eq!(
+        std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land"),
+        "DISTILLED-MARKER: the durable decision\n",
+        "distill copies the bytes the run accepted, not what is lying in the view"
+    );
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    let provenance: serde_norway::Value =
+        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+            .unwrap();
+    assert_eq!(
+        provenance["artifacts"][0]["content_hash"].as_str(),
+        Some(format!("sha256:{}", held[0].content_hash).as_str()),
+        "the recorded hash is the one on the log, never a rehash"
+    );
+}
+
+// --- where a session writes --------------------------------------------
+
+#[tokio::test]
+async fn a_node_that_declares_an_opaque_artifact_writes_in_its_own_staging_directory() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: staged
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the plan to {{node.artifacts}}/plan.md."
+    artifacts:
+      produces: [plan.md]
+"#;
+    let staging = bench.staging("plan");
+    let fixture = format!(
+        r#"
+sessions:
+  - match_prompt_contains: "{staging}/plan.md"
+    effects:
+      - {{ path: "{staging}/plan.md", content: "the plan\n" }}
+    outcome: {{ type: completed, summary: "planned" }}
+"#,
+        staging = staging.display()
+    );
+
+    let (terminal, state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        bench.mock().artifact_dirs_seen(),
+        vec![Some(staging)],
+        "the writable root a session is granted is this node's own, never the run's view"
+    );
+    assert_eq!(
+        bench.artifact("plan.md").expect("the run holds it"),
+        b"the plan\n"
     );
 }

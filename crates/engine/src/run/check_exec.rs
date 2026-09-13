@@ -25,17 +25,15 @@ pub(super) async fn execute_check(
     ctx: &RunCtx<'_>,
     node: &Node,
     builtin: &CheckBuiltin,
-    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     match builtin {
-        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, attempt, cancel).await,
-        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, attempt, cancel).await,
-        // `findings_gate` reads the log, runs no command of its own —
-        // `cancel` reaches only the repair session its close may
-        // dispatch.
+        CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, cancel).await,
+        CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, cancel).await,
+        // `findings_gate` reads the log and runs no command of its own,
+        // so nothing of it is cancellable.
         CheckBuiltin::FindingsGate { max_severity } => {
-            execute_findings_gate(ctx, node, *max_severity, attempt, cancel).await
+            execute_findings_gate(ctx, node, *max_severity).await
         }
     }
 }
@@ -85,7 +83,6 @@ async fn run_command(
 async fn execute_baseline_compare(
     ctx: &RunCtx<'_>,
     node: &Node,
-    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(baseline) = &ctx.manifest.config.baseline else {
@@ -138,8 +135,6 @@ async fn execute_baseline_compare(
                 Close::new(
                     format!("baseline captured (exit {})", output.exit_code),
                     TokenUsage::default(),
-                    attempt,
-                    cancel,
                 ),
             )
             .await
@@ -163,8 +158,6 @@ async fn execute_baseline_compare(
                     Close::new(
                         format!("no regression vs baseline (exit {})", output.exit_code),
                         TokenUsage::default(),
-                        attempt,
-                        cancel,
                     ),
                 )
                 .await
@@ -180,7 +173,6 @@ async fn execute_baseline_compare(
 async fn execute_coverage_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
-    attempt: u32,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(coverage) = &ctx.manifest.config.coverage else {
@@ -232,8 +224,6 @@ async fn execute_coverage_gate(
                     coverage.threshold
                 ),
                 TokenUsage::default(),
-                attempt,
-                cancel,
             ),
         )
         .await
@@ -282,8 +272,6 @@ async fn execute_findings_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
     max_severity: FindingSeverity,
-    attempt: u32,
-    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let state = ctx.run_view().await?.state;
     let offending: Vec<&str> = state
@@ -300,8 +288,6 @@ async fn execute_findings_gate(
             Close::new(
                 format!("no finding at or above {max_severity:?}"),
                 TokenUsage::default(),
-                attempt,
-                cancel,
             ),
         )
         .await

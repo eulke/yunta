@@ -1,5 +1,5 @@
 //! End-to-end runs with the mock adapter: the bootstrap
-//! shape — a prompt plan node that produces the ledger, a loop that
+//! shape — a prompt plan node that produces the tasks document, a loop that
 //! implements it task by task, a bash gate — plus re-routes, hooks,
 //! findings and the birth of a run, all derived from the event log alone.
 
@@ -19,7 +19,6 @@ use common::*;
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
     let workflow = r#"
 name: bootstrap
@@ -27,46 +26,58 @@ nodes:
   - id: plan
     kind: prompt
     runner: planner
-    prompt: "Write the ledger to {{run.dir}}/artifacts/plan.yaml."
+    prompt: "Write the tasks document."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
   - id: implement
     kind: loop
     runner: executor
     depends_on: [plan]
     until: all_tasks_complete
-    prompt: "Read your task from the ledger and implement it."
+    prompt: "Read your task from the tasks document and implement it."
   - id: verify
     kind: bash
     depends_on: [implement]
     run: "test -f hello.txt && test -f world.txt"
 "#;
 
-    // Session 1 is the planner: it "writes" the ledger artifact the way a
-    // real agent would, at the absolute path its prompt named. Sessions 2
-    // and 3 are one executor session per task.
-    let fixture = format!(
-        r#"
+    // Session 1 is the planner: it hands the tasks document over through its run
+    // tools. Sessions 2 and 3 are one executor session per task, each
+    // writing the file its task is scoped to.
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Create hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+              - id: T002
+                title: "Create world"
+                scope: ["world.txt"]
+                criteria:
+                  - cmd: "test -f world.txt"
+                depends_on: [T001]
+    outcome: { type: completed, summary: "planned" }
   - effects:
-      - {{ path: "{artifacts}/plan.yaml", content: "tasks:\n  - id: T001\n    title: \"Create hello\"\n    scope: [\"hello.txt\"]\n    criteria:\n      - cmd: \"test -f hello.txt\"\n  - id: T002\n    title: \"Create world\"\n    scope: [\"world.txt\"]\n    criteria:\n      - cmd: \"test -f world.txt\"\n    depends_on: [T001]\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-  - effects:
-      - {{ path: hello.txt, content: "hello" }}
+      - { path: hello.txt, content: "hello" }
     steps:
-      - {{ type: usage, input_tokens: 100, output_tokens: 20 }}
-    outcome: {{ type: completed, summary: "did T001" }}
+      - { type: usage, input_tokens: 100, output_tokens: 20 }
+    outcome: { type: completed, summary: "did T001" }
   - effects:
-      - {{ path: world.txt, content: "world" }}
+      - { path: world.txt, content: "world" }
     steps:
-      - {{ type: usage, input_tokens: 80, output_tokens: 10 }}
-    outcome: {{ type: completed, summary: "did T002" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+      - { type: usage, input_tokens: 80, output_tokens: 10 }
+    outcome: { type: completed, summary: "did T002" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
@@ -271,7 +282,7 @@ nodes:
 }
 
 #[tokio::test]
-async fn an_agent_that_never_writes_its_declared_artifact_fails_the_node() {
+async fn a_session_that_never_hands_over_its_declared_document_fails_the_node() {
     let bench = Bench::new();
 
     let workflow = r#"
@@ -282,13 +293,15 @@ nodes:
     runner: planner
     prompt: "Write the plan."
     artifacts:
-      produces:
-        - { name: plan.yaml, kind: task-ledger }
+      produces: [tasks]
 "#;
 
-    // The session claims success but writes nothing — the engine
-    // verifies, and the missing artifact fails the node.
+    // The session claims success but submits nothing — the engine
+    // verifies, and the document nobody handed over fails the node. It
+    // names the node and what that node owes: no file was ever going to
+    // be there, so the failure points at nothing on disk.
     let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "trust me, it is written" }
 "#;
@@ -300,8 +313,8 @@ sessions:
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
-                "artifacts/plan.yaml: 1 error\n  \
-         the document was declared by node `plan` and never produced"
+                "node `plan`: 1 error\n  handed over no tasks document — \
+                 produce it before the node ends, or stop declaring it here"
             );
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -334,7 +347,8 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let report = execute_run(RunEnv {
         run_id: &bench.run_id,
         manifest: &manifest,
@@ -550,22 +564,25 @@ nodes:
     runner: executor
     prompt: "Review the changes."
     artifacts:
-      produces:
-        - { name: findings.yaml, kind: findings }
+      produces: [findings]
 "#;
 
-    let artifacts_dir = bench.run_dir().join("artifacts");
-    let fixture = format!(
-        r#"
+    let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
-  - effects:
-      - {{ path: "{artifacts}/findings.yaml", content: "findings:\n  - id: f1\n    severity: major\n    title: \"Unchecked error\"\n    location: \"src/lib.rs:10\"\n    detail: \"The Result is discarded.\"\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"#,
-        artifacts = artifacts_dir.display()
-    );
+  - steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: f1
+          severity: major
+          title: "Unchecked error"
+          location: "src/lib.rs:10"
+          detail: "The Result is discarded."
+    outcome: { type: completed, summary: "reviewed" }
+"#;
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let (terminal, state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(state.findings.len(), 1);
     assert_eq!(state.findings[0].id, "f1");
@@ -615,9 +632,8 @@ nodes:
     let content = std::fs::read_to_string(
         bench
             .run_dir()
-            .join("context")
-            .join(source.content_hash.as_str())
-            .join("content"),
+            .join("objects")
+            .join(source.content_hash.as_str()),
     )
     .unwrap();
     assert!(
@@ -638,11 +654,104 @@ nodes:
     );
 }
 
+// --- what a command node writes enters the run at its close ------------------
+
+#[tokio::test]
+async fn a_file_a_command_node_writes_enters_the_run_as_ingested() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ingest
+nodes:
+  - id: report
+    kind: bash
+    run: "echo the-report > {{node.artifacts}}/report.md"
+    artifacts: { produces: [report.md] }
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(
+        held[0].producer.as_ref().map(|n| n.to_string()),
+        Some("report".to_string())
+    );
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Opaque {
+            name: "report.md".to_string()
+        }
+    );
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        bench.object(&held[0].content_hash).expect("the object"),
+        b"the-report\n"
+    );
+    assert_eq!(
+        std::fs::read(bench.run_dir().join("artifacts/report/report.md")).expect("the view"),
+        b"the-report\n",
+        "the view sits under the node that produced it"
+    );
+}
+
+#[tokio::test]
+async fn an_interpreted_artifact_a_node_wrote_is_stored_canonical() {
+    let bench = Bench::new();
+    // A valid tasks document in the node's own spelling: a comment and a
+    // flow style nothing canonical writes.
+    let workflow = r#"
+name: ingest-typed
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf '# the plan\ntasks:\n- {id: alpha, title: First, scope: [src/**], criteria: [{cmd: cargo test}]}\n' > {{node.artifacts}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let held = bench.accepted();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(
+        held[0].artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks
+        }
+    );
+
+    // What the run stores is the document, rendered the way the engine
+    // renders every document of that kind — not the spelling the node
+    // happened to write.
+    let written =
+        std::fs::read(bench.staging("plan").join("tasks.yaml")).expect("the node wrote it");
+    let stored = bench.object(&held[0].content_hash).expect("the object");
+    assert_ne!(stored, written, "the file was not canonical to begin with");
+    let parsed: yunta_core::TasksFile =
+        yunta_core::shape::read(&stored, "tasks.yaml").expect("a canonical tasks document");
+    assert_eq!(
+        stored,
+        yunta_core::shape::render(&parsed).unwrap().into_bytes(),
+        "the stored bytes re-render to themselves"
+    );
+    assert_eq!(
+        parsed
+            .tasks
+            .iter()
+            .map(|t| t.id.to_string())
+            .collect::<Vec<_>>(),
+        vec!["alpha".to_string()]
+    );
+}
+
 // --- a run is born once, whole -----------------------------------------------
 
 struct BirthBench {
     _root: tempfile::TempDir,
     runs_root: std::path::PathBuf,
+    /// The tree the run works in — a birth asks it what it already has.
+    worktree: std::path::PathBuf,
     storage: Storage,
     manifest: yunta_core::Manifest,
 }
@@ -665,10 +774,12 @@ impl BirthBench {
             &worktree,
             &HashMap::new(),
         )
-        .unwrap();
+        .unwrap()
+        .manifest;
         BirthBench {
             runs_root: root.path().join("runs"),
             _root: root,
+            worktree,
             storage,
             manifest,
         }
@@ -685,6 +796,7 @@ impl BirthBench {
                 manifest: &self.manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts,
             },
@@ -714,11 +826,18 @@ async fn create_run_refuses_an_existing_run_dir() {
 }
 
 #[tokio::test]
-async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log() {
+async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     let bench = BirthBench::new();
     let run_id = RunId::from("run-with-brief");
+    let from = RunId::from("run-predecessor");
     let artifacts = vec![yunta_engine::BirthArtifact {
-        name: "brief/plan.md".to_string(),
+        artifact: yunta_core::events::ArtifactId::Opaque {
+            name: "brief/plan.md".to_string(),
+        },
+        origin: yunta_engine::BirthOrigin::Inherited {
+            run: from.clone(),
+            producer: Some("write".into()),
+        },
         bytes: b"hello".to_vec(),
     }];
 
@@ -726,15 +845,38 @@ async fn create_run_writes_the_birth_artifacts_before_the_run_exists_in_the_log(
 
     assert_eq!(
         std::fs::read(run_dir.join("artifacts").join("brief").join("plan.md")).unwrap(),
-        b"hello"
+        b"hello",
+        "the view of what the run was handed sits at the root: it has no producer here"
     );
     let events = bench.storage.events_for_run(&run_id).unwrap();
     assert!(
         matches!(
-            events.as_slice(),
-            [only] if matches!(only.payload(), Some(yunta_core::events::EventPayload::RunCreated(_)))
+            events.first().and_then(|e| e.payload()),
+            Some(yunta_core::events::EventPayload::RunCreated(_))
         ),
-        "the birth is one run_created after the directory is complete"
+        "the run exists in the log before anything is said about it"
+    );
+    let accepted = yunta_testkit::accepted(&events);
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    assert_eq!(
+        accepted[0].producer, None,
+        "no node of this run produced it"
+    );
+    assert_eq!(
+        accepted[0].origin,
+        yunta_core::events::ArtifactOrigin::Inherited {
+            run: from,
+            producer: Some("write".into()),
+        }
+    );
+    assert_eq!(
+        std::fs::read(
+            run_dir
+                .join("objects")
+                .join(accepted[0].content_hash.as_str())
+        )
+        .unwrap(),
+        b"hello"
     );
 }
 
@@ -767,13 +909,15 @@ nodes:
         &bench.worktree,
         &provided,
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -804,6 +948,106 @@ nodes:
     assert_eq!(created.inputs["idea"], "ship it");
 }
 
+/// A hand-written tasks document: what a person points a run at.
+const TASKS_ON_DISK: &str = "tasks:\n  - id: greeting\n    title: 'Add the greeting'\n    \
+     scope: ['src/**']\n    criteria:\n      - {cmd: 'true'}\n";
+
+#[tokio::test]
+async fn a_document_input_is_born_as_an_artifact_and_frozen_as_its_hash() {
+    let bench = Bench::new();
+    std::fs::write(bench.worktree.join("plan.yaml"), TASKS_ON_DISK).unwrap();
+    let workflow: Workflow = serde_norway::from_str(
+        r#"
+name: with-a-document
+inputs:
+  tasks:
+    type: document
+    kind: tasks
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+"#,
+    )
+    .unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let provided = HashMap::from([("tasks".to_string(), "plan.yaml".to_string())]);
+    let frozen = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &provided,
+    )
+    .unwrap();
+    create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &frozen.manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            worktree: &bench.worktree,
+            promoted_from: None,
+            artifacts: &frozen.documents,
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(
+        matches!(
+            events.first().and_then(|e| e.payload()),
+            Some(yunta_core::events::EventPayload::RunCreated(_))
+        ),
+        "the run exists in the log before the document it holds is stated"
+    );
+    let accepted = yunta_testkit::accepted(&events);
+    assert_eq!(accepted.len(), 1, "{accepted:?}");
+    assert_eq!(
+        accepted[0].producer, None,
+        "no node of this run produced it: it came in as an input"
+    );
+    assert_eq!(
+        accepted[0].origin,
+        yunta_core::events::ArtifactOrigin::Input {
+            input: "tasks".to_string()
+        }
+    );
+    assert_eq!(
+        accepted[0].artifact,
+        yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks
+        }
+    );
+
+    let frozen_value = format!("sha256:{}", accepted[0].content_hash);
+    assert_eq!(
+        frozen.manifest.inputs["tasks"], frozen_value,
+        "the manifest freezes the document the run holds, not the path it was read from"
+    );
+    let created = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::RunCreated(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("run_created is the first event");
+    assert_eq!(created.inputs["tasks"], frozen_value);
+
+    assert_eq!(
+        yunta_engine::derive(&events).tasks,
+        std::collections::HashMap::from([(
+            "greeting".into(),
+            yunta_core::events::TaskStatus::Pending
+        )]),
+        "the tasks of a document the run was given are tasks of the run: no node produces it, \
+         so its birth is where they are registered"
+    );
+}
+
 #[tokio::test]
 async fn run_resumed_records_the_policy_each_orphan_resolved_to() {
     let bench = Bench::new();
@@ -826,13 +1070,15 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
-    .unwrap();
+    .unwrap()
+    .manifest;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &bench.run_id,
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -900,5 +1146,257 @@ nodes:
         resumed.resume_policy_applied.as_deref(),
         Some("fail_if_uncertain"),
         "the one policy every orphan shares, never a fixed literal"
+    );
+}
+
+#[tokio::test]
+async fn the_loop_finds_its_tasks_after_the_view_of_them_is_deleted() {
+    // The tasks document is a fact of the log and bytes in the store.
+    // Deleting the whole `artifacts/` view leaves both untouched, so the
+    // loop still has its tasks.
+    let bench = Bench::new();
+    // The view is the engine's own directory, so the node that deletes
+    // it names it by its absolute path rather than through a template no
+    // workflow has for it.
+    let workflow = format!(
+        r#"
+name: tasks-from-the-log
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{{{node.artifacts}}}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+  - id: wipe
+    kind: bash
+    depends_on: [plan]
+    run: "rm -rf {view}"
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [wipe]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#,
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+    );
+    let fixture = r#"
+sessions:
+  - effects:
+      - { path: hello.txt, content: "hello" }
+    outcome: { type: completed, summary: "did T001" }
+"#;
+
+    let (terminal, state) = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+}
+
+#[tokio::test]
+async fn a_file_left_by_a_failed_attempt_is_not_ingested_by_the_next_one() {
+    // `report` writes its artifact and fails; the re-route fixes what
+    // made it fail and `report` runs again, this time writing nothing.
+    // The second attempt owes an artifact it never produced, because it
+    // opened on an empty directory — what the first attempt left behind
+    // is not this attempt's work.
+    let bench = Bench::new();
+    let workflow = r#"
+name: stale-staging
+nodes:
+  - id: report
+    kind: bash
+    run: "test -f marker || (echo the-report > {{node.artifacts}}/report.md; false)"
+    artifacts: { produces: [report.md] }
+    on_failure: { goto: fix, max_reroutes: 1 }
+  - id: fix
+    kind: bash
+    run: "touch marker"
+"#;
+    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("the second attempt owes an artifact it never wrote: {terminal:?} {state:?}");
+    };
+    assert!(
+        reason.contains("report.md") && reason.contains("never produced"),
+        "the second attempt is judged on what it produced: {reason}"
+    );
+    assert_eq!(
+        bench.accepted(),
+        vec![],
+        "nothing a failed attempt left behind becomes the next attempt's artifact"
+    );
+}
+
+// --- a run answers for the tasks of every document it holds ------------
+
+const ONE_TASK: &str = r#"
+tasks:
+  - id: T001
+    title: "Write done.txt"
+    scope: ["done.txt"]
+    criteria: [{cmd: "test -f done.txt"}]
+"#;
+
+/// The tasks document as a run stores it: read through its own door and
+/// rendered canonically.
+fn tasks_document(yaml: &str) -> (yunta_core::TasksFile, Vec<u8>) {
+    let document: yunta_core::TasksFile =
+        yunta_core::shape::read(yaml.as_bytes(), "tasks").expect("a valid tasks document");
+    let bytes = yunta_core::shape::render(&document)
+        .expect("the canonical rendering")
+        .into_bytes();
+    (document, bytes)
+}
+
+#[tokio::test]
+async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_never_created() {
+    let bench = BirthBench::new();
+    let source = RunId::from("run-unreadable-source");
+    // A status about a task nobody registered: a log replay stops at.
+    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    planted.record(yunta_testkit::task_status_changed(
+        &"T001".into(),
+        yunta_core::events::TaskStatus::Done,
+        None,
+        1u64.into(),
+    ));
+
+    let (_document, bytes) = tasks_document(ONE_TASK);
+    let run_id = RunId::from("run-from-a-broken-source");
+    let error = bench
+        .create(
+            &run_id,
+            &[yunta_engine::BirthArtifact {
+                artifact: yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Tasks,
+                },
+                origin: yunta_engine::BirthOrigin::Inherited {
+                    run: source.clone(),
+                    producer: None,
+                },
+                bytes,
+            }],
+        )
+        .await
+        .unwrap_err();
+
+    let yunta_engine::RunError::Broken { diagnostic } = &error else {
+        panic!("a source whose log does not replay refuses the birth: {error:?}");
+    };
+    assert!(
+        diagnostic.contains(source.as_str()),
+        "the diagnostic names the run that cannot answer: {diagnostic}"
+    );
+    assert!(
+        !bench.runs_root.join(run_id.as_str()).exists(),
+        "the run has no directory, because it was never born"
+    );
+    assert!(
+        bench.storage.events_for_run(&run_id).unwrap().is_empty(),
+        "nor a single event"
+    );
+}
+
+const LOOP_ONLY_WORKFLOW: &str = r#"
+name: loop-only
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+
+#[tokio::test]
+async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stuck() {
+    let bench = Bench::new();
+    let workflow: Workflow = serde_norway::from_str(LOOP_ONLY_WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap()
+    .manifest;
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            worktree: &bench.worktree,
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    // A document the run holds and never said what to do about — the
+    // one shape that reaches a loop with no registration behind it.
+    let (_document, bytes) = tasks_document(ONE_TASK);
+    let content_hash = yunta_engine::ObjectStore::at(&run_dir).put(&bytes).unwrap();
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: None,
+                payload: yunta_core::events::EventPayload::ArtifactAccepted(
+                    yunta_core::events::ArtifactAcceptedPayload {
+                        artifact: yunta_core::events::ArtifactId::Interpreted {
+                            kind: yunta_core::ArtifactKind::Tasks,
+                        },
+                        content_hash,
+                        origin: yunta_core::events::ArtifactOrigin::Inherited {
+                            run: "run-elsewhere".into(),
+                            producer: None,
+                        },
+                    },
+                ),
+            },
+            &yunta_core::SystemClock,
+        )
+        .unwrap();
+
+    let adapters: HashMap<yunta_core::AdapterId, std::sync::Arc<dyn yunta_adapters::Adapter>> =
+        HashMap::from([(
+            "mock".into(),
+            std::sync::Arc::new(yunta_adapters::MockAdapter::from_yaml("sessions: []\n").unwrap())
+                as std::sync::Arc<dyn yunta_adapters::Adapter>,
+        )]);
+    let error = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &adapters,
+        storage: &bench.storage.async_handle(),
+        clock: std::sync::Arc::new(FixedClock),
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+        ambient: None,
+    })
+    .await
+    .unwrap_err();
+
+    let yunta_engine::RunError::Broken { diagnostic } = &error else {
+        panic!("a document with no registration behind it is broken: {error:?}");
+    };
+    assert!(
+        diagnostic.contains("tasks.yaml") && diagnostic.contains("T001"),
+        "the diagnostic names the document and every task missing from the log: {diagnostic}"
     );
 }

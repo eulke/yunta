@@ -117,15 +117,15 @@ pub struct Receipt {
     /// Events this binary could not interpret, by kind — a run with any
     /// is certified only for what the binary understood.
     pub unknown_kinds: Vec<UnknownKindCount>,
-    /// What the run's documents got wrong, counted by the document kind
-    /// the rule was asked of and the stable name of each kind of
-    /// problem.
+    /// What the run's declared artifacts got wrong, counted by the
+    /// document kind the rule was asked of — `None` where nothing read a
+    /// document — and the stable name of each kind of problem.
     ///
     /// Counting is the whole reason a diagnostic is a value: a receipt
     /// that had to read prose could only reprint it, and "how often does
-    /// a ledger come back unreadable" is a question nobody can answer by
+    /// a tasks document come back unreadable" is a question nobody can answer by
     /// grepping free text. The kind is half the answer — `duplicate-id`
-    /// is one rule asked of three documents, so three broken ledgers and
+    /// is one rule asked of three documents, so three broken tasks documents and
     /// one of each are different facts and count separately.
     pub diagnostics: Vec<DiagnosticCount>,
 }
@@ -135,8 +135,8 @@ pub struct Receipt {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiagnosticCount {
     /// The document whose rules were asked. `None` for a problem with
-    /// the file itself — a file that was never written has no content
-    /// to have a kind.
+    /// the artifact itself — a file that was never written, and an
+    /// artifact another run owes, have no content to have a kind.
     pub kind: Option<ArtifactKind>,
     pub code: String,
     pub occurrences: usize,
@@ -159,34 +159,50 @@ impl std::fmt::Display for DiagnosticCount {
     }
 }
 
+/// What one artifact failure adds to the count: the `(document kind,
+/// code)` of each problem it carries.
+///
+/// A problem with the artifact itself is counted under its own code and
+/// no kind: `artifact-missing` is the same fact whatever the file was
+/// going to contain, `artifact-undelivered` the same whatever the node
+/// was going to hand over, and `artifact-unheld` the same whatever run
+/// was asked. A document whose content failed is not one problem but
+/// every problem it has, each under the kind it was read against.
+fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str)> {
+    match failure {
+        // Exhaustive rather than keyed off `report()`, so a fifth way an
+        // artifact can fail reaches this decision as a compile error
+        // instead of falling into whichever arm happens to fit.
+        ArtifactFailure::File { .. }
+        | ArtifactFailure::Undelivered { .. }
+        | ArtifactFailure::Unheld { .. } => failure
+            .code()
+            .map(|code| (None, code))
+            .into_iter()
+            .collect(),
+        ArtifactFailure::Content(report) => report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| (Some(report.document.kind), diagnostic.code()))
+            .collect(),
+    }
+}
+
 /// Every problem the log recorded, counted by `(document kind, code)`,
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
     let mut counts: HashMap<(Option<ArtifactKind>, &'static str), usize> = HashMap::new();
-    for event in events {
-        let Some(EventPayload::NodeFailed(p)) = event.payload() else {
+    let failed = events.iter().filter_map(|event| match event.payload() {
+        Some(EventPayload::NodeFailed(p)) => Some(&p.failure),
+        _ => None,
+    });
+    for failure in failed {
+        let Failure::Artifacts { artifacts } = failure else {
             continue;
         };
-        let Failure::Artifacts { artifacts } = &p.failure else {
-            continue;
-        };
-        for failure in artifacts {
-            match failure {
-                // A problem with the file itself is counted under its own
-                // code and no kind: `artifact-missing` is the same fact
-                // whatever the file was going to contain.
-                ArtifactFailure::File { problem, .. } => {
-                    *counts.entry((None, problem.code())).or_default() += 1;
-                }
-                ArtifactFailure::Content(report) => {
-                    for diagnostic in &report.diagnostics {
-                        *counts
-                            .entry((Some(report.document.kind), diagnostic.code()))
-                            .or_default() += 1;
-                    }
-                }
-            }
+        for entry in artifacts.iter().flat_map(counted) {
+            *counts.entry(entry).or_default() += 1;
         }
     }
     let mut counts: Vec<DiagnosticCount> = counts
@@ -349,8 +365,8 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
 /// Which runner ran each node, in the order the nodes first resolved
 /// one.
 ///
-/// A node resolves its runner once per session it opens — again for a
-/// repair, again after a re-route — and the receipt's line counts
+/// A node resolves its runner once per session it opens — again after a
+/// re-route, again on a retry — and the receipt's line counts
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
 /// this.

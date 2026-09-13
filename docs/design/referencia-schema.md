@@ -88,8 +88,6 @@ limits:
   max_workflow_depth: 4
   max_artifact_bytes: 50_000_000    # guardia contra accidentes (§4)
   inline_context_bytes: 32_000      # sobre este umbral, el contexto se monta por referencia (§9.1)
-  max_artifact_repairs: 1           # cuántas veces se le pide de nuevo un artifact interpretado
-                                    #   que no se pudo leer, con el diagnóstico en la mano
 
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
@@ -103,7 +101,7 @@ secrets:                            # nombres de env vars; valores JAMÁS acá
 
 ```yaml
 name: build-feature
-description: Feature completa con grill, ledger verificado, review multi-runner y PR
+description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
 yunta_schema: ">=1 <2"              # opcional (§2.1); sin declarar, se infiere del binario
 inputs:
   idea:
@@ -132,9 +130,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
       necesarias como artifact; no converses. Con las respuestas, escribí el brief.
     artifacts:
-      produces:
-        - { name: questions.yaml, kind: questions }
-        - brief.md
+      produces: [questions, brief.md]
 
   - id: plan
     kind: prompt
@@ -149,7 +145,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }   # §9.3 — también admite string inline
     artifacts:
-      produces: [{ name: plan.yaml, kind: task-ledger }]
+      produces: [tasks]
 
   - id: approve-plan
     kind: gate
@@ -171,7 +167,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       within: ["src/**"]
       max_per_run: 3
     prompt: |
-      Leé tu tarea del ledger. Implementala dentro de su scope.
+      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
 
   - id: lint
     kind: bash
@@ -198,9 +194,9 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios; hallazgos a {{run.dir}}/artifacts/findings-{{runner.role}}.yaml"
+    prompt: "Auditá los cambios y reportá cada hallazgo."
     artifacts:
-      produces: [{ name: "findings-{{runner.role}}.yaml", kind: findings }]
+      produces: [findings]
 
   - id: fix-findings
     kind: prompt
@@ -225,7 +221,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
 
 on_finish:
   - cleanup: worktree
-  - distill: [plan.yaml]
+  - distill: [{ node: plan, kind: tasks }]
 ```
 
 ## Workflow compuesto de referencia: release-cycle.yaml
@@ -294,14 +290,40 @@ que siempre está al día.
 
 ## Notas de schema
 
-- **`kind:` de un artifact**: el conjunto es cerrado — `task-ledger`, `findings` y
-  `questions` — y lo nombra un único tipo, del que salen el valor que se escribe acá,
-  el argumento de `yunta schema <kind>`, el catálogo de la tool `document_shape` y el
-  documento del que habla un reporte de lectura (D132). Declarar el `kind` alcanza
-  para que el nodo reciba la forma de ese documento en su contexto: no hay una
-  segunda clave que la pida. Qué implica declararlo — parser, reglas, corrección de
-  un archivo ilegible — está en el Contrato §4.1; la forma de cada kind se lee con
-  `yunta schema <kind>`, y su JSON Schema con `--json`.
+- **`artifacts.produces`**: una lista de strings sueltos. Un string que nombra un
+  kind — el conjunto es cerrado: `tasks`, `findings` y `questions` — declara ese
+  documento, y todo otro string es el nombre de un archivo opaco. Un nodo produce a
+  lo sumo uno de cada kind, así que el kind identifica al documento y no hay nombre
+  que elegir: declarar el mismo kind dos veces es error de `check`, y los tres
+  nombres de kind quedan reservados como nombres de archivo. El kind lo nombra un
+  único tipo, del que salen el valor que se escribe acá, el argumento de
+  `yunta schema <kind>`, el catálogo de la tool `document_shape` y el documento del
+  que habla un reporte de lectura (D132). Declararlo alcanza para que el nodo reciba
+  la forma de ese documento en su contexto: no hay una segunda clave que la pida.
+  Qué implica declararlo — parser, reglas, rechazo de un documento inválido — está
+  en el Contrato §4.1; la forma de cada kind se lee con `yunta schema <kind>`, y su
+  JSON Schema con `--json`.
+- **`inputs:`**: un mapa de nombre a especificación, con `type:` eligiendo la forma
+  — `string`, `number`, `boolean`, `enum`, `path`, `document` —, y solo los campos
+  de ese tipo disponibles. Un `document` declara además el `kind:` con el que el run
+  lee el archivo: el run nace teniéndolo como artifact propio, sin nodo productor, y
+  `{{inputs.<nombre>}}` rinde su identidad (`sha256:<hash>`) y no la ruta. El resto
+  está en el Contrato §2.3.
+- **Referencias a un artifact**: una `context: [{ artifact }]`, una entrada de
+  `mounts:` y una de `on_finish.distill` nombran el artifact por lo que lo
+  identifica — `kind: <k>` para un documento que el engine lee, `name: <archivo>`
+  para uno opaco — y exactamente uno de los dos. Un `as:` de mount renombra un
+  opaco, que es lo que el hijo pasa a tener; un interpretado se identifica por su
+  kind en todo run que lo tenga, así que `as:` al lado de un `kind:` se rechaza al
+  leer el workflow.
+- **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
+  prompt, su `run:`, sus hooks y sus patrones de `context:` — `{{run.dir}}`,
+  `{{run.worktree}}`, `{{run.branch}}`, `{{node.artifacts}}` (el directorio propio
+  del nodo, donde escribe lo que declara), `{{runner.role}}` cuando el nodo declara
+  un runner, `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}`
+  según lo que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado.
+  Una variable que no está definida ahí falla el nodo nombrándola; `yunta check`
+  además rechaza estáticamente todo `{{inputs.x}}` que `inputs:` no declare.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis
