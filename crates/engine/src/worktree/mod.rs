@@ -19,15 +19,23 @@
 //! its real Finish instead. `none`'s lock is always released at
 //! Finish, since holding it forever would make every run after the
 //! first permanently refuse to start.
+//!
+//! Waking a run asks the same tree the other question this module
+//! answers — whether it is still the tree the run left — and
+//! [`WorktreeIntegrity`] is where that lives, together with why the
+//! answer is never about the tree's content.
+
+mod integrity;
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_adapters::signal::Liveness;
-use yunta_core::{Isolation, Pid, SystemClock};
+use yunta_core::{CommitSha, InvalidId, Isolation, Pid, RunId, SystemClock};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
-use yunta_core::CommitSha;
+
+pub use integrity::{RunWorktree, WorktreeIntegrity};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -89,6 +97,28 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         owner_pid: Option<Pid>,
     },
+    /// A run's own linked worktree is not at the path its manifest
+    /// froze — moved, deleted, or replaced by something git does not
+    /// know as a working tree. Not a broken run: the log and the objects
+    /// that are the run's evidence are untouched, and git still holds the
+    /// run's branch, so the checkout comes back with one command.
+    #[error(
+        "the run's branch `{branch}` has no worktree at `{path}` ({detail}) — the run's \
+         history and artifacts are intact; bring the checkout back with `git worktree add \
+         {path} {branch}`, run from the repository the run was created in, and resume again"
+    )]
+    RunWorktreeLost {
+        path: PathBuf,
+        branch: String,
+        detail: String,
+    },
+    /// A run under isolation `none` works on the checkout it was created
+    /// in, and `resume` was run somewhere that is not one.
+    #[error(
+        "`{path}` is not a git working tree ({detail}) — this run has `isolation: none`, so it \
+         works directly on the checkout it was created in; resume it from there"
+    )]
+    NotACheckout { path: PathBuf, detail: String },
     /// The common git dir has no parent directory, so there is no
     /// checkout to run `git worktree` from.
     #[error("the git common dir `{common_dir}` has no parent directory to run `git worktree` in")]
@@ -230,6 +260,31 @@ pub async fn cleanup_worktree(
     // Best-effort by design: `-d` refusing is the branch's protection.
     let _ = run_git(&main_repo, &["branch", "-d", branch]).await;
     Ok(WorktreeCleanup::Removed)
+}
+
+/// The branch a run's own commits live on: the branch its worktree is
+/// created on, what `{{run.branch}}` renders, what the run's cleanup
+/// deletes, and what a diagnostic names when the checkout has to be
+/// brought back. One name, composed here, so every one of those is the
+/// same string.
+pub fn run_branch(run_id: &RunId) -> String {
+    format!("yunta/{run_id}")
+}
+
+/// The commit `repo`'s HEAD is on — the one place the engine asks a
+/// checkout where it is, so "HEAD" means the same thing to the batch that
+/// branches from it, the promotion that builds on it, and the resume that
+/// checks the run's base commit is still behind it.
+pub async fn head_commit(repo: &Path) -> Result<CommitSha, WorktreeError> {
+    let output = run_git(repo, &["rev-parse", "HEAD"]).await?;
+    output
+        .trim()
+        .parse()
+        .map_err(|e: InvalidId| WorktreeError::Git {
+            args: "rev-parse HEAD".to_string(),
+            cwd: repo.to_path_buf(),
+            detail: e.to_string(),
+        })
 }
 
 async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {

@@ -21,6 +21,7 @@ use yunta_storage::AsyncStorage;
 use crate::artifacts::ArtifactIntegrity;
 use crate::replay::RunView;
 use crate::task_cycle::Memo;
+use crate::worktree::{RunWorktree, WorktreeIntegrity};
 
 use super::schedule::{self, ScheduleStep};
 use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
@@ -190,10 +191,10 @@ pub(crate) async fn execute_run_at_depth(
 
 /// Wakes the run: builds its context, refuses a run with no log, returns
 /// early for one whose log already ends, verifies that the run still
-/// holds the artifacts its log accepted, records a resume and any
-/// deferred registry-write finding, rechecks approved gates, and freezes
-/// the mode — everything that happens once per invocation, before the
-/// scheduler loop.
+/// holds the artifacts its log accepted and still has the worktree its
+/// history describes, records a resume and any deferred registry-write
+/// finding, rechecks approved gates, and freezes the mode — everything
+/// that happens once per invocation, before the scheduler loop.
 async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     let (ctx, root_cancel, registry_error) = build_ctx(env, depth);
 
@@ -260,22 +261,75 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     })
 }
 
-/// Wakes a run that already has history: verifies that it still holds
-/// the artifacts its log accepted, records the resume with the policy
-/// each orphan node resolves to, and states what the verification could
+/// Wakes a run that already has history: verifies that the run is still
+/// what its own log says it is, records the resume with the policy each
+/// orphan node resolves to, and states what the verification could not
+/// check.
+///
+/// The order is the whole of it. A run that cannot answer for its history
+/// is broken with a diagnostic before anything says it resumed, never a
+/// run that keeps going and hands a node something the log never saw.
+/// What the verification could not do is said after, because by then the
+/// run has woken.
+async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
+    let artifacts = verify_before_waking(ctx, view).await?;
+    record_resume(ctx, view).await?;
+    if let Some(detail) = artifacts.unverifiable_detail() {
+        ctx.engine_finding(
+            None,
+            "engine-artifact-store",
+            FindingSeverity::Minor,
+            "the run holds artifacts this binary cannot verify".to_string(),
+            ctx.run_dir
+                .join(crate::artifacts::store::OBJECTS_DIR)
+                .display()
+                .to_string(),
+            detail,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Asks the run's two questions about itself before it wakes, and returns
+/// what the artifact half found so the caller can report what it could
 /// not check.
 ///
-/// The order is the whole of it. An artifact whose object is gone, or
-/// whose bytes no longer hash to their own name, is a run that cannot
-/// answer for its own history: it is broken with a diagnostic before
-/// anything says it resumed, never a run that keeps going and hands a
-/// node something the log never saw. What the verification could not do
-/// is said after, because by then the run has woken.
-async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
-    let integrity = ArtifactIntegrity::of(ctx.run_dir, &view.events);
-    if let Some(diagnostic) = integrity.diagnostic(ctx.run_id) {
+/// The two ask different questions of different things, and the
+/// difference is deliberate. An artifact is immutable, so it is verified
+/// by content: every object the log names is read back and hashed against
+/// its own name. A worktree is the work and changes by design, so only
+/// its identity and its ancestry are verified — see [`WorktreeIntegrity`]
+/// for why its content is not, and what the engine does instead with a
+/// tree that moved.
+///
+/// A missing worktree is the one failure here that is not `broken`: the
+/// run's own evidence is intact, so the error carries the remedy instead.
+async fn verify_before_waking(
+    ctx: &RunCtx<'_>,
+    view: &RunView,
+) -> Result<ArtifactIntegrity, RunError> {
+    let artifacts = ArtifactIntegrity::of(ctx.run_dir, &view.events);
+    if let Some(diagnostic) = artifacts.diagnostic(ctx.run_id) {
         return Err(steps::broken(ctx, diagnostic).await);
     }
+    let worktree = WorktreeIntegrity::of(RunWorktree {
+        run_id: ctx.run_id,
+        path: ctx.worktree,
+        base_commit: &ctx.manifest.base_commit,
+        isolation: ctx.manifest.isolation,
+    })
+    .await?;
+    if let Some(diagnostic) = worktree.diagnostic() {
+        return Err(steps::broken(ctx, diagnostic).await);
+    }
+    Ok(artifacts)
+}
+
+/// Writes the `run_resumed` that says the run woke, carrying the policy
+/// each orphan node resolves to — and the single name they share, when
+/// they share one.
+async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
     // A node the mode excludes never ran, so the orphans are the same
     // whichever nodes are in the mode.
     let policies = schedule::resume_policies(
@@ -299,20 +353,6 @@ async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
         }),
     )
     .await?;
-    if let Some(detail) = integrity.unverifiable_detail() {
-        ctx.engine_finding(
-            None,
-            "engine-artifact-store",
-            FindingSeverity::Minor,
-            "the run holds artifacts this binary cannot verify".to_string(),
-            ctx.run_dir
-                .join(crate::artifacts::store::OBJECTS_DIR)
-                .display()
-                .to_string(),
-            detail,
-        )
-        .await?;
-    }
     Ok(())
 }
 

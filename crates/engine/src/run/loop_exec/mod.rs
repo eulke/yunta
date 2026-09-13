@@ -24,7 +24,9 @@ use super::step::Step;
 use super::{RunCtx, RunError};
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
 use escalate::{resolve_escalations, PendingEscalation};
-use integrate::{head_commit, integrate_batch};
+use integrate::integrate_batch;
+
+use crate::worktree::head_commit;
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,

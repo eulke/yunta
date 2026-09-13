@@ -337,7 +337,7 @@ pub(super) async fn execute_workflow(
                 ctx.worktree,
                 &tree,
                 &child_manifest.base_commit,
-                &format!("yunta/{child_id}"),
+                &crate::worktree::run_branch(&child_id),
                 Isolation::Worktree,
             )
             .await

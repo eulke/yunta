@@ -60,6 +60,18 @@ binary cannot check — a `minor` finding on the run and a line in `yunta
 verify` — and the run resumes. A newer binary never makes an older run
 unresumable by asking of it a guarantee its own format could not give.
 
+Waking a run also checks the worktree it works in, and checks something else
+there: that a git working tree is still at the path the manifest froze, and
+that the commit the run branched from is still behind that tree's HEAD. The
+content of the tree is never checked against a snapshot — the tree is the
+work, and changing it between a pause and a resume (new commits, a fix made
+by hand, a build left behind) is the system working as intended. A tree whose
+history has lost the run's base commit — a `reset --hard` behind the run's
+commits, a rebase, another branch checked out — leaves the run broken with a
+diagnostic; a missing checkout is an error naming the command that brings it
+back, not a broken run. Neither depends on the binary's version: both are
+asked of the run's own frozen manifest.
+
 ## What every release verifies before it ships
 
 Per the release pipeline's `test` gate (`.github/workflows/release.yml`):

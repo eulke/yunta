@@ -65,8 +65,11 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
         )
     });
     if wants_cleanup && ctx.manifest.isolation == yunta_core::Isolation::Worktree {
-        match crate::worktree::cleanup_worktree(ctx.worktree, &format!("yunta/{}", ctx.run_id))
-            .await
+        match crate::worktree::cleanup_worktree(
+            ctx.worktree,
+            &crate::worktree::run_branch(ctx.run_id),
+        )
+        .await
         {
             Ok(crate::worktree::WorktreeCleanup::Removed) => {}
             Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {

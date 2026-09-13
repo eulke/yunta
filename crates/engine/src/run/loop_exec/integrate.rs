@@ -8,10 +8,11 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Phase,
     ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
 };
-use yunta_core::{CommitSha, InvalidId, Node, Seq, Task};
+use yunta_core::{Node, Seq, Task};
 
 use crate::scope::scope_check;
 use crate::task_cycle::{post_check, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
+use crate::worktree::head_commit;
 
 use super::escalate::{emit_scope_expansion_events, PendingEscalation};
 use super::{BatchIntegration, LoopState};
@@ -338,22 +339,6 @@ async fn run_git_ok(cwd: &Path, args: &[&str]) -> Result<bool, RunError> {
         .map_err(|e| RunError::Git {
             context: format!("run git {}", e.args),
             detail: e.detail(),
-        })
-}
-
-pub(super) async fn head_commit(repo: &Path) -> Result<CommitSha, RunError> {
-    let context = "read the integration HEAD commit";
-    crate::git::output(repo, &["rev-parse", "HEAD"])
-        .await
-        .map_err(|e| RunError::Git {
-            context: context.to_string(),
-            detail: e.detail(),
-        })?
-        .trim()
-        .parse()
-        .map_err(|e: InvalidId| RunError::Git {
-            context: context.to_string(),
-            detail: e.to_string(),
         })
 }
 

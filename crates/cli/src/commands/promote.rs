@@ -200,7 +200,7 @@ nodes:
             &cwd,
             &worktree,
             &manifest.base_commit,
-            &format!("yunta/{run_id}"),
+            &yunta_engine::run_branch(&run_id),
             manifest.isolation,
         )
         .await

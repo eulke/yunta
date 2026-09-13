@@ -246,7 +246,10 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, S
         // run id, not necessarily the worktree's own local checkout
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
-        ("run.branch".to_string(), format!("yunta/{}", ctx.run_id)),
+        (
+            "run.branch".to_string(),
+            crate::worktree::run_branch(ctx.run_id),
+        ),
         // Where this node's own files go. A command node has no run tool
         // to be told through, so the one way it can write what it
         // declares is to render this.

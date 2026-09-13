@@ -18,7 +18,6 @@ use yunta_storage::AsyncStorage;
 use crate::artifacts::ObjectError;
 
 use super::{create_run, BirthArtifact, CreateRunParams, RunError};
-use yunta_core::{CommitSha, InvalidId};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -75,7 +74,7 @@ pub async fn create_promotion_successor(
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
-    manifest.base_commit = head_commit(predecessor_worktree)?;
+    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree).await?;
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => {
@@ -84,7 +83,7 @@ pub async fn create_promotion_successor(
                 repo,
                 &worktree,
                 &manifest.base_commit,
-                &format!("yunta/{successor_id}"),
+                &crate::worktree::run_branch(&successor_id),
                 Isolation::Worktree,
             )
             .await?;
@@ -165,19 +164,4 @@ pub(super) fn birth_artifact(
         },
         bytes,
     }
-}
-
-fn head_commit(worktree: &Path) -> Result<CommitSha, RunError> {
-    let context = || format!("resolve HEAD in `{}`", worktree.display());
-    crate::git::output_blocking(worktree, &["rev-parse", "HEAD"])
-        .map_err(|e| RunError::Git {
-            context: context(),
-            detail: e.detail(),
-        })?
-        .trim()
-        .parse()
-        .map_err(|e: InvalidId| RunError::Git {
-            context: context(),
-            detail: e.to_string(),
-        })
 }

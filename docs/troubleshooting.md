@@ -202,6 +202,69 @@ A run created by a Yunta older than the object store reports instead that it
 holds artifacts this binary cannot verify — a `minor` finding, not a break.
 That log names files rather than objects; see [compatibility](compatibility.md).
 
+## `resume` says the run is broken because of its worktree
+
+```
+run is broken: run `01J...` works in `/home/me/.yunta/worktrees/01J...`, whose
+HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
+task, scope check and criterion this run's log records was established against
+a tree that this one is not a continuation of. Put it back on the run's own
+branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/01J...`), or
+on any commit that still descends from `4a77...` — ...
+```
+
+Waking a run asks its worktree two questions, and this is the second one
+failing. The run branched from a commit, and everything on its log — each
+task marked done, each `scope_checked`, each green criterion — was
+established against a tree descending from it. A `git reset --hard` behind
+the run's own commits, a rebase, or a checkout of an unrelated branch takes
+that commit out of the tree's history, and from then on the state derived
+from the log describes a tree that is not there. The run stops before doing
+any more work on it.
+
+What to do:
+
+- **Put the tree back.** `git -C <worktree> reflog` shows every commit that
+  tree has been on, including where the run left it. `git -C <worktree>
+  checkout yunta/<run_id>` returns it to the run's own branch; any commit
+  that still descends from the base commit works.
+- **Under `isolation: none`** the run works directly on your checkout, so a
+  `git pull --rebase` or a rebase while the run was paused is the usual way
+  this happens. The remedy is the same — the reflog, then back onto a commit
+  that still descends from the base.
+- **If that history is gone for good**, this run's is too: start a new run
+  against the tree as it is now. The work in the tree is not lost by this —
+  only the run's claim to have verified it.
+
+**What is *not* a problem: a changed tree.** New commits on top, or
+uncommitted edits you made by hand during the pause, are the expected case
+and the run resumes over them without a word. The worktree is the work; its
+content is never verified against a snapshot. What answers a changed tree is
+the criteria memo, which is keyed on a hash of the tree, so the run re-runs
+its criteria against what is there instead of trusting a result about a tree
+that is gone.
+
+## `resume` cannot find the run's worktree
+
+```
+the run's branch `yunta/01J...` has no worktree at
+`/home/me/.yunta/worktrees/01J...` (there is nothing at that path) — the
+run's history and artifacts are intact; bring the checkout back with `git
+worktree add /home/me/.yunta/worktrees/01J... yunta/01J...`, run from the
+repository the run was created in, and resume again
+```
+
+The first of the two questions. The run is not broken: its event log and the
+objects under `objects/` — everything that is its evidence — are untouched,
+and git still holds its branch with every commit the run made. Only the
+checkout is missing, and the command in the message brings it back exactly.
+Run it from the repository the run was created against (the one whose
+`.git/worktrees/` holds the entry), then resume.
+
+If the run has `isolation: none` the message is different — it says the
+directory is not a git working tree at all. That run works on the checkout it
+was created in rather than on one of its own, so resume it from there.
+
 ## Something looks corrupted, or a replay disagrees with what you remember
 
 ```bash
