@@ -75,10 +75,12 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
-**A-13 · Hooks de edición en los adapters.** Ningún adapter declara `edit_hooks`;
-el scope se verifica después de la sesión por diff, y el engine lo dice con
-`capability_degraded(PostCheckOnly)` una vez por run. Lo resolvería un adapter
-que instale un hook de pre-edición y lo declare (D167).
+**A-13 · La cerca en los adapters.** Ningún adapter cerca lo que una sesión
+escribe; el scope se verifica después de la sesión por diff, y el engine lo
+dice con `capability_degraded(PostCheckOnly)` una vez por run. Lo resuelve la
+cerca (D172, `plan-de-raiz/cerca.md`, ítem 3-08): un juez en core, un hook
+en claude-code, el sandbox en codex, el juez en el mock; este ítem se cierra
+con 3-08.
 
 **A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
 un `kind: questions` se responde por consola o por la tool MCP. Lo resolvería

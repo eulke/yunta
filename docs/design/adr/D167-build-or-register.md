@@ -3,7 +3,7 @@ number: D167
 title: "Lo prometido y no construido se construye o se registra; nunca queda como comentario"
 status: accepted
 revises: [D18, D62, D19]
-revised_by: []
+revised_by: [D172]
 ---
 
 # D167 — Lo prometido y no construido se construye o se registra; nunca queda como comentario
@@ -25,7 +25,8 @@ resuelven así:
 - **Hooks de edición** (spec-adapter §6): **se registra** como deuda `A-13`.
   Ningún adapter los tiene; el engine degrada con
   `capability_degraded(PostCheckOnly)` una vez por run, y spec-adapter §6 dice
-  la verdad sobre cada adapter.
+  la verdad sobre cada adapter. *(Revisado por D172: se construye como la
+  cerca, M25, ítem 3-08; A-13 se cierra con ese ítem.)*
 - **Preguntas por pull request** (Contrato §3, §4.1): **se registra** como
   deuda `A-14`. `Channel` queda `{Tty, Mcp}`; el Contrato se corrige.
 - **Fuentes de contexto por executor** (D19, Contrato §9): **se registra**

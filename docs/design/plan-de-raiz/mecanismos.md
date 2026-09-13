@@ -22,11 +22,11 @@ RunToolsEndpoint, PermissionProfile, signal::Liveness, process_start}`).
 // crates/core/src/port/mod.rs
 pub trait Adapter: Send + Sync { /* idéntico a adapters/src/session.rs:251-280 */ }
 pub trait AgentSession: Send { /* idéntico a session.rs:282-305 */ }
-pub struct SessionRequest { /* idéntico a session.rs:44-105 */ }
+pub struct SessionRequest { /* idéntico a session.rs:44-105; en 3-08 toma la forma de cerca.md §3 */ }
 pub struct RunToolsEndpoint { pub url: String, pub token: Secret<String> }
 pub const SERVER_NAME: &str = "yunta";
 pub enum ProbeReport { Healthy { version: Option<String> }, Unhealthy { diagnostic: String } }
-pub enum AgentEvent { /* idéntico */ }
+pub enum AgentEvent { /* idéntico; en 3-08 gana `fence` en SessionOpened y `WriteRefused` (cerca.md §3) */ }
 pub enum AdapterError { /* idéntico */ }
 pub struct Budget { /* idéntico */ }
 pub enum PermissionProfile { /* idéntico */ }
@@ -145,7 +145,7 @@ impl NodeReroutedPayload { pub fn new(to: NodeId, cause: RerouteCause, origin: R
 pub struct RerouteCause(pub Failure);   // Display = Failure's
 // session/payloads.rs
 impl CapabilityDegradedPayload { pub fn new(capability: Capability, adapter: AdapterId, policy: Policy) -> Self; }
-pub enum Policy { PostCheckOnly, NoTokenBudget, NoSkills, NoRunTools, NetworkOpen, FreshSession }   // Display en el borde
+pub enum Policy { PostCheckOnly, NoWritableRoots, NoTokenBudget, NoSkills, NoRunTools, NetworkOpen, FreshSession }   // Display en el borde; NoWritableRoots es de M25
 impl AgentMessagePayload { pub fn tool_use(target: ToolTarget) -> Self; pub fn usage(…) -> Self; pub fn note(summary: NoteSummary) -> Self; }
 // tasks/payloads.rs
 impl TaskStatusChangedPayload { pub fn to(task: TaskId, status: TaskStatus, caused_by: Seq) -> Self; pub fn done(task: TaskId, caused_by: Seq, commit: CommitSha) -> Self; }
@@ -334,12 +334,14 @@ pub async fn open_session(ctx: &RunCtx<'_>, plan: SessionPlan<'_>, adapter: &dyn
 
 `open_session`: resuelve skills (`require(Skills)`), abre run tools
 (`require(RunTools)` con la refusal `TypedArtifactNeedsRunTools` /
-`BlackboardNeedsRunTools` / `TypedArtifactListenerFailed`), `edit_constraints`
-(`require(EditHooks)`), `agent` (`require(CustomAgents)`), `network`
+`BlackboardNeedsRunTools` / `TypedArtifactListenerFailed`), `fence`
+(`require(Fence)` y `Fence::for_session(profile, scope, artifact_dir)`, M25),
+`agent` (`require(CustomAgents)`), `network`
 (`require(NetworkIsolation)`), `budget.max_turns` (`require(UsageReporting)`);
 `model = Some(chosen.model.clone())`, `agent = chosen.agent.clone()`,
-`artifact_dir = plan.artifact_dir`, `scratch_dir` por `SessionSlot`,
-`env = secrets_env(…)`, `run_tools_endpoint`, `skills`, `adapter_settings`.
+`artifact_dir = plan.artifact_dir`, `scratch_dir` por `SessionSlot` (siempre),
+`yunta_bin` de `RunEnv`, `env = secrets_env(…)`, `run_tools_endpoint`,
+`skills`, `adapter_settings`.
 Registra cada `Degradation` por `ctx.log().record` antes de devolver.
 
 **Archivos.** nuevo `session_plan.rs`; modifica `prompt_exec.rs:122-278`
@@ -370,7 +372,7 @@ que el mock registra son iguales campo a campo salvo `prompt`, `cwd`,
 pub enum Absence { Resting, FailAtCheck, FailNode, DegradeWith(Policy) }
 pub const POLICY: [(Capability, Absence); 8] = [
     (Capability::ResumeSession,      Absence::DegradeWith(Policy::FreshSession)),
-    (Capability::EditHooks,          Absence::DegradeWith(Policy::PostCheckOnly)),
+    (Capability::Fence,              Absence::DegradeWith(Policy::PostCheckOnly)),   // FenceLevel::None; M25
     (Capability::PermissionProfiles, Absence::FailAtCheck),
     (Capability::CustomAgents,       Absence::FailAtCheck),
     (Capability::UsageReporting,     Absence::DegradeWith(Policy::NoTokenBudget)),
@@ -386,7 +388,7 @@ pub fn require(adapter: &dyn Adapter, capability: Capability, node: &Node, ctx: 
 pub fn check(workflow: &Workflow, config: &ConfigLayer, adapters: &Adapters) -> Result<Vec<CheckWarning>, CheckError>;   // FailAtCheck se aplica acá
 ```
 
-`EditHooks` y `UsageReporting` degradan **una vez por run** (la
+`Fence` y `UsageReporting` degradan **una vez por run** (la
 `DegradationLedger` sabe si ya se registró). `check_warnings` toma adapters:
 `read_only`/`edit` sin `permission_profiles` y `agent:` sin `custom_agents`
 son errores de `check`.
@@ -397,12 +399,12 @@ modifica `engine/src/check/mod.rs:241-245` y `cli/src/commands/run.rs::runnable`
 `task_cycle/session.rs:372-379` (budget: si `NoTokenBudget` está registrado,
 el run no finge presupuesto — y lo dice); `adapters/src/claude_code/permissions.rs:36-47`
 (`ReadOnly` sin `Write`, o `permission_profiles: false`); `adapters/src/codex/mod.rs:143-157`
-(`ReadOnly`+`artifact_dir` → `Degradation`); `adapters/src/mock/fixture.rs:87-111`
+(`ReadOnly`+`artifact_dir` → `Degradation` con `Policy::NoWritableRoots`, M25); `adapters/src/mock/fixture.rs:87-111`
 (twin + test).
 
 **Tests.** `every_capability_has_exactly_one_absence_policy`
 (core/tests/capabilities.rs); `every_capability_round_trips_through_a_fixture`
-(adapters/tests/mock.rs); `a_run_on_an_adapter_without_edit_hooks_says_so_once`
+(adapters/tests/mock.rs); `a_run_on_an_adapter_without_a_fence_says_so_once`
 (engine/tests/degradation.rs); `a_run_on_an_adapter_without_usage_reporting_says_it_has_no_token_budget`;
 `check_refuses_read_only_on_an_adapter_without_permission_profiles`
 (engine/tests/check.rs); `check_refuses_an_agent_on_an_adapter_without_custom_agents`.
@@ -884,3 +886,16 @@ atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
 `session.rs:3-10`, `context.rs` sobre extensibilidad).
 
 **Cierra.** DO-D1, DO-D2, DO-D4, DO-D5, DO-D7, DO-D8, TE-D25, CLI-D16 (P5).
+
+---
+
+## M25 · La cerca
+
+Especificación completa en [`cerca.md`](cerca.md): vocabulario, tipos
+(`Fence`, `FenceLevel`, `FenceReport`, `Coverage`, `Verdict`, `Refusal`),
+las reglas del juez, el texto del rechazo, el comando `yunta fence`, el
+engine (`Fence::for_session`, `fence_breach`), los tres adapters builtin, la
+muestra de ocho CLIs del mercado con las cinco reglas de escalado, archivos,
+tests y ADR D172.
+
+**Cierra.** AD-D2, AD-D7 (con 3-07), AD-D20, AD-D24, DO-D2, A-13.

@@ -17,8 +17,10 @@ por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos.
 | [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
 | [`mecanismos.md`](mecanismos.md) | los 24 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
 | [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
+| [`cerca.md`](cerca.md) | M25 completo: vocabulario, tipos, juez, codec, `yunta fence`, engine, adapters builtin, la muestra del mercado, archivos, tests, ADR D172 | quien implementa 3-08 |
 | [`artefactos/yunta-de-raiz.html`](artefactos/yunta-de-raiz.html), [`artefactos/cronica-del-run.html`](artefactos/cronica-del-run.html) | las dos propuestas tal como fueron aprobadas, con sus diagramas; el README y `mecanismos.md` son su forma normativa | quien quiera la versión legible |
 | [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
+| [`auditoria/09-mercado-de-clis.md`](auditoria/09-mercado-de-clis.md) | los ocho CLIs relevados para la cerca (Gemini, Copilot, Cursor, OpenCode, Aider, Goose, Amp, Kimi), textuales, con URLs y lo no verificado marcado | quien implementa 3-08 o un adapter nuevo |
 
 Ningún ítem se empieza sin haber leído este README entero, el mecanismo que el
 ítem nombra en `mecanismos.md`, y la auditoría del frente. Lo que esos tres no
@@ -135,17 +137,17 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
 
 ---
 
-## 2. Los doce vicios y los veinticuatro mecanismos
+## 2. Los doce vicios y los veinticinco mecanismos
 
 | vicio | síntoma principal | mecanismos |
 |---|---|---|
-| V1 un hecho se construye en muchos lugares | `GateWaiting` ×7, `capability_degraded` ×8, `SessionRequest` ×2 divergentes | M03 M08 |
+| V1 un hecho se construye en muchos lugares | `GateWaiting` ×7, `capability_degraded` ×8, `SessionRequest` ×2 divergentes, lo escribible ×4 | M03 M08 M25 |
 | V2 una pregunta se responde en muchos lugares | `last_external_ref` ×2, attempt ×6, dedup ×2, run dir ×6, `RunPhase`→palabras ×5 | M04 M15 M16 |
 | V3 el catch-all silencioso | `replay::apply` `_ => Ok(())`, `phase.rs` `_ => Created` | M05 |
 | V4 la declaración dispersa | un kind = 9+2 lugares | M02 |
 | V5 prosa congelada en el log, texto en la capa equivocada | `run_paused.reason`, `{:?}` al usuario ×9, MCP re-bordea ×17 | M06 M17 |
 | V6 la disciplina que el tipo no impone | globs `String`, `Legacy` fresco, nombre de artifact que escapa, versión no leída | M12 M13 M14 |
-| V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos | M09 M24 |
+| V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos | M09 M24 M25 |
 | V8 la cáscara que no gobierna | git sin grupo, 15 `std::fs` en async, 3 `SystemClock`, `target_digest` crudo | M10 M11 |
 | V9 el puerto del lado equivocado | el engine importa su interfaz desde `yunta-adapters` | M01 |
 | V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra | M18 M19 M20 |
@@ -216,8 +218,9 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   prompt, chosen: RunnerCandidate, profile, artifact_dir, resume:
   Option<SessionId> }`; `open_session(plan, adapter) -> (SessionRequest,
   Vec<Degradation>)` en `engine/src/run/session_plan.rs`, único lugar que
-  construye un `SessionRequest`. `prompt_exec` y `attempt.rs` lo llaman.
-  `TypedArtifactNeedsRunTools` rige en ambos.
+  construye un `SessionRequest`, y con él la cerca de la sesión (M25).
+  `prompt_exec` y `attempt.rs` lo llaman. `TypedArtifactNeedsRunTools` rige
+  en ambos.
 - **M09 · Capacidad→política como tabla.** `core::port::POLICY:
   [(Capability, Absence)]` con `Absence { Resting, FailAtCheck, FailNode,
   DegradeWith(Policy) }`, una fila por variante (test que recorre
@@ -340,6 +343,18 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   documentación y no construido se construye, o se retira con entrada `A-NN`
   en `deuda-consciente.md` y nota `Revisada` en el ADR que lo describía.
   Nunca un comentario que explique el atajo.
+- **M25 · La cerca.** `yunta_core::fence::Fence { allowed: Vec<ScopeGlob>,
+  roots: Vec<PathBuf> }` con `judge(worktree, target) -> Verdict`, el único
+  juez de lo que una sesión escribe; `Capabilities::fence: FenceLevel { None,
+  ToolCalls, Filesystem }` reemplaza `edit_hooks`; `FenceReport { level,
+  coverage: Coverage { Exact, WidenedToRoots, ToolsOnly } }` en
+  `agent_session_opened`, cobertura = el canal más débil; kind
+  `write_refused { target: ToolTarget }`; `yunta fence <adapter>` es el hook
+  y cada adapter escribe solo el `FenceCodec`; la cerca vive en
+  `scratch_dir`, nunca bajo `cwd`; `read_only` = `allowed` vacío con raíces;
+  una escritura que llega al diff bajo `Exact` es `engine_finding`.
+  `edit_constraints`, `Glob`, `blocked:<path>` se borran. Especificación
+  completa y la muestra de ocho CLIs del mercado: `cerca.md`.
 
 ---
 
@@ -437,7 +452,7 @@ Test de frontera: `crates/engine/tests/no_adapter_crate_in_engine.rs`.
 |---|---|---|
 | `run` | run_created run_paused run_resumed run_finished promotion_signaled | `RunLedger` |
 | `node` | node_started node_finished node_failed node_rerouted hook_executed context_assembled criteria_checked scope_checked baseline_captured | `NodeLedger` |
-| `session` | agent_session_opened agent_message capability_degraded | `SessionLedger`, `DegradationLedger` |
+| `session` | agent_session_opened agent_message capability_degraded write_refused | `SessionLedger`, `DegradationLedger` |
 | `tasks` | task_registered task_status_changed | `TaskLedger` |
 | `scope` | scope_expansion_requested/granted/denied | `GrantLedger` (existe) |
 | `findings` | finding_posted/updated/withdrawn/refused | `FindingLedger` (existe) |
@@ -493,6 +508,9 @@ Constructores por dominio, con el invariante que fijan: `mecanismos.md#m03`.
 | `StagedHash` | `VerifiedArtifact.content_hash` con dos significados | un campo que es dos hashes |
 | `PauseReason` `Policy` `RerouteCause` | `reason: String`, `policy_applied: String`, `cause: String` | prosa del engine congelada en el log |
 | `PersistedDoc<T>` | archivos persistidos sin versión leída | un lector viejo que no marca lo que no entendió |
+| `FenceLevel` | `Capabilities.edit_hooks: bool` | un sandbox y un hook dichos con la misma palabra |
+| `Fence { allowed: Vec<ScopeGlob>, roots }` | `edit_constraints: Option<Vec<String>>` + `artifact_dir` como permiso | un glob inválido en una sesión; dos fuentes para lo escribible |
+| `FenceReport { level, coverage }` | nada (la sesión no decía qué cercó) | una cobertura declarada y no construida |
 
 ### Sesiones y capacidades
 
@@ -509,16 +527,17 @@ flowchart LR
 
 
 `SessionPlan` → `open_session` → `require(cap)` por cada campo gobernado
-(`edit_constraints`, `skills`, `agent`, `run_tools_endpoint`,
-`budget.max_turns`, `network`) → `SessionRequest` + `Vec<Degradation>` →
-`dispatch_session` (sin cambios).
+(`fence`, `skills`, `agent`, `run_tools_endpoint`, `budget.max_turns`,
+`network`) → `SessionRequest` + `Vec<Degradation>` → `dispatch_session`
+(sin cambios). La cerca la arma `Fence::for_session(profile, scope,
+artifact_dir)` (M25, `cerca.md` §5).
 
 `POLICY` (valores iniciales; una fila por variante):
 
 | capacidad | ausencia |
 |---|---|
 | `resume_session` | `Resting` (sesión fresca; ya emite `capability_degraded`) |
-| `edit_hooks` | `DegradeWith(PostCheckOnly)` una vez por run |
+| `fence` (`FenceLevel::None`) | `DegradeWith(PostCheckOnly)` una vez por run |
 | `permission_profiles` | `FailAtCheck` cuando un nodo pide `read_only`/`edit` |
 | `custom_agents` | `FailAtCheck` cuando un nodo declara `agent:` |
 | `usage_reporting` | `DegradeWith(NoTokenBudget)` una vez por run |
@@ -627,7 +646,8 @@ lo `FailAtCheck`.
 
 Registradas el 2026-09-13, con la recomendación como decisión, por
 aprobación explícita del dueño del repo: D165 (P1), D166 (P2), D167 (P3),
-D168 (P4), D169 (P5), D164 (P6, dentro de la crónica), D170 (P7), D171 (P8).
+D168 (P4), D169 (P5), D164 (P6, dentro de la crónica), D170 (P7), D171 (P8),
+D172 (P9, la cerca, con la muestra de ocho CLIs del mercado).
 Viven en `docs/design/adr/` y las indexa `adrs.md`. Un ítem que quiera
 apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 
@@ -641,6 +661,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | P6 | qué conserva una terminal observada (`kept`) | lo que cierra algo o pide algo a una persona | D164 · M19, fase 5 |
 | P7 | umbrales sin ADR: `WAIT_DEADLINE`, stagger 60 ms, `QUEUE_DEPTH`, `REDRAW_CEILING_HZ`, `MIN_SAMPLES_FOR_ESTIMATION` | un ADR "umbrales de superficie y arnés"; el ratchet rechaza `const` numérico nuevo sin referencia a ADR | M22, fase 6 |
 | P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | D171 · W-01…W-08 |
+| P9 | ¿Cómo se cerca lo que una sesión escribe, y escala a cualquier adapter futuro? | un juez en core, un nivel por adapter, una cobertura por sesión, un rechazo como kind; el post-check sigue siendo la garantía | D172 · M25, 3-08 |
 
 ---
 
@@ -652,7 +673,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | 0 | P1–P8 registrados como ADR por archivo; corpus des-corrompido; `docs_sync` recursivo; ratchets nuevos sembrados | que la documentación pueda perder | — |
 | 1 | M01 | tabla de política en core; arnés único | P1 |
 | 2 | M02 M03 M04 M05 | todo lo que deriva | P2, fase 1 |
-| 3 | M06 M07 M08 M09 M10 M11 | un engine que el compilador defiende | P3, fase 2 |
+| 3 | M06 M07 M08 M09 M10 M11 M25 | un engine que el compilador defiende | P3, P9, fase 2 |
 | 4 | M12 M13 M14 | `check` atrapa antes del primer token | P4, fase 2 |
 | 5 | M15 M16 M17 M18 M19 | la misma palabra en cada superficie | P5, P6, fase 2 |
 | 6 | M20 M21 M22 | que el ratchet signifique lo que dice | P7, fase 2 |
@@ -720,8 +741,8 @@ Estados: `pendiente` · `bloqueado(Pn)` · `en curso` · `levantado(§11)` ·
 
 Cada ítem `N-xx` implementa los mecanismos que su fase nombra en §7; la
 especificación de cada mecanismo —firmas, archivos, tests— es
-`mecanismos.md#mNN`, y para 5-05 es `cronica.md`. Los ítems W-xx tienen su
-especificación completa en §4.
+`mecanismos.md#mNN`, para 5-05 es `cronica.md` y para 3-08 es `cerca.md`. Los
+ítems W-xx tienen su especificación completa en §4.
 
 | ítem | qué | depende de | estado |
 |---|---|---|---|
@@ -753,6 +774,7 @@ especificación completa en §4.
 | 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | pendiente |
 | 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | pendiente |
 | 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `ReadOnly` sin `Write` | 1-01 | pendiente |
+| 3-08 | la cerca (`cerca.md`): `core::fence`, `FenceLevel`, `FenceReport`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | pendiente |
 | 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | pendiente |
 | 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | pendiente |
 | 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | pendiente |
@@ -887,12 +909,12 @@ CO core, TE tests, DO docs.
 | CLI-D25 | `MARKER`/`GAP`, `{:<12}` | M16 | 5 |
 | CLI-D26 | warnings de `Console::open` sin `Diagnostics` | M17 | 5 |
 | AD-D1 | mock pierde handle del player | M10 · W-07 | W |
-| AD-D2 | `edit_hooks` nunca consultada | M09 | 3 |
+| AD-D2 | `edit_hooks` nunca consultada | M09 M25 | 3 |
 | AD-D3 | `usage_reporting` nunca consultada | M09 | 3 |
 | AD-D4 | `permission_profiles` nunca; `check` ciego | M09 | 3 |
 | AD-D5 | `target_digest` crudo | M11 · W-03 | W |
 | AD-D6 | sin pase de redacción | M11 | 3 |
-| AD-D7 | claude `ReadOnly` con `Write` | M09 | 3 |
+| AD-D7 | claude `ReadOnly` con `Write` | M09 M25 | 3 |
 | AD-D8 | fixture renderer en el CLI | M01 | 1 |
 | AD-D9 | gates de skills/run_tools duplicados | M08 M09 | 3 |
 | AD-D10 | `policy_applied` prosa ×7 | M03 M09 | 2–3 |
@@ -905,11 +927,11 @@ CO core, TE tests, DO docs.
 | AD-D17 | `refuse_unrunnable` prosa | M01 | 1 |
 | AD-D18 | `RunTools` vs `run_tools` | M06 | 5 |
 | AD-D19 | codex sin `RunToolsMounted` | M09 | 3 |
-| AD-D20 | codex `ReadOnly`+`artifact_dir` sin evento | M09 | 3 |
+| AD-D20 | codex `ReadOnly`+`artifact_dir` sin evento | M25 | 3 |
 | AD-D21 | readers sin span | M10 | 3 |
 | AD-D22 | spec-events 6 caps, `model` obligatorio | M23 | 7 |
 | AD-D23 | adapters.md "primer sano" | M23 | 7 |
-| AD-D24 | spec-adapter §6 falso | M23 M24 · P3 | 0–7 |
+| AD-D24 | spec-adapter §6 falso | M23 M25 · P9 | 3–7 |
 | CO-1 | globs sin compilar | M12 | 4 |
 | CO-2 | `yunta_schema` String | M12 | 4 |
 | CO-3 | commits String | M12 | 4 |
@@ -956,7 +978,7 @@ CO core, TE tests, DO docs.
 | TE-D24 | 34 tests >500, 145 fns >50 | M22 | 6 |
 | TE-D25 | 60 ms sin decisión | M24 · P7 | 0 |
 | DO-D1 | baseline lazy vs D18/§7.2 | M24 · P3 | 0–3 |
-| DO-D2 | claude-code `edit_hooks` vs spec | M09 M24 · P3 | 0–3 |
+| DO-D2 | claude-code `edit_hooks` vs spec | M25 · P9 | 3 |
 | DO-D3 | codex `resume_session: true` vs spec | M23 | 7 |
 | DO-D4 | preguntas por PR | M24 · P3 | 0 |
 | DO-D5 | orden de criterios por invocación vs D62 | M24 · P3 | 0–3 |
