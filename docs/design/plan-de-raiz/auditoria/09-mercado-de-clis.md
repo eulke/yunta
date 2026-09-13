@@ -1,7 +1,7 @@
 # Auditoría 09 — El mercado de CLIs y el control de escritura
 
 Ocho CLIs de agentes de código relevados el 2026-09-13 como adapters posibles,
-para probar que la cerca (`cerca.md`) escala a cualquiera. Un informe por CLI,
+para probar que el cerco (`cerco.md`) escala a cualquiera. Un informe por CLI,
 textual, en inglés, tal como lo produjo cada agente investigador con Context7 y
 las fuentes oficiales; lo marcado `unverified` no se confirmó. Ninguno se
 ejecutó salvo Copilot CLI, que el investigador corrió contra un proveedor

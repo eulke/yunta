@@ -22,11 +22,11 @@ RunToolsEndpoint, PermissionProfile, signal::Liveness, process_start}`).
 // crates/core/src/port/mod.rs
 pub trait Adapter: Send + Sync { /* idéntico a adapters/src/session.rs:251-280 */ }
 pub trait AgentSession: Send { /* idéntico a session.rs:282-305 */ }
-pub struct SessionRequest { /* idéntico a session.rs:44-105; en 3-08 toma la forma de cerca.md §3 */ }
+pub struct SessionRequest { /* idéntico a session.rs:44-105; en 3-08 toma la forma de cerco.md §3 */ }
 pub struct RunToolsEndpoint { pub url: String, pub token: Secret<String> }
 pub const SERVER_NAME: &str = "yunta";
 pub enum ProbeReport { Healthy { version: Option<String> }, Unhealthy { diagnostic: String } }
-pub enum AgentEvent { /* idéntico; en 3-08 gana `fence` en SessionOpened y `WriteRefused` (cerca.md §3) */ }
+pub enum AgentEvent { /* idéntico; en 3-08 gana `fence` en SessionOpened y `WriteRefused` (cerco.md §3) */ }
 pub enum AdapterError { /* idéntico */ }
 pub struct Budget { /* idéntico */ }
 pub enum PermissionProfile { /* idéntico */ }
@@ -145,7 +145,7 @@ impl NodeReroutedPayload { pub fn new(to: NodeId, cause: RerouteCause, origin: R
 pub struct RerouteCause(pub Failure);   // Display = Failure's
 // session/payloads.rs
 impl CapabilityDegradedPayload { pub fn new(capability: Capability, adapter: AdapterId, policy: Policy) -> Self; }
-pub enum Policy { PostCheckOnly, NoWritableRoots, NoTokenBudget, NoSkills, NoRunTools, NetworkOpen, FreshSession }   // Display en el borde; NoWritableRoots es de M25
+pub enum Policy { PostCheckOnly, NoTokenBudget, NoSkills, NoRunTools, NetworkOpen, FreshSession }   // Display en el borde
 impl AgentMessagePayload { pub fn tool_use(target: ToolTarget) -> Self; pub fn usage(…) -> Self; pub fn note(summary: NoteSummary) -> Self; }
 // tasks/payloads.rs
 impl TaskStatusChangedPayload { pub fn to(task: TaskId, status: TaskStatus, caused_by: Seq) -> Self; pub fn done(task: TaskId, caused_by: Seq, commit: CommitSha) -> Self; }
@@ -398,8 +398,8 @@ modifica `engine/src/check/mod.rs:241-245` y `cli/src/commands/run.rs::runnable`
 (pasa `&adapters` a `check`); `session_plan.rs` (usa `require`);
 `task_cycle/session.rs:372-379` (budget: si `NoTokenBudget` está registrado,
 el run no finge presupuesto — y lo dice); `adapters/src/claude_code/permissions.rs:36-47`
-(`ReadOnly` sin `Write`, o `permission_profiles: false`); `adapters/src/codex/mod.rs:143-157`
-(`ReadOnly`+`artifact_dir` → `Degradation` con `Policy::NoWritableRoots`, M25); `adapters/src/mock/fixture.rs:87-111`
+(`read_only` con `Write`/`Edit` solo si hay archivos declarados, bajo el cerco — M25; o `permission_profiles: false`); `adapters/src/codex/mod.rs:143-157`
+(`ReadOnly`+raíces → `AdapterError::FenceUnbuildable(SealedRoots)`, M25); `adapters/src/mock/fixture.rs:87-111`
 (twin + test).
 
 **Tests.** `every_capability_has_exactly_one_absence_policy`
@@ -889,13 +889,14 @@ atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
 
 ---
 
-## M25 · La cerca
+## M25 · El cerco
 
-Especificación completa en [`cerca.md`](cerca.md): vocabulario, tipos
-(`Fence`, `FenceLevel`, `FenceReport`, `Coverage`, `Verdict`, `Refusal`),
-las reglas del juez, el texto del rechazo, el comando `yunta fence`, el
-engine (`Fence::for_session`, `fence_breach`), los tres adapters builtin, la
+Especificación completa en [`cerco.md`](cerco.md): vocabulario, tipos
+(`Fence`, `FenceLevel`, `Coverage`, `Fenced`, `Verdict`, `Refusal`,
+`FenceHook`), las reglas del juez, el texto del rechazo, el comando
+`yunta fence`, el engine (`Fence::for_session`, `fence_breach`), los tres
+adapters builtin, la
 muestra de ocho CLIs del mercado con las cinco reglas de escalado, archivos,
 tests y ADR D172.
 
-**Cierra.** AD-D2, AD-D7 (con 3-07), AD-D20, AD-D24, DO-D2, A-13.
+**Cierra.** AD-D2, AD-D7, AD-D20, AD-D24, DO-D2, A-13.

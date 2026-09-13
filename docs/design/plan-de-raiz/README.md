@@ -17,10 +17,10 @@ por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos.
 | [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
 | [`mecanismos.md`](mecanismos.md) | los 24 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
 | [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
-| [`cerca.md`](cerca.md) | M25 completo: vocabulario, tipos, juez, codec, `yunta fence`, engine, adapters builtin, la muestra del mercado, archivos, tests, ADR D172 | quien implementa 3-08 |
+| [`cerco.md`](cerco.md) | M25 completo: vocabulario, tipos, juez, codec, `yunta fence`, engine, adapters builtin, la muestra del mercado, archivos, tests, ADR D172 | quien implementa 3-08 |
 | [`artefactos/yunta-de-raiz.html`](artefactos/yunta-de-raiz.html), [`artefactos/cronica-del-run.html`](artefactos/cronica-del-run.html) | las dos propuestas tal como fueron aprobadas, con sus diagramas; el README y `mecanismos.md` son su forma normativa | quien quiera la versión legible |
 | [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
-| [`auditoria/09-mercado-de-clis.md`](auditoria/09-mercado-de-clis.md) | los ocho CLIs relevados para la cerca (Gemini, Copilot, Cursor, OpenCode, Aider, Goose, Amp, Kimi), textuales, con URLs y lo no verificado marcado | quien implementa 3-08 o un adapter nuevo |
+| [`auditoria/09-mercado-de-clis.md`](auditoria/09-mercado-de-clis.md) | los ocho CLIs relevados para el cerco (Gemini, Copilot, Cursor, OpenCode, Aider, Goose, Amp, Kimi), textuales, con URLs y lo no verificado marcado | quien implementa 3-08 o un adapter nuevo |
 
 Ningún ítem se empieza sin haber leído este README entero, el mecanismo que el
 ítem nombra en `mecanismos.md`, y la auditoría del frente. Lo que esos tres no
@@ -343,18 +343,18 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   documentación y no construido se construye, o se retira con entrada `A-NN`
   en `deuda-consciente.md` y nota `Revisada` en el ADR que lo describía.
   Nunca un comentario que explique el atajo.
-- **M25 · La cerca.** `yunta_core::fence::Fence { allowed: Vec<ScopeGlob>,
+- **M25 · El cerco.** `yunta_core::fence::Fence { allowed: Vec<ScopeGlob>,
   roots: Vec<PathBuf> }` con `judge(worktree, target) -> Verdict`, el único
   juez de lo que una sesión escribe; `Capabilities::fence: FenceLevel { None,
-  ToolCalls, Filesystem }` reemplaza `edit_hooks`; `FenceReport { level,
-  coverage: Coverage { Exact, WidenedToRoots, ToolsOnly } }` en
-  `agent_session_opened`, cobertura = el canal más débil; kind
-  `write_refused { target: ToolTarget }`; `yunta fence <adapter>` es el hook
-  y cada adapter escribe solo el `FenceCodec`; la cerca vive en
+  ToolCalls, Filesystem }` reemplaza `edit_hooks`; `Coverage { Exact,
+  WidenedToRoots, ToolsOnly }` en `agent_session_opened`, el canal más
+  débil; kind `write_refused { session_id, target }`; `FenceHook` lo arma el
+  CLI y `yunta fence <adapter>` es el hook, cada adapter escribe solo el
+  `FenceCodec`; las raíces salen de `fence.roots`; el cerco vive en
   `scratch_dir`, nunca bajo `cwd`; `read_only` = `allowed` vacío con raíces;
   una escritura que llega al diff bajo `Exact` es `engine_finding`.
   `edit_constraints`, `Glob`, `blocked:<path>` se borran. Especificación
-  completa y la muestra de ocho CLIs del mercado: `cerca.md`.
+  completa y la muestra de ocho CLIs del mercado: `cerco.md`.
 
 ---
 
@@ -452,7 +452,7 @@ Test de frontera: `crates/engine/tests/no_adapter_crate_in_engine.rs`.
 |---|---|---|
 | `run` | run_created run_paused run_resumed run_finished promotion_signaled | `RunLedger` |
 | `node` | node_started node_finished node_failed node_rerouted hook_executed context_assembled criteria_checked scope_checked baseline_captured | `NodeLedger` |
-| `session` | agent_session_opened agent_message capability_degraded write_refused | `SessionLedger`, `DegradationLedger` |
+| `session` | agent_session_opened agent_message capability_degraded write_refused (este último nace en 3-08, no en 2-01) | `SessionLedger`, `DegradationLedger` |
 | `tasks` | task_registered task_status_changed | `TaskLedger` |
 | `scope` | scope_expansion_requested/granted/denied | `GrantLedger` (existe) |
 | `findings` | finding_posted/updated/withdrawn/refused | `FindingLedger` (existe) |
@@ -510,7 +510,7 @@ Constructores por dominio, con el invariante que fijan: `mecanismos.md#m03`.
 | `PersistedDoc<T>` | archivos persistidos sin versión leída | un lector viejo que no marca lo que no entendió |
 | `FenceLevel` | `Capabilities.edit_hooks: bool` | un sandbox y un hook dichos con la misma palabra |
 | `Fence { allowed: Vec<ScopeGlob>, roots }` | `edit_constraints: Option<Vec<String>>` + `artifact_dir` como permiso | un glob inválido en una sesión; dos fuentes para lo escribible |
-| `FenceReport { level, coverage }` | nada (la sesión no decía qué cercó) | una cobertura declarada y no construida |
+| `Coverage` en `agent_session_opened` | nada (la sesión no decía qué cercó) | una cobertura declarada y no construida |
 
 ### Sesiones y capacidades
 
@@ -529,8 +529,8 @@ flowchart LR
 `SessionPlan` → `open_session` → `require(cap)` por cada campo gobernado
 (`fence`, `skills`, `agent`, `run_tools_endpoint`, `budget.max_turns`,
 `network`) → `SessionRequest` + `Vec<Degradation>` → `dispatch_session`
-(sin cambios). La cerca la arma `Fence::for_session(profile, scope,
-artifact_dir)` (M25, `cerca.md` §5).
+(sin cambios). El cerco lo arma `Fence::for_session(profile, scope,
+artifact_dir)` (M25, `cerco.md` §5).
 
 `POLICY` (valores iniciales; una fila por variante):
 
@@ -647,7 +647,7 @@ lo `FailAtCheck`.
 Registradas el 2026-09-13, con la recomendación como decisión, por
 aprobación explícita del dueño del repo: D165 (P1), D166 (P2), D167 (P3),
 D168 (P4), D169 (P5), D164 (P6, dentro de la crónica), D170 (P7), D171 (P8),
-D172 (P9, la cerca, con la muestra de ocho CLIs del mercado).
+D172 (P9, el cerco, con la muestra de ocho CLIs del mercado).
 Viven en `docs/design/adr/` y las indexa `adrs.md`. Un ítem que quiera
 apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 
@@ -673,7 +673,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | 0 | P1–P8 registrados como ADR por archivo; corpus des-corrompido; `docs_sync` recursivo; ratchets nuevos sembrados | que la documentación pueda perder | — |
 | 1 | M01 | tabla de política en core; arnés único | P1 |
 | 2 | M02 M03 M04 M05 | todo lo que deriva | P2, fase 1 |
-| 3 | M06 M07 M08 M09 M10 M11 M25 | un engine que el compilador defiende | P3, P9, fase 2 |
+| 3 | M06 M07 M08 M09 M10 M11 M25 | un engine que el compilador defiende | P3, P9, fase 2; 3-08 además 4-01 |
 | 4 | M12 M13 M14 | `check` atrapa antes del primer token | P4, fase 2 |
 | 5 | M15 M16 M17 M18 M19 | la misma palabra en cada superficie | P5, P6, fase 2 |
 | 6 | M20 M21 M22 | que el ratchet signifique lo que dice | P7, fase 2 |
@@ -741,7 +741,7 @@ Estados: `pendiente` · `bloqueado(Pn)` · `en curso` · `levantado(§11)` ·
 
 Cada ítem `N-xx` implementa los mecanismos que su fase nombra en §7; la
 especificación de cada mecanismo —firmas, archivos, tests— es
-`mecanismos.md#mNN`, para 5-05 es `cronica.md` y para 3-08 es `cerca.md`. Los
+`mecanismos.md#mNN`, para 5-05 es `cronica.md` y para 3-08 es `cerco.md`. Los
 ítems W-xx tienen su especificación completa en §4.
 
 | ítem | qué | depende de | estado |
@@ -773,8 +773,8 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | pendiente |
 | 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | pendiente |
 | 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | pendiente |
-| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `ReadOnly` sin `Write` | 1-01 | pendiente |
-| 3-08 | la cerca (`cerca.md`): `core::fence`, `FenceLevel`, `FenceReport`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | pendiente |
+| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (`cerco.md` §6) | 1-01 | pendiente |
+| 3-08 | el cerco (`cerco.md`): `core::fence`, `FenceLevel`, `Coverage`, `FenceHook`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | pendiente |
 | 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | pendiente |
 | 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | pendiente |
 | 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | pendiente |

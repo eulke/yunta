@@ -75,10 +75,10 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
-**A-13 · La cerca en los adapters.** Ningún adapter cerca lo que una sesión
+**A-13 · El cerco en los adapters.** Ningún adapter cerca lo que una sesión
 escribe; el scope se verifica después de la sesión por diff, y el engine lo
-dice con `capability_degraded(PostCheckOnly)` una vez por run. Lo resuelve la
-cerca (D172, `plan-de-raiz/cerca.md`, ítem 3-08): un juez en core, un hook
+dice con `capability_degraded(PostCheckOnly)` una vez por run. Lo resuelve el
+cerco (D172, `plan-de-raiz/cerco.md`, ítem 3-08): un juez en core, un hook
 en claude-code, el sandbox en codex, el juez en el mock; este ítem se cierra
 con 3-08.
 
