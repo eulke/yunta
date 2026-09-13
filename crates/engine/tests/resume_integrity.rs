@@ -98,6 +98,7 @@ async fn paused_run() -> Paused {
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[BirthArtifact {
                 artifact: ArtifactId::Opaque {

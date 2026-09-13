@@ -82,6 +82,7 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"default".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },

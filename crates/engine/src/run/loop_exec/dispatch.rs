@@ -121,6 +121,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             task_id: task.id.clone(),
             new_status: TaskStatus::Running,
             caused_by: registered_seq,
+            commit: None,
         }),
     )
     .await?;

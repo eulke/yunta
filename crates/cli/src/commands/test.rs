@@ -262,6 +262,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &mode,
+            worktree: &worktree,
             promoted_from: None,
             // A case's `inputs:` name documents the same way `--input`
             // does, and the run is born holding each of them.

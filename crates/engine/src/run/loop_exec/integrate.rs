@@ -8,7 +8,7 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Phase,
     ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
 };
-use yunta_core::{Node, Seq, Task};
+use yunta_core::{CommitSha, Node, Seq, Task};
 
 use crate::scope::scope_check;
 use crate::task_cycle::{post_check, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
@@ -109,6 +109,7 @@ pub(super) async fn integrate_batch(
                         task_id: task.id.clone(),
                         new_status: TaskStatus::Blocked,
                         caused_by: last_check_seq,
+                        commit: None,
                     }),
                 )
                 .await?;
@@ -137,10 +138,13 @@ pub(super) async fn integrate_batch(
                 // retry exhaustion, the branch above. The `task_status_changed`
                 // emitted just below is the log's record of the rejection
                 // (with the rebase-conflict `criteria_checked` that caused
-                // it), so no warning duplicates that event.
-                let new_status = match &outcome {
-                    IntegrationOutcome::Integrated => TaskStatus::Done,
-                    IntegrationOutcome::Rejected => TaskStatus::Pending,
+                // it), so no warning duplicates that event. A `done`
+                // names the commit the tree stands at once the work is
+                // in it, which is what lets another run tell whether its
+                // own tree has that work.
+                let (new_status, commit) = match outcome {
+                    IntegrationOutcome::Integrated { commit } => (TaskStatus::Done, Some(commit)),
+                    IntegrationOutcome::Rejected => (TaskStatus::Pending, None),
                 };
                 ctx.emit(
                     Some(&node.id),
@@ -148,6 +152,7 @@ pub(super) async fn integrate_batch(
                         task_id: task.id.clone(),
                         new_status,
                         caused_by: last_check_seq,
+                        commit,
                     }),
                 )
                 .await?;
@@ -185,7 +190,12 @@ pub(super) async fn integrate_batch(
 }
 
 enum IntegrationOutcome {
-    Integrated,
+    /// The run's tree fast-forwarded onto the task's work and now stands
+    /// at this commit — where that task's work landed. A task that
+    /// committed nothing lands at the integration head itself, and
+    /// recording that is exact: a tree descending from it vacuously has
+    /// everything the task did.
+    Integrated { commit: CommitSha },
     /// The task returned to `ready`; the cause is already on the log —
     /// the rebase-conflict `criteria_checked`, or the post-integration
     /// `criteria_checked`/`scope_checked` — so the variant carries none.
@@ -293,7 +303,7 @@ async fn integrate_task(
             detail: "expected a clean fast-forward after rebase but git refused it".to_string(),
         });
     }
-    Ok(IntegrationOutcome::Integrated)
+    Ok(IntegrationOutcome::Integrated { commit: task_head })
 }
 
 /// Commits a done task's work in `cwd` — the task's own isolated worktree

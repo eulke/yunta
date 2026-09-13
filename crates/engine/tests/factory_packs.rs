@@ -122,6 +122,7 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &"quick".into(),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &[],
         },

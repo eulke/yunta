@@ -750,6 +750,8 @@ nodes:
 struct BirthBench {
     _root: tempfile::TempDir,
     runs_root: std::path::PathBuf,
+    /// The tree the run works in — a birth asks it what it already has.
+    worktree: std::path::PathBuf,
     storage: Storage,
     manifest: yunta_core::Manifest,
 }
@@ -777,6 +779,7 @@ impl BirthBench {
         BirthBench {
             runs_root: root.path().join("runs"),
             _root: root,
+            worktree,
             storage,
             manifest,
         }
@@ -793,6 +796,7 @@ impl BirthBench {
                 manifest: &self.manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts,
             },
@@ -913,6 +917,7 @@ nodes:
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -981,6 +986,7 @@ nodes:
             manifest: &frozen.manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &frozen.documents,
         },
@@ -1072,6 +1078,7 @@ nodes:
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
@@ -1250,12 +1257,11 @@ async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_ne
     let source = RunId::from("run-unreadable-source");
     // A status about a task nobody registered: a log replay stops at.
     let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
-    planted.record(yunta_core::events::EventPayload::TaskStatusChanged(
-        yunta_core::events::TaskStatusChangedPayload {
-            task_id: "T001".into(),
-            new_status: yunta_core::events::TaskStatus::Done,
-            caused_by: 1u64.into(),
-        },
+    planted.record(yunta_testkit::task_status_changed(
+        &"T001".into(),
+        yunta_core::events::TaskStatus::Done,
+        None,
+        1u64.into(),
     ));
 
     let (_document, bytes) = tasks_document(ONE_TASK);
@@ -1324,6 +1330,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },

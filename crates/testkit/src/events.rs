@@ -1,11 +1,12 @@
-//! Reading a run's log the way a test asks about it.
+//! Reading a run's log the way a test asks about it, and writing the
+//! events a run would have written.
 
 use yunta_core::events::artifacts::ArtifactRef;
 use yunta_core::events::{
-    EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload,
+    EventBody, EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload,
+    TaskStatus, TaskStatusChangedPayload,
 };
-use yunta_core::{RunId, Seq, Task};
+use yunta_core::{CommitSha, RunId, Seq, Task, TaskId};
 use yunta_storage::Storage;
 
 /// Every `artifact_accepted` on `events`, in log order — one entry per
@@ -25,6 +26,47 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
             _ => None,
         })
         .collect()
+}
+
+/// The `task_registered` a run writes for `task` — what the run has to
+/// do about it, in the task's own terms.
+pub fn task_registered(task: &Task) -> EventPayload {
+    EventPayload::TaskRegistered(TaskRegisteredPayload {
+        task_id: task.id.clone(),
+        criteria: task.criteria.iter().map(Into::into).collect(),
+        scope: task.scope.clone(),
+        depends_on: task.depends_on.clone(),
+    })
+}
+
+/// The `task_status_changed` a run writes about `task`: the status it
+/// reached, the commit its work landed at — which a `done` names and no
+/// other status does — and the event that justifies the transition.
+pub fn task_status_changed(
+    task: &TaskId,
+    status: TaskStatus,
+    commit: Option<&CommitSha>,
+    caused_by: Seq,
+) -> EventPayload {
+    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+        task_id: task.clone(),
+        new_status: status,
+        caused_by,
+        commit: commit.cloned(),
+    })
+}
+
+/// One event as a log holds it: position `seq` of `run`, with no node
+/// behind it — what a test hands a function that reads a log without
+/// storing one.
+pub fn stored(run: &RunId, seq: u64, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
+        run_id: run.clone(),
+        seq: seq.into(),
+        timestamp: chrono::DateTime::UNIX_EPOCH,
+        node_id: None,
+        body: EventBody::Known(payload),
+    }
 }
 
 /// Another run's log, written by hand: what a run that hands something
@@ -71,19 +113,11 @@ impl<'a> SourceLog<'a> {
             .expect("append to the source log")
     }
 
-    /// Registers `task` the way a run does, and says what became of it.
-    pub fn task(&self, task: &Task, status: TaskStatus) -> &Self {
-        let registered = self.record(EventPayload::TaskRegistered(TaskRegisteredPayload {
-            task_id: task.id.clone(),
-            criteria: task.criteria.iter().map(Into::into).collect(),
-            scope: task.scope.clone(),
-            depends_on: task.depends_on.clone(),
-        }));
-        self.record(EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status: status,
-            caused_by: registered,
-        }));
+    /// Registers `task` the way a run does, and says what became of it —
+    /// `commit` is where the work landed, which only a `done` names.
+    pub fn task(&self, task: &Task, status: TaskStatus, commit: Option<&CommitSha>) -> &Self {
+        let registered = self.record(task_registered(task));
+        self.record(task_status_changed(&task.id, status, commit, registered));
         self
     }
 }

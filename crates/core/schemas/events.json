@@ -2641,6 +2641,17 @@
           "description": "`seq` of the event that justifies this transition.",
           "$ref": "#/$defs/Seq"
         },
+        "commit": {
+          "description": "Where the task's work landed, on a `done` and nowhere else: the\ncommit the run's tree carried after integrating it. What makes a\n`done` answerable by another run — a tree either descends from\nthis commit or does not have the work.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "new_status": {
           "$ref": "#/$defs/TaskStatus"
         },

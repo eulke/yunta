@@ -9,10 +9,11 @@
 //! a `kind: workflow` child that promotes mid-composition.
 //!
 //! The successor's tree branches from where the predecessor's work left
-//! it, so the tasks that run finished are finished here too: what a
-//! handed-over tasks document means to the run receiving it is
-//! `crate::tasks`'s call, made at birth, and this module only says which
-//! run handed it over.
+//! it, so every commit that run integrated is an ancestor of the
+//! successor's HEAD and the tasks it finished are finished here too.
+//! What a handed-over tasks document means to the run receiving it is
+//! `crate::tasks`'s call, made at birth against that tree; this module
+//! only says which run handed it over and which tree it lands in.
 
 use std::path::{Path, PathBuf};
 
@@ -109,6 +110,7 @@ pub async fn create_promotion_successor(
             manifest: &manifest,
             runs_root: roots.runs,
             mode: suggested_mode,
+            worktree: &worktree,
             promoted_from: Some(predecessor_id),
             artifacts: &inherited,
         },

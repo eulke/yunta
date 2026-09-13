@@ -114,6 +114,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &ModeName::from(mode),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },

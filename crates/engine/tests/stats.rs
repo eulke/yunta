@@ -220,6 +220,7 @@ fn fixture_events() -> Vec<StoredEvent> {
                 task_id: "t1".into(),
                 new_status: TaskStatus::Done,
                 caused_by: 10.into(),
+                commit: None,
             }),
         ),
     ]

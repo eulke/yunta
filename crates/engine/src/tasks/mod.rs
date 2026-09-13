@@ -1,25 +1,31 @@
 //! What a tasks document means to the run that holds it: the
 //! registration every one entails, and what a document another run
-//! hands over carries with it.
+//! hands over carries into the tree this run works in.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+mod crossing;
+
+use std::collections::{BTreeMap, HashMap};
 
 use yunta_core::events::{
     self, EventPayload, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
 };
-use yunta_core::{NodeId, RunId, Task, TaskId, TasksFile};
+use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
 
-use crate::replay::RunState;
 use crate::run::RunError;
 use crate::run_log::RunLog;
+
+pub(crate) use crossing::{carried_into, standing_of, Standing};
 
 /// Where a tasks document came from, as far as its registration cares.
 #[derive(Clone, Copy)]
 pub(crate) enum Provenance<'a> {
     /// Nobody did anything about these tasks before this run.
     Fresh,
-    /// Another run's log already says what became of them.
-    Inherited { standing: &'a RunState },
+    /// Another run handed the document over, and this is what of it the
+    /// receiving tree already has.
+    Inherited {
+        carried: &'a BTreeMap<TaskId, CommitSha>,
+    },
 }
 
 /// What a task is, for the question of whether a status still describes
@@ -59,51 +65,17 @@ pub(crate) fn prior_registrations(events: &[StoredEvent]) -> BTreeMap<TaskId, Id
         .collect()
 }
 
-/// The state another run's log leaves standing — the one thing this
-/// module reads from a log that is not this run's.
-///
-/// A log that does not replay is refused here rather than read
-/// partially: a source that cannot answer for its own tasks is not a
-/// source this run can build on, and the diagnostic names it and what
-/// stopped the replay.
-pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<RunState, RunError> {
-    let state = crate::replay::derive(events);
-    match state.broken {
-        Some(diagnostic) => Err(RunError::Broken {
-            diagnostic: format!(
-                "run `{run}` hands over a tasks document, and its own log does not replay: \
-                 {diagnostic}"
-            ),
-        }),
-        None => Ok(state),
-    }
-}
-
-/// The ids of `document` the source leaves `Done`.
-///
-/// Only `done` crosses: it is the one state the receiving run can stand
-/// behind, because that run's tree is built on the tree where the work
-/// it names is integrated. An id the source knows and the document no
-/// longer declares is not this document's business.
-pub(crate) fn carried_done(standing: &RunState, document: &TasksFile) -> BTreeSet<TaskId> {
-    document
-        .tasks
-        .iter()
-        .filter(|task| standing.tasks.get(&task.id) == Some(&TaskStatus::Done))
-        .map(|task| task.id.clone())
-        .collect()
-}
-
 /// What follows a registration, if anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Follow {
     /// This log registered the id with another identity: whatever it
     /// says about the task is about a different task, so the new one
     /// starts `pending`.
     Reset,
-    /// The run that handed the document over left the task done, and
-    /// this log has nothing that contradicts it.
-    Done,
+    /// The work is in this run's tree, at the commit the source named —
+    /// carried forward so a run that inherits from this one can answer
+    /// the same question.
+    Done(CommitSha),
 }
 
 /// One task of a document, and what its registration entails.
@@ -124,7 +96,7 @@ pub(crate) fn plan_registration<'a>(
     document: &'a TasksFile,
     prior: &BTreeMap<TaskId, Identity>,
     current: &HashMap<TaskId, TaskStatus>,
-    carried: &BTreeSet<TaskId>,
+    carried: &BTreeMap<TaskId, CommitSha>,
 ) -> Vec<Planned<'a>> {
     document
         .tasks
@@ -135,11 +107,11 @@ pub(crate) fn plan_registration<'a>(
                 .is_some_and(|identity| *identity != Identity::of(task));
             let follow = if recut {
                 Some(Follow::Reset)
-            } else if carried.contains(&task.id) && current.get(&task.id) != Some(&TaskStatus::Done)
-            {
-                Some(Follow::Done)
             } else {
-                None
+                carried
+                    .get(&task.id)
+                    .filter(|_| current.get(&task.id) != Some(&TaskStatus::Done))
+                    .map(|commit| Follow::Done(commit.clone()))
             };
             Planned { task, follow }
         })
@@ -164,12 +136,13 @@ pub(crate) async fn register(
     let events = log.events().await?;
     let prior = prior_registrations(&events);
     let current = crate::replay::derive(&events).tasks;
+    let nothing = BTreeMap::new();
     let carried = match provenance {
-        Provenance::Fresh => BTreeSet::new(),
-        Provenance::Inherited { standing } => carried_done(standing, document),
+        Provenance::Fresh => &nothing,
+        Provenance::Inherited { carried } => carried,
     };
 
-    for planned in plan_registration(document, &prior, &current, &carried) {
+    for planned in plan_registration(document, &prior, &current, carried) {
         let registered = log
             .record(
                 node,
@@ -184,15 +157,19 @@ pub(crate) async fn register(
         let Some(follow) = planned.follow else {
             continue;
         };
+        // Only a `done` states where work landed; a reset states that
+        // nothing about this task is settled, which no commit can name.
+        let (new_status, commit) = match follow {
+            Follow::Reset => (TaskStatus::Pending, None),
+            Follow::Done(commit) => (TaskStatus::Done, Some(commit)),
+        };
         log.record(
             node,
             EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                 task_id: planned.task.id.clone(),
-                new_status: match follow {
-                    Follow::Reset => TaskStatus::Pending,
-                    Follow::Done => TaskStatus::Done,
-                },
+                new_status,
                 caused_by: registered,
+                commit,
             }),
         )
         .await?;
@@ -203,57 +180,39 @@ pub(crate) async fn register(
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use yunta_core::events::{EventBody, TaskStatusChangedPayload};
+    use yunta_core::RunId;
+    use yunta_testkit::tasks_document;
 
     use super::*;
 
-    fn document(tasks: &[(&str, &str, &str)]) -> TasksFile {
-        let mut yaml = String::from("tasks:\n");
-        for (id, scope, cmd) in tasks {
-            yaml.push_str(&format!("  - id: {id}\n"));
-            yaml.push_str(&format!("    title: \"{id}\"\n"));
-            yaml.push_str(&format!("    scope: [\"{scope}\"]\n"));
-            yaml.push_str(&format!("    criteria: [{{cmd: \"{cmd}\"}}]\n"));
-        }
-        yunta_core::shape::read(yaml.as_bytes(), "tasks").expect("a valid tasks document")
-    }
-
-    fn standing(tasks: &[(&str, TaskStatus)]) -> RunState {
-        RunState {
-            tasks: tasks.iter().map(|(id, s)| ((*id).into(), *s)).collect(),
-            ..RunState::default()
-        }
-    }
-
-    fn event(seq: u64, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: "run-1".into(),
-            seq: seq.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
-            node_id: None,
-            body: EventBody::Known(payload),
-        }
-    }
-
+    /// The registration this log holds for `task`, at `seq`.
     fn registration(seq: u64, task: &Task) -> StoredEvent {
-        event(
+        yunta_testkit::stored(
+            &RunId::from("run-1"),
             seq,
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
-                task_id: task.id.clone(),
-                criteria: task.criteria.iter().map(Into::into).collect(),
-                scope: task.scope.clone(),
-                depends_on: task.depends_on.clone(),
-            }),
+            yunta_testkit::task_registered(task),
         )
+    }
+
+    /// The commit a `done` that crossed names. Any commit: what
+    /// `plan_registration` does with it never depends on its value.
+    fn landed() -> CommitSha {
+        CommitSha::from("0123456789abcdef0123456789abcdef01234567")
+    }
+
+    /// What a receiving tree already has of `ids`, all at the same
+    /// commit.
+    fn carried(ids: &[&str]) -> BTreeMap<TaskId, CommitSha> {
+        ids.iter().map(|id| ((*id).into(), landed())).collect()
     }
 
     #[test]
     fn a_fresh_document_registers_every_task_with_no_status_to_follow() {
-        let doc = document(&[
+        let doc = tasks_document(&[
             ("T001", "a.txt", "test -f a.txt"),
             ("T002", "b.txt", "true"),
         ]);
-        let planned = plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &BTreeSet::new());
+        let planned = plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &carried(&[]));
 
         assert_eq!(
             planned
@@ -267,22 +226,26 @@ mod tests {
     }
 
     #[test]
-    fn an_inherited_done_task_with_the_same_identity_is_done_here() {
-        let doc = document(&[("T001", "a.txt", "test -f a.txt")]);
-        let carried = BTreeSet::from([TaskId::from("T001")]);
-        let planned = plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &carried);
+    fn a_task_that_crossed_with_the_same_identity_is_done_here_at_the_commit_it_names() {
+        let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
+        let planned =
+            plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &carried(&["T001"]));
 
-        assert_eq!(planned[0].follow, Some(Follow::Done));
+        assert_eq!(
+            planned[0].follow,
+            Some(Follow::Done(landed())),
+            "the done carries the commit forward, so a run inheriting from this one can \
+             answer the same question"
+        );
     }
 
     #[test]
-    fn an_inherited_done_task_whose_identity_changed_here_starts_over() {
-        let doc = document(&[("T001", "a.txt", "test -f a.txt")]);
-        let cut_differently = document(&[("T001", "a.txt", "test -f something-else")]);
+    fn a_task_that_crossed_whose_identity_changed_here_starts_over() {
+        let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
+        let cut_differently = tasks_document(&[("T001", "a.txt", "test -f something-else")]);
         let prior = prior_registrations(&[registration(1, &cut_differently.tasks[0])]);
-        let carried = BTreeSet::from([TaskId::from("T001")]);
 
-        let planned = plan_registration(&doc, &prior, &HashMap::new(), &carried);
+        let planned = plan_registration(&doc, &prior, &HashMap::new(), &carried(&["T001"]));
 
         assert_eq!(
             planned[0].follow,
@@ -293,72 +256,12 @@ mod tests {
 
     #[test]
     fn a_task_this_log_already_has_done_gets_no_second_done() {
-        let doc = document(&[("T001", "a.txt", "test -f a.txt")]);
+        let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
         let current = HashMap::from([(TaskId::from("T001"), TaskStatus::Done)]);
-        let carried = BTreeSet::from([TaskId::from("T001")]);
 
-        let planned = plan_registration(&doc, &BTreeMap::new(), &current, &carried);
+        let planned = plan_registration(&doc, &BTreeMap::new(), &current, &carried(&["T001"]));
 
         assert_eq!(planned[0].follow, None);
-    }
-
-    #[test]
-    fn only_done_crosses_from_a_source_log() {
-        let doc = document(&[
-            ("T001", "a.txt", "true"),
-            ("T002", "b.txt", "true"),
-            ("T003", "c.txt", "true"),
-            ("T004", "d.txt", "true"),
-            ("T005", "e.txt", "true"),
-            ("T006", "f.txt", "true"),
-        ]);
-        let source = standing(&[
-            ("T001", TaskStatus::Running),
-            ("T002", TaskStatus::Failed),
-            ("T003", TaskStatus::Blocked),
-            ("T004", TaskStatus::Pending),
-            ("T005", TaskStatus::Ready),
-            ("T006", TaskStatus::Done),
-        ]);
-
-        assert_eq!(
-            carried_done(&source, &doc),
-            BTreeSet::from([TaskId::from("T006")]),
-            "done is the only state with a meaning the receiving run can stand behind"
-        );
-    }
-
-    #[test]
-    fn carried_done_ignores_tasks_the_document_no_longer_has() {
-        let doc = document(&[("T001", "a.txt", "true")]);
-        let source = standing(&[("T001", TaskStatus::Done), ("T099", TaskStatus::Done)]);
-
-        assert_eq!(
-            carried_done(&source, &doc),
-            BTreeSet::from([TaskId::from("T001")]),
-        );
-    }
-
-    #[test]
-    fn a_source_log_that_does_not_replay_is_refused_naming_the_run() {
-        let orphan = event(
-            1,
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                task_id: "T001".into(),
-                new_status: TaskStatus::Done,
-                caused_by: 1u64.into(),
-            }),
-        );
-
-        let error = standing_of(&RunId::from("run-source"), &[orphan]).unwrap_err();
-
-        let RunError::Broken { diagnostic } = &error else {
-            panic!("a source that cannot answer for itself is refused: {error:?}");
-        };
-        assert!(
-            diagnostic.contains("run-source") && diagnostic.contains("T001"),
-            "the diagnostic names the run and what stopped its replay: {diagnostic}"
-        );
     }
 
     fn any_status() -> impl Strategy<Value = TaskStatus> {
@@ -397,7 +300,7 @@ mod tests {
                 (prop_oneof![Just("T001"), Just("T002"), Just("T003")], any_status()),
                 0..4,
             ),
-            carried in prop::collection::vec(
+            crossed in prop::collection::vec(
                 prop_oneof![Just("T001"), Just("T002"), Just("T003")],
                 0..4,
             ),
@@ -405,7 +308,7 @@ mod tests {
             // A document declares each id once, so the generated pairs
             // collapse by id before they become one.
             let unique = |pairs: &[(String, String)]| -> Vec<(String, String)> {
-                let mut seen = BTreeSet::new();
+                let mut seen = std::collections::BTreeSet::new();
                 pairs.iter().filter(|(id, _)| seen.insert(id.clone())).cloned().collect()
             };
             // A scope of its own per id, because a document whose tasks
@@ -415,7 +318,7 @@ mod tests {
                     .into_iter()
                     .map(|(id, cmd)| (format!("{id}.txt"), id, cmd))
                     .collect();
-                document(
+                tasks_document(
                     &scoped
                         .iter()
                         .map(|(scope, id, cmd)| (id.as_str(), scope.as_str(), cmd.as_str()))
@@ -434,9 +337,9 @@ mod tests {
             );
             let current: HashMap<TaskId, TaskStatus> =
                 current.into_iter().map(|(id, status)| (id.into(), status)).collect();
-            let carried: BTreeSet<TaskId> = carried.into_iter().map(Into::into).collect();
+            let crossed = carried(&crossed);
 
-            let planned = plan_registration(&doc, &prior, &current, &carried);
+            let planned = plan_registration(&doc, &prior, &current, &crossed);
 
             prop_assert_eq!(
                 planned.iter().map(|p| p.task.id.clone()).collect::<Vec<_>>(),
@@ -447,7 +350,7 @@ mod tests {
                     .get(&entry.task.id)
                     .is_some_and(|identity| *identity != Identity::of(entry.task))
                 {
-                    prop_assert_eq!(entry.follow, Some(Follow::Reset));
+                    prop_assert_eq!(entry.follow.clone(), Some(Follow::Reset));
                 }
             }
         }

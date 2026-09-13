@@ -15,7 +15,7 @@ use crate::artifacts::{
     accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
-use crate::tasks::Provenance;
+use crate::tasks::{Provenance, Standing};
 
 use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
@@ -186,7 +186,7 @@ fn resolve_from_child<'a>(
 /// did with it.
 pub(super) struct Acquired {
     pub verified: Vec<VerifiedArtifact>,
-    pub standing: crate::replay::RunState,
+    pub standing: Standing,
 }
 
 /// Takes over every artifact a `kind: workflow` node declares from the
@@ -237,23 +237,23 @@ pub(super) async fn acquire_from_child(
 }
 
 /// Records every verified artifact on the log, and what its content
-/// means to the run: a tasks document's tasks registered, a findings
-/// file's entries posted.
+/// means to the run.
 ///
 /// Only what the run does not already hold enters here, as `ingested` —
 /// everything else is on the log already, with the origin that brought
 /// it in. What the run stores is the canonical rendering, so an
 /// interpreted document is the same bytes whoever wrote the file.
 ///
-/// `provenance` is the whole close's, not one artifact's: a node holds
-/// at most one document of each kind and every artifact it closes on
-/// came in through the same door, so where they came from is a fact
-/// about the close.
+/// `standing` is the whole close's, not one artifact's: a node holds at
+/// most one document of each kind and every artifact it closes on came
+/// in through the same door, so what the run handing them over left
+/// standing is a fact about the close — `None` when this run's own node
+/// produced them and there is no other log to read.
 pub(super) async fn record_artifacts(
     ctx: &RunCtx<'_>,
     node: &Node,
     verified: &[VerifiedArtifact],
-    provenance: Provenance<'_>,
+    standing: Option<&Standing>,
 ) -> Result<(), RunError> {
     for artifact in verified {
         // What the run already holds came in where it was produced,
@@ -274,33 +274,54 @@ pub(super) async fn record_artifacts(
             )
             .await?;
         }
-        match &artifact.content {
-            ArtifactContent::Tasks(tasks) => {
-                crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
-            }
-            // A session node's findings are already on this log — they
-            // are what the file was derived from. A `kind: workflow`
-            // node's were posted in the child run, so this log learns
-            // them here, under the node that acquired them: the parent
-            // counts, renders and inherits the composition's findings
-            // like any other.
-            ArtifactContent::Findings(findings)
-                if matches!(node.kind, NodeKind::Workflow { .. }) =>
-            {
-                for finding in findings {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                            finding: finding.clone(),
-                        }),
-                    )
-                    .await?;
+        record_content(ctx, node, &artifact.content, standing).await?;
+    }
+    Ok(())
+}
+
+/// What one artifact's content means to the run: a tasks document's
+/// tasks registered, a findings file's entries posted. An artifact the
+/// engine does not interpret states nothing beyond its acceptance.
+async fn record_content(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    content: &ArtifactContent,
+    standing: Option<&Standing>,
+) -> Result<(), RunError> {
+    match content {
+        ArtifactContent::Tasks(tasks) => {
+            // What of the source's finished work this run's own tree
+            // already has — asked of that tree, here, because the
+            // document is what names the tasks to ask about.
+            let carried = match standing {
+                Some(standing) => {
+                    Some(crate::tasks::carried_into(standing, tasks, ctx.worktree).await?)
                 }
-            }
-            ArtifactContent::Findings(_)
-            | ArtifactContent::Questions(_)
-            | ArtifactContent::Opaque => {}
+                None => None,
+            };
+            let provenance = match &carried {
+                Some(carried) => Provenance::Inherited { carried },
+                None => Provenance::Fresh,
+            };
+            crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
         }
+        // A session node's findings are already on this log — they are
+        // what the file was derived from. A `kind: workflow` node's were
+        // posted in the child run, so this log learns them here, under
+        // the node that acquired them: the parent counts, renders and
+        // inherits the composition's findings like any other.
+        ArtifactContent::Findings(findings) if matches!(node.kind, NodeKind::Workflow { .. }) => {
+            for finding in findings {
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
+                        finding: finding.clone(),
+                    }),
+                )
+                .await?;
+            }
+        }
+        ArtifactContent::Findings(_) | ArtifactContent::Questions(_) | ArtifactContent::Opaque => {}
     }
     Ok(())
 }

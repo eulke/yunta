@@ -112,6 +112,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },
@@ -1613,7 +1614,7 @@ nodes:
 }
 
 #[tokio::test]
-async fn a_parent_acquiring_its_child_s_tasks_holds_them_done() {
+async fn a_parent_does_not_hold_done_what_its_child_did_in_a_tree_of_its_own() {
     let bench = Bench::new(&[(
         "plan-and-do",
         &format!(
@@ -1630,6 +1631,9 @@ nodes:
 "#
         ),
     )]);
+    // The default isolation gives the child a tree of its own, and
+    // nothing merges it back: the child's commits live on the child's
+    // branch, so the parent's tree does not have the work `done` names.
     let parent = r#"
 name: parent
 nodes:
@@ -1653,18 +1657,160 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done),
-        "what the child finished is finished for the parent that took the document over"
-    );
-    assert_eq!(
         task_registrations(&bench, &run_id),
         vec![(Some("feat".to_string()), "T001".to_string())],
         "the parent registers them under the node that acquired the document"
     );
     assert_eq!(
         task_statuses(&bench, &run_id),
+        vec![],
+        "a done whose commit the parent's tree does not have follows no registration"
+    );
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Pending),
+        "the parent holds the task open: the work is in a tree it never took"
+    );
+}
+
+#[tokio::test]
+async fn a_parent_sharing_its_tree_with_its_child_holds_its_child_s_work_done() {
+    let bench = Bench::new(&[(
+        "plan-and-do",
+        &format!(
+            r#"
+name: plan-and-do
+nodes:
+{WRITES_ONE_TASK}
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#
+        ),
+    )]);
+    // `inherit` puts the child's integration commits in the parent's own
+    // tree, which is what makes the child's `done` answerable here.
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: plan-and-do
+    isolation: inherit
+    artifacts: { produces: [tasks] }
+"#;
+
+    let run_id = RunId::from("run-shares-its-tree");
+    let (terminal, state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            DOES_ONE_TASK,
+            &NoInteraction,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done),
+        "what the child finished in this very tree is finished here"
+    );
+    assert_eq!(
+        task_statuses(&bench, &run_id),
         vec![("T001".to_string(), yunta_core::events::TaskStatus::Done)],
+    );
+}
+
+#[tokio::test]
+async fn a_sibling_mounting_a_finished_child_s_tasks_starts_them_over() {
+    let bench = Bench::new(&[
+        (
+            "plan-and-do",
+            &format!(
+                r#"
+name: plan-and-do
+nodes:
+{WRITES_ONE_TASK}
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#
+            ),
+        ),
+        (
+            "hold-them",
+            r#"
+name: hold-them
+nodes:
+  - id: note
+    kind: bash
+    run: "true"
+"#,
+        ),
+    ]);
+    // A fan-out: one child plans and implements in its own tree, a
+    // sibling mounts the document it left. The sibling's tree branches
+    // from the parent's, which never took the first child's branch, so
+    // the work that document calls done is not there to stand on and
+    // the sibling starts its tasks where any task starts.
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: plan-and-do
+    artifacts: { produces: [tasks] }
+  - id: audit
+    kind: workflow
+    use: hold-them
+    depends_on: [feat]
+    mounts:
+      - artifact: { node: feat, kind: tasks }
+"#;
+
+    let run_id = RunId::from("run-fan-out-tasks");
+    let (terminal, _state) = bench
+        .run(
+            &run_id,
+            parent,
+            CONFIG,
+            &HashMap::new(),
+            DOES_ONE_TASK,
+            &NoInteraction,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let sibling = bench
+        .children_by_node(&run_id)
+        .into_iter()
+        .find(|(node, _)| node == "audit")
+        .map(|(_, id)| id)
+        .expect("the sibling is linked on the parent's log");
+    assert_eq!(
+        task_registrations(&bench, &sibling),
+        vec![(None, "T001".to_string())],
+        "the mounted document's tasks are the sibling's from birth"
+    );
+    assert_eq!(
+        task_statuses(&bench, &sibling),
+        vec![],
+        "and none of them crosses: the sibling's tree has no commit the document's done names"
+    );
+    let state = yunta_engine::derive(&bench.storage.events_for_run(&sibling).unwrap());
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Pending),
+        "the sibling has the task to do, not behind it"
     );
 }
 

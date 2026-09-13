@@ -161,6 +161,7 @@ async fn run_planted(
             manifest: &manifest,
             runs_root: &runs_root,
             mode: &ModeName::from(mode),
+            worktree: &worktree,
             promoted_from: None,
             artifacts: &born,
         },
@@ -170,6 +171,12 @@ async fn run_planted(
     .await
     .unwrap();
 
+    // Where the planted work landed: this run's own tree, which is what
+    // a successor branches from, so the `done` answers there too.
+    let landed: yunta_core::CommitSha =
+        yunta_testkit::git_output(&worktree, &["rev-parse", "HEAD"])
+            .parse()
+            .unwrap();
     for task in planted.done {
         let caused_by = registration_of(&storage.events_for_run(&run_id).unwrap(), task);
         storage
@@ -177,12 +184,11 @@ async fn run_planted(
                 &yunta_core::events::EventDraft {
                     run_id: run_id.clone(),
                     node_id: None,
-                    payload: EventPayload::TaskStatusChanged(
-                        yunta_core::events::TaskStatusChangedPayload {
-                            task_id: (*task).into(),
-                            new_status: yunta_core::events::TaskStatus::Done,
-                            caused_by,
-                        },
+                    payload: yunta_testkit::task_status_changed(
+                        &(*task).into(),
+                        yunta_core::events::TaskStatus::Done,
+                        Some(&landed),
+                        caused_by,
                     ),
                 },
                 &yunta_core::SystemClock,
@@ -631,4 +637,112 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
         state.tasks.get("T002"),
         Some(&yunta_core::events::TaskStatus::Pending)
     );
+}
+
+#[tokio::test]
+async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let closed = run_planted(
+        PROMOTABLE_WORKFLOW,
+        "quick",
+        &interaction,
+        Planted {
+            tasks: Some(TWO_TASKS),
+            done: &["T001"],
+            ..Planted::default()
+        },
+    )
+    .await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    let worktrees = closed.runs_root.parent().unwrap().join("worktrees");
+
+    let first = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &worktrees,
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the first successor is created");
+
+    // The second link of the chain: the run the first successor was
+    // born as is itself promoted, and what it says about T001 is only
+    // what it was born saying.
+    let second = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &first.run_id,
+            manifest: &first.manifest,
+            worktree: &first.worktree,
+            run_dir: &first.run_dir,
+        },
+        &first.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &worktrees,
+        },
+        &closed.storage.async_handle(),
+        &FixedClock,
+        &IDS,
+    )
+    .await
+    .expect("the second successor is created");
+
+    let landed = done_at(
+        &closed.storage.events_for_run(&first.run_id).unwrap(),
+        "T001",
+    );
+    assert_eq!(
+        done_at(
+            &closed.storage.events_for_run(&second.run_id).unwrap(),
+            "T001"
+        ),
+        landed,
+        "a done that crossed names the same commit further down the chain, which is what          lets the third link answer the question the first one did"
+    );
+    assert!(
+        landed.is_some(),
+        "the commit the work landed at is what the crossing is made of"
+    );
+
+    let state = yunta_engine::derive(&closed.storage.events_for_run(&second.run_id).unwrap());
+    assert_eq!(
+        state.tasks.get("T001"),
+        Some(&yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        state.tasks.get("T002"),
+        Some(&yunta_core::events::TaskStatus::Pending)
+    );
+}
+
+/// The commit the last `done` about `task` on `events` names.
+fn done_at(
+    events: &[yunta_core::events::StoredEvent],
+    task: &str,
+) -> Option<yunta_core::CommitSha> {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::TaskStatusChanged(p))
+                if p.task_id.as_str() == task
+                    && p.new_status == yunta_core::events::TaskStatus::Done =>
+            {
+                Some(p.commit.clone())
+            }
+            _ => None,
+        })
+        .flatten()
 }

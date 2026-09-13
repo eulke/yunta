@@ -166,6 +166,7 @@ fn task_status_changed_without_task_registered_is_broken() {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
             caused_by: 1.into(),
+            commit: None,
         }),
     )];
 
@@ -193,6 +194,7 @@ fn task_lifecycle_derives_its_latest_status() {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Running,
                 caused_by: 1.into(),
+                commit: None,
             }),
         ),
         event(
@@ -202,6 +204,7 @@ fn task_lifecycle_derives_its_latest_status() {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Done,
                 caused_by: 2.into(),
+                commit: None,
             }),
         ),
     ];

@@ -81,13 +81,16 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             scope: Vec::new(),
             depends_on: Vec::new(),
         })),
-        (task_id(), task_status()).prop_map(|(id, new_status)| EventPayload::TaskStatusChanged(
-            TaskStatusChangedPayload {
+        (task_id(), task_status(), any::<bool>()).prop_map(|(id, new_status, placed)| {
+            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
                 task_id: id.into(),
                 new_status,
                 caused_by: 1u64.into(),
-            }
-        )),
+                // Both shapes a status has on the wire: one naming where
+                // the work landed, and one from a log that never did.
+                commit: placed.then(|| "deadbeef".into()),
+            })
+        }),
         (severity(), "[a-z]{0,6}", "[a-z]{0,6}").prop_map(|(severity, title, location)| {
             EventPayload::FindingPosted(FindingPostedPayload {
                 finding: Finding {

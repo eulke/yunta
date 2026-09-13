@@ -463,6 +463,7 @@ async fn create_run_from(
             manifest,
             runs_root: &ctx.project.runs_root,
             mode: &resolved_mode,
+            worktree: &worktree,
             promoted_from: None,
             // The run is born holding every document its `inputs:`
             // named, accepted right after `run_created`.

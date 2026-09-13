@@ -90,6 +90,7 @@ fn all_kinds() -> Vec<EventPayload> {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
             caused_by: 42.into(),
+            commit: Some("deadbeef".into()),
         }),
         EventPayload::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),

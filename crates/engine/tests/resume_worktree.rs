@@ -115,6 +115,7 @@ async fn paused_run(isolation: Isolation) -> Paused {
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },

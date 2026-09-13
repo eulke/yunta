@@ -355,6 +355,12 @@ pub struct TaskStatusChangedPayload {
     pub new_status: TaskStatus,
     /// `seq` of the event that justifies this transition.
     pub caused_by: Seq,
+    /// Where the task's work landed, on a `done` and nowhere else: the
+    /// commit the run's tree carried after integrating it. What makes a
+    /// `done` answerable by another run — a tree either descends from
+    /// this commit or does not have the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitSha>,
 }
 
 /// `task_id` is present for a task's scope check within a loop node;

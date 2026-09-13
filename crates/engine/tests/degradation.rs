@@ -79,6 +79,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &"default".into(),
+                worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &[],
             },

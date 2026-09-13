@@ -211,6 +211,7 @@ nodes:
                 manifest: &manifest,
                 runs_root: &project.runs_root,
                 mode: &"quick".into(),
+                worktree: &worktree,
                 promoted_from: None,
                 artifacts: &[],
             },

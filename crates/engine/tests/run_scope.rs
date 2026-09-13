@@ -611,10 +611,16 @@ async fn a_successor_s_replan_keeps_done_what_it_kept_and_resets_what_it_recut()
         },
         bytes,
     }]);
-    // The source run's own log: both tasks registered, both done.
+    // The source run's own log: both tasks registered, both done at a
+    // commit this bench's tree already carries — the successor works in
+    // the tree the predecessor left, so its `done` answers here.
+    let landed: yunta_core::CommitSha =
+        yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
+            .parse()
+            .unwrap();
     let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
     for task in &document.tasks {
-        planted.task(task, yunta_core::events::TaskStatus::Done);
+        planted.task(task, yunta_core::events::TaskStatus::Done, Some(&landed));
     }
 
     let workflow = r#"
@@ -694,5 +700,59 @@ nodes:
     assert!(
         !commit_subjects(&bench.worktree).contains(&"task task-a: Write a".to_string()),
         "no session ever ran for task-a here"
+    );
+}
+
+#[tokio::test]
+async fn an_integrated_task_records_the_commit_its_work_landed_at() {
+    let bench = Bench::new();
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-a", "Write a", "a.txt", "test -f a.txt")
+    );
+    let workflow = r#"
+name: one-task
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
+    );
+
+    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let placed: Vec<Option<yunta_core::CommitSha>> = events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                if p.new_status == yunta_core::events::TaskStatus::Done =>
+            {
+                Some(p.commit.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    let head: yunta_core::CommitSha =
+        yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
+            .parse()
+            .unwrap();
+    assert_eq!(
+        placed,
+        vec![Some(head)],
+        "the done names the commit the run's tree carried after integrating the task"
     );
 }

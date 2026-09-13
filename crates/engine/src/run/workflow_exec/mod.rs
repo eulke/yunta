@@ -391,6 +391,7 @@ pub(super) async fn execute_workflow(
             manifest: &child_manifest,
             runs_root: &runs,
             mode: &child_mode,
+            worktree: &child_tree,
             promoted_from: None,
             artifacts: &born,
         },

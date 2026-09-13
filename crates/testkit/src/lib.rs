@@ -15,14 +15,16 @@ mod clock;
 mod events;
 mod interaction;
 mod repo;
+mod tasks;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{run_id_from, run_yunta, stderr, stdout};
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
-pub use events::{accepted, SourceLog};
+pub use events::{accepted, stored, task_registered, task_status_changed, SourceLog};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
+pub use tasks::tasks_document;
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 
 /// Runs the `yunta` binary from an integration test: `yunta_in!(dir, home,

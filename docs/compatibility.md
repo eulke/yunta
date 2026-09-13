@@ -176,6 +176,14 @@ each came from: the receipt counts a problem by its code together with the kind 
 document it was found in, and a failure of the file itself, which has no document,
 counts by code alone.
 
+`task_status_changed` carries `commit` on a `done`: the commit the run's tree
+stood at once that task's work was in it. No other status carries one, and a log
+whose `done` events name none — every log written before the field existed —
+reads back as exactly that. The field is what lets another run tell whether its
+own tree has the work, so a `done` that names no commit crosses to no run: that
+run registers the task and does it again, rather than assuming a tree it cannot
+ask about.
+
 An artifact kind is read under its current name and under the one it had. The
 tasks document is `tasks`; a log — `artifact_accepted`, `artifact_written`,
 `artifact_submitted` — or

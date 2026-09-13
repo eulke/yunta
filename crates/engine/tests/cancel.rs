@@ -55,6 +55,7 @@ async fn prepare(bench: &Bench) -> (Manifest, std::path::PathBuf) {
             manifest: &manifest,
             runs_root: &bench.runs_root,
             mode: &"default".into(),
+            worktree: &bench.worktree,
             promoted_from: None,
             artifacts: &[],
         },
