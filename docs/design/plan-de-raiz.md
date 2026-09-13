@@ -1,0 +1,800 @@
+# Plan de raíz
+
+El plan vigente de corrección arquitectónica de Yunta. Es la especificación de
+todo el trabajo que sigue en la rama `feature/improve-ux`: cada ítem se
+implementa tal como está escrito acá, con los nombres, los archivos y los tests
+que acá se nombran. Lo que este documento no dice, no se inventa: se levanta
+(§0) y decide un humano.
+
+Fuente: ocho auditorías independientes sobre `80abe93` —eventos, engine,
+artifacts, CLI, adapters, core, tests, documentación— con 198 defectos citados
+por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos. La
+versión legible con diagramas está publicada como artefacto; este archivo es la
+fuente de verdad y el tablero.
+
+---
+
+## 0. Régimen de ejecución
+
+Estas reglas rigen para todo agente o persona que implemente un ítem de este
+plan. No admiten interpretación.
+
+1. **El plan es la spec.** Un ítem se implementa con los nombres de tipos,
+   funciones, módulos, archivos y tests que el plan nombra. No se renombra, no
+   se reubica, no se "mejora" el nombre. Si el plan dice `Escalation::new`, el
+   constructor se llama `Escalation::new`.
+2. **Lo que el plan no dice, se levanta.** Un agente que encuentra una
+   contradicción, una imposibilidad, un diseño mejor, una dependencia oculta o
+   un alcance mayor **se detiene**, escribe el levantamiento en §11 con
+   evidencia (archivo:línea), alternativas y recomendación, y espera. No
+   improvisa una solución "mientras tanto". No implementa una parte y deja una
+   nota. No decide solo.
+3. **Nada fuera del ítem.** Un PR cierra ítems del tablero (§10) y nada más.
+   No se agregan mecanismos, tipos, archivos, dependencias ni flags que el plan
+   no nombre. No se aprovecha "ya que estoy". Un refactor adyacente que el
+   ítem no exige es drift.
+4. **Las decisiones P1–P8 son bloqueantes.** Un ítem marcado como dependiente
+   de una decisión no registrada en `adrs.md` no se empieza. Un agente no toma
+   una decisión P por defecto, ni "provisoriamente".
+5. **Lo marcado "se conserva" no se toca.** `RunLog`, el observer, `RunFrame`,
+   `Failure`, `reserved::offer`, `FindingLedger`, `ArtifactLedger`,
+   `GateResolvedPayload`, `string_id!`, `shape::read`, `spawn_governed`,
+   `Delivery::choose`, `Curtain`, `Folded`, `render::state`, `advice`,
+   `Layout`, `wait.rs`, `Terminal`, la nomenclatura de tests. Un mecanismo
+   nuevo los generaliza; nunca los reimplementa ni los reemplaza.
+6. **Cada ítem cierra con el gate completo ejecutado**, en este orden, por
+   quien implementa: `cargo fmt --all --check`, `cargo clippy --workspace
+   --all-targets -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc
+   --workspace --no-deps`, `cargo run -p xtask -- schema --check`, `cargo run
+   -p xtask -- smells --check`, `cargo deny check`, `cargo test --workspace`,
+   `yunta check` sobre todo workflow del repo y los packs, `yunta test` en el
+   repo y en cada pack, `cargo check -p <crate>` por crate. Un resultado no
+   ejecutado no existe.
+7. **Primero en rojo.** Cada ítem nombra su test. El test se escribe primero,
+   corre, falla por la razón exacta del ítem, y recién entonces se escribe el
+   código. Un ítem sin su test en rojo no se considera empezado.
+8. **El texto queda en presente.** Ningún rustdoc, ayuda, mensaje ni comentario
+   del diff nombra este plan, una fase, un ítem, lo que había antes ni lo que
+   vendrá. Este archivo es el único lugar del repo que planifica.
+9. **El tablero se actualiza en el mismo PR.** Un ítem cerrado cambia su estado
+   en §10 en el mismo commit que lo cierra, con el hash del commit. Un ítem
+   levantado cambia a `levantado` y apunta a §11.
+10. **Prohibiciones que el ratchet mide** (§7, M22) y que un PR no puede subir:
+    `_ =>` en un `apply` de ledger; un `format!` que construya `reason`,
+    `summary`, `cause` o `policy_applied`; un `SessionRequest { … }` literal
+    fuera de `open_session`; `Command::new("git")` fuera de `git.rs` y
+    `repo.rs`; `std::fs` dentro de `async fn`; `SystemClock` o `Utc::now`
+    fuera de `clock.rs` y `main.rs`; `std::env` fuera del boundary de `Env`;
+    `execute_run(RunEnv` fuera del testkit; `fn event(` fuera del testkit;
+    `sleep` en tests; vocabulario prohibido (tabla de CLAUDE.md); marcadores
+    de tiempo o plan en texto (`for now`, `yet`, `today`, `the old`, `will`,
+    `future`, `not yet`).
+11. **Vocabulario.** La tabla de CLAUDE.md rige. `ledger` solo nombra un
+    pliegue del log. El documento de tareas es `tasks`.
+12. **Orden.** Los ítems de un PR respetan las dependencias de §10. Una fase
+    no empieza hasta que la anterior de la que depende está cerrada.
+
+---
+
+## 1. Diagnóstico
+
+| medida | valor |
+|---|---|
+| lugares donde se declara un kind de evento | 9 en el workspace + 2 docs; el compilador defiende 3 |
+| literales de `GateWaitingPayload` sin constructor | 7, en 4 módulos |
+| módulos que pliegan el ciclo de vida de un nodo | 19 |
+| replays completos del log por iteración del scheduler | ≥ 3 (y ≥ 2 lecturas de storage) |
+| subprocesos git con process group, registro o cancelación | 0 |
+| capacidades declaradas que el engine nunca consulta | 3 (`edit_hooks`, `usage_reporting`, `permission_profiles`) |
+| copias de "buscar el run dir" en el CLI / redacciones de "no run" | 6 / 10 |
+| `execute_run(RunEnv{…})` a mano en tests / en el testkit | 46 / 1 |
+| divergencias documentación↔código | 44; `docs/design/` no está atado por ningún test |
+| tags publicados | 0 — por D141, reestructurar payloads hoy no cuesta ningún `_v2` |
+
+Lo que está bien y se conserva (regla 5 de §0): el engine tiene cero
+conocimiento de CLIs concretos; `RunLog` es una costura única con el observer
+colgado; `Failure` y `reserved::offer` son hechos tipados con constructor
+único; `FindingLedger` y `ArtifactLedger` son pliegues únicos; `GateResolvedPayload`
+separa forma Rust de forma wire; `string_id!` valida todo id; `shape::read`
+fusiona parsear y chequear; `spawn_governed` es el modelo de propiedad;
+`Delivery::choose`, `Curtain`, `Folded`, `render::state`, `advice`, `Layout`
+en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
+
+---
+
+## 2. Los doce vicios y los veinticuatro mecanismos
+
+| vicio | síntoma principal | mecanismos |
+|---|---|---|
+| V1 un hecho se construye en muchos lugares | `GateWaiting` ×7, `capability_degraded` ×8, `SessionRequest` ×2 divergentes | M03 M08 |
+| V2 una pregunta se responde en muchos lugares | `last_external_ref` ×2, attempt ×6, dedup ×2, run dir ×6, `RunPhase`→palabras ×5 | M04 M15 M16 |
+| V3 el catch-all silencioso | `replay::apply` `_ => Ok(())`, `phase.rs` `_ => Created` | M05 |
+| V4 la declaración dispersa | un kind = 9+2 lugares | M02 |
+| V5 prosa congelada en el log, texto en la capa equivocada | `run_paused.reason`, `{:?}` al usuario ×9, MCP re-bordea ×17 | M06 M17 |
+| V6 la disciplina que el tipo no impone | globs `String`, `Legacy` fresco, nombre de artifact que escapa, versión no leída | M12 M13 M14 |
+| V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos | M09 M24 |
+| V8 la cáscara que no gobierna | git sin grupo, 15 `std::fs` en async, 3 `SystemClock`, `target_digest` crudo | M10 M11 |
+| V9 el puerto del lado equivocado | el engine importa su interfaz desde `yunta-adapters` | M01 |
+| V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra | M18 M19 M20 |
+| V11 la documentación sin atar | `docs/design/` invisible a `docs_sync`; la config de referencia no parsea | M23 |
+| V12 el ratchet que mide el síntoma | `copied_test_helpers 0` falso; propiedad de resume tautológica | M21 M22 |
+
+### Los mecanismos
+
+- **M01 · Puerto en core.** `yunta_core::port` define `Adapter`, `AgentSession`,
+  `SessionRequest`, `RunToolsEndpoint`, `Budget`, `PermissionProfile`,
+  `ProbeReport`, `AgentEvent`, `AdapterError`. `yunta_core::process` recibe
+  `subprocess.rs`, `signal.rs`, `process_start.rs`. `yunta-adapters` implementa
+  el puerto y no lo exporta. El engine depende de core y storage únicamente.
+  `MockFixture::parse(yaml, &RunPaths)` en `adapters/src/mock/fixture.rs`.
+  `yunta-testkit-core` (solo depende de core) + `yunta-testkit`. Test de
+  frontera `crates/engine/tests/no_adapter_crate_in_engine.rs`. El registro de
+  adapters concretos en el CLI se deriva de `adapters.keys()`, no de prosa.
+- **M02 · Kind declarado en su dominio.** `core/src/events/{run,node,session,
+  tasks,scope,findings,artifacts,gates,children}/` con `kinds.rs`,
+  `payloads.rs`, `ledger.rs`, `happening.rs`. `EventPayload` de 9 brazos
+  (`Run(RunEvent)`, `Node(NodeEvent)`, …). `wire.rs`: `EventPayloadWire` plano
+  por `#[serde(from/into)]`; `KINDS` concatenado de los dominios; `JsonSchema`
+  a mano que emite el mismo `oneOf` de 36 ramas en el mismo orden.
+  `events.json` no cambia un byte (`xtask schema --check` lo guarda).
+  `kind_name`, `all_kinds()` y los "36" se derivan de `KINDS`. Versión por
+  dominio.
+- **M03 · Constructor por hecho.** Un constructor público por kind, en su
+  dominio, que fija el invariante: `RunPaused::new(PauseReason)`,
+  `RunResumed::new(OnInterrupt)`, `RunFinished::closed(terminal, &RunState)`,
+  `NodeStarted::attempt(n)`, `NodeFinished::new(outcome, tokens)`,
+  `NodeRerouted::new(to, RerouteCause(Failure), origin)`,
+  `Degradation::new(Capability, AdapterId, Policy)`,
+  `TaskStatusChanged::to(task, status, caused_by)` / `::done(task, caused_by,
+  commit)`, `Escalation::new(summary, Evidence, NonEmpty<GateOption>)`,
+  `QuestionsAnswered::via(Channel, Responder)`, `ChildClosed::new(run,
+  terminal, tokens)`, `ArtifactAccepted::new(id, hash, RecordedOrigin)`.
+  `artifact_written` sin constructor y `#[doc(hidden)]`. `RunCtx::engine_finding`
+  es el único autor de findings del engine.
+- **M04 · Un ledger por dominio.** `TaskLedger`, `GateLedger`, `NodeLedger`,
+  `SessionLedger`, `ChildLedger`, `DegradationLedger`, `RunLedger` junto a
+  `FindingLedger`, `ArtifactLedger`, `GrantLedger`. `RunState` los sostiene a
+  todos en un pase O(e). `NodeHistory`, `last_external_ref` ×2, los 6 conteos
+  de attempt, las 5 lecturas de tasks, `RunArtifacts::of` ×4, los scans de
+  hijos ×5 desaparecen. `blackboard.rs` consume
+  `FindingLedger::effective_of`. Una sola regla de dedup (`dedup_findings`),
+  consumida por `inherited_findings`. `FindingLedger::effective` se llama una
+  vez al final de `derive`, no por evento.
+- **M05 · Replay sin comodín.** `derive` despacha por dominio; cada
+  `<dominio>::apply` es exhaustivo. Lo que no mueve estado se declara
+  `Audit` por nombre en su `kinds.rs`. `phase.rs` lee `RunLedger`.
+- **M06 · Hechos tipados, prosa en el borde.** `PauseReason { Escalation,
+  Cancelled, BudgetExhausted{spent,cap}, ExternalGate(Url),
+  UncertainOrphans(Vec<NodeId>), NodeFailed{node,failure} }`, `Policy` enum,
+  `RerouteCause(Failure)`, `Capability::as_str` en vez de `{:?}`;
+  `RunError::Git(#[source] GitError)`; parsers de adapters como
+  `#[serde(tag = "type")]` con `#[serde(other)] Unknown` y `Option<u64>` para
+  conteos ausentes; `AgentError` con causa; `Diagnostic` en vez de
+  `Vec<String>` en `questions::validate_answers` y
+  `permission_layer_conflicts`.
+- **M07 · decide/execute separados.** `schedule::next_step` en `gate_step`,
+  `waiting_step`, `orphan_step`, `failure_step`, `ready_batch` compuestas por
+  `decide(&Workflow, &RunState, &Policy)`. `parallel_exec` llama
+  `schedule::resume_policies`. `GateStep::Waiting(PauseReason)`: `steps`
+  registra `run_paused`, el gate nunca. `RunFinished::closed` único en
+  `finish(terminal)`. `current_escalation` sin segundo `next_step`;
+  `current_mode_name` es `run_mode()`.
+- **M08 · SessionPlan único.** `SessionPlan { node, task: Option<TaskId>,
+  prompt, chosen: RunnerCandidate, profile, artifact_dir, resume:
+  Option<SessionId> }`; `open_session(plan, adapter) -> (SessionRequest,
+  Vec<Degradation>)` en `engine/src/run/session_plan.rs`, único lugar que
+  construye un `SessionRequest`. `prompt_exec` y `attempt.rs` lo llaman.
+  `TypedArtifactNeedsRunTools` rige en ambos.
+- **M09 · Capacidad→política como tabla.** `core::port::POLICY:
+  [(Capability, Absence)]` con `Absence { Resting, FailAtCheck, FailNode,
+  DegradeWith(Policy) }`, una fila por variante (test que recorre
+  `Capability::ALL`). `require(adapter, capability, ctx) -> Decision` en el
+  engine, único consumidor. `check(workflow, config, &Adapters)`. Test
+  `every_capability_round_trips_through_a_fixture` para el twin
+  `FixtureCapabilities`.
+- **M10 · Una cáscara.** `git.rs` por `spawn_governed`; `tokio::fs` en
+  `node_close`, `distill`, `context_resolve/{sources,knowledge}`,
+  `workflow_exec`, `lock.rs`, `worktree`, `criteria.rs`, `process_registry`,
+  `claude_code/mod.rs`, `mock/mod.rs`; `Clock` inyectado en `worktree/mod.rs`
+  (3 sitios); `SecretSource` en `RunEnv` consumido por `secrets_env` y
+  `context_resolve/mcp.rs`; `Env` leído una vez en `main`; `JoinHandle`
+  conservado en `MockSession`; `#[instrument(fields(run_id, node_id))]` en
+  `publish_gate`, `poll_gate`, `resolve_internal_gate`, `execute_ask`;
+  `tokio::spawn(fut.instrument(Span::current()))` en readers y players;
+  `ctx.adapters.get(&id).ok_or(RunError::AdapterMissing)`;
+  `ContentHash::short()`; toda falla de `process_registry`, `interrupt`/`kill`,
+  `encode_ref`, `git::success` es un `engine_finding`; `read_registry`
+  distingue corrupto de ausente.
+- **M11 · Secreto.** `ToolTarget { display: Option<String>, digest:
+  ContentHash }` con `display` solo para paths relativos al worktree, nunca
+  `command`/`url`; pase de redacción en `RunLog::record` contra el
+  `SecretSource`; `scratch/mcp.json` se borra con el registro; comparación de
+  bearer en tiempo constante sobre `Secret`.
+- **M12 · Parsear es validar, extendido.** `ScopeGlob`, `SchemaRange`,
+  `ArtifactName` + `ReservedIdentity`, `TemplateVar` (enum; `{{runner.role}}`
+  → `{{runner.name}}`), `CommitSha` en `PackProvenance`/`PackLockEntry`,
+  `DateTime<Utc>` en `EngineProcessFile.started_at`, `WorkflowName`,
+  `SkillName`, `InputName`, `McpServerName`, `RecordedOrigin` →
+  `ArtifactOrigin`, `ArtifactKind::Answers`, `Location { path, range }`,
+  `Vec<QuestionId>`, `DiagnosticCode` (una enum), `StagedHash` distinto del
+  hash del store, `ArtifactRefId` con `deny_unknown_fields` por variante,
+  `Answer`/`AnswersFile` estrictos, `ScopeExpansionPermissions` exportado.
+- **M13 · Puertas únicas en core.** `workflow::read(bytes, path) ->
+  Result<Workflow, Report>` con las reglas de `engine/src/check/` en el mismo
+  `Report`; `Document` para `FindingEntry` y `Withdrawal`; `text::counted(n,
+  noun)`; `Answerer { Log, Staging }`; `RunTool` enum con `name()`,
+  `describe()`, `schema()` y dispatch exhaustivo; `run_dir::{manifest_path,
+  progress_path, sessions_root, task_worktrees}`; `steps.rs:256` por
+  `canonical::derive_findings`.
+- **M14 · PersistedDoc<T>.** `schema_version` escrito **y leído**, balde
+  `unknown` que aflora, en `manifest.yaml`, `yunta.lock`,
+  `scratch/engine.json`, el lock de aislamiento, `receipt.json`. `Manifest`
+  embebe formas persistidas tolerantes, no `Workflow`/`ConfigLayer`
+  estrictos. `manifest.rs:151` reporta un `pack.yaml` ilegible.
+- **M15 · Context::open_run.** `Opened { run_id, run_dir, manifest:
+  PersistedDoc<Manifest>, events, project }`; `CliError::RunNotFound { id,
+  roots }` con una sola oración. La usan `status`, `stats`, `receipt`,
+  `verify`, `cancel`, `gc`, `graph`, `resume`, `resolve-gate`, `list --runs`,
+  `drive::settle`, los 4 tools MCP y `collect_history` (que deja de tener dos
+  copias).
+- **M16 · Un vocabulario.** `render::state::RunWord` para el estado de un run;
+  `progress::summary`, `Closing::verdict`, `Standing::heading`,
+  `RunJson.outcome`, `demand_line` lo consumen; `--json` emite el mismo token
+  que el texto. `Outcome` deriva de `RunWord` en un solo lugar. `RunDocument`
+  versionado para run/resume/status; `receipt.json` con `schema_version`.
+  `width::` en `ask/menu.rs` y `schema.rs`. `stats.rs` renderiza a `String`.
+- **M17 · Un borde de texto.** `CliError` con brazos tipados; `Message(String)`
+  solo para lo único; `mcp.rs` devuelve `Result<T, CliError>` y un adaptador lo
+  vuelve tool result; `promote.rs` y `test.rs` tipados; `init`/`new` preguntan
+  por `ask::Console`; warnings de `Console::open` por `Diagnostics`.
+- **M18 · Un camino de ejecución.** `test::run_case` y `promote` entran por
+  `runnable` + `drive` con `ctx.clock` y `ctx.ids`; `mcp::tool_resolve_gate`
+  es `resolve_gate` con otro medio; `graph` abre storage por `ctx.storage()`;
+  `check_or_refuse(&Path)`.
+- **M19 · Crónica derivada.** `engine/src/view/chronicle.rs`: `Moment { seq,
+  at, elapsed, node, happening }`, `Happening` de 9 brazos por dominio (cada
+  dominio implementa `From<&XEvent> for x::Happening`), `chronicle(events) ->
+  Vec<Moment>` pura, uno por evento, monótona. `cli/src/surface/chronicle.rs`:
+  `Said`, `say`, `kept`, `graduation`. `Lines::moment`, `Region::record`.
+  Desaparecen `Scrollback::{gone,leaving,restart}`, `Region::restart`,
+  `view::{graduation,settled_nodes,working_nodes}`, `lines::{detail,
+  resolution,counted_problems}`. `Painter` recibe `glyphs`. `Layout::aside` →
+  `Layout::advice`. Tests: `every_event_is_one_moment`,
+  `the_chronicle_of_a_prefix_is_a_prefix_of_the_chronicle`,
+  `the_frame_agrees_with_the_chronicle`,
+  `a_settled_node_carries_how_long_it_worked_and_the_children_it_bore`,
+  `a_node_that_settles_twice_is_two_moments`,
+  `what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes`,
+  `a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept`.
+- **M20 · Un arnés por capa.** `testkit_core::Log::for_run(id).at(t).node(n,
+  p).after(s).event(p).build()`; un `Bench` con `run_sabotaged`, `wake`,
+  `wake_with(forge)`, `with_clock`, `with_ids`, `findings_by`, `group_output`,
+  `commit_subjects`; `hermetic(cmd, dir, home)` compartido por `run_yunta` y
+  `Terminal::open` (fija `YUNTA_HOME`, `YUNTA_ORG_CONFIG` a un archivo vacío,
+  `HOME`, `USER`, `TERM`, quita `NO_COLOR`); `Checkout::without_yunta_home()`;
+  `common/mod.rs` reducido a literales; `testkit::adapter` con `request`,
+  `drain`, `write_lines`, `child_pid_fifo`, `grandchild_pid` y el test de
+  secretos parametrizado; `SourceLog::record` con clock inyectado;
+  `SeqIdSource` por bench; `wait.rs` cede con `sleep(1ms)`.
+- **M21 · Cuatro propiedades.** Generador sobre los 36 kinds + `Unknown`
+  (comparte la lista con `all_kinds()`): replay (se conserva), resume real
+  (prefijo → camino de resume → estado final igual), idempotencia
+  (re-entrega de subsecuencia; re-corrida tras crash = un `node_finished` por
+  attempt), cadena (todo append verifica; toda mutación de un byte falla).
+- **M22 · Ratchet que mide la regla.** Contadores nuevos en `xtask smells`,
+  sobre `src` y `tests`: `execute_run_outside_testkit`,
+  `git_command_outside_git_rs`, `system_clock_in_tests`, `sleep_in_tests`,
+  `env_set_in_tests`, `event_builder_outside_testkit`,
+  `bench_struct_outside_testkit`, `banned_vocabulary`, `tense_markers`,
+  `test_files_over_500_lines`, `test_fns_over_50_lines`; `[workspace.lints]`
+  en `Cargo.toml` con el bloque de deny (5 copias → 1); `release.yml` reusa
+  `ci` por `workflow_call`; job macOS `cargo test --workspace`; `for p in
+  packs/*/`; `concurrency` + `timeout-minutes`; `cargo test --release` una
+  vez; CONTRIBUTING lista `smells --check`.
+- **M23 · Docs atados.** `docs_sync.rs` recursivo sobre `docs/design/`: todo
+  YAML parsea y chequea; Contrato §3 ≡ `KINDS`; spec-events §5.x ≡ structs;
+  spec-adapter caps ≡ `Capability::ALL`, tabla de degradación completa, §6 ≡
+  `capabilities()` por adapter; spec-ledger §3 ≡ `RULES`; Contrato §6.4 ≡
+  `tool_definitions()` + catálogo; §7.1/§9/§2.3 ≡ variantes.
+  `docs/design/adr/DNNN-slug.md` con front-matter `number, title, status,
+  revises, revised_by`; `adrs.md` generado por `cargo xtask adr --check`
+  (huecos, citas, recíprocos). Pase que deshace la corrupción del corpus
+  (`\{\{`, `\[`, `\|`, fences `javascript`, autolinks `http://x.md`, fence sin
+  cerrar en `contrato:19`). Correcciones que los tests exigen (§9). Glosario:
+  `frame`, `standing`, `escalation`, `tradeoff`, `demand line`,
+  `crónica`/`momento`, `puerto`. `spec-ledger.md` → `spec-tasks.md`.
+- **M24 · Build-or-register.** Cada comportamiento prometido por la
+  documentación y no construido se construye, o se retira con entrada `A-NN`
+  en `deuda-consciente.md` y nota `Revisada` en el ADR que lo describía.
+  Nunca un comentario que explique el atajo.
+
+---
+
+## 3. Arquitectura objetivo
+
+```
+RunState  ← derive(events)                        // un pase, un dueño por lectura
+Decision  ← decide(&Workflow, &RunState, &Policy)  // pura, total, no toca el log
+Effects   ← execute(Decision, &mut Shell)          // solo I/O; produce hechos
+Fact      ← <dominio>::Constructor(...)            // uno por kind
+seq       ← RunLog::record(fact)                   // una costura, observer colgado
+                    ↓
+        run_frame(&RunState)  chronicle(events)     // dos derivaciones, un vocabulario
+                    ↓
+        Region · Scrollback · Lines · Closing · status · --json · MCP   // disposiciones
+```
+
+### Crates
+
+```
+yunta (cli)  → engine, adapters, core, storage        raíz de composición
+yunta-engine → core, storage                          conoce el puerto, no el crate
+yunta-adapters → core                                 implementa core::port
+yunta-storage → core
+yunta-core                                            + port + process + events/<dominio>
+yunta-testkit-core → core                             FixedClock, Log, ids, Captured
+yunta-testkit → core, storage, adapters, engine, cli  Bench, Checkout, Terminal
+```
+
+### Eventos: nueve dominios
+
+| dominio | kinds | ledger |
+|---|---|---|
+| `run` | run_created run_paused run_resumed run_finished promotion_signaled | `RunLedger` |
+| `node` | node_started node_finished node_failed node_rerouted hook_executed context_assembled criteria_checked scope_checked baseline_captured | `NodeLedger` |
+| `session` | agent_session_opened agent_message capability_degraded | `SessionLedger`, `DegradationLedger` |
+| `tasks` | task_registered task_status_changed | `TaskLedger` |
+| `scope` | scope_expansion_requested/granted/denied | `GrantLedger` (existe) |
+| `findings` | finding_posted/updated/withdrawn/refused | `FindingLedger` (existe) |
+| `artifacts` | artifact_accepted artifact_submitted artifact_written | `ArtifactLedger` (existe) |
+| `gates` | gate_waiting gate_resolved questions_answered | `GateLedger` |
+| `children` | child_run_created child_run_finished loop_iteration | `ChildLedger` |
+
+### Sesiones y capacidades
+
+`SessionPlan` → `open_session` → `require(cap)` por cada campo gobernado
+(`edit_constraints`, `skills`, `agent`, `run_tools_endpoint`,
+`budget.max_turns`, `network`) → `SessionRequest` + `Vec<Degradation>` →
+`dispatch_session` (sin cambios).
+
+`POLICY` (valores iniciales; una fila por variante):
+
+| capacidad | ausencia |
+|---|---|
+| `resume_session` | `Resting` (sesión fresca; ya emite `capability_degraded`) |
+| `edit_hooks` | `DegradeWith(PostCheckOnly)` una vez por run |
+| `permission_profiles` | `FailAtCheck` cuando un nodo pide `read_only`/`edit` |
+| `custom_agents` | `FailAtCheck` cuando un nodo declara `agent:` |
+| `usage_reporting` | `DegradeWith(NoTokenBudget)` una vez por run |
+| `skills` | `DegradeWith(NoSkills)` |
+| `run_tools` | `FailNode` si el nodo declara artifact interpretado o blackboard; `DegradeWith(NoRunTools)` si no |
+| `network_isolation` | `DegradeWith(NetworkOpen)` |
+
+---
+
+## 4. Los bugs de comportamiento
+
+Trece defectos que cambian lo que un run hace hoy. Ocho tienen un fix propio
+que es un subconjunto estricto de su mecanismo —código que la fase igual
+escribiría, en el mismo lugar— y se hacen **antes de la fase 0**, cada uno un
+ítem del tablero (W-01…W-08) con su test en rojo primero. Cinco van por fase o
+por decisión.
+
+| # | bug | hoy | mecanismo | fix | test |
+|---|---|---|---|---|---|
+| W-01 | sesiones de `loop` en el modelo default | `task_cycle/attempt.rs:266-267` pasa `model: None, agent: None, artifact_dir: None`; `runner_resolved` registra otro modelo | M08 | `SessionSetup` gana `chosen: RunnerCandidate` y `artifact_dir: Option<PathBuf>`; `attempt.rs` copia `chosen.model`, `chosen.agent` y `artifact_dir` de ahí; `prepare_loop` llama `open_run_tools` (y con eso rige `TypedArtifactNeedsRunTools`) | `crates/engine/tests/run_concurrency.rs::a_task_session_runs_on_the_model_and_agent_the_runner_resolved`; `::a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools` |
+| W-02 | nombre de artifact que escapa del run dir | `check/declarations.rs:133` valida el template sin renderizar; `node_exec.rs:348` renderiza `{{inputs.*}}`; `store.rs:147` une el nombre a un `PathBuf` | M12 | `core::workflow::ArtifactName::parse(&str) -> Result<Self, Problem>` (segmentos relativos, sin `..`, sin absoluto, no reservado por `ReservedIdentity`); `render_artifact_names` lo aplica **después** de renderizar y falla el nodo con `Failure::message` | `crates/engine/tests/artifacts.rs::a_rendered_artifact_name_that_leaves_the_run_dir_fails_the_node`; `crates/core/tests/artifacts.rs::an_artifact_name_with_a_parent_segment_is_refused` |
+| W-03 | `target_digest` persiste comandos crudos | `claude_code/parse.rs:131-138`, `codex/parse.rs:109-138` guardan `command`/`url`/`file_path` literal | M11 | ambos parsers producen siempre `sha256_hex(input)[..12]`; nada literal | `crates/adapters/tests/claude_code.rs::a_tool_use_never_persists_the_command_it_ran`; ídem en `codex.rs` |
+| W-04 | blackboard muestra findings retirados | `run_tools/blackboard.rs:26-52,64-86` pliegan `finding_posted` a mano | M04 | `consolidate_blackboard` y `get_blackboard` leen `FindingLedger::of(events).effective()` filtrado por grupo; `findings::inherited_findings` llama `replay::dedup_findings` (una regla) | `crates/engine/tests/blackboard.rs::a_withdrawn_finding_leaves_the_blackboard`; `::an_updated_finding_shows_its_last_content`; `crates/engine/tests/promotion.rs::inherited_findings_dedup_the_way_the_frame_counts_them` |
+| W-05 | git sin process group ni cancelación | `git.rs:116,132,145,157,167` usan `Command::new("git")` directo | M10 | `git.rs` construye `GovernedCommand` y llama `spawn_governed` con el registro y el `CancellationToken` del run; los dos `std::process::Command` pasan a async | `crates/engine/tests/process.rs::a_cancelled_run_kills_the_git_it_spawned` (git envuelto por un stub en `PATH` inyectado que espera un marcador) |
+| W-06 | `parallel_exec` ignora `on_interrupt` | `parallel_exec.rs:39-47` reinicia siempre | M07 | `execute_parallel` llama `schedule::resume_policies` y honra `fail_if_uncertain`/`resume_session` | `crates/engine/tests/run_concurrency.rs::a_parallel_child_with_fail_if_uncertain_fails_instead_of_restarting` |
+| W-07 | mock pierde el handle del player | `mock/mod.rs:234` `tokio::spawn` descartado; `MockSession` sin `Drop` | M10 | `MockSession { player: JoinHandle<()> }` + `impl Drop` que aborta | `crates/adapters/tests/mock.rs::a_dropped_session_stops_its_player` |
+| W-08 | tests heredan `/etc/yunta/config.yaml` | `testkit/src/bin.rs:11-19` y `terminal.rs:81-88` no fijan `YUNTA_ORG_CONFIG` | M20 | `run_yunta` y `Terminal::open` fijan `YUNTA_ORG_CONFIG` a un archivo vacío bajo `home`, `USER=yunta-test`, `TERM` y quitan `NO_COLOR` — el núcleo de `hermetic()` | `crates/cli/tests/run_flow.rs::a_run_under_test_reads_no_org_config_from_the_host` |
+| — | tres capacidades nunca consultadas | AD-D2 D3 D4 | M09 · fase 3 | un quinto gate inline sería V7; depende de P3 | — |
+| — | findings bloqueantes salen con 0 | CLI-D16 | M16 · fase 5 | depende de P5 | — |
+| — | propiedad de resume tautológica | TE-D12 | M21 · fase 6 | ahora: renombrar a `derive_is_deterministic_from_any_prefix` y borrar el `_crashed_at_k`; la real es M21 | W-09 |
+| — | `loop` sin gate de artifact tipado | EN-D3 | M08 | cae con W-01 | — |
+| — | config de referencia no parsea | CO-14 | M23 · fase 0 | W-10 | — |
+
+---
+
+## 5. Los siete flujos
+
+**F1 · agregar un kind.** Variante en `<dominio>/kinds.rs`; struct y
+constructor en `<dominio>/payloads.rs`; `ledger.rs::apply` no compila sin
+brazo (o `Audit` por nombre); `happening.rs` no compila sin lectura; `KINDS`,
+`kind_name`, `all_kinds()`, `events.json`, los "36" se derivan; el test de docs
+exige fila del Contrato y sección del spec.
+
+**F2 · un nodo corre.** `exec` lee el log una vez → `derive` → `decide` →
+`Execute(node, attempt)` (attempt de `NodeLedger`) → `NodeStarted::attempt(n)`
+por `RunLog::record` → por kind: `spawn_governed`, o `SessionPlan` (F3), o
+`Escalation::new` + `GateStep::Waiting(PauseReason)` → `close_node` con
+`Answerer` → `NodeFinished::new`/`NodeFailed::new` → `progress.md` por
+`tokio::fs` desde `RunState` → observer → `Folded` → `run_frame` +
+`chronicle`.
+
+**F3 · una sesión se abre.** `resolve_node_runner` → `SessionPlan` →
+`open_session` con `require(cap)` por campo → `SessionRequest` con modelo y
+agente de `chosen` → `dispatch_session` → audit events con `Result`,
+`ToolTarget` digest → cancel/budget: interrupt → gracia → kill; un kill fallido
+es `engine_finding`.
+
+**F4 · un artifact vive.** `ArtifactSpec::{Interpreted(kind),
+Opaque(ArtifactName)}` validado como escrito y después de renderizar →
+entrega por `RunTool` (`yunta_submit_<kind> {document}`) con `shape::accept`
++ `canonical` + `accept(…, RecordedOrigin::Submitted)`, o archivo en staging →
+cierre por `Answerer` → `held_document`/`verify_one`, mismo camino para
+`yunta_check_artifact` → `ArtifactLedger` única respuesta → `Answers` es un
+kind.
+
+**F5 · un comando abre un run.** `Context::load()` con `Env` una vez →
+`ctx.open_run(&id)?` → `Opened` o `RunNotFound` → `PersistedDoc<Manifest>` →
+deriva → `RunWord`/`NodeDisplay`/`advice` → `Outcome ← RunWord` → `main` mapea
+una vez.
+
+**F6 · una capacidad degrada.** `POLICY` → `require()` →
+`capability_degraded(Policy)` por `RunLog` → `DegradationLedger` →
+`RunFrame.degraded`, receipt, `stats`, `verify`, crónica → `check` refuta antes
+lo `FailAtCheck`.
+
+**F7 · una afirmación queda atada.** Tipo declara → doc lista en tabla fija →
+`docs_sync` compara → ratchets corren → ADR con `revises` → `xtask adr
+--check` exige recíproco.
+
+---
+
+## 6. Decisiones que van antes (paso 2)
+
+Ninguna se toma sola. Cada una es un ADR en `docs/design/adr/` (formato de
+M23, estrenado acá) antes de que empiece el ítem que depende de ella.
+
+| id | pregunta | recomendación | bloquea |
+|---|---|---|---|
+| P1 | ¿El puerto vive en `yunta_core::port` o en un crate `yunta-port`? | `core::port` | fase 1 |
+| P2 | ¿La reestructura de eventos se hace antes del primer tag? | sí, y es lo primero después de P1 (D141) | fase 2 |
+| P3 | Build-or-register para: baseline al crear el run (D18, §7.2); hooks de edición (spec-adapter §6); preguntas por PR (§3, §4.1); orden de criterios aprendido del log (D62); fuentes de contexto por executor (D19) | construir baseline eager y orden desde el log; registrar como deuda los otros tres | M09, M24, fase 3 |
+| P4 | `#[serde(alias = "task-ledger")]` en YAML de autor y CLI | alias solo al leer lo persistido; rechazo con diagnóstico en YAML de autor; ADR | M12, fase 4 |
+| P5 | exit code de un run "finished, holding N blocking findings" | `Reported` (1) | M16, fase 5 |
+| P6 | qué conserva una terminal observada (`kept`) | lo que cierra algo o pide algo a una persona | M19, fase 5 |
+| P7 | umbrales sin ADR: `WAIT_DEADLINE`, stagger 60 ms, `QUEUE_DEPTH`, `REDRAW_CEILING_HZ`, `MIN_SAMPLES_FOR_ESTIMATION` | un ADR "umbrales de superficie y arnés"; el ratchet rechaza `const` numérico nuevo sin referencia a ADR | M22, fase 6 |
+| P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | W-01…W-08 |
+
+---
+
+## 7. Fases
+
+| fase | ítems | desbloquea | depende de |
+|---|---|---|---|
+| W | W-01…W-10: los ocho fixes, el rename de la propiedad, la config de referencia | un usuario de hoy | P8 |
+| 0 | P1–P8 registrados como ADR por archivo; corpus des-corrompido; `docs_sync` recursivo; ratchets nuevos sembrados | que la documentación pueda perder | — |
+| 1 | M01 | tabla de política en core; arnés único | P1 |
+| 2 | M02 M03 M04 M05 | todo lo que deriva | P2, fase 1 |
+| 3 | M06 M07 M08 M09 M10 M11 | un engine que el compilador defiende | P3, fase 2 |
+| 4 | M12 M13 M14 | `check` atrapa antes del primer token | P4, fase 2 |
+| 5 | M15 M16 M17 M18 M19 | la misma palabra en cada superficie | P5, P6, fase 2 |
+| 6 | M20 M21 M22 | que el ratchet signifique lo que dice | P7, fase 2 |
+| 7 | M23 M24 | el primer tag | acompaña 2–6 |
+
+Orden estricto W → 0 → 1 → 2 → 3; 4, 5 y 6 dependen de 2 y pueden ir en
+paralelo entre sí; 7 acompaña. El primer tag se publica después de la 7.
+
+---
+
+## 8. Lo que no cambia
+
+`RunLog`, `observer.rs`, `run_frame`/`view/`, `lock` + `hand_over` (salvo su
+`std::fs`), `worktree` (integridad, `branch -d`, guard en `Drop`),
+`reserved::offers`, los dos builders de `escalation`, `pre_seeded_resolution`,
+`process.rs::spawn_governed`, `node_close::fail_with`, `create_run`'s
+`tokio::fs`; `Failure`, `Evidence`/`Fact`, `Report`/`Diagnostic`,
+`GateResolvedPayload`, `EventDraft`/`StoredEvent`, `EventBody::Unknown`,
+`FindingLedger`, `ArtifactLedger`, `run_mode()`, `string_id!`, `shape::read`
++ `RULES`, `FrozenPaths::new`, `Secret<T>`, `text.rs`, `yaml.rs`,
+`ArtifactKind`, `InputSpec`; hash store + view, `ArtifactId`, la entrega por
+tools, el split estricto/tolerante; `Capabilities::declares`,
+`RunToolsEndpoint`, `staged_paths`, `SessionObserver -> Result`,
+`typed_settings`, `ConfigOverride`, `LineReader`, `note_summary`, el mock como
+cliente MCP real; `Delivery::choose`, `Curtain`, la política de drop del
+`Feed`, `Folded`, `Region` sin raw mode, `render::state`, `advice`, `Layout`,
+`render::escalation`, `json::SCHEMA_VERSION` como regla, `error::{warn,note}`
++ `Diagnostics`; `wait.rs`, `Terminal`, `repo.rs`, `Bench`/`Checkout` como
+par, `RecordingObserver`, `frames.rs`, `Env::subprocess_vars`, `yunta test`
+como segunda superficie, la nomenclatura de tests, la forma del ratchet.
+
+---
+
+## 9. Correcciones documentales que los tests de M23 van a exigir
+
+Contrato: 6 tools MCP en §6.4; `{document}` en §6.4; `finished` en §3.2;
+§5.3 sin `free_text`/`default_on_timeout` como campos y con `external_ref`;
+§5.4 con la clave real del memo y la cache por invocación; §9 sin fuentes por
+executor (o P3); §2 sin `baseline/` (o P3); §12 sin `ledger` del hijo.
+spec-events: `commit` en §5.11, `paths` en §5.14, `external_ref` y el modelo
+de `gate_resolved` con `sha` en §5.18, `model` opcional en §5.5, sin
+`[inferido]`, artifacts fuera de §5.21.x, sin "precede a los tipos".
+spec-adapter: 8 capacidades, tabla de degradación completa, `SessionRequest`
+real, `pgid()`, `AdapterId`, §6 verdadero por adapter, O1–O6 sin duplicar.
+spec-ledger → spec-tasks: 9 reglas, regla 1 en su capa, ejemplo con path
+real, sin "se escribe antes del código". referencia-schema: `2000000`,
+`50000000`, `32000`, `baseline.suite` igual al fixture. compatibility: 8
+schemas, todos los códigos de artifact. adrs: D132 "tasks document", D139
+"ocho", D152 `Revisada por D157`, D03 con reviser, D140/D144 `Revisada por
+D156`, D06 sin `plugin`, D37 sin `subagente`. rfc-0002 `M14` → A-06;
+rfc-0003 `deuda ⑪` → A-05. README: `graph <workflow> [--run <id>]`, `list`
+sin "modes". concepts: `waiting` incluye preguntas. Rustdoc:
+`session.rs:3-10`, `sections.rs:133-168`, `declarations.rs:9`,
+`process_registry.rs:3`, `mcp.rs:1-2`, `cli.rs:141-145`, `replay.rs:1-8`,
+`lib.rs:4,6`, `project.rs:46`, `create.rs:113`, `criteria.rs:25`,
+`worktree/mod.rs:75`, `Task.id`. Comentarios de dev-dep: `storage/Cargo.toml`
+(fixed clock), `cli/Cargo.toml` (`nix`). 19 tests sin `//!`.
+
+---
+
+## 10. Tablero
+
+Estados: `pendiente` · `bloqueado(Pn)` · `en curso` · `levantado(§11)` ·
+`cerrado(hash)`. Se actualiza en el mismo commit que cambia el estado.
+
+| ítem | qué | depende de | estado |
+|---|---|---|---|
+| W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `prepare_loop` por `open_run_tools` | P8 | bloqueado(P8) |
+| W-02 | `ArtifactName::parse` después de renderizar | P8 | bloqueado(P8) |
+| W-03 | `target_digest` siempre hash | P8 | bloqueado(P8) |
+| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | bloqueado(P8) |
+| W-05 | `git.rs` por `spawn_governed` | P8 | bloqueado(P8) |
+| W-06 | `parallel_exec` por `resume_policies` | P8 | bloqueado(P8) |
+| W-07 | `MockSession` con handle y `Drop` | P8 | bloqueado(P8) |
+| W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | bloqueado(P8) |
+| W-09 | renombrar la propiedad tautológica a lo que prueba | — | pendiente |
+| W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | pendiente |
+| 0-01 | ADRs P1–P8 en `docs/design/adr/` con front-matter; `xtask adr --check` | — | pendiente |
+| 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
+| 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
+| 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | bloqueado(P1) |
+| 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | bloqueado(P1) |
+| 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | bloqueado(P1) |
+| 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | bloqueado(P1) |
+| 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico | P2, 1-01 | bloqueado(P2) |
+| 2-02 | constructores M03 en cada dominio; todos los emisores los usan | 2-01 | bloqueado(P2) |
+| 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados | 2-01 | bloqueado(P2) |
+| 2-04 | `derive` por dominio, `apply` exhaustivo, `Audit` por nombre; `phase.rs` por `RunLedger` | 2-03 | bloqueado(P2) |
+| 3-01 | `PauseReason`, `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | bloqueado(P3) |
+| 3-02 | `decide` en cinco; `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | bloqueado(P3) |
+| 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman | 2-02 | bloqueado(P3) |
+| 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | bloqueado(P3) |
+| 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | bloqueado(P3) |
+| 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | bloqueado(P3) |
+| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `ReadOnly` sin `Write` | 1-01 | bloqueado(P3) |
+| 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | bloqueado(P4) |
+| 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | bloqueado(P4) |
+| 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | bloqueado(P4) |
+| 4-04 | `PersistedDoc<T>` en manifest, lock, engine.json, lock de aislamiento, receipt | 4-01 | bloqueado(P4) |
+| 5-01 | `Context::open_run`; `collect_history` único | 4-04 | bloqueado(P5) |
+| 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::` | 5-01 | bloqueado(P5) |
+| 5-03 | `CliError` en MCP/promote/test; `ask::Console` en init/new; `Diagnostics` en `Console::open` | 5-01 | bloqueado(P5) |
+| 5-04 | `test`/`promote` por `runnable`+`drive`; `mcp::resolve_gate` único; `graph` por `ctx.storage()`; `Env` una vez | 5-01 | bloqueado(P5) |
+| 5-05 | crónica: `view/chronicle.rs`, `surface/chronicle.rs`, `Lines::moment`, `Region::record`, borrados, `Layout::advice`, tests | 2-01, P6 | bloqueado(P6) |
+| 6-01 | `Log` builder; 10 `fn event()` borrados; `SourceLog` con clock | 1-03 | bloqueado(P7) |
+| 6-02 | un `Bench` con las cinco capacidades; 46 `execute_run` y 8 sombra migrados; `common/mod.rs` a literales | 6-01 | bloqueado(P7) |
+| 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async` | 6-01 | bloqueado(P7) |
+| 6-04 | cuatro propiedades sobre generador completo | 2-01 | bloqueado(P7) |
+| 6-05 | ratchet: 11 contadores nuevos sobre `src`+`tests`; `[workspace.lints]`; CI `workflow_call`, macOS, glob de packs, timeouts, `--release`; CONTRIBUTING | — | bloqueado(P7) |
+| 7-01 | `docs_sync` ata los conjuntos cerrados (§2 M23) | 2-01, 3-04 | pendiente |
+| 7-02 | ADR por archivo, índice generado, recíprocos | 0-01 | pendiente |
+| 7-03 | correcciones de §9 | 7-01 | pendiente |
+| 7-04 | glosario, deuda (P3), `spec-tasks.md` | 7-03 | pendiente |
+
+Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
+observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados
+(`365aa41`), ofertas con tradeoff por constructor (`reserved::offers`),
+`hand_over` del lock en `--detach`, la vista viva como default (D162),
+correcciones de docs (`8582c01`, `80abe93`).
+
+---
+
+## 11. Levantamientos
+
+Un agente que se detiene por la regla 2 de §0 escribe acá, con fecha, ítem,
+evidencia (archivo:línea), alternativas y recomendación. El humano responde en
+el mismo lugar y, si corresponde, registra un ADR.
+
+_(vacío)_
+
+---
+
+## 12. Índice: cada defecto, su mecanismo
+
+Ids de las auditorías: EV eventos, EN engine, AR artifacts, CLI, AD adapters,
+CO core, TE tests, DO docs.
+
+| id | defecto | mecanismo | fase |
+|---|---|---|---|
+| EV-D1 | kind declarado en 9 sitios, 3 defendidos | M02 | 2 |
+| EV-D2 | `KINDS` sin vínculo de compilación con la enum | M02 | 2 |
+| EV-D3 | `replay::apply` `_ => Ok(())` silencioso | M05 | 2 |
+| EV-D4 | 30+ brazos comodín en 13 módulos | M04 M05 | 2 |
+| EV-D5 | `phase.rs` responde `Created` a lo desconocido | M04 | 2 |
+| EV-D6 | `GateWaitingPayload` sin constructor, 7 literales | M03 | 2 |
+| EV-D7 | escalación con menú vacío representable | M03 | 2 |
+| EV-D8 | `run_paused.reason` con 10 strings | M03 M06 | 2 |
+| EV-D9 | 4 bypass de `engine_finding` | M03 | 2 |
+| EV-D10 | `capability_degraded` sin constructor, prosa ×8 | M03 M09 | 2–3 |
+| EV-D11 | blackboard repliega findings | M04 · W-04 | W |
+| EV-D12 | `last_external_ref` ×2 idéntica | M04 | 2 |
+| EV-D13 | tasks plegadas en 5 lugares | M04 | 2 |
+| EV-D14 | ciclo de nodo en 19 módulos; dos "sesión" | M04 | 2 |
+| EV-D15 | `artifact_written` escribible sin emisor | M03 | 2 |
+| EV-D16 | spec-events numera artifacts bajo findings | M23 | 7 |
+| EV-D17 | `schema_version` constante | M02 | 2 |
+| EV-D18 | tres "36" a mano | M02 M23 | 2 |
+| EV-D19 | `payloads.rs` 989 líneas | M02 | 2 |
+| EN-D1 | git sin process group/registro/cancel | M10 · W-05 | W |
+| EN-D2 | `parallel_exec` ignora `on_interrupt` | M07 · W-06 | W |
+| EN-D3 | loop sin gate `TypedArtifactNeedsRunTools` | M08 · W-01 | W |
+| EN-D4 | dos dedup de findings divergentes | M04 · W-04 | W |
+| EN-D5 | `derive` O(e+F²) | M04 | 2 |
+| EN-D6 | ≥2 lecturas, ≥3 replays por iteración | M04 M07 | 2–3 |
+| EN-D7 | `progress.md` con replay + fs síncrono | M04 M10 | 3 |
+| EN-D8 | índice de HashMap ×2 | M10 | 3 |
+| EN-D9 | `encode_ref` traga error | M10 | 3 |
+| EN-D10 | registro de procesos a tracing | M10 | 3 |
+| EN-D11 | registro corrupto = ausente | M14 | 4 |
+| EN-D12 | kill fallido descartado | M10 | 3 |
+| EN-D13 | `git::success.unwrap_or(false)` | M10 | 3 |
+| EN-D14 | `StillWaiting` ambiguo sobre `run_paused` | M07 | 3 |
+| EN-D15 | `node_finished` ×4, `node_started` ×3 | M03 | 2 |
+| EN-D16 | gate/questions sin span | M10 | 3 |
+| EN-D17 | 15 `std::fs` en async | M10 | 3 |
+| EN-D18 | 3 `SystemClock` en el engine | M10 | 3 |
+| EN-D19 | `std::env` en el engine ×2 | M10 | 3 |
+| EN-D20 | 5 archivos >500, 56 fns >50 | M07 M02 | 2–3 |
+| EN-D21 | `verification_effectiveness` 5 pases | M04 | 3 |
+| EN-D22 | `current_escalation` deriva ×2 | M07 | 3 |
+| EN-D23 | `RunArtifacts::of` ×4 | M04 | 2 |
+| EN-D24 | `clippy.toml` apunta a lints inexistentes; deny ×5 | M22 | 6 |
+| EN-D25 | literales `distilled`/`manifest.yaml` | M13 | 4 |
+| EN-D26 | `GitError` stringificado | M06 | 3 |
+| AR-D1 | blackboard repliega (confirmación) | M04 · W-04 | W |
+| AR-D2 | loop en modelo default, sin agente | M08 · W-01 | W |
+| AR-D3 | `SessionRequest` ×2 campo a campo | M08 | 3 |
+| AR-D4 | gate de artifact tipado solo en prompt | M08 · W-01 | W |
+| AR-D5 | `answered_by_the_log` re-derivado | M13 | 4 |
+| AR-D6 | nombres de tools como literales | M13 | 4 |
+| AR-D7 | `manifest.yaml` ×15, paths fuera de `run_dir` | M13 | 4 |
+| AR-D8 | nombre de artifact escapa el run dir | M12 · W-02 | W |
+| AR-D9 | `ANSWERS_SUFFIX` no reservado | M12 | 4 |
+| AR-D10 | findings heredados fuera de `canonical` | M13 | 4 |
+| AR-D11 | `Legacy` representable en fresco | M12 | 4 |
+| AR-D12 | Contrato §6.4 `{name, document}` | M23 | 7 |
+| AR-D13 | Contrato §5.2 brief con ruta | M23 | 7 |
+| AR-D14 | spec-ledger regla 1 en dos capas | M23 | 7 |
+| AR-D15 | `Vec<String>` por `QuestionId` | M12 | 4 |
+| AR-D16 | `location: String` | M12 | 4 |
+| AR-D17 | `content_hash` con dos significados | M12 | 4 |
+| AR-D18 | `{{runner.role}}` | M12 | 4 |
+| CLI-D1 | sin puerta `open_run` | M15 | 5 |
+| CLI-D2 | `collect_history` saltea `Project::run_dir` | M15 | 5 |
+| CLI-D3 | `collect_history` ×2 | M15 | 5 |
+| CLI-D4 | run parado con 4 palabras | M16 | 5 |
+| CLI-D5 | `RunPhase`→palabras ×5 | M16 | 5 |
+| CLI-D6 | `{:?}` al usuario ×9 | M06 | 5 |
+| CLI-D7 | 25 `(s)`, 3 pluralizadores | M13 | 4 |
+| CLI-D8 | dos derivaciones para las superficies | M19 | 5 |
+| CLI-D9 | `Scrollback::gone` | M19 | 5 |
+| CLI-D10 | `mcp::tool_resolve_gate` duplicado | M18 | 5 |
+| CLI-D11 | MCP re-bordea 17 errores | M17 | 5 |
+| CLI-D12 | `promote` aplana errores, `SystemClock` | M17 M18 | 5 |
+| CLI-D13 | `test` cuarto camino, sin `check` | M18 M13 | 4–5 |
+| CLI-D14 | `init`/`new` fuera de `ask` | M17 | 5 |
+| CLI-D15 | cwd/HOME leídos ×2 | M10 | 5 |
+| CLI-D16 | dos exit codes; findings bloqueantes = 0 | M16 · P5 | 5 |
+| CLI-D17 | receipt JSON sin versión | M14 M16 | 4–5 |
+| CLI-D18 | `--quiet` imprime más que el id | M23 | 5 |
+| CLI-D19 | README `list` modes, `graph` firma | M23 | 7 |
+| CLI-D20 | scans de terminal a mano ×3 | M04 M15 | 5 |
+| CLI-D21 | "only claude-code and codex" ×2 | M01 | 1 |
+| CLI-D22 | `stats.rs` 25 `println!` | M16 | 5 |
+| CLI-D23 | tamaños | M15 M17 M18 | 5 |
+| CLI-D24 | `graph` abre storage solo | M15 | 5 |
+| CLI-D25 | `MARKER`/`GAP`, `{:<12}` | M16 | 5 |
+| CLI-D26 | warnings de `Console::open` sin `Diagnostics` | M17 | 5 |
+| AD-D1 | mock pierde handle del player | M10 · W-07 | W |
+| AD-D2 | `edit_hooks` nunca consultada | M09 | 3 |
+| AD-D3 | `usage_reporting` nunca consultada | M09 | 3 |
+| AD-D4 | `permission_profiles` nunca; `check` ciego | M09 | 3 |
+| AD-D5 | `target_digest` crudo | M11 · W-03 | W |
+| AD-D6 | sin pase de redacción | M11 | 3 |
+| AD-D7 | claude `ReadOnly` con `Write` | M09 | 3 |
+| AD-D8 | fixture renderer en el CLI | M01 | 1 |
+| AD-D9 | gates de skills/run_tools duplicados | M08 M09 | 3 |
+| AD-D10 | `policy_applied` prosa ×7 | M03 M09 | 2–3 |
+| AD-D11 | codex traga error de settings | M10 | 3 |
+| AD-D12 | `std::fs` en spawn async | M10 | 3 |
+| AD-D13 | parsers stringly; conteos ausentes = 0 | M06 | 3 |
+| AD-D14 | `AgentError` sin causa | M06 | 3 |
+| AD-D15 | `FixtureCapabilities` sin guard | M09 | 3 |
+| AD-D16 | `init.rs` re-deletrea ids | M01 | 1 |
+| AD-D17 | `refuse_unrunnable` prosa | M01 | 1 |
+| AD-D18 | `RunTools` vs `run_tools` | M06 | 5 |
+| AD-D19 | codex sin `RunToolsMounted` | M09 | 3 |
+| AD-D20 | codex `ReadOnly`+`artifact_dir` sin evento | M09 | 3 |
+| AD-D21 | readers sin span | M10 | 3 |
+| AD-D22 | spec-events 6 caps, `model` obligatorio | M23 | 7 |
+| AD-D23 | adapters.md "primer sano" | M23 | 7 |
+| AD-D24 | spec-adapter §6 falso | M23 M24 · P3 | 0–7 |
+| CO-1 | globs sin compilar | M12 | 4 |
+| CO-2 | `yunta_schema` String | M12 | 4 |
+| CO-3 | commits String | M12 | 4 |
+| CO-4 | `started_at` String | M12 | 4 |
+| CO-5 | `manifest.schema_version` no leído | M14 | 4 |
+| CO-6 | 4 persistidos sin versión | M14 | 4 |
+| CO-7 | `Manifest` embebe tipos estrictos | M14 | 4 |
+| CO-8 | `FindingEntry` parseada a mano | M13 | 4 |
+| CO-9 | `Workflow` sin reglas ×11 | M13 | 4 |
+| CO-10 | prosa en core (`Vec<String>`) | M06 | 4 |
+| CO-11 | pluralización ×3 | M13 | 4 |
+| CO-12 | códigos half-typed | M12 | 4 |
+| CO-13 | rustdoc de `Task.id` contradice el tipo | M23 | 4 |
+| CO-14 | referencia-schema no parsea | M23 · W-10 | W |
+| CO-15 | 7 schemas documentados, 8 reales | M23 | 7 |
+| CO-16 | D140/D144 sin nota de D156 | M23 | 7 |
+| CO-17 | `pack.yaml` ilegible tragado | M14 | 4 |
+| CO-18 | `ArtifactRefId` untagged | M12 | 4 |
+| CO-19 | `ScopeExpansionPermissions` sin export; `Answer` sin deny | M12 | 4 |
+| CO-20 | HOME/TERM ×2 | M10 | 5 |
+| TE-D1 | `copied_test_helpers 0` falso | M22 | 6 |
+| TE-D2 | 46 `execute_run` a mano | M20 | 6 |
+| TE-D3 | `stored` sin usuarios; 10 builders | M20 | 6 |
+| TE-D4 | core/adapters sin testkit | M01 M20 | 1 |
+| TE-D5 | `common/mod.rs` segundo testkit | M20 | 6 |
+| TE-D6 | `sleep(100ms)` | M22 | 6 |
+| TE-D7 | `run_yunta` hereda org config, TERM, USER | M20 · W-08 | W |
+| TE-D8 | `check_keys_cmd` lee config real | M20 | 6 |
+| TE-D9 | `docs_sync` sin HOME/git pin | M20 | 6 |
+| TE-D10 | `remove_var` global | M22 | 6 |
+| TE-D11 | `static IDS` ×12 | M20 | 6 |
+| TE-D12 | propiedad de resume tautológica | M21 · W-09 | W–6 |
+| TE-D13 | sin idempotencia | M21 | 6 |
+| TE-D14 | sin propiedad de cadena | M21 | 6 |
+| TE-D15 | generador 8/36 | M21 | 6 |
+| TE-D16 | release nunca testeado | M22 | 6 |
+| TE-D17 | sin macOS | M22 | 6 |
+| TE-D18 | release gate débil | M22 | 6 |
+| TE-D19 | nombres — sin defecto | se conserva | — |
+| TE-D20 | 19 tests sin `//!` | M23 | 6 |
+| TE-D21 | comentario de dev-dep falso | M23 | 6 |
+| TE-D22 | `nix` dev-dep obsoleto | M23 | 6 |
+| TE-D23 | `yunta test` "determinista" con SystemClock | M18 | 5 |
+| TE-D24 | 34 tests >500, 145 fns >50 | M22 | 6 |
+| TE-D25 | 60 ms sin decisión | M24 · P7 | 0 |
+| DO-D1 | baseline lazy vs D18/§7.2 | M24 · P3 | 0–3 |
+| DO-D2 | claude-code `edit_hooks` vs spec | M09 M24 · P3 | 0–3 |
+| DO-D3 | codex `resume_session: true` vs spec | M23 | 7 |
+| DO-D4 | preguntas por PR | M24 · P3 | 0 |
+| DO-D5 | orden de criterios por invocación vs D62 | M24 · P3 | 0–3 |
+| DO-D6 | memo key con `env` inexistente | M23 | 7 |
+| DO-D7 | fuentes por executor vs D19 | M24 · P3 | 0 |
+| DO-D8 | `task-ledger` en YAML de autor | M24 · P4 | 0–4 |
+| DO-D9 | referencia-schema no parsea | M23 · W-10 | W |
+| DO-D10–11 | 5 tools MCP en Contrato, `--help`, rustdoc | M23 | 7 |
+| DO-D12 | §6.4 `{name, document}` | M23 | 7 |
+| DO-D13 | `session.rs:3-10` rustdoc falso ×3 | M23 | 1 |
+| DO-D14 | "Only pause is built" | M23 | 7 |
+| DO-D15 | "future --detach" | M23 | 7 |
+| DO-D16 | README `graph` | M23 | 7 |
+| DO-D17 | `waiting` incompleto en concepts | M23 | 7 |
+| DO-D18 | marcadores `[inferido]` obsoletos | M23 | 7 |
+| DO-D19–21 | spec-adapter/spec-events campos desfasados | M23 | 7 |
+| DO-D22 | 7 reglas documentadas, 9 publicadas | M23 | 7 |
+| DO-D23 | `done` vs `finished` | M23 | 7 |
+| DO-D24 | §5.3 campos inexistentes | M23 | 7 |
+| DO-D25 | markdown corrupto | M23 | 0 |
+| DO-D26–27 | D132 "task ledger", D139 "siete" | M23 | 7 |
+| DO-D28–30 | O5 duplicado, M14, deuda ⑪ | M23 | 7 |
+| DO-D31–32 | D152 sin nota; D03 sin reviser | M23 | 7 |
+| DO-D33–34 | agrupación degenerada; `adr/` vacío | M23 | 0 |
+| DO-D35–41 | vocabulario prohibido (12 + 6) | M23 | 0–7 |
+| DO-D42 | 21 marcadores de tiempo/plan | M23 | 0–7 |
+| DO-D43 | términos sin glosario | M23 | 7 |
+| DO-D44 | `docs/design` invisible a `docs_sync` | M23 · W-10 | W |

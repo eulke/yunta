@@ -18,5 +18,6 @@ Complementos:
 - [`glosario.md`](glosario.md) — los términos del dominio, con la palabra que se usa y las que se evitan.
 - [`status.md`](status.md) — lo que sigue abierto y las posturas cerradas que no son deuda.
 - [`smoke-checklist.md`](smoke-checklist.md) — verificación en vivo de adapters, forja y MCP contra sistemas reales.
+- [`plan-de-raiz.md`](plan-de-raiz.md) — el plan vigente de corrección arquitectónica: régimen de ejecución, mecanismos, decisiones pendientes, tablero e índice de defectos. Mientras esté abierto, manda sobre el orden del trabajo.
 
 La documentación de uso, en inglés, vive un nivel arriba en [`docs/`](../README.md).

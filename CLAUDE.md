@@ -40,6 +40,27 @@ orden; ninguno se cierra antes.
 7. **Commiteá un tema.** Mensaje convencional; el porqué cuando el diff no lo dice.
    Listo cuando el commit se entiende sin esta conversación.
 
+## Plan vigente
+
+`docs/design/plan-de-raiz.md` es la especificación de todo el trabajo en curso y
+manda sobre cualquier otra lectura del repo mientras esté abierto. Su §0 rige a
+quien implementa, y no admite interpretación:
+
+- **Al pie de la letra.** Un ítem se implementa con los nombres, archivos y
+  tests que el plan nombra. No se renombra, no se reubica, no se "mejora".
+- **Lo que el plan no dice, no se inventa.** Contradicción, imposibilidad,
+  diseño mejor, dependencia oculta o alcance mayor: te detenés, escribís el
+  levantamiento en el §11 del plan con evidencia, alternativas y recomendación,
+  y esperás. Nada "mientras tanto", nada parcial, nada decidido solo.
+- **Nada fuera del ítem.** Un PR cierra ítems del tablero (§10) y actualiza su
+  estado en el mismo commit. Sin mecanismos, tipos, archivos, dependencias ni
+  refactors que el plan no nombre.
+- **Las decisiones P1–P8 bloquean.** Un ítem `bloqueado(Pn)` no se empieza
+  hasta que el ADR de Pn existe. Nadie toma una P por defecto.
+- **Lo marcado "se conserva" no se toca.** Se generaliza; nunca se reimplementa.
+- **Rojo primero, gate completo después.** El test del ítem falla por su razón
+  antes del código; el ítem cierra con el gate de §0.6 ejecutado entero.
+
 ## Juicio
 
 Los criterios con los que se decide. Entre dos opciones, gana la que los cumple
