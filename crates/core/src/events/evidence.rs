@@ -84,8 +84,9 @@ impl Evidence {
     }
 
     /// The facts, with an older log's prose read as the one unlabelled
-    /// fact it is.
-    pub fn facts(&self) -> Vec<Fact> {
+    /// fact it is — the one place that tolerance is applied, and what
+    /// every rendering below is built on.
+    fn facts(&self) -> Vec<Fact> {
         match self {
             Evidence::Facts(facts) => facts.clone(),
             Evidence::Prose(text) => vec![Fact::bare(text.clone())],
@@ -106,11 +107,6 @@ impl Evidence {
     /// Empty when nothing is attached.
     pub fn one_line(&self) -> String {
         self.lines().join("; ")
-    }
-
-    /// Whether there is anything to show.
-    pub fn is_empty(&self) -> bool {
-        self.lines().is_empty()
     }
 }
 
@@ -155,7 +151,6 @@ mod tests {
 
     #[test]
     fn evidence_with_nothing_attached_shows_nothing() {
-        assert!(Evidence::none().is_empty());
         assert_eq!(Evidence::none().one_line(), "");
     }
 

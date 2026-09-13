@@ -91,7 +91,7 @@ async fn every_event_the_run_appends_reaches_the_observer() {
          run drives. `create_run`'s `run_created` is the one exception: it is written \
          before any execution context, and so any observer, exists, and a caller that \
          draws the run reads it as its seed. A difference here means an append site \
-         writes to the log without going through `observer::append_observed`."
+         reaches the log without going through a `RunLog` that carries the observer."
     );
 }
 

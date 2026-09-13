@@ -7,21 +7,24 @@
 //! the truth and replay stays how state comes off it; what an observer
 //! holds is the cache of a single invocation, discarded with it.
 //!
-//! **What reaches an observer, and what cannot.** Every append a run
-//! makes while this process executes it goes through
-//! [`append_observed`]: `RunCtx::emit` (the run's own events),
-//! `RunCtx`'s [`SessionObserver`](crate::SessionObserver) impl (a live
-//! session's audit events) and the run-tools listener's `post_finding`
-//! (what an agent posts mid-session). Three appends stay outside, and
-//! nothing is lost by any of them:
+//! **What reaches an observer, and what cannot.** An event reaches a
+//! run's log through [`RunLog`](crate::RunLog) and nowhere else, so the
+//! mirror sits there: a log built with an observer hands it every event
+//! it appends, in the order the log carries them. The scheduler's own
+//! events, a live session's audit trail, what an agent posts
+//! mid-session and every document a session hands over all append
+//! through that one door, and so every one of them is observed without
+//! knowing an observer exists. Three appends stay outside, and nothing
+//! is lost by any of them:
 //!
-//! - `create_run` writes `run_created` before a `RunCtx` — and so an
-//!   observer — exists at all; a caller that draws the run reads that
-//!   one event as its seed.
-//! - `resolve_gate` and `record_pause_after_crash` only ever write to a
-//!   run *this* process is not executing: a parked one another process
-//!   left behind, or one whose engine already died. There is no live
-//!   view of that run here to mirror into.
+//! - `create_run` writes `run_created` before an execution context —
+//!   and so an observer — exists at all; a caller that draws the run
+//!   reads that one event as its seed.
+//! - `resolve_gate` and `record_pause_after_crash` append to storage
+//!   directly, and only ever to a run *this* process is not executing:
+//!   a parked one another process left behind, or one whose engine
+//!   already died. There is no live view of that run here to mirror
+//!   into.
 //!
 //! `crates/engine/tests/observer.rs` holds that list to the log itself:
 //! it compares what an observer recorded against the run's own events,
