@@ -8,9 +8,20 @@ que acá se nombran. Lo que este documento no dice, no se inventa: se levanta
 
 Fuente: ocho auditorías independientes sobre `80abe93` —eventos, engine,
 artifacts, CLI, adapters, core, tests, documentación— con 198 defectos citados
-por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos. La
-versión legible con diagramas está publicada como artefacto; este archivo es la
-fuente de verdad y el tablero.
+por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos.
+
+## Qué hay en este directorio
+
+| archivo | qué es | quién lo lee |
+|---|---|---|
+| [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
+| [`mecanismos.md`](mecanismos.md) | los 24 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
+| [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
+| [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
+
+Ningún ítem se empieza sin haber leído este README entero, el mecanismo que el
+ítem nombra en `mecanismos.md`, y la auditoría del frente. Lo que esos tres no
+dicen, no existe: se levanta.
 
 ---
 
@@ -73,6 +84,27 @@ plan. No admiten interpretación.
     pliegue del log. El documento de tareas es `tasks`.
 12. **Orden.** Los ítems de un PR respetan las dependencias de §10. Una fase
     no empieza hasta que la anterior de la que depende está cerrada.
+13. **Leer antes de tocar.** README entero, el mecanismo del ítem en
+    `mecanismos.md`, la auditoría del frente en `auditoria/`. Un agente que no
+    puede citar la línea de la auditoría que motiva el ítem no lo empezó.
+14. **Un ítem, un PR** (o una serie corta que el tablero enumera). El título
+    del PR nombra el ítem (`W-03`, `2-01`); la descripción lista los defectos
+    del índice que cierra por id y pega la salida del gate.
+
+### Cómo se cierra un ítem
+
+- [ ] Leídos README, mecanismo y auditoría del frente; citada la evidencia.
+- [ ] Toda decisión P de la que depende está registrada como ADR.
+- [ ] El test nombrado por el ítem existe, corrió y falló por la razón del ítem.
+- [ ] El código usa los nombres del plan; no hay tipo, archivo, mecanismo ni
+      dependencia que el plan no nombre.
+- [ ] Nada marcado "se conserva" fue reimplementado ni reemplazado.
+- [ ] Ningún texto del diff nombra el plan, una fase, un ítem, lo que había o
+      lo que vendrá.
+- [ ] Gate completo (§0.6) ejecutado, con salida en el PR.
+- [ ] `xtask/smells.baseline` regenerado por medición; ningún contador subió.
+- [ ] Tablero (§10) actualizado en el mismo commit, con el hash.
+- [ ] Índice (§12): los defectos que este ítem cierra siguen apuntando a él.
 
 ---
 
@@ -324,6 +356,41 @@ seq       ← RunLog::record(fact)                   // una costura, observer co
         Region · Scrollback · Lines · Closing · status · --json · MCP   // disposiciones
 ```
 
+### Diagrama
+
+```mermaid
+flowchart LR
+  subgraph storage
+    L[(Event log<br/>wire plano · hash chain)]
+  end
+  subgraph core/events · por dominio
+    LD[Ledgers<br/>Run Node Session Tasks Grant<br/>Finding Artifact Gate Child Degradation]
+    RS[RunState<br/>= todos los ledgers, un pase O e]
+  end
+  subgraph engine · puro
+    D[decide<br/>gate · waiting · orphan · failure · ready_batch]
+    RF[run_frame<br/>estado en un instante]
+    CH[chronicle<br/>qué pasó, en orden]
+  end
+  subgraph engine · cáscara
+    EX[execute<br/>Shell: spawn_governed · tokio::fs · Clock/Env/Secrets inyectados]
+    SP[SessionPlan → open_session → dispatch]
+    RQ[require cap ← POLICY]
+  end
+  subgraph de vuelta al log
+    CT[Constructores<br/>Escalation::new · Degradation::new · PauseReason …]
+    RL[RunLog::record<br/>una costura, observer colgado]
+  end
+  L --> LD --> RS --> D --> EX --> CT --> RL --> L
+  RS --> RF
+  L --> CH
+  EX --> SP --> RQ
+  RL -.observer.-> RF
+  RL -.observer.-> CH
+  RF --> UI[Region · Closing · status · --json · MCP]
+  CH --> UI2[Scrollback · Lines]
+```
+
 ### Crates
 
 ```
@@ -335,6 +402,33 @@ yunta-core                                            + port + process + events/
 yunta-testkit-core → core                             FixedClock, Log, ids, Captured
 yunta-testkit → core, storage, adapters, engine, cli  Bench, Checkout, Terminal
 ```
+
+```mermaid
+flowchart TB
+  subgraph hoy
+    A1[yunta cli] --> A2[yunta-engine]
+    A2 -->|importa Adapter, SessionRequest, Budget, signal, process_start| A3[yunta-adapters]
+    A2 --> A4[yunta-storage]
+    A3 --> A5[yunta-core]
+    A4 --> A5
+    A6[yunta-testkit] --> A2
+    A6 --> A3
+  end
+  subgraph objetivo
+    B1[yunta cli · raíz de composición] --> B2[yunta-engine]
+    B1 --> B3[yunta-adapters]
+    B2 --> B4[yunta-storage]
+    B2 --> B5[yunta-core · + port + process + events/dominio]
+    B3 -->|implementa core::port| B5
+    B4 --> B5
+    B6[yunta-testkit-core] --> B5
+    B7[yunta-testkit] --> B2
+    B7 --> B3
+    B7 --> B6
+  end
+```
+
+Test de frontera: `crates/engine/tests/no_adapter_crate_in_engine.rs`.
 
 ### Eventos: nueve dominios
 
@@ -350,7 +444,68 @@ yunta-testkit → core, storage, adapters, engine, cli  Bench, Checkout, Termina
 | `gates` | gate_waiting gate_resolved questions_answered | `GateLedger` |
 | `children` | child_run_created child_run_finished loop_iteration | `ChildLedger` |
 
+Lo que un módulo de dominio es dueño de, y lo que se deriva:
+
+```mermaid
+flowchart LR
+  subgraph core/events/findings/ · dueño de
+    K[kinds.rs<br/>enum FindingEvent · KINDS · kind_name · schema_version · is_audit]
+    P[payloads.rs<br/>structs + constructores]
+    LG[ledger.rs<br/>FindingLedger::apply exhaustivo]
+    H[happening.rs<br/>From&lt;&amp;FindingEvent&gt; for Happening]
+  end
+  subgraph core/events/ · derivado
+    EP[EventPayload<br/>9 brazos]
+    W[wire.rs<br/>EventPayloadWire plano · KINDS · JsonSchema]
+  end
+  subgraph ya no se escribe a mano
+    D1[kind_name]
+    D2[all_kinds]
+    D3["36" = KINDS.len]
+    D4[events.json]
+    D5[lines::detail → chronicle::say]
+  end
+  K --> EP --> W --> D1 & D2 & D3 & D4
+  H --> D5
+```
+
+Constructores por dominio, con el invariante que fijan: `mecanismos.md#m03`.
+
+### Tipos: lo inválido, irrepresentable
+
+| tipo nuevo | reemplaza | qué vuelve irrepresentable |
+|---|---|---|
+| `ScopeGlob` | `Node.scope`, `Task.scope`, `ScopeExpansion.within` (`Vec<String>`) | un glob inválido que pasa `check` y falla a mitad del run |
+| `SchemaRange` | `Workflow.yunta_schema`, `PackManifest.yunta_schema` (`String`) | un rango que se parsea en el engine y no en el pack |
+| `ArtifactName` + `ReservedIdentity` | `ArtifactSpec::Opaque(String)`, `ArtifactRefId::Name`, `MountArtifact.rename` | `..`, absoluto, o colisión con un nombre del engine; se re-valida después de renderizar |
+| `TemplateVar` (enum) | `BTreeMap<String,String>` de `template_vars` | un input del usuario expandido donde un path no lo admite; `{{runner.role}}` → `{{runner.name}}` |
+| `CommitSha` (existe) | `PackProvenance.commit`, `PackLockEntry.commit` | un commit que no es hex |
+| `DateTime<Utc>` | `EngineProcessFile.started_at: String` | dos representaciones del instante en archivos hermanos |
+| `WorkflowName` `SkillName` `InputName` `McpServerName` | `NodeKind::Workflow.use`, `Node.skills`, claves de `inputs`, `McpQueryParams.server` | una referencia que no puede resolver |
+| `RecordedOrigin` → `ArtifactOrigin` | `ArtifactAcceptedPayload.origin` | `Legacy` en una aceptación fresca |
+| `ArtifactKind::Answers` | `ANSWERS_SUFFIX` + `Opaque` | un documento que el engine escribe y se niega a leer |
+| `Location { path, range }` | `FindingEntry.location: String` | "path y rango opcional" solo por convención |
+| `Vec<QuestionId>` | `pending_questions: Vec<String>` | un id y una violación en la misma lista |
+| `DiagnosticCode` | `RuleCode` + literales de parse/file/artifact + `DiagnosticCount.code: String` | un código escrito a mano sin test que lo ate |
+| `Answerer { Log, Staging }` | `answered_by_the_log` + su re-derivación | una tercera lectura de quién responde por un artifact |
+| `RunTool` (enum) | literales en `catalog.rs` y `session.rs` | catálogo y dispatch que se olvidan uno del otro |
+| `StagedHash` | `VerifiedArtifact.content_hash` con dos significados | un campo que es dos hashes |
+| `PauseReason` `Policy` `RerouteCause` | `reason: String`, `policy_applied: String`, `cause: String` | prosa del engine congelada en el log |
+| `PersistedDoc<T>` | archivos persistidos sin versión leída | un lector viejo que no marca lo que no entendió |
+
 ### Sesiones y capacidades
+
+```mermaid
+flowchart LR
+  SP[SessionPlan<br/>node · task · prompt · chosen · profile · artifact_dir · resume] --> OS[open_session plan, adapter]
+  PT[core::port::POLICY<br/>una fila por Capability] --> RQ[require cap]
+  OS --> RQ
+  RQ -->|Granted| SR[SessionRequest<br/>modelo y agente de chosen]
+  RQ -->|Degraded| DG[Degradation::new → RunLog]
+  RQ -->|Refused| RE[RunError → nodo falla]
+  SR --> DS[dispatch_session · sin cambios]
+```
+
 
 `SessionPlan` → `open_session` → `require(cap)` por cada campo gobernado
 (`edit_constraints`, `skills`, `agent`, `run_tools_endpoint`,
@@ -397,6 +552,29 @@ por decisión.
 | — | config de referencia no parsea | CO-14 | M23 · fase 0 | W-10 | — |
 
 ---
+
+### El CLI: puertas, vocabulario, borde
+
+```mermaid
+flowchart LR
+  C[Context::load · Env una vez] --> O[Context::open_run id<br/>Opened o RunNotFound]
+  O --> D[run_frame · derive · chronicle]
+  D --> V[RunWord · NodeDisplay · advice]
+  V --> B[CliError · un borde<br/>MCP renderiza CliError]
+  B --> X[Outcome ← RunWord → main]
+  A[ask::Console<br/>init · new · gates · questions] --> B
+```
+
+### Documentación atada
+
+```mermaid
+flowchart LR
+  T[Los tipos<br/>KINDS · Capability::ALL · RULES · CheckBuiltin · ContextSpec · InputSpec · tool_definitions] --> S[schemas/*.json<br/>xtask schema --check]
+  T --> DS[docs_sync recursivo<br/>9 comparaciones]
+  DD[docs/design/*.md<br/>citan, no restatean] --> DS
+  AD[adr/DNNN-slug.md<br/>front-matter revises/revised_by] --> AI[adrs.md generado<br/>xtask adr --check]
+  R[ratchets<br/>banned_vocabulary · tense_markers] --> DD
+```
 
 ## 5. Los siete flujos
 
@@ -535,6 +713,11 @@ sin "modes". concepts: `waiting` incluye preguntas. Rustdoc:
 
 Estados: `pendiente` · `bloqueado(Pn)` · `en curso` · `levantado(§11)` ·
 `cerrado(hash)`. Se actualiza en el mismo commit que cambia el estado.
+
+Cada ítem `N-xx` implementa los mecanismos que su fase nombra en §7; la
+especificación de cada mecanismo —firmas, archivos, tests— es
+`mecanismos.md#mNN`, y para 5-05 es `cronica.md`. Los ítems W-xx tienen su
+especificación completa en §4.
 
 | ítem | qué | depende de | estado |
 |---|---|---|---|

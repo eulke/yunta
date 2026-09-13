@@ -42,7 +42,7 @@ orden; ninguno se cierra antes.
 
 ## Plan vigente
 
-`docs/design/plan-de-raiz.md` es la especificación de todo el trabajo en curso y
+`docs/design/plan-de-raiz/README.md` es la especificación de todo el trabajo en curso y
 manda sobre cualquier otra lectura del repo mientras esté abierto. Su §0 rige a
 quien implementa, y no admite interpretación:
 
@@ -52,6 +52,8 @@ quien implementa, y no admite interpretación:
   diseño mejor, dependencia oculta o alcance mayor: te detenés, escribís el
   levantamiento en el §11 del plan con evidencia, alternativas y recomendación,
   y esperás. Nada "mientras tanto", nada parcial, nada decidido solo.
+- **Leer antes de tocar.** El README del plan entero, `mecanismos.md` en la
+  sección del ítem, y la auditoría del frente en `plan-de-raiz/auditoria/`.
 - **Nada fuera del ítem.** Un PR cierra ítems del tablero (§10) y actualiza su
   estado en el mismo commit. Sin mecanismos, tipos, archivos, dependencias ni
   refactors que el plan no nombre.
