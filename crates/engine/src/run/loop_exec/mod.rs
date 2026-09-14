@@ -19,7 +19,7 @@ use crate::replay::RunState;
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
-use super::runner_resolve::{report_declarative_network, resolve_node_runner};
+use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
@@ -282,37 +282,42 @@ async fn prepare_loop<'a>(
     } else {
         skills
     };
-    // Same gating as a prompt session — the capability decides, and a
-    // blackboard-group loop on a capability-less adapter fails rather than
-    // silently dropping its declared coordination.
-    let run_tools = if adapter
-        .capabilities()
-        .declares(yunta_core::Capability::RunTools)
-    {
-        Some(crate::run_tools::RunToolsAccess {
-            host: ctx.run_tools_host.clone(),
-            node: node.id.clone(),
-            // A task session writes into the loop node's own declared
-            // artifacts, so it gets to check them: the file it writes is
-            // the file that node closes on.
-            declared: super::node_exec::declared_artifacts(ctx, node),
-        })
-    } else {
-        if ctx.run_tools_host.is_blackboard_member(&node.id) {
-            let end = fail(
-                ctx,
-                node,
-                format!(
-                    "node `{}` is in a `coordination: blackboard` group but adapter `{}` \
-                     declares no `run_tools` capability — the blackboard cannot be mounted",
-                    node.id, chosen.adapter
-                ),
-                false,
-            )
-            .await?;
+    // The same gate a prompt session passes, so a loop node whose
+    // declared document has no way in — an interpreted artifact, or a
+    // `coordination: blackboard` group, on an adapter that cannot be a
+    // client of the per-run endpoint — is refused before any task
+    // session opens. The listener it opens proves the binding works and
+    // closes with the resolution; every attempt opens its own.
+    let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
+        Ok(resolution) => {
+            if let Some(policy_applied) = resolution.degraded {
+                ctx.emit(
+                    Some(&node.id),
+                    EventPayload::CapabilityDegraded(
+                        yunta_core::events::CapabilityDegradedPayload {
+                            capability: yunta_core::Capability::RunTools,
+                            adapter: chosen.adapter.clone(),
+                            policy_applied,
+                        },
+                    ),
+                )
+                .await?;
+            }
+            resolution
+                .session
+                .map(|_| crate::run_tools::RunToolsAccess {
+                    host: ctx.run_tools_host.clone(),
+                    node: node.id.clone(),
+                    // A task session writes into the loop node's own declared
+                    // artifacts, so it gets to check them: the file it writes is
+                    // the file that node closes on.
+                    declared: super::node_exec::declared_artifacts(ctx, node),
+                })
+        }
+        Err(error) => {
+            let end = fail(ctx, node, error.to_string(), false).await?;
             return Ok(LoopReady::Ended(end));
         }
-        None
     };
     let setup = crate::task_cycle::SessionSetup {
         skills,
@@ -321,6 +326,8 @@ async fn prepare_loop<'a>(
         run_tools,
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),
+        artifact_dir: super::node_exec::artifact_dir(ctx, node),
+        chosen: chosen.clone(),
     };
 
     let view = ctx.run_view().await?;

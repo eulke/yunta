@@ -39,12 +39,22 @@ pub struct SessionSetup {
     /// session's own scratch directory, so concurrent attempts of one
     /// node never write over each other's scaffolding.
     pub node: yunta_core::NodeId,
+    /// The runner this node resolved to: every task session of the node
+    /// runs on its model and, when it names one, its agent. The runner
+    /// is resolved once for the whole loop, so no attempt can drift onto
+    /// another model than the one the log recorded.
+    pub chosen: yunta_core::RunnerCandidate,
+    /// Where the files this node declares belong, when it declares any.
+    /// A task session writes the loop node's own artifacts, so it is
+    /// told the same directory the node closes on.
+    pub artifact_dir: Option<PathBuf>,
 }
 
 impl SessionSetup {
     /// A setup that carries nothing but the node its sessions belong
-    /// to: no skills, no settings, no secrets and no per-run tools.
-    pub fn bare(node: yunta_core::NodeId) -> Self {
+    /// to and the runner they run on: no skills, no settings, no
+    /// secrets, no per-run tools and no declared files.
+    pub fn bare(node: yunta_core::NodeId, chosen: yunta_core::RunnerCandidate) -> Self {
         Self {
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
@@ -52,6 +62,8 @@ impl SessionSetup {
             run_tools: None,
             run_dir: PathBuf::new(),
             node,
+            chosen,
+            artifact_dir: None,
         }
     }
 

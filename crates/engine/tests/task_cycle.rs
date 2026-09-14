@@ -7,6 +7,19 @@ use yunta_engine::{
 };
 use yunta_testkit::init_repo;
 
+/// The setup a task session of node `build` runs under: the mock
+/// runner every fixture here answers as, and nothing else.
+fn bare_setup() -> yunta_engine::SessionSetup {
+    yunta_engine::SessionSetup::bare(
+        yunta_core::NodeId::from_static("build"),
+        yunta_core::RunnerCandidate {
+            adapter: "mock".into(),
+            model: "mock-model".into(),
+            agent: None,
+        },
+    )
+}
+
 fn cmd(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
@@ -75,7 +88,7 @@ outcome: { type: completed, summary: "wrote it" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -130,7 +143,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -171,7 +184,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -224,7 +237,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -286,7 +299,7 @@ outcome: { type: completed, summary: "done" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -343,7 +356,7 @@ sessions:
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -396,7 +409,7 @@ sessions:
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -446,7 +459,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -587,7 +600,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             },
             None,
             &tokio_util::sync::CancellationToken::new(),
-            &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+            &bare_setup(),
         ),
     )
     .await
@@ -650,7 +663,7 @@ outcome: { type: completed, summary: "should never be reached" }
         },
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap();
@@ -839,7 +852,7 @@ outcome: { type: completed, summary: "wrote it" }
         },
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(),
     )
     .await
     .unwrap_err();

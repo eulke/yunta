@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
-use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, Result, SessionId};
+use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, ModelName, Result, SessionId};
 
 use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
 
@@ -50,6 +50,11 @@ pub struct MockAdapter {
     /// Every `spawn()`'s `req.agent`, in claim order — same
     /// record-the-mount principle as `skills_seen`.
     agents_seen: Mutex<Vec<Option<AgentName>>>,
+    /// Every `spawn()`'s `req.model`, in claim order — same
+    /// record-the-mount principle as `skills_seen`: the model a session
+    /// runs on is the runner's, and a test reads it here rather than
+    /// through a real CLI.
+    models_seen: Mutex<Vec<Option<ModelName>>>,
     /// Every `resume()`'s session id, in call order: the mock's
     /// "resume" is serving the next script under the SAME session id —
     /// recording which one proves the engine handed back the
@@ -78,6 +83,7 @@ impl MockAdapter {
             consumed,
             skills_seen: Mutex::new(Vec::new()),
             agents_seen: Mutex::new(Vec::new()),
+            models_seen: Mutex::new(Vec::new()),
             resumes_seen: Mutex::new(Vec::new()),
             endpoints_seen: Mutex::new(Vec::new()),
             artifact_dirs_seen: Mutex::new(Vec::new()),
@@ -105,6 +111,11 @@ impl MockAdapter {
     /// The `agent` of every session spawned so far, in claim order.
     pub fn agents_seen(&self) -> Vec<Option<AgentName>> {
         read(&self.agents_seen)
+    }
+
+    /// The `model` of every session spawned so far, in claim order.
+    pub fn models_seen(&self) -> Vec<Option<ModelName>> {
+        read(&self.models_seen)
     }
 
     /// The `skills` of every session spawned so far, in claim order.
@@ -246,6 +257,7 @@ impl MockAdapter {
         record(&self.endpoints_seen, req.run_tools_endpoint.clone());
         record(&self.artifact_dirs_seen, req.artifact_dir.clone());
         record(&self.agents_seen, req.agent.clone());
+        record(&self.models_seen, req.model.clone());
     }
 
     /// The index of the script this request claims, marked consumed so no

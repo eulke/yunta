@@ -263,8 +263,8 @@ async fn open_and_dispatch(
     let request = SessionRequest {
         prompt,
         cwd: cwd.to_path_buf(),
-        model: None,
-        agent: None,
+        model: Some(setup.chosen.model.clone()),
+        agent: setup.chosen.agent.clone(),
         permissions: profile,
         env: setup.env.clone(),
         edit_constraints: Some(task.scope.clone()),
@@ -272,10 +272,10 @@ async fn open_and_dispatch(
         adapter_settings: setup.adapter_settings.clone(),
         skills: setup.skills.clone(),
         run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-        // A task session produces no declared artifact of its own:
-        // the tasks document it works from was written by the node that
-        // declared it, and its work lands in the worktree.
-        artifact_dir: None,
+        // The file this node closes on is written from what its task
+        // sessions hand over, so a session that has one to write is
+        // told where it belongs.
+        artifact_dir: setup.artifact_dir.clone(),
         scratch_dir: Some(
             crate::session_dir::SessionSlot::Task(&setup.node, &task.id)
                 .scratch_dir(&setup.run_dir),

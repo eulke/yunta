@@ -1149,3 +1149,103 @@ nodes:
         other => panic!("the losing check must be recorded interrupted, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn a_task_session_runs_on_the_model_and_agent_the_runner_resolved() {
+    let bench = Bench::new();
+
+    // Two runners on one adapter, each with its own model, and the
+    // executor with a named agent: what every session mounts is then
+    // readable apart, session by session.
+    let config = r#"
+runners:
+  planner:
+    - { adapter: mock, model: plan-model }
+  executor:
+    - { adapter: mock, model: task-model, agent: builder }
+"#;
+    let workflow = r#"
+name: resolved-runner
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let fixture = format!(
+        "capabilities: {{ run_tools: true, custom_agents: true }}\nsessions:\n{}{}",
+        tasks_session(
+            &format!(
+                "tasks:\n{}",
+                task_yaml("T001", "Write out.txt", "out.txt", "test -f out.txt")
+            ),
+            "planned",
+        ),
+        "  - effects:\n      - { path: out.txt, content: \"1\" }\n    \
+         outcome: { type: completed, summary: \"did T001\" }\n",
+    );
+
+    let (terminal, _state, adapter) =
+        run_with_recording_mock(&bench, workflow, &fixture, config).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        adapter.models_seen(),
+        vec![Some("plan-model".into()), Some("task-model".into())],
+        "each session runs on the model its own runner resolved",
+    );
+    assert_eq!(
+        adapter.agents_seen(),
+        vec![None, Some("builder".into())],
+        "the task session runs as the agent its runner named",
+    );
+}
+
+#[tokio::test]
+async fn a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools() {
+    let bench = Bench::new();
+
+    // The document a `findings` artifact holds reaches the engine
+    // through the run tools and nowhere else, so a loop node that
+    // declares one on an adapter without them is refused before any
+    // session opens — not after one produced nothing.
+    let workflow = r#"
+name: findings-loop
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    artifacts:
+      produces: [findings]
+"#;
+
+    let (terminal, state) = bench
+        .run(
+            workflow,
+            "capabilities: { run_tools: false }\nsessions: []\n",
+        )
+        .await;
+
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    match state.nodes.get("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let said = failure.to_string();
+            assert!(
+                said.contains("declares a `findings` artifact")
+                    && said.contains("declares no `run_tools` capability"),
+                "the refusal names the artifact and the missing capability, got {said}",
+            );
+        }
+        other => panic!("the node must be refused before it opens a session, got {other:?}"),
+    }
+}
