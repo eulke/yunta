@@ -21,6 +21,12 @@ pub(crate) const LABEL_WIDTH: usize = 12;
 /// deep still leaves [`LINE_WIDTH`] most of its room for words.
 pub(crate) const INDENT: &str = "  ";
 
+/// One step of [`INDENT`] in display cells, for a caller that lays a
+/// column out by arithmetic rather than by prefixing a string — the
+/// same step, so a list whose rows are *computed* still lines up with
+/// the blocks that are *indented*.
+pub(crate) const INDENT_WIDTH: usize = INDENT.len();
+
 /// `depth` steps of [`INDENT`], for a caller that places a line at a
 /// known depth rather than under the line above it.
 pub(crate) fn indent(depth: usize) -> String {

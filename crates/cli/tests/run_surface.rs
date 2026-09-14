@@ -485,3 +485,82 @@ fn the_budget_warning_survives_quiet_and_the_distribution_does_not() {
         stderr(&quiet)
     );
 }
+
+#[test]
+fn a_parked_run_is_called_the_same_thing_on_every_surface() {
+    // One stop, five surfaces, one word. The vocabulary lives in
+    // `render::state::RunWord`, and this is what holds every surface to
+    // it: a reader who met `paused` on the block that closed the run
+    // meets `paused` again on the status page, in both documents a
+    // program reads, and in the listing's own grouping.
+    const WORD: &str = "paused";
+
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), EXHAUSTED);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--json"]);
+    let document: serde_json::Value = serde_json::from_str(&stdout(&run))
+        .unwrap_or_else(|e| panic!("run --json emits JSON: {e}\n{}", stdout(&run)));
+    let run_id = document["run_id"]
+        .as_str()
+        .expect("the run's id")
+        .to_string();
+    assert_eq!(document["outcome"], WORD, "run --json: {document:#}");
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let from_status: serde_json::Value = serde_json::from_str(&stdout(&status))
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+    assert_eq!(
+        from_status["outcome"], WORD,
+        "status --json: {from_status:#}"
+    );
+
+    let page = yunta_in!(&repo, &home, &["status", &run_id]);
+    assert!(
+        stdout(&page).contains(WORD),
+        "the status page: {}",
+        stdout(&page)
+    );
+
+    // Driven again with no flag at all, so the block that closes a run
+    // out says it in the words a person reads.
+    let closing = yunta_in!(&repo, &home, &["resume", &run_id]);
+    assert!(
+        stdout(&closing).contains(WORD),
+        "the closing block: {}",
+        stdout(&closing)
+    );
+
+    // The listing groups by the same word, so the heading over a run and
+    // the word for that run cannot disagree.
+    let listing = yunta_in!(&repo, &home, &["list", "--runs"]);
+    let text = stdout(&listing);
+    let needs_you = text
+        .find("needs you")
+        .unwrap_or_else(|| panic!("a group for it: {text}"));
+    let listed = text
+        .find(&run_id)
+        .unwrap_or_else(|| panic!("the run itself: {text}"));
+    assert!(needs_you < listed, "the run is under that heading: {text}");
+}
+
+#[test]
+fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
+    // The surface a person actually watches is drawn on a pty and takes
+    // a different path to the same block: a live terminal puts the menu
+    // to the person instead of parking on it, so the run stops here
+    // because they walked away from it. It ends in the same word.
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), EXHAUSTED);
+
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    terminal.wait_for("esc parks the run", "the menu was never put to anyone");
+    terminal.keys("\x1b");
+
+    let drawn = terminal.ended();
+    assert!(
+        !terminal.ran_to_the_end(),
+        "a parked run is not a success:\n{drawn}"
+    );
+    assert!(drawn.contains("paused"), "{drawn}");
+}

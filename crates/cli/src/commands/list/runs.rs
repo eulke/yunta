@@ -13,13 +13,14 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{RunFrame, RunPhase};
+use yunta_engine::RunFrame;
 use yunta_storage::Storage;
 
 use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
+use crate::render::state::RunWord;
 use crate::render::{cell_width, format_duration, indent, truncate, Glyphs, INDENT, LINE_WIDTH};
 
 /// The cells a run id gets. A ULID is 26 characters, and the id is what
@@ -59,17 +60,20 @@ impl Standing {
     /// Every group, in printing order.
     const ALL: [Standing; 3] = [Standing::NeedsYou, Standing::InFlight, Standing::Closed];
 
-    /// Which group `phase` puts a run in. A log that stopped making sense
-    /// needs a person as much as a decision does: nothing moves it on its
-    /// own again.
-    fn of(phase: &RunPhase) -> Self {
-        match phase {
-            RunPhase::Waiting { .. } | RunPhase::Broken { .. } => Standing::NeedsYou,
-            RunPhase::Created | RunPhase::Running => Standing::InFlight,
-            RunPhase::Finished
-            | RunPhase::Failed { .. }
-            | RunPhase::Cancelled
-            | RunPhase::Promoted { .. } => Standing::Closed,
+    /// Which group a run called `word` belongs in. A log that stopped
+    /// making sense needs a person as much as a decision does: nothing
+    /// moves it on its own again.
+    ///
+    /// The grouping is read off the word every other surface calls the
+    /// run by, so a heading and the summary under it are two views of
+    /// one answer rather than two readings of a phase.
+    fn of(word: RunWord) -> Self {
+        match word {
+            RunWord::Paused | RunWord::Broken => Standing::NeedsYou,
+            RunWord::Created | RunWord::Running => Standing::InFlight,
+            RunWord::Finished | RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => {
+                Standing::Closed
+            }
         }
     }
 
@@ -178,7 +182,7 @@ impl RunRow {
     fn of(frame: &RunFrame, age: Duration) -> Self {
         RunRow {
             run_id: frame.run_id.clone(),
-            standing: Standing::of(&frame.phase),
+            standing: Standing::of(RunWord::of(&frame.phase)),
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
             age,
@@ -281,8 +285,6 @@ fn time_in_state(events: &[StoredEvent], now: DateTime<Utc>) -> Duration {
 mod tests {
     use super::*;
 
-    use yunta_engine::WaitingOn;
-
     fn row(id: &'static str, standing: Standing, age_secs: u64) -> RunRow {
         RunRow {
             run_id: RunId::from_static(id),
@@ -311,32 +313,31 @@ mod tests {
     const NEWEST: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P4";
 
     #[test]
-    fn a_runs_phase_decides_the_group_it_is_listed_under() {
+    fn the_word_a_run_is_called_by_decides_the_group_it_is_listed_under() {
         // A log that stopped making sense needs a person as much as a
         // decision does: nothing moves it on its own again.
-        for phase in [
-            RunPhase::Waiting {
-                on: WaitingOn::Run {
-                    reason: "node `lint` failed".to_string(),
-                },
-            },
-            RunPhase::Broken {
-                diagnostic: "event 4 refers to a node the manifest does not declare".to_string(),
-            },
+        for word in [RunWord::Paused, RunWord::Broken] {
+            assert_eq!(Standing::of(word), Standing::NeedsYou, "{word}");
+        }
+        for word in [RunWord::Created, RunWord::Running] {
+            assert_eq!(Standing::of(word), Standing::InFlight, "{word}");
+        }
+        for word in [
+            RunWord::Finished,
+            RunWord::Failed,
+            RunWord::Cancelled,
+            RunWord::Promoted,
         ] {
-            assert_eq!(Standing::of(&phase), Standing::NeedsYou, "{phase:?}");
+            assert_eq!(Standing::of(word), Standing::Closed, "{word}");
         }
-        for phase in [RunPhase::Created, RunPhase::Running] {
-            assert_eq!(Standing::of(&phase), Standing::InFlight, "{phase:?}");
-        }
-        for phase in [
-            RunPhase::Finished,
-            RunPhase::Failed { failure: None },
-            RunPhase::Cancelled,
-            RunPhase::Promoted { to: None },
-        ] {
-            assert_eq!(Standing::of(&phase), Standing::Closed, "{phase:?}");
-        }
+    }
+
+    #[test]
+    fn every_word_a_run_can_be_called_by_has_a_group() {
+        // The listing is an inbox: a run whose word fell through would
+        // be a run nobody goes looking for.
+        let groups: Vec<Standing> = RunWord::ALL.into_iter().map(Standing::of).collect();
+        assert_eq!(groups.len(), RunWord::ALL.len());
     }
 
     #[test]

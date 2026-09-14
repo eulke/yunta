@@ -2532,7 +2532,14 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
     assert!(json.status.success(), "stderr: {}", stderr(&json));
     let document: serde_json::Value = serde_json::from_slice(&json.stdout)
         .unwrap_or_else(|e| panic!("`--json` prints one document and nothing else: {e}"));
-    assert_eq!(document["outcome"], "detached");
+    // The run's own word, from its own log: a run just handed off is
+    // one its log calls `created`, or `running` once the child it was
+    // handed to has started it. No surface reports `detached` — that is
+    // something this invocation did, not a state the run is in.
+    assert!(
+        matches!(document["outcome"].as_str(), Some("created" | "running")),
+        "{document:#}"
+    );
     assert!(
         stderr(&json).contains("max_tokens_per_run") && stderr(&json).contains("p90"),
         "the warning reaches the person watching: {}",
@@ -2669,7 +2676,7 @@ nodes:
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
-        stdout(&status).contains("waiting"),
+        stdout(&status).contains("paused"),
         "an invalid option must not touch the run's state: {}",
         stdout(&status)
     );

@@ -14,7 +14,7 @@ use yunta_storage::AsyncStorage;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::json::SCHEMA_VERSION;
+use crate::render::state::RunWord;
 use crate::render::Glyphs;
 use crate::surface::{
     Closing, ClosingEnv, Curtain, Delivery, Diagnostics, Outline, Surface, SurfaceEnv, TerminalEnv,
@@ -292,7 +292,15 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
         .await?;
     }
     if settling.json {
-        return print_run_json(&settling.run_id, &settling.report, settling.budget_warning);
+        return Ok(report_run_json(
+            settling.ctx,
+            settling.storage,
+            &settling.run_id,
+            &settling.manifest,
+            settling.budget_warning,
+        )
+        .await?
+        .into());
     }
     if settling.quiet {
         // The run id already went out when the invocation opened, and the
@@ -302,19 +310,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
     report_closing(Closed {
         run_id: &settling.run_id,
         manifest: &settling.manifest,
-        // Search order, the same rule `status` follows: the run may live
-        // under the default state root rather than this project's.
-        run_dir: &settling
-            .ctx
-            .project
-            .run_dir(settling.run_id.as_str())
-            .unwrap_or_else(|| {
-                settling
-                    .ctx
-                    .project
-                    .runs_root
-                    .join(settling.run_id.as_str())
-            }),
+        run_dir: &run_dir_of(settling.ctx, &settling.run_id),
         worktree: &settling.worktree,
         storage: settling.storage,
         clock: &settling.ctx.clock,
@@ -322,6 +318,18 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
         glyphs: settling.glyphs,
     })
     .await
+}
+
+/// Where the run this invocation drove lives, by the same search order
+/// `yunta status` follows: a run may sit under the default state root
+/// rather than under this project's. A run whose directory nothing
+/// found is named under this project's root, because the block that
+/// closes it out prints a path a reader goes looking in, and no path at
+/// all sends them nowhere.
+fn run_dir_of(ctx: &Context, run_id: &RunId) -> PathBuf {
+    ctx.project
+        .run_dir(run_id.as_str())
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
 }
 
 /// Everything the closing block reads about a run that has stopped, as
@@ -368,75 +376,37 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
     Ok(closing.outcome())
 }
 
-/// Prints the run's outcome as the one versioned document `run --json`
-/// and `resume --json` both emit, and reports its verdict.
-pub(crate) fn print_run_json(
-    run_id: &RunId,
-    report: &RunReport,
-    budget_warning: Option<String>,
-) -> Result<Outcome, CliError> {
-    crate::json::print_json(&RunJson::from_report(run_id, report, budget_warning))?;
-    Ok(verdict(report))
-}
-
 /// The verdict the exit code carries: success only when the run
 /// finished. A paused, failed or unresolved-promoted run ran to a stop
 /// that needs a decision, which is its own output, not an error.
 pub(crate) fn verdict(report: &RunReport) -> Outcome {
-    match report.terminal {
-        RunTerminal::Finished => Outcome::Success,
-        _ => Outcome::Reported,
-    }
+    RunWord::of_terminal(&report.terminal).into()
 }
 
-/// The outcome of a run as the versioned JSON `--json` prints and
-/// the control plane can hand back — the run's id and how it ended, or
-/// that it detached to run on independently.
-#[derive(serde::Serialize)]
-pub(crate) struct RunJson {
-    schema_version: u32,
-    run_id: String,
-    /// The one piece of the pre-run estimation §8.6 of the run contract
-    /// makes actionable: the declared cap sits under what this workflow
-    /// has historically spent. It goes to stderr for the person
-    /// watching, and here for the reader that has only this document —
-    /// which is the reader most likely to be automating the spend.
-    #[serde(skip_serializing_if = "Option::is_none")]
+/// Prints the run as the one versioned document `run --json`,
+/// `resume --json` and `run --detach --json` all emit, and hands back
+/// the word it reports.
+///
+/// The document is derived from the run's own log, exactly as
+/// `yunta status --json` derives it later: the invocation that drove a
+/// run and the command that reads it an hour afterwards publish one
+/// answer, rather than two shapes that happen to agree.
+///
+/// The word, not a verdict: whether the invocation succeeded is the
+/// caller's to say. An invocation that drove the run answers for where
+/// the run got to; one that handed it off answers for the handoff, and
+/// a run still moving is exactly what that command set out to leave
+/// behind.
+pub(crate) async fn report_run_json(
+    ctx: &Context,
+    storage: &AsyncStorage,
+    run_id: &RunId,
+    manifest: &Manifest,
     budget_warning: Option<String>,
-    /// `detached`, or the run's terminal: `finished`, `paused`,
-    /// `failed`, `promoted`.
-    outcome: &'static str,
-    /// Why, when the run did not finish. Absent on a clean finish and on
-    /// `detached`, where there is nothing to say yet. A caller reading
-    /// JSON learns what went wrong here, not only that something did.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-}
-
-impl RunJson {
-    pub(crate) fn detached(run_id: &RunId, budget_warning: Option<String>) -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            run_id: run_id.to_string(),
-            budget_warning,
-            outcome: "detached",
-            reason: None,
-        }
-    }
-
-    fn from_report(run_id: &RunId, report: &RunReport, budget_warning: Option<String>) -> Self {
-        let (outcome, reason) = match &report.terminal {
-            RunTerminal::Finished => ("finished", None),
-            RunTerminal::Paused { reason } => ("paused", Some(reason.clone())),
-            RunTerminal::Failed { reason } => ("failed", Some(reason.clone())),
-            RunTerminal::Promoted { .. } => ("promoted", None),
-        };
-        Self {
-            schema_version: SCHEMA_VERSION,
-            run_id: run_id.to_string(),
-            budget_warning,
-            outcome,
-            reason,
-        }
-    }
+) -> Result<RunWord, CliError> {
+    let events = storage.events_for_run(run_id.clone()).await?;
+    let document = crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now())
+        .warning(budget_warning);
+    crate::json::print_json(&document)?;
+    Ok(document.outcome())
 }

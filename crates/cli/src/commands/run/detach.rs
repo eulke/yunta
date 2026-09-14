@@ -10,7 +10,7 @@ use yunta_engine::FrozenRun;
 use yunta_storage::AsyncStorage;
 
 use super::{create_run_from, estimate, runnable};
-use crate::commands::drive::RunJson;
+use crate::commands::drive::report_run_json;
 use crate::commands::{spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -59,10 +59,20 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     let estimated = estimate(ctx, &frozen.manifest, quiet, json).await;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if json {
-        return crate::json::print_json(&RunJson::detached(
+        // The run's own log, read the instant it was handed off: the
+        // same document `yunta status --json` prints, saying where the
+        // run stood when this invocation let go of it. The verdict is
+        // the handoff's and not the run's — a run still moving is what
+        // this command set out to leave behind.
+        report_run_json(
+            ctx,
+            storage,
             &run_id,
+            &frozen.manifest,
             estimated.budget_warning.clone(),
-        ));
+        )
+        .await?;
+        return Ok(Outcome::Success);
     }
     println!("run {run_id}: detached, driving forward independently");
     Ok(Outcome::Success)

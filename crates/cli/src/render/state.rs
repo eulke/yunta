@@ -5,12 +5,10 @@
 //! the vocabulary a run is judged against and the vocabulary a person
 //! reads are the same one, and neither can drift from the other.
 //!
-//! A run's terminal verdict (`finished`, `paused`, `failed`, `promoted`)
-//! is a second vocabulary. It keys on [`yunta_engine::RunTerminal`],
-//! which only a run in flight produces, and lives with the surfaces that
-//! hold one.
+//! [`RunWord`] is the same thing for the run as a whole: what its
+//! derived phase is called, wherever a surface says it.
 
-use yunta_engine::NodeState;
+use yunta_engine::{NodeState, RunPhase};
 
 /// The cells the short word gets in a column of them. Four, the width of
 /// the longest of the six.
@@ -199,5 +197,134 @@ mod tests {
             NodeDisplay::of(Some(&waiting)).label(),
             "waiting — https://forge/pr/7"
         );
+    }
+}
+
+/// What a run's derived phase is called, wherever a surface says it.
+///
+/// Eight words for the eight answers a reader acts on. A listing, a
+/// status page, a closing block and a JSON document each used to reach
+/// into [`RunPhase`] and choose a word, so one stop could be called
+/// four things — and whether the command succeeded was decided a third
+/// time, somewhere else again. The word is decided here; what qualifies
+/// it (what a run waits on, what broke it, which mode it promoted to)
+/// stays on the phase, because that is detail rather than vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunWord {
+    Created,
+    Running,
+    /// Stopped until a person acts.
+    Paused,
+    Finished,
+    Failed,
+    Cancelled,
+    Promoted,
+    /// The log stopped making sense.
+    Broken,
+}
+
+impl RunWord {
+    /// Every word, for the tests that hold the set closed: one that
+    /// proves each has a group in the listing, and one that proves each
+    /// reads as itself.
+    #[cfg(test)]
+    pub(crate) const ALL: [RunWord; 8] = [
+        RunWord::Created,
+        RunWord::Running,
+        RunWord::Paused,
+        RunWord::Finished,
+        RunWord::Failed,
+        RunWord::Cancelled,
+        RunWord::Promoted,
+        RunWord::Broken,
+    ];
+
+    /// What `phase` is called.
+    pub(crate) fn of(phase: &RunPhase) -> Self {
+        match phase {
+            RunPhase::Created => RunWord::Created,
+            RunPhase::Running => RunWord::Running,
+            RunPhase::Waiting { .. } => RunWord::Paused,
+            RunPhase::Finished => RunWord::Finished,
+            RunPhase::Failed { .. } => RunWord::Failed,
+            RunPhase::Cancelled => RunWord::Cancelled,
+            RunPhase::Promoted { .. } => RunWord::Promoted,
+            RunPhase::Broken { .. } => RunWord::Broken,
+        }
+    }
+
+    /// What a run this invocation drove reached.
+    ///
+    /// The other way one arrives at the same word: a run in flight
+    /// reports a terminal rather than a derived phase, and the two are
+    /// the same vocabulary — so `yunta run` and `yunta status` call one
+    /// stop the same thing.
+    pub(crate) fn of_terminal(terminal: &yunta_engine::RunTerminal) -> Self {
+        match terminal {
+            yunta_engine::RunTerminal::Finished => RunWord::Finished,
+            yunta_engine::RunTerminal::Paused { .. } => RunWord::Paused,
+            yunta_engine::RunTerminal::Failed { .. } => RunWord::Failed,
+            yunta_engine::RunTerminal::Promoted { .. } => RunWord::Promoted,
+        }
+    }
+
+    /// The word a person reads, and the token a document carries — one
+    /// spelling, because a reader who greps a log for what `status`
+    /// printed should find what `--json` published.
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            RunWord::Created => "created",
+            RunWord::Running => "running",
+            RunWord::Paused => "paused",
+            RunWord::Finished => "finished",
+            RunWord::Failed => "failed",
+            RunWord::Cancelled => "cancelled",
+            RunWord::Promoted => "promoted",
+            RunWord::Broken => "broken",
+        }
+    }
+
+    /// The mark that repeats the word for the eye, in the same
+    /// vocabulary a node's state uses.
+    pub(crate) fn mark(self) -> StateWord {
+        match self {
+            RunWord::Created | RunWord::Running => StateWord::Run,
+            RunWord::Paused | RunWord::Promoted => StateWord::Wait,
+            RunWord::Finished => StateWord::Done,
+            RunWord::Failed | RunWord::Cancelled | RunWord::Broken => StateWord::Fail,
+        }
+    }
+}
+
+/// One spelling on the wire too: a document carries the word.
+impl serde::Serialize for RunWord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.word())
+    }
+}
+
+impl std::fmt::Display for RunWord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.word())
+    }
+}
+
+/// Whether the invocation that reached this word reports success.
+///
+/// One mapping, because "did the command succeed" is one question. Only
+/// a run that finished says yes: every other word is a stop that needs a
+/// decision, and the block above it already says which.
+impl From<RunWord> for crate::error::Outcome {
+    fn from(word: RunWord) -> Self {
+        match word {
+            RunWord::Finished => crate::error::Outcome::Success,
+            RunWord::Created
+            | RunWord::Running
+            | RunWord::Paused
+            | RunWord::Failed
+            | RunWord::Cancelled
+            | RunWord::Promoted
+            | RunWord::Broken => crate::error::Outcome::Reported,
+        }
     }
 }

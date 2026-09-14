@@ -29,4 +29,6 @@ pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
 pub(crate) use glyphs::Glyphs;
 pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
-pub(crate) use width::{cell_width, indent, truncate, wrap, INDENT, LABEL_WIDTH, LINE_WIDTH};
+pub(crate) use width::{
+    cell_width, indent, truncate, wrap, INDENT, INDENT_WIDTH, LABEL_WIDTH, LINE_WIDTH,
+};

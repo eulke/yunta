@@ -278,9 +278,30 @@ that group is ordered by run id alone.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 3`. The
-three share one stamp, so all of them carry the new number even though only
-`status --json` changed shape.
+`stats --json`, `status --json` and `run --json` carry `schema_version: 4`. The
+three share one stamp, so all of them carry the new number even though only the
+run document changed shape.
+
+`run --json`, `resume --json`, `status --json` and the control plane's
+`workflow_status` all emit one document. It is derived from the run's own event
+log, so the command that drove a run to its stop and the command that reads that
+run afterwards publish the same answer, field for field. `outcome` is the word
+every text surface prints for the run — `created`, `running`, `paused`,
+`finished`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+terminal for what `status` said finds the same word in the document. A failed or
+broken run carries `reason`; a parked one carries `waiting_on` and, when its
+pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
+same document for the run it just handed off, which its log calls `created` or
+`running`: no surface reports an outcome of `detached`, because detaching is
+something an invocation did and not a state a run is in.
+
+`stats --json` publishes what a run handed over and what it found beside what it
+spent: `submissions` (`{accepted, refused}`) counts every document offered,
+`findings` (`{posted, updated, withdrawn, refused}`) counts every finding call the
+log carries, and `findings_standing` counts the findings that stand now — the
+fold over the whole log, where an update replaces and a withdrawal removes. Each
+node row carries its own `submissions` and `findings`, zeroed for a node the log
+carries none from.
 
 In `status --json`, `diagnostics` maps a failed node to the artifacts its failure
 names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,

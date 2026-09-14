@@ -331,3 +331,48 @@ fn status_json_publishes_an_unheld_artifact_under_its_stable_code() {
     assert!(entry["kind"].is_null(), "{state:#}");
     assert!(entry["file"].is_null(), "{state:#}");
 }
+
+/// The workflow the one-document test drives: two nodes, the second
+/// depending on the first, so a run of it reaches a stop with nodes and
+/// tasks to report.
+const TWO_NODES: &str = r#"
+name: two-nodes
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+  - id: verify
+    kind: bash
+    depends_on: [touch]
+    run: "test -f made.txt"
+"#;
+
+#[test]
+fn run_json_and_status_json_are_one_document() {
+    // `yunta run --json` and `yunta status --json` answer the same
+    // question about the same run, and answer it with the same document:
+    // one derivation off the run's own log, so a program that learned to
+    // read one reads the other.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), TWO_NODES);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--json"]);
+    assert!(run.status.success(), "{}", stdout(&run));
+    let from_run: serde_json::Value = serde_json::from_str(&stdout(&run))
+        .unwrap_or_else(|e| panic!("run --json emits JSON: {e}\n{}", stdout(&run)));
+    let run_id = from_run["run_id"].as_str().expect("the run's id");
+
+    let status = yunta_in!(&repo, &home, &["status", run_id, "--json"]);
+    let from_status: serde_json::Value = serde_json::from_str(&stdout(&status))
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+
+    assert_eq!(
+        from_run, from_status,
+        "one document, two commands:\n{from_run:#}\n{from_status:#}"
+    );
+    assert_eq!(from_run["outcome"], "finished", "{from_run:#}");
+}

@@ -35,6 +35,7 @@ use super::status::task_status_label;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
+use crate::render::state::RunWord;
 use crate::render::StateWord;
 
 #[derive(Debug, Deserialize)]
@@ -70,31 +71,17 @@ struct Expect {
     tasks: BTreeMap<String, String>,
 }
 
-/// How a final state reads in a case file, so a mismatch is reported in
-/// the words the case was written with.
-fn final_state_label(state: FinalState) -> &'static str {
-    match state {
-        FinalState::Finished => "finished",
-        FinalState::Paused => "paused",
-        FinalState::Failed => "failed",
-        FinalState::Promoted => "promoted",
-    }
-}
-
 /// The terminal a run actually reached, with the reason a person needs
 /// laid out under it. `Debug` would wrap the reason in quotes and escape
 /// every one it contains — noise added to a message already written for
 /// a reader.
 fn terminal_label(terminal: &RunTerminal) -> String {
+    let word = RunWord::of_terminal(terminal);
     match terminal {
-        RunTerminal::Finished => "finished".to_string(),
-        RunTerminal::Paused { reason } => {
-            format!("paused\n    {}", yunta_core::text::hanging(reason, "    "))
+        RunTerminal::Paused { reason } | RunTerminal::Failed { reason } => {
+            format!("{word}\n    {}", yunta_core::text::hanging(reason, "    "))
         }
-        RunTerminal::Failed { reason } => {
-            format!("failed\n    {}", yunta_core::text::hanging(reason, "    "))
-        }
-        RunTerminal::Promoted { .. } => "promoted".to_string(),
+        RunTerminal::Finished | RunTerminal::Promoted { .. } => word.to_string(),
     }
 }
 
@@ -111,6 +98,21 @@ enum FinalState {
     /// kept for schema completeness rather than making `RunTerminal`'s
     /// mapping here partial.
     Promoted,
+}
+
+impl FinalState {
+    /// The word a case file's `final_state` is written in, which is the
+    /// word every surface calls that stop by: a case is asserted in the
+    /// vocabulary the run is reported in, so neither can drift from the
+    /// other.
+    fn word(self) -> RunWord {
+        match self {
+            FinalState::Finished => RunWord::Finished,
+            FinalState::Paused => RunWord::Paused,
+            FinalState::Failed => RunWord::Failed,
+            FinalState::Promoted => RunWord::Promoted,
+        }
+    }
 }
 
 pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
@@ -306,16 +308,10 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
 
     // Compare against expect — every mismatch reported, not just the first.
     let mut problems = Vec::new();
-    let got_state = match &report.terminal {
-        RunTerminal::Finished => FinalState::Finished,
-        RunTerminal::Paused { .. } => FinalState::Paused,
-        RunTerminal::Failed { .. } => FinalState::Failed,
-        RunTerminal::Promoted { .. } => FinalState::Promoted,
-    };
-    if got_state != case.expect.final_state {
+    let expected_word = case.expect.final_state.word();
+    if RunWord::of_terminal(&report.terminal) != expected_word {
         problems.push(format!(
-            "final_state: expected {}, got {}",
-            final_state_label(case.expect.final_state),
+            "final_state: expected {expected_word}, got {}",
             terminal_label(&report.terminal)
         ));
     }

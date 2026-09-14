@@ -33,16 +33,10 @@
 use dialoguer::FuzzySelect;
 
 use super::{Answered, Console, NoAnswer, PARKS};
-use crate::render::{wrap, LINE_WIDTH};
+use crate::render::{wrap, INDENT, INDENT_WIDTH, LINE_WIDTH};
 
 /// The keys a list answers to, named above every one of them.
 const KEYS: &str = "arrows move, type to filter, enter chooses";
-
-/// The cells the list marker takes before an option's row.
-const MARKER: usize = 2;
-
-/// The cells between an option's number and its text.
-const GAP: usize = 2;
 
 /// One option: what it is, what choosing it means, and what the caller
 /// gets back for it.
@@ -99,9 +93,8 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
 /// line after the first sitting under the text of the first.
 fn read<T>(choices: &[Choice<T>]) -> Vec<String> {
     let digits = digits(choices);
-    let indent = " ".repeat(MARKER + digits + GAP);
+    let indent = " ".repeat(INDENT_WIDTH + digits + INDENT_WIDTH);
     let room = LINE_WIDTH.saturating_sub(indent.len());
-    let marker = " ".repeat(MARKER);
     choices
         .iter()
         .enumerate()
@@ -112,11 +105,7 @@ fn read<T>(choices: &[Choice<T>]) -> Vec<String> {
                 .chain(choice.detail.iter().flat_map(|detail| wrap(detail, room)));
             for line in text {
                 match lines.is_empty() {
-                    true => lines.push(format!(
-                        "{marker}{:>digits$}{}{line}",
-                        index + 1,
-                        " ".repeat(GAP)
-                    )),
+                    true => lines.push(format!("{INDENT}{:>digits$}{INDENT}{line}", index + 1)),
                     false => lines.push(format!("{indent}{line}")),
                 }
             }
@@ -138,8 +127,8 @@ fn rows<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
         .enumerate()
         .map(|(index, choice)| {
             within(
-                &format!("{:>digits$}{}{}", index + 1, " ".repeat(GAP), choice.head),
-                width.saturating_sub(MARKER + 1),
+                &format!("{:>digits$}{INDENT}{}", index + 1, choice.head),
+                width.saturating_sub(INDENT_WIDTH + 1),
             )
         })
         .collect()
@@ -193,7 +182,7 @@ mod tests {
 
     /// The cells an option's text has once the marker, the position and
     /// the gap after it are drawn.
-    const ROOM: usize = LINE_WIDTH - MARKER - 1 - GAP;
+    const ROOM: usize = LINE_WIDTH - INDENT_WIDTH - 1 - INDENT_WIDTH;
 
     fn choices(details: bool) -> Vec<Choice<u8>> {
         ["approve", "adjust", "abort"]
@@ -277,7 +266,7 @@ mod tests {
         );
         for row in &rows {
             assert!(
-                row.len() + MARKER < TERMINAL,
+                row.len() + INDENT_WIDTH < TERMINAL,
                 "{} bytes on a terminal {TERMINAL} wide: {row:?}",
                 row.len()
             );
@@ -299,7 +288,7 @@ mod tests {
         let read = read(std::slice::from_ref(&long));
         let row = rows.first().map(String::as_str).unwrap_or_default();
         let block = read.first().map(String::as_str).unwrap_or_default();
-        assert!(row.len() < 20 - MARKER, "{row:?}");
+        assert!(row.len() < 20 - INDENT_WIDTH, "{row:?}");
         assert!(block.contains(&long.head), "{block:?}");
         assert!(
             block.contains("tradeoff: one more attempt"),

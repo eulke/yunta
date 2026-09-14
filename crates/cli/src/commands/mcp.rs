@@ -266,7 +266,7 @@ async fn tool_workflow_status(
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
-    crate::json::to_json_string(&super::status::status_json(
+    crate::json::to_json_string(&crate::json::RunDocument::of(
         &run_id,
         &events,
         &manifest,

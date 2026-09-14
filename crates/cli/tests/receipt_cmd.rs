@@ -143,3 +143,37 @@ fn receipt_refuses_a_run_that_has_not_finished() {
     assert!(!run_dir.join("receipt.md").exists());
     assert!(!run_dir.join("receipt.json").exists());
 }
+
+#[test]
+fn the_receipt_carries_the_document_version() {
+    // Every machine-readable document this CLI writes says which schema
+    // it was written against — the receipt included, so a reader can
+    // refuse one from a schema it predates instead of guessing at a
+    // field it does not recognise.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/bash-only-receipt.yaml"),
+        bash_only_workflow(),
+    );
+
+    let run_out = yunta_in!(
+        &repo,
+        &home,
+        &["run", ".yunta/workflows/bash-only-receipt.yaml"]
+    );
+    assert!(run_out.status.success(), "{}", stderr(&run_out));
+    let run_id = run_id_from(&run_out);
+
+    let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id, "--json"]);
+    assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
+    let receipt: serde_json::Value = serde_json::from_str(&stdout(&receipt_out)).unwrap();
+    assert!(
+        receipt["schema_version"].as_u64().is_some(),
+        "the receipt names its schema: {receipt:#}"
+    );
+}

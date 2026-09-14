@@ -11,6 +11,7 @@
 //! Counters with context, never percentages: a percentage lies the moment
 //! a re-route grows the denominator.
 
+use crate::render::state::RunWord;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
@@ -75,24 +76,22 @@ fn terminated(flow: &Counter) -> usize {
     flow.done + flow.failed
 }
 
-/// The phase on one line, for the end of a summary.
+/// The phase on one line, for the end of a summary: the word every
+/// surface calls it by, and what qualifies it when something does.
 fn phase_label(phase: &RunPhase) -> String {
+    let word = RunWord::of(phase);
     match phase {
-        RunPhase::Created => "created".to_string(),
-        RunPhase::Running => "running".to_string(),
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
-        RunPhase::Waiting { on } => format!("waiting — {}", advice::parked_on(on)),
-        // `finished` is the word every other surface reports a completed
-        // run with; the other three are named as themselves, because a
-        // run a person cancelled and a run that failed are not a run that
-        // finished.
-        RunPhase::Finished => "finished".to_string(),
-        RunPhase::Failed { .. } => "failed".to_string(),
-        RunPhase::Cancelled => "cancelled".to_string(),
-        RunPhase::Promoted { .. } => "promoted".to_string(),
+        RunPhase::Waiting { on } => format!("{word} — {}", advice::parked_on(on)),
         RunPhase::Broken { diagnostic } => {
-            format!("broken — {}", yunta_core::text::one_line(diagnostic))
+            format!("{word} — {}", yunta_core::text::one_line(diagnostic))
         }
+        RunPhase::Created
+        | RunPhase::Running
+        | RunPhase::Finished
+        | RunPhase::Failed { .. }
+        | RunPhase::Cancelled
+        | RunPhase::Promoted { .. } => word.to_string(),
     }
 }

@@ -16,6 +16,7 @@
 //! child under the node that bore it and never averaged into a figure of
 //! its own (`contrato-del-run.md` §8.5).
 
+use crate::render::state::RunWord;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -93,10 +94,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        match self.frame.phase {
-            RunPhase::Finished => Outcome::Success,
-            _ => Outcome::Reported,
-        }
+        RunWord::of(&self.frame.phase).into()
     }
 
     /// The whole block, ready to print.
@@ -156,49 +154,48 @@ impl Closing {
     /// The outcome, as the word a reader acts on and the mark that
     /// repeats it.
     fn verdict(&self) -> Verdict {
-        match &self.frame.phase {
-            RunPhase::Finished if self.blocking > 0 => Verdict::new(
+        let word = RunWord::of(&self.frame.phase);
+        let (mark, said) = match &self.frame.phase {
+            // A run that finished holding blocking findings finished,
+            // and a reader still has something to do — so the word
+            // stands and the mark is the one that says "you".
+            RunPhase::Finished if self.blocking > 0 => (
                 StateWord::Wait,
                 format!(
-                    "finished, holding {}",
+                    "{word}, holding {}",
                     counted(self.blocking, "blocking finding")
                 ),
             ),
-            RunPhase::Finished => Verdict::new(StateWord::Done, "finished".to_string()),
-            RunPhase::Failed { failure } => Verdict::new(
-                StateWord::Fail,
-                match failure {
-                    Some(failure) => format!("failed — {}", one_line(&failure.to_string())),
-                    None => "failed".to_string(),
-                },
+            RunPhase::Failed {
+                failure: Some(failure),
+            } => (
+                word.mark(),
+                format!("{word} — {}", one_line(&failure.to_string())),
             ),
-            RunPhase::Cancelled => Verdict::new(StateWord::Fail, "cancelled".to_string()),
-            RunPhase::Promoted { to } => Verdict::new(
-                StateWord::Wait,
-                match to {
-                    Some(mode) => format!("promoted to `{mode}`"),
-                    None => "promoted".to_string(),
-                },
-            ),
+            RunPhase::Promoted { to: Some(mode) } => (word.mark(), format!("{word} to `{mode}`")),
             // A run stopped on a menu says only that here: the block
             // right under this line carries the whole decision, and
             // saying it twice makes a reader check whether the two
             // agree.
             RunPhase::Waiting { .. } if self.decision.is_some() => {
-                Verdict::new(StateWord::Wait, "paused on a decision".to_string())
+                (word.mark(), format!("{word} on a decision"))
             }
-            RunPhase::Waiting { on } => Verdict::new(
-                StateWord::Wait,
-                format!("paused — {}", advice::parked_on(on)),
-            ),
-            RunPhase::Broken { diagnostic } => Verdict::new(
-                StateWord::Fail,
-                format!("broken — {}", one_line(diagnostic)),
-            ),
-            RunPhase::Created | RunPhase::Running => {
-                Verdict::new(StateWord::Run, "still moving".to_string())
+            RunPhase::Waiting { on } => {
+                (word.mark(), format!("{word} — {}", advice::parked_on(on)))
             }
-        }
+            RunPhase::Broken { diagnostic } => {
+                (word.mark(), format!("{word} — {}", one_line(diagnostic)))
+            }
+            // A run this block is drawn over that has not stopped is
+            // reported as what it is doing, not as a stop it has not
+            // reached.
+            RunPhase::Created | RunPhase::Running => (word.mark(), "still moving".to_string()),
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { to: None } => (word.mark(), word.to_string()),
+        };
+        Verdict::new(mark, said)
     }
 
     /// The labelled rows under the outcome.

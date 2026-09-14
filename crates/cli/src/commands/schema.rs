@@ -16,6 +16,7 @@ use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
+use crate::render::{INDENT, LABEL_WIDTH};
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
@@ -54,7 +55,11 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
 fn list() -> String {
     let mut out = String::from("Documents Yunta reads and validates:\n");
     for kind in ArtifactKind::ALL {
-        out.push_str(&format!("  {:<12} {}\n", kind.as_str(), kind.label()));
+        out.push_str(&format!(
+            "{INDENT}{:<LABEL_WIDTH$} {}\n",
+            kind.as_str(),
+            kind.label()
+        ));
     }
     out.push_str(
         "\nRun `yunta schema <kind>` for the shape to write, or add `--json` for the \

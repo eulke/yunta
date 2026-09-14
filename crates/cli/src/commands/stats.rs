@@ -56,13 +56,16 @@ async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_run_stats(
-        run_id,
-        mode.as_str(),
-        &run_stats,
-        &yunta_engine::derive(&events),
-        pricing.as_ref(),
-        Glyphs::from_env(),
+    print!(
+        "{}",
+        render_run_stats(
+            run_id,
+            mode.as_str(),
+            &run_stats,
+            &yunta_engine::derive(&events),
+            pricing.as_ref(),
+            Glyphs::from_env(),
+        )
     );
     Ok(Outcome::Success)
 }
@@ -89,7 +92,10 @@ async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outc
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_workflow_history(workflow_name, &history, Glyphs::from_env());
+    print!(
+        "{}",
+        render_workflow_history(workflow_name, &history, Glyphs::from_env())
+    );
     if let Some(findings) = &findings {
         let text = render_verification_findings(findings);
         if !text.is_empty() {
@@ -197,6 +203,11 @@ fn currency_line(
     ))
 }
 
+/// The whole `yunta stats <run_id>` block, ready to print.
+///
+/// A block rather than a run of `println!`s: what this command says
+/// about a run is one thing a test reads whole, and a number nobody can
+/// assert is a number nobody is holding to anything.
 fn render_run_stats(
     run_id: &RunId,
     mode: &str,
@@ -204,80 +215,133 @@ fn render_run_stats(
     state: &yunta_engine::RunState,
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
     glyphs: Glyphs,
-) {
-    println!("run {run_id} — mode {mode}");
+) -> String {
+    let mut out = format!("run {run_id} — mode {mode}\n");
     if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
-        println!("{note}");
+        out.push_str(&format!("{note}\n"));
     }
-    match stats.cptv {
-        Some(cptv) => println!(
+    out.push_str(&rates(stats));
+    out.push_str(&spend(stats, pricing));
+    out.push_str(&format!(
+        "{}\n",
+        submissions_line(&stats.artifact_submissions)
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        findings_line(&stats.findings, stats.findings_effective)
+    ));
+    out.push_str(&render_nodes(stats, state, glyphs));
+    out.push_str(&render_runners(stats, glyphs));
+    out
+}
+
+/// The three rates a run is read by, each saying `n/a` and why rather
+/// than a number nothing supports.
+fn rates(stats: &RunStats) -> String {
+    let cptv = match stats.cptv {
+        Some(cptv) => format!(
             "CPTV: {cptv:.1} tokens/task done ({} done)",
             stats.tasks_done
         ),
-        None => println!("CPTV: n/a (no task done yet)"),
-    }
-    match stats.rework_rate {
-        Some(rate) => println!("rework rate: {}", format_pct(rate)),
-        None => println!("rework rate: n/a"),
-    }
-    match stats.cache_rate {
-        Some(rate) => println!("cache rate: {}", format_pct(rate)),
-        None => println!("cache rate: n/a (adapter never reported it)"),
-    }
-    let total = stats.total_tokens.total();
-    print!(
-        "tokens: {} in / {} out",
+        None => "CPTV: n/a (no task done yet)".to_string(),
+    };
+    let rework = match stats.rework_rate {
+        Some(rate) => format!("rework rate: {}", format_pct(rate)),
+        None => "rework rate: n/a".to_string(),
+    };
+    let cache = match stats.cache_rate {
+        Some(rate) => format!("cache rate: {}", format_pct(rate)),
+        None => "cache rate: n/a (adapter never reported it)".to_string(),
+    };
+    format!("{cptv}\n{rework}\n{cache}\n")
+}
+
+/// What the run spent: the tokens, and what they come to in currency
+/// when this project prices the models it used.
+fn spend(
+    stats: &RunStats,
+    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
+) -> String {
+    let cached = match stats.total_tokens.cached {
+        Some(cached) => format!(" ({cached} cached)"),
+        None => String::new(),
+    };
+    let mut out = format!(
+        "tokens: {} in / {} out{cached}\n",
         stats.total_tokens.input, stats.total_tokens.output
     );
-    if let Some(cached) = stats.total_tokens.cached {
-        print!(" ({cached} cached)");
+    if let Some(line) = currency_line(stats.total_tokens.total(), pricing) {
+        out.push_str(&format!("{line}\n"));
     }
-    println!();
-    if let Some(line) = currency_line(total, pricing) {
-        println!("{line}");
-    }
-    render_nodes(stats, state, glyphs);
-    render_runners(stats, glyphs);
+    out
+}
+
+/// What the run handed over, by what the engine answered — the other
+/// half of what a run cost, beside the tokens it spent.
+fn submissions_line(submissions: &yunta_engine::Submissions) -> String {
+    format!(
+        "documents: {} accepted, {} refused",
+        submissions.accepted, submissions.refused
+    )
+}
+
+/// What the run found, by what the engine answered, and how many of
+/// those findings stand now.
+///
+/// The calls and the standing count are two different facts and are
+/// said as two: a log carrying five posts, one update and one
+/// withdrawal stands at four, and a reader shown only one of those
+/// numbers draws the wrong conclusion from either.
+fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
+    format!(
+        "findings: {} posted, {} updated, {} withdrawn, {} refused — {effective} standing",
+        activity.posted, activity.updated, activity.withdrawn, activity.refused
+    )
 }
 
 /// One row per node that started, each opening with the state it is in:
 /// the same token count reads one way under a node that finished and
 /// another under one that failed, so the number never appears without
 /// it.
-fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs) {
+fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs) -> String {
     if stats.nodes.is_empty() {
-        return;
+        return String::new();
     }
-    println!("\nnodes:");
     let max_tokens = stats
         .nodes
         .iter()
         .map(|n| n.tokens.total())
         .max()
         .unwrap_or(0);
+    let mut out = String::from("\nnodes:\n");
     for node in &stats.nodes {
         let display = NodeDisplay::of(state.nodes.state(&node.node_id));
-        println!("{}", node_line(node, max_tokens, &display, glyphs));
+        out.push_str(&format!(
+            "{}\n",
+            node_line(node, max_tokens, &display, glyphs)
+        ));
     }
+    out
 }
 
 /// The same tokens grouped by the runner that spent them: where the
 /// run's cost went, across however many nodes each runner was given.
-fn render_runners(stats: &RunStats, glyphs: Glyphs) {
+fn render_runners(stats: &RunStats, glyphs: Glyphs) -> String {
     let by_runner = stats.tokens_by_runner();
     if by_runner.is_empty() {
-        return;
+        return String::new();
     }
-    println!("\nrunners:");
     let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
+    let mut out = String::from("\nrunners:\n");
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
-        println!(
-            "{INDENT}{} {}  {total:>8} tok",
+        out.push_str(&format!(
+            "{INDENT}{} {}  {total:>8} tok\n",
             truncate(runner.as_str(), LABEL_WIDTH, glyphs),
             bar(total, max_runner_tokens, glyphs),
-        );
+        ));
     }
+    out
 }
 
 fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Glyphs) -> String {
@@ -296,19 +360,24 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
     )
 }
 
-fn render_workflow_history(workflow_name: &WorkflowName, history: &[RunSummary], glyphs: Glyphs) {
-    println!(
-        "workflow `{workflow_name}` — {}",
+/// The whole `yunta stats --workflow <name>` block, ready to print.
+fn render_workflow_history(
+    workflow_name: &WorkflowName,
+    history: &[RunSummary],
+    glyphs: Glyphs,
+) -> String {
+    let mut out = format!(
+        "workflow `{workflow_name}` — {}\n",
         yunta_core::text::counted(history.len(), "run")
     );
 
-    println!("\nCPTV over time:");
-    println!("{}", cptv_line(history, glyphs));
+    out.push_str("\nCPTV over time:\n");
+    out.push_str(&format!("{}\n", cptv_line(history, glyphs)));
 
-    println!("\nmodes:");
+    out.push_str("\nmodes:\n");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
-        println!(
-            "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}",
+        out.push_str(&format!(
+            "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}\n",
             truncate(mode.as_str(), LABEL_WIDTH, glyphs),
             runs,
             median_cptv
@@ -317,18 +386,20 @@ fn render_workflow_history(workflow_name: &WorkflowName, history: &[RunSummary],
             median_tokens
                 .map(|v| format!("{v:.0}"))
                 .unwrap_or_else(|| "n/a".to_string()),
-        );
+        ));
     }
 
-    if let Some(estimation) = prior_estimation(history) {
-        println!("\n{}", format_estimation_line(&estimation));
-    } else {
-        println!(
-            "\nestimation: not enough runs yet (need {}, have {})",
+    match prior_estimation(history) {
+        Some(estimation) => {
+            out.push_str(&format!("\n{}\n", format_estimation_line(&estimation)));
+        }
+        None => out.push_str(&format!(
+            "\nestimation: not enough runs yet (need {}, have {})\n",
             yunta_engine::MIN_SAMPLES_FOR_ESTIMATION,
             history.len()
-        );
+        )),
     }
+    out
 }
 
 /// Every past run's CPTV as one cell, oldest first, with the newest
@@ -465,10 +536,19 @@ struct NodeStatJson {
     active_secs: f64,
     blocked_secs: f64,
     blocked_fraction: Option<f64>,
+    /// What this node handed over, by what the engine answered. A node
+    /// that submitted nothing carries zeroes rather than nothing: it
+    /// was asked and did not deliver, which is a number, not an absence.
+    submissions: yunta_engine::Submissions,
+    /// What this node found, by what the engine answered — zeroes for a
+    /// node the log carries no finding call from, for the same reason.
+    findings: yunta_engine::FindingActivity,
 }
 
-impl From<&NodeStat> for NodeStatJson {
-    fn from(n: &NodeStat) -> Self {
+impl NodeStatJson {
+    /// One node's row, with the per-node counts the run's own maps hold
+    /// beside the numbers the node stat carries itself.
+    fn of(n: &NodeStat, stats: &RunStats) -> Self {
         Self {
             node_id: n.node_id.to_string(),
             runner: n.runner.as_ref().map(ToString::to_string),
@@ -479,6 +559,16 @@ impl From<&NodeStat> for NodeStatJson {
             active_secs: n.active.as_secs_f64(),
             blocked_secs: n.blocked.as_secs_f64(),
             blocked_fraction: n.blocked_fraction(),
+            submissions: stats
+                .submissions_by_node
+                .get(&n.node_id)
+                .copied()
+                .unwrap_or_default(),
+            findings: stats
+                .findings_by_node
+                .get(&n.node_id)
+                .copied()
+                .unwrap_or_default(),
         }
     }
 }
@@ -500,6 +590,15 @@ struct RunStatsJson {
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
     unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
+    /// Every document the run handed over, by what the engine answered.
+    submissions: yunta_engine::Submissions,
+    /// Every finding call the log carries, by what the engine answered.
+    findings: yunta_engine::FindingActivity,
+    /// How many findings stand now — the fold over the whole log, where
+    /// an update replaces and a withdrawal removes. Never the count of
+    /// posts: a reader given only `findings.posted` reads a withdrawn
+    /// finding as one that still stands.
+    findings_standing: u64,
 }
 
 impl RunStatsJson {
@@ -524,8 +623,15 @@ impl RunStatsJson {
             tasks_done: stats.tasks_done,
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             currency_estimate: currency_line(total, pricing),
-            nodes: stats.nodes.iter().map(NodeStatJson::from).collect(),
+            nodes: stats
+                .nodes
+                .iter()
+                .map(|node| NodeStatJson::of(node, stats))
+                .collect(),
             unknown_kinds: stats.unknown_kinds.clone(),
+            submissions: stats.artifact_submissions,
+            findings: stats.findings,
+            findings_standing: stats.findings_effective,
         }
     }
 }
@@ -698,6 +804,62 @@ mod tests {
             tasks_total: 1,
             cptv: Some(cptv),
         }
+    }
+
+    #[test]
+    fn stats_renders_to_a_string_a_test_can_read() {
+        // What this command says about a run is one block, not a run of
+        // `println!`s: a number nobody can read back is a number nobody
+        // is holding to anything. The two counts a run's documents and
+        // findings come to are in it, each said as itself.
+        let stats = RunStats {
+            cptv: Some(500.0),
+            rework_rate: None,
+            cache_rate: None,
+            total_tokens: yunta_core::events::TokenUsage {
+                input: 300,
+                output: 200,
+                cached: None,
+            },
+            tasks_total: 2,
+            tasks_done: 1,
+            wall_clock: Some(Duration::from_secs(90)),
+            nodes: Vec::new(),
+            unknown_kinds: Vec::new(),
+            artifact_submissions: yunta_engine::Submissions {
+                accepted: 3,
+                refused: 1,
+            },
+            submissions_by_node: Default::default(),
+            findings: yunta_engine::FindingActivity {
+                posted: 5,
+                updated: 1,
+                withdrawn: 1,
+                refused: 0,
+            },
+            findings_by_node: Default::default(),
+            findings_effective: 4,
+        };
+        let text = render_run_stats(
+            &RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            "default",
+            &stats,
+            &yunta_engine::derive(&[]),
+            None,
+            Glyphs::Ascii,
+        );
+        assert!(
+            text.contains("documents: 3 accepted, 1 refused"),
+            "what the run handed over: {text}"
+        );
+        assert!(
+            text.contains("findings: 5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing"),
+            "what it found, and what still stands: {text}"
+        );
+        assert!(
+            text.contains("CPTV: 500.0 tokens/task done (1 done)"),
+            "{text}"
+        );
     }
 
     #[test]

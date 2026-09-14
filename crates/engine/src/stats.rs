@@ -111,7 +111,7 @@ impl NodeStat {
 }
 
 /// Whole documents sessions offered, by what the engine answered.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Submissions {
     pub accepted: u64,
     pub refused: u64,
@@ -119,7 +119,7 @@ pub struct Submissions {
 
 /// Finding calls a log carries, by what the engine answered: the three
 /// accepted forms, and the calls it turned down.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct FindingActivity {
     pub posted: u64,
     pub updated: u64,
