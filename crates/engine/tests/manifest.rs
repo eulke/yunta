@@ -416,7 +416,7 @@ nodes:
     kind: prompt
     runners: [reviewer, reviewer-alt]
     depends_on: [work]
-    prompt: "Audit as {{runner.role}}."
+    prompt: "Audit as {{runner.name}}."
   - id: ship
     kind: bash
     depends_on: [review]

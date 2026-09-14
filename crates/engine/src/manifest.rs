@@ -187,7 +187,7 @@ async fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core:
 /// A node with `runners: [a, b]` becomes one `<id>@<runner>`
 /// node per runner — **statically, in the manifest**, before anything
 /// runs: the fan-out is visible in `status`, each expanded node
-/// resolves its own runner and renders its own `{{runner.role}}`, and
+/// resolves its own runner and renders its own `{{runner.name}}`, and
 /// the scheduler needs zero fan-out awareness. Every reference to the
 /// original id follows the expansion: downstream `depends_on` rewires
 /// onto all siblings, and mode include lists name them all (so a mode

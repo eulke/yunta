@@ -113,7 +113,7 @@ pub(super) async fn close_node(
     }
 
     // An opaque artifact's name can carry a template
-    // (`report-{{runner.role}}.md`) — rendered per node so every fan-out
+    // (`report-{{runner.name}}.md`) — rendered per node so every fan-out
     // sibling verifies its own file. A document the engine reads has no
     // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {

@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::template::TemplateVar;
 use yunta_core::yaml::{self, Value};
 use yunta_core::{Capabilities, FenceLevel, ModelName};
 
@@ -42,12 +43,12 @@ pub struct MockFixture {
 pub struct RunPaths<'a> {
     /// `{{run.dir}}` — the run's own directory.
     pub run_dir: &'a Path,
-    /// `{{worktree}}` — the checkout the session works in.
+    /// `{{run.worktree}}` — the checkout the session works in.
     pub worktree: &'a Path,
-    /// `{{staging}}` — the root under which each node writes the files
+    /// `{{run.staging}}` — the root under which each node writes the files
     /// it declares, one directory per node id: a session scripted to
     /// produce an artifact of node `grill` writes
-    /// `{{staging}}/grill/<name>`, which is exactly the directory that
+    /// `{{run.staging}}/grill/<name>`, which is exactly the directory that
     /// session is granted.
     pub staging: &'a Path,
 }
@@ -80,21 +81,21 @@ impl MockFixture {
         Self::render(
             yaml,
             BTreeMap::from([
-                ("run.dir".to_string(), paths.run_dir.display().to_string()),
-                ("worktree".to_string(), paths.worktree.display().to_string()),
-                ("staging".to_string(), paths.staging.display().to_string()),
+                (TemplateVar::RunDir, paths.run_dir.display().to_string()),
+                (TemplateVar::Worktree, paths.worktree.display().to_string()),
+                (TemplateVar::Staging, paths.staging.display().to_string()),
             ]),
         )
     }
 
     /// One fixture for a caller that has no run: the same door with no
     /// directory defined, so a fixture that names one is refused here
-    /// instead of scripting the literal `{{staging}}` as a path.
+    /// instead of scripting the literal `{{run.staging}}` as a path.
     pub fn parse_without_a_run(yaml: &str) -> Result<Self, FixtureError> {
         Self::render(yaml, BTreeMap::new())
     }
 
-    fn render(yaml: &str, vars: BTreeMap<String, String>) -> Result<Self, FixtureError> {
+    fn render(yaml: &str, vars: BTreeMap<TemplateVar, String>) -> Result<Self, FixtureError> {
         let rendered = yunta_core::template::render_template(yaml, &vars)?;
         Ok(yunta_core::yaml::parse(&rendered)?)
     }

@@ -2819,7 +2819,7 @@ fn adapter_mock_with_fixture_runs() {
     );
     write(
         &repo.join("fixture.yaml"),
-        "sessions:\n  - effects:\n      - { path: \"{{staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
+        "sessions:\n  - effects:\n      - { path: \"{{run.staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
     );
 
     let refused = yunta_in!(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);

@@ -1574,6 +1574,19 @@ nodes:
         "got: {:?}",
         check_warnings(&wf, &config)
     );
+    // The remedy the warning proposes is a variable, so it is spelled
+    // the way the renderer reads it — the warning's own text is the one
+    // copy a compile-time format string forces, and this is what keeps
+    // it honest.
+    let warned = check_warnings(&wf, &config)
+        .into_iter()
+        .find(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. }))
+        .expect("the ungated push warns")
+        .to_string();
+    assert!(
+        warned.contains(&yunta_core::template::TemplateVar::RunBranch.braced()),
+        "{warned}"
+    );
 
     // The same push behind a gate is deliberate — no warning: a gate
     // upstream is the carve-out.
@@ -1989,7 +2002,7 @@ fn an_artifact_name_the_run_could_not_take_is_refused() {
     let mut node = bash("a", "true", &[]);
     node.artifacts = Some(yunta_core::Artifacts {
         produces: vec![yunta_core::ArtifactSpec::Opaque(
-            "reports/report-{{runner.role}}.md".to_string(),
+            "reports/report-{{runner.name}}.md".to_string(),
         )],
     });
     assert!(

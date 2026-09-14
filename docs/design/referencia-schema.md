@@ -329,13 +329,17 @@ que siempre está al día.
   kind en todo run que lo tenga, así que `as:` al lado de un `kind:` se rechaza al
   leer el workflow.
 - **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
-  prompt, su `run:`, sus hooks y sus patrones de `context:` — `{{run.dir}}`,
-  `{{run.worktree}}`, `{{run.branch}}`, `{{node.artifacts}}` (el directorio propio
-  del nodo, donde escribe lo que declara), `{{runner.role}}` cuando el nodo declara
-  un runner, `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}`
-  según lo que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado.
-  Una variable que no está definida ahí falla el nodo nombrándola; `yunta check`
-  además rechaza estáticamente todo `{{inputs.x}}` que `inputs:` no declare.
+  prompt, su `run:`, sus hooks y sus patrones de `context:`. El conjunto es cerrado
+  (`TemplateVar`): `{{run.dir}}`, `{{run.worktree}}`, `{{run.branch}}`,
+  `{{run.staging}}` (la raíz bajo la que cuelga el staging de cada nodo),
+  `{{node.artifacts}}` (el directorio propio del nodo, donde escribe lo que
+  declara), `{{node.id}}`, `{{runner.name}}` cuando el nodo declara un runner,
+  `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}` según lo
+  que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado. Un nombre
+  que no es ninguna de esas no es una variable y se rechaza al leer el template,
+  nombrando las que existen; una variable del conjunto que nadie definió en ese
+  sitio falla el nodo nombrándola; `yunta check` además rechaza estáticamente todo
+  `{{inputs.x}}` que `inputs:` no declare.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis

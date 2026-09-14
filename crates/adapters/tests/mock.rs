@@ -723,13 +723,13 @@ async fn a_dropped_session_stops_its_player() {
 /// the file its node declares, above all — and it has to mean the same
 /// thing whichever caller parses it. The `yunta test` harness rendered
 /// those names and the run bench did not, so the same YAML scripted a
-/// real path from one caller and a literal `{{staging}}` from the other.
+/// real path from one caller and a literal `{{run.staging}}` from the other.
 #[test]
 fn a_fixture_renders_its_run_paths_wherever_it_is_parsed() {
     let yaml = "\
 sessions:
   - effects:
-      - path: \"{{staging}}/grill/brief.md\"
+      - path: \"{{run.staging}}/grill/brief.md\"
         content: hi
     outcome: { type: completed, summary: done }
 ";
@@ -745,20 +745,20 @@ sessions:
     assert_eq!(
         fixture.sessions[0].effects[0].path,
         PathBuf::from("/runs/r1/scratch/staging/grill/brief.md"),
-        "`{{{{staging}}}}` names the directory the run granted the node"
+        "`{{{{run.staging}}}}` names the directory the run granted the node"
     );
 }
 
 /// A caller with no run in hand still gets one answer, not a wrong one:
 /// the fixture that names a directory the caller cannot resolve is
 /// refused, rather than scripting a session to write to a path spelled
-/// `{{staging}}`.
+/// `{{run.staging}}`.
 #[test]
 fn a_fixture_naming_a_run_directory_is_refused_where_there_is_no_run() {
     let yaml = "\
 sessions:
   - effects:
-      - path: \"{{staging}}/grill/brief.md\"
+      - path: \"{{run.staging}}/grill/brief.md\"
         content: hi
     outcome: { type: completed, summary: done }
 ";

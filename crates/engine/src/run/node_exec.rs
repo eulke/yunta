@@ -21,6 +21,7 @@ use super::prompt_exec::execute_prompt;
 use super::step::Step;
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
+use yunta_core::template::TemplateVar;
 
 /// How the node's execution ended, as recorded in the log by the caller.
 pub(crate) enum NodeEnd {
@@ -237,58 +238,61 @@ pub(super) async fn open_staging(
         })
 }
 
-/// Template variables for one node's own rendering: `run.*`
-/// and `node.artifacts` — this node's own writable directory — are
-/// always present; `runner.role` is the node's own declared `runner:`
-/// (the role name itself, known statically from the workflow — never the
-/// adapter/model a later resolution step picks, so no ordering
-/// dependency on `resolve_node_runner`); `project.*` mirrors whatever
-/// the merged config's `project:` group declares; `inputs.*` is
-/// every declared input's already-resolved-and-validated value, read
-/// straight from the frozen manifest — never re-resolved per node, since
-/// that would make a `default` non-deterministic across nodes.
-pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, String> {
+/// Template variables for one node's own rendering: the run's own places
+/// and this node's identity are always present; `runner.name` is the
+/// name the node declares under `runner:` (known from the workflow
+/// alone, never the adapter or model a later resolution picks, so no
+/// ordering dependency on `resolve_node_runner`); `project.*` mirrors
+/// whatever the merged config's `project:` group declares; an input is
+/// its already-resolved-and-validated value, read straight from the
+/// frozen manifest — never re-resolved per node, since that would make a
+/// `default` non-deterministic across nodes.
+pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<TemplateVar, String> {
     let mut vars = BTreeMap::from([
-        ("run.dir".to_string(), ctx.run_dir.display().to_string()),
-        (
-            "run.worktree".to_string(),
-            ctx.worktree.display().to_string(),
-        ),
+        (TemplateVar::RunDir, ctx.run_dir.display().to_string()),
+        (TemplateVar::Worktree, ctx.worktree.display().to_string()),
         // The reference example (`external.branch:
         // "{{run.branch}}"`) — a fresh push target derived from the
         // run id, not necessarily the worktree's own local checkout
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
         (
-            "run.branch".to_string(),
+            TemplateVar::RunBranch,
             crate::worktree::run_branch(ctx.run_id),
+        ),
+        (
+            TemplateVar::Staging,
+            crate::run_dir::staging_root(ctx.run_dir)
+                .display()
+                .to_string(),
         ),
         // Where this node's own files go. A command node has no run tool
         // to be told through, so the one way it can write what it
         // declares is to render this.
         (
-            "node.artifacts".to_string(),
+            TemplateVar::NodeArtifacts,
             crate::run_dir::staging(ctx.run_dir, &node.id)
                 .display()
                 .to_string(),
         ),
+        (TemplateVar::NodeId, node.id.to_string()),
     ]);
-    if let Some(role) = &node.runner {
-        vars.insert("runner.role".to_string(), role.to_string());
+    if let Some(runner) = &node.runner {
+        vars.insert(TemplateVar::RunnerName, runner.to_string());
     }
     if let Some(project) = &ctx.manifest.config.project {
-        if let Some(name) = &project.name {
-            vars.insert("project.name".to_string(), name.clone());
-        }
-        if let Some(base_branch) = &project.base_branch {
-            vars.insert("project.base_branch".to_string(), base_branch.clone());
-        }
-        if let Some(branch_prefix) = &project.branch_prefix {
-            vars.insert("project.branch_prefix".to_string(), branch_prefix.clone());
+        for (variable, declared) in [
+            (TemplateVar::ProjectName, &project.name),
+            (TemplateVar::ProjectBaseBranch, &project.base_branch),
+            (TemplateVar::ProjectBranchPrefix, &project.branch_prefix),
+        ] {
+            if let Some(value) = declared {
+                vars.insert(variable, value.clone());
+            }
         }
     }
     for (name, value) in &ctx.manifest.inputs {
-        vars.insert(format!("inputs.{name}"), value.clone());
+        vars.insert(TemplateVar::Input(name.clone()), value.clone());
     }
     vars
 }
@@ -353,7 +357,7 @@ pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::P
 
 /// `node` with every opaque artifact name rendered against its own
 /// template vars, so a fan-out sibling that names its file
-/// `report-{{runner.role}}.md` declares — and verifies — its own.
+/// `report-{{runner.name}}.md` declares — and verifies — its own.
 ///
 /// Only an opaque name: an interpreted artifact is identified by its
 /// kind, which is a closed vocabulary with nothing in it to render, and

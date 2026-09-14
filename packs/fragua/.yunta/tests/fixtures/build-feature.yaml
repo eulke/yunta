@@ -14,7 +14,7 @@ sessions:
     outcome: { type: completed, summary: "nothing to ask" }
   - match_prompt_contains: "Write the brief"
     effects:
-      - { path: "{{staging}}/brief/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
+      - { path: "{{run.staging}}/brief/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
     outcome: { type: completed, summary: "brief written" }
   - match_prompt_contains: "tasks document"
     steps:

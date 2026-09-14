@@ -32,7 +32,7 @@ pub struct Location {
 /// What a location is relative to. The run has two places and a finding
 /// is about one of them: what the agents change, or what the engine
 /// keeps about the changing. The same two the templates name
-/// (`{{worktree}}`, `{{run.dir}}`).
+/// (`{{run.worktree}}`, `{{run.dir}}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum LocationRoot {
     /// The run's worktree — the project. What an agent's finding is

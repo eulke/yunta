@@ -1,6 +1,7 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::template::TemplateVar;
 
 /// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
@@ -23,12 +24,9 @@ pub(crate) fn collect_push_to_base_warnings(
         if !command.contains("git push") {
             return None;
         }
-        if command.contains("{{project.base_branch}}") {
-            return Some(
-                base_branch
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "{{project.base_branch}}".to_string()),
-            );
+        let templated = TemplateVar::ProjectBaseBranch.braced();
+        if command.contains(&templated) {
+            return Some(base_branch.map(str::to_string).unwrap_or(templated));
         }
         let base = base_branch?;
         let named = command

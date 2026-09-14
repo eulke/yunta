@@ -11,7 +11,7 @@
 //! initial commit, so a workflow that reads files, takes a `path` input
 //! or runs the project's own toolchain has what it needs before any
 //! session starts. The fixture file is rendered with `{{run.dir}}` and
-//! `{{worktree}}` before parsing, so a scripted session can place
+//! `{{run.worktree}}` before parsing, so a scripted session can place
 //! artifacts exactly where a real agent (told `{{run.dir}}` in its
 //! prompt) would.
 //!

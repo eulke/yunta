@@ -66,7 +66,7 @@ pub(crate) fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckErro
 /// second declaration could never be answered separately. An opaque
 /// artifact is written to a path, and a name that is absolute or climbs
 /// with `..` would land outside the run — templates in a name
-/// (`report-{{runner.role}}.md`) are checked as written.
+/// (`report-{{runner.name}}.md`) are checked as written.
 /// A node that asks, asks: it declares `questions` and nothing else,
 /// and it is the one kind that holds a session to ask from and a close
 /// to wait in.

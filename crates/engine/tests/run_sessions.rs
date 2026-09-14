@@ -501,9 +501,9 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}}; write {{node.artifacts}}/findings-{{runner.role}}.md"
+    prompt: "Audit as {{runner.name}}; write {{node.artifacts}}/findings-{{runner.name}}.md"
     artifacts:
-      produces: ["findings-{{runner.role}}.md"]
+      produces: ["findings-{{runner.name}}.md"]
 "#;
     let config = r#"
 runners:
@@ -570,7 +570,7 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}} and report what you find."
+    prompt: "Audit as {{runner.name}} and report what you find."
     artifacts:
       produces: [findings]
 "#;

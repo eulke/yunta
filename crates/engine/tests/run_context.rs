@@ -251,21 +251,35 @@ nodes:
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
-// --- templates — {{runner.role}}, {{project.*}} ----------------------
+// --- templates — {{runner.name}}, {{node.id}}, {{project.*}} ---------
 
 #[tokio::test]
-async fn a_node_can_reference_its_own_runner_role_by_template() {
-    // render golden — {{runner.role}} es el nombre de rol
-    // declarado en `runner:`, conocido estáticamente, nunca el
-    // adapter/model que una resolución posterior elige.
+async fn a_node_can_reference_its_own_runner_by_template() {
+    // `{{runner.name}}` is the name the node declares under `runner:`,
+    // known from the workflow alone — never the adapter or model a later
+    // resolution picks.
     let bench = Bench::new();
     let workflow = r#"
-name: role-template
+name: runner-template
 nodes:
   - id: only
     kind: bash
     runner: executor
-    run: "test 'executor' = '{{runner.role}}'"
+    run: "test 'executor' = '{{runner.name}}'"
+"#;
+    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn a_node_can_reference_its_own_id_by_template() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: node-id-template
+nodes:
+  - id: only
+    kind: bash
+    run: "test 'only' = '{{node.id}}'"
 "#;
     let (terminal, _) = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);

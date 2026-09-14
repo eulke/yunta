@@ -8,6 +8,7 @@
 
 use yunta_core::events::FindingSeverity;
 use yunta_core::shape::Document;
+use yunta_core::template::TemplateVar;
 use yunta_core::{AnswerType, ArtifactKind, FindingsFile, QuestionsFile, TasksFile};
 
 /// What serde writes for a value, unquoted.
@@ -44,6 +45,45 @@ fn a_kind_that_does_not_exist_names_the_ones_that_do() {
     for kind in ArtifactKind::ALL {
         assert!(text.contains(kind.as_str()), "{text}");
     }
+}
+
+#[test]
+fn a_template_variable_reads_back_from_the_name_it_publishes() {
+    for variable in TemplateVar::FIXED {
+        assert_eq!(
+            variable
+                .to_string()
+                .parse::<TemplateVar>()
+                .expect("round-trips"),
+            variable
+        );
+    }
+    let input = TemplateVar::Input("idea".parse().expect("an input name"));
+    assert_eq!(input.to_string(), "inputs.idea");
+    assert_eq!(
+        input
+            .to_string()
+            .parse::<TemplateVar>()
+            .expect("round-trips"),
+        input
+    );
+}
+
+#[test]
+fn a_template_variable_that_does_not_exist_names_the_ones_that_do() {
+    let error = "run.directory"
+        .parse::<TemplateVar>()
+        .expect_err("no such variable");
+    let text = error.to_string();
+    assert!(text.contains("{{run.directory}}"), "{text}");
+    for variable in TemplateVar::FIXED {
+        assert!(text.contains(&variable.to_string()), "{text}");
+    }
+}
+
+#[test]
+fn a_template_variable_is_braced_in_one_place() {
+    assert_eq!(TemplateVar::RunDir.braced(), "{{run.dir}}");
 }
 
 #[test]
