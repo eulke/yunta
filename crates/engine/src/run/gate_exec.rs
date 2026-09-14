@@ -588,7 +588,7 @@ async fn render_or_fail_here(
     node: &Node,
     input: &str,
 ) -> Result<GateRender, RunError> {
-    match crate::template::render_template(input, &template_vars(ctx, node)) {
+    match yunta_core::template::render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
         Err(e) => {
             emit_started(ctx, node).await?;

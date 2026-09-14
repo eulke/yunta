@@ -49,7 +49,7 @@ use yunta_core::events::{
 use yunta_core::{Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation};
 
 use crate::replay::derive;
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use mounts::resolve_mounts;
 

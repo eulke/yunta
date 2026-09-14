@@ -31,6 +31,6 @@ pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};
 pub use forge::{GitHubForge, MockForge, MockForgeState};
 pub use mock::{
-    MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript,
-    ID as MOCK_ID,
+    FixtureError, MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,
+    RunPaths, SessionScript, ID as MOCK_ID,
 };

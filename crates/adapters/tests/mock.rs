@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::StreamExt;
-use yunta_adapters::{MockAdapter, MockForge, MockForgeState};
+use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
 use yunta_core::port::{
     Adapter, AgentEvent, Budget, Forge, ForgeError, PermissionProfile, ProbeReport, PublishRequest,
     PublishedGate, ReviewOutcome, SessionRequest,
@@ -735,4 +735,54 @@ async fn a_dropped_session_stops_its_player() {
         tokio::task::yield_now().await;
     }
     panic!("a dropped session leaves its player waiting on a step nobody will read");
+}
+
+/// A fixture names the run's own directories — where a session writes
+/// the file its node declares, above all — and it has to mean the same
+/// thing whichever caller parses it. The `yunta test` harness rendered
+/// those names and the run bench did not, so the same YAML scripted a
+/// real path from one caller and a literal `{{staging}}` from the other.
+#[test]
+fn a_fixture_renders_its_run_paths_wherever_it_is_parsed() {
+    let yaml = "\
+sessions:
+  - effects:
+      - path: \"{{staging}}/grill/brief.md\"
+        content: hi
+    outcome: { type: completed, summary: done }
+";
+    let fixture = MockFixture::parse(
+        yaml,
+        &RunPaths {
+            run_dir: Path::new("/runs/r1"),
+            worktree: Path::new("/runs/r1/tree"),
+            staging: Path::new("/runs/r1/scratch/staging"),
+        },
+    )
+    .expect("the fixture parses");
+    assert_eq!(
+        fixture.sessions[0].effects[0].path,
+        PathBuf::from("/runs/r1/scratch/staging/grill/brief.md"),
+        "`{{{{staging}}}}` names the directory the run granted the node"
+    );
+}
+
+/// A caller with no run in hand still gets one answer, not a wrong one:
+/// the fixture that names a directory the caller cannot resolve is
+/// refused, rather than scripting a session to write to a path spelled
+/// `{{staging}}`.
+#[test]
+fn a_fixture_naming_a_run_directory_is_refused_where_there_is_no_run() {
+    let yaml = "\
+sessions:
+  - effects:
+      - path: \"{{staging}}/grill/brief.md\"
+        content: hi
+    outcome: { type: completed, summary: done }
+";
+    let refused = MockFixture::parse_without_a_run(yaml).expect_err("no run defines `staging`");
+    assert!(
+        refused.to_string().contains("run paths"),
+        "the refusal names what could not be resolved: {refused}"
+    );
 }

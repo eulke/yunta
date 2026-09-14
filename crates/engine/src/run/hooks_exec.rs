@@ -5,7 +5,7 @@ use yunta_core::events::{EventPayload, HookExecutedPayload, HookPhase};
 use yunta_core::{HookStep, Hooks, Node};
 
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use super::node_exec::template_vars;
 use super::{RunCtx, RunError};

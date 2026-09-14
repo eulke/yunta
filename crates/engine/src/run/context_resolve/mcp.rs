@@ -7,7 +7,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use yunta_core::Node;
 
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use super::error::ContextResolveError;
 use super::EXTERNAL_CALL_TIMEOUT;

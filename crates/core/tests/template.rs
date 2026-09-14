@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use yunta_engine::{render_template, template_variables, TemplateError};
+use yunta_core::template::{render_template, template_variables, TemplateError};
 
 fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs

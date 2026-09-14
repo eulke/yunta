@@ -11,7 +11,7 @@ use yunta_core::events::{EventPayload, Failure, HookPhase};
 use yunta_core::port::PermissionProfile;
 use yunta_core::{HookFailurePolicy, Node, NodeKind};
 
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use super::bash_exec::execute_bash;
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};

@@ -13,7 +13,8 @@
 //! never a silent replay of the last session. A person writes fixtures,
 //! so every shape here refuses a key it does not know.
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use yunta_core::yaml::{self, Value};
@@ -25,6 +26,72 @@ use yunta_core::{Capabilities, ModelName};
 pub struct MockFixture {
     pub capabilities: Capabilities,
     pub sessions: Vec<SessionScript>,
+}
+
+/// The run directories a fixture names. They are the caller's to
+/// compute — a fixture is parsed before any run exists in some callers
+/// and beside a live one in others — and this is what they are called
+/// inside the YAML.
+#[derive(Debug, Clone, Copy)]
+pub struct RunPaths<'a> {
+    /// `{{run.dir}}` — the run's own directory.
+    pub run_dir: &'a Path,
+    /// `{{worktree}}` — the checkout the session works in.
+    pub worktree: &'a Path,
+    /// `{{staging}}` — the root under which each node writes the files
+    /// it declares, one directory per node id: a session scripted to
+    /// produce an artifact of node `grill` writes
+    /// `{{staging}}/grill/<name>`, which is exactly the directory that
+    /// session is granted.
+    pub staging: &'a Path,
+}
+
+/// Why a fixture did not become a script.
+#[derive(Debug, thiserror::Error)]
+pub enum FixtureError {
+    /// The YAML names a variable these paths do not define, or leaves a
+    /// `{{` unclosed.
+    #[error("the fixture's run paths could not be resolved")]
+    Paths(#[from] yunta_core::template::TemplateError),
+    /// The rendered YAML is not a fixture. The document's own
+    /// diagnostic is the message: it already names the key, the path
+    /// and what it expected, which is what the person who wrote the
+    /// fixture needs.
+    #[error(transparent)]
+    Shape(#[from] yunta_core::yaml::YamlError),
+}
+
+impl MockFixture {
+    /// Reads one fixture, resolving the run directories it names against
+    /// `paths` before the YAML is parsed.
+    ///
+    /// The one way a scripted session comes to exist. Rendering here
+    /// rather than in each caller is what makes a fixture mean the same
+    /// thing from the `yunta test` harness, from `yunta run --adapter
+    /// mock --fixture` and from the run bench — the paths differ, the
+    /// document does not.
+    pub fn parse(yaml: &str, paths: &RunPaths<'_>) -> Result<Self, FixtureError> {
+        Self::render(
+            yaml,
+            BTreeMap::from([
+                ("run.dir".to_string(), paths.run_dir.display().to_string()),
+                ("worktree".to_string(), paths.worktree.display().to_string()),
+                ("staging".to_string(), paths.staging.display().to_string()),
+            ]),
+        )
+    }
+
+    /// One fixture for a caller that has no run: the same door with no
+    /// directory defined, so a fixture that names one is refused here
+    /// instead of scripting the literal `{{staging}}` as a path.
+    pub fn parse_without_a_run(yaml: &str) -> Result<Self, FixtureError> {
+        Self::render(yaml, BTreeMap::new())
+    }
+
+    fn render(yaml: &str, vars: BTreeMap<String, String>) -> Result<Self, FixtureError> {
+        let rendered = yunta_core::template::render_template(yaml, &vars)?;
+        Ok(yunta_core::yaml::parse(&rendered)?)
+    }
 }
 
 impl<'de> Deserialize<'de> for MockFixture {

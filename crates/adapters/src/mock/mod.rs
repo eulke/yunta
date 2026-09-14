@@ -18,7 +18,8 @@ mod run_tool;
 mod script;
 
 pub use fixture::{
-    MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript, ToolExpectation,
+    FixtureError, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, RunPaths,
+    SessionScript, ToolExpectation,
 };
 
 use std::path::PathBuf;
@@ -135,8 +136,11 @@ impl MockAdapter {
         read(&self.artifact_dirs_seen)
     }
 
-    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, yunta_core::yaml::YamlError> {
-        Ok(Self::new(yunta_core::yaml::parse(yaml)?))
+    /// One adapter from a fixture that names no run directory — every
+    /// caller with a run in hand goes through [`MockFixture::parse`]
+    /// instead, and a fixture that names a directory is refused here.
+    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, FixtureError> {
+        Ok(Self::new(MockFixture::parse_without_a_run(yaml)?))
     }
 
     /// Whether an effect at `path` is blocked by the request's edit

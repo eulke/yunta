@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
-use yunta_adapters::{MockAdapter, MOCK_ID};
+use yunta_adapters::{MockAdapter, MockFixture, RunPaths, MOCK_ID};
 use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
@@ -334,36 +334,23 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     Ok(problems)
 }
 
-/// Reads a mock fixture, renders it with the run's own paths
-/// (`{{run.dir}}`, `{{worktree}}`, `{{staging}}`) and parses it — the one
-/// way a scripted session comes to exist, for `yunta test` and for
-/// `yunta run --adapter mock --fixture` alike.
-///
-/// `{{staging}}` is where nodes write the files they declare, one
-/// directory per node id: a session scripted to produce an opaque
-/// artifact of node `grill` writes `{{staging}}/grill/<name>`, which is
-/// exactly the directory that session is granted.
+/// Reads a mock fixture and parses it against the run's own
+/// directories — for `yunta test` and for `yunta run --adapter mock
+/// --fixture` alike.
 pub(crate) fn load_mock_fixture(
     fixture_path: &Path,
     run_dir: &Path,
     worktree: &Path,
 ) -> Result<Arc<MockAdapter>, String> {
-    let fixture_text = std::fs::read_to_string(fixture_path)
+    let text = std::fs::read_to_string(fixture_path)
         .map_err(|e| format!("cannot read fixture `{}`: {e}", fixture_path.display()))?;
-    let vars = BTreeMap::from([
-        ("run.dir".to_string(), run_dir.display().to_string()),
-        ("worktree".to_string(), worktree.display().to_string()),
-        (
-            "staging".to_string(),
-            yunta_engine::run_dir::staging_root(run_dir)
-                .display()
-                .to_string(),
-        ),
-    ]);
-    let rendered = yunta_engine::render_template(&fixture_text, &vars)
-        .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))?;
-    MockAdapter::from_yaml(&rendered)
-        .map(Arc::new)
+    let paths = RunPaths {
+        run_dir,
+        worktree,
+        staging: &yunta_engine::run_dir::staging_root(run_dir),
+    };
+    MockFixture::parse(&text, &paths)
+        .map(|fixture| Arc::new(MockAdapter::new(fixture)))
         .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))
 }
 

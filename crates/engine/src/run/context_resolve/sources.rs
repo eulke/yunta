@@ -10,7 +10,7 @@ use yunta_core::{ContentHash, Node, NodeId};
 
 use crate::artifacts::store::ObjectStore;
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use super::error::ContextResolveError;
 use super::EXTERNAL_CALL_TIMEOUT;

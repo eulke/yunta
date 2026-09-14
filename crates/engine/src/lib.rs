@@ -71,7 +71,6 @@ mod skills;
 mod stats;
 mod task_cycle;
 mod tasks;
-mod template;
 mod verification_effectiveness;
 mod view;
 mod worktree;
@@ -141,7 +140,6 @@ pub use task_cycle::{
     Memo, PreCheckOutcome, ScopeGovernance, SessionObserver, SessionSetup, TaskCycleError,
     TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
 };
-pub use template::{render_template, template_variables, TemplateError};
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,

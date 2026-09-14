@@ -43,6 +43,7 @@ pub mod schema;
 mod secret;
 pub mod shape;
 mod tasks;
+pub mod template;
 pub mod text;
 mod workflow;
 pub mod yaml;

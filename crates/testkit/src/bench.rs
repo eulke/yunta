@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use yunta_adapters::MockAdapter;
+use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
 use yunta_core::events::StoredEvent;
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, SeqIdSource, Workflow};
@@ -282,7 +282,17 @@ impl Bench {
         .await
         .expect("create run");
 
-        let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).expect("parse mock fixture"));
+        let adapter = Arc::new(MockAdapter::new(
+            MockFixture::parse(
+                fixture_yaml,
+                &RunPaths {
+                    run_dir: &run_dir,
+                    worktree: &self.worktree,
+                    staging: &yunta_engine::run_dir::staging_root(&run_dir),
+                },
+            )
+            .expect("parse mock fixture"),
+        ));
         *self.mock.lock().expect("the bench's own lock") = Some(adapter.clone());
         let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".into(), adapter);

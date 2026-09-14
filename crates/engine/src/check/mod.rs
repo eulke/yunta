@@ -44,7 +44,6 @@ pub use warning::CheckWarning;
 // and the template scanner), and each family's own rule functions, so a
 // family file's `use super::*` sees them all and the two entries below
 // call any rule unqualified.
-pub(crate) use crate::template::template_variables;
 pub(crate) use declarations::*;
 pub(crate) use gates::*;
 pub(crate) use graph::*;
@@ -54,6 +53,7 @@ pub(crate) use packs::*;
 pub(crate) use runners::*;
 pub(crate) use scopes::*;
 pub(crate) use std::collections::{HashMap, HashSet};
+pub(crate) use yunta_core::template::template_variables;
 pub(crate) use yunta_core::{
     might_overlap, ArtifactSpec, ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind,
     RunnerName, Workflow,

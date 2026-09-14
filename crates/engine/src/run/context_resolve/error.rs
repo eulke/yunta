@@ -5,7 +5,7 @@
 use thiserror::Error;
 use yunta_core::NodeId;
 
-use crate::template::TemplateError;
+use yunta_core::template::TemplateError;
 
 use super::mcp::McpQueryError;
 use super::EXTERNAL_CALL_TIMEOUT;
