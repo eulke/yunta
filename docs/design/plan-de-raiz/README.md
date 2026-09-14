@@ -800,7 +800,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | cerrado(99f148a) |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | cerrado(afaf173) |
 | W-10 | `referencia-schema.md` parsea (números planos, CO-14) | — | pendiente |
-| W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `interactive` retirado, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, el corte `grill`/`brief` | P10 | pendiente |
+| W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `interactive` retirado, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, el corte `grill`/`brief` | P10 | cerrado(45aa682) |
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | cerrado(ebd4d16) |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
