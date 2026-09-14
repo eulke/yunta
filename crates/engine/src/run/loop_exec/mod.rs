@@ -19,7 +19,7 @@ use crate::replay::RunState;
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
-use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
+use super::runner_resolve::{report_declarative_network, resolve_node_runner, run_tools_allowed};
 use super::step::Step;
 use super::{RunCtx, RunError};
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
@@ -286,34 +286,18 @@ async fn prepare_loop<'a>(
     // declared document has no way in — an interpreted artifact, or a
     // `coordination: blackboard` group, on an adapter that cannot be a
     // client of the per-run endpoint — is refused before any task
-    // session opens. The listener it opens proves the binding works and
-    // closes with the resolution; every attempt opens its own.
-    let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
-        Ok(resolution) => {
-            if let Some(policy_applied) = resolution.degraded {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload {
-                            capability: yunta_core::Capability::RunTools,
-                            adapter: chosen.adapter.clone(),
-                            policy_applied,
-                        },
-                    ),
-                )
-                .await?;
-            }
-            resolution
-                .session
-                .map(|_| crate::run_tools::RunToolsAccess {
-                    host: ctx.run_tools_host.clone(),
-                    node: node.id.clone(),
-                    // A task session writes into the loop node's own declared
-                    // artifacts, so it gets to check them: the file it writes is
-                    // the file that node closes on.
-                    declared: super::node_exec::declared_artifacts(ctx, node),
-                })
-        }
+    // session opens. Each attempt opens its own listener from this
+    // access, and a bind that fails is that attempt's own degradation.
+    let run_tools = match run_tools_allowed(ctx, node, adapter.as_ref(), &chosen.adapter) {
+        Ok(true) => Some(crate::run_tools::RunToolsAccess {
+            host: ctx.run_tools_host.clone(),
+            node: node.id.clone(),
+            // A task session writes into the loop node's own declared
+            // artifacts, so it gets to check them: the file it writes is
+            // the file that node closes on.
+            declared: super::node_exec::declared_artifacts(ctx, node),
+        }),
+        Ok(false) => None,
         Err(error) => {
             let end = fail(ctx, node, error.to_string(), false).await?;
             return Ok(LoopReady::Ended(end));

@@ -808,7 +808,57 @@ Un agente que se detiene por la regla 2 de §0 escribe acá, con fecha, ítem,
 evidencia (archivo:línea), alternativas y recomendación. El humano responde en
 el mismo lugar y, si corresponde, registra un ADR.
 
-_(vacío)_
+### L-01 · 2026-09-14 · W-01 · `prepare_loop` no puede llamar `open_run_tools` tal cual
+
+**Evidencia.** `open_run_tools` (`engine/src/run/runner_resolve.rs`) hace dos
+cosas en una: decide si el nodo puede correr sin run tools —y refusa cuando
+declara un artifact interpretado o está en un grupo `blackboard`— y **abre el
+listener de esa sesión**. Para un nodo `prompt` eso es correcto: la sesión es
+una. Para un `loop` no: cada intento abre el suyo
+(`engine/src/task_cycle/attempt.rs:205-240`, "A fresh listener + credential per
+attempt"), y `run_tools/mod.rs:1-6` fija el invariante: "one loopback HTTP
+listener **per node session**, never per run".
+
+Implementado al pie de la letra, el ítem quedó con dos defectos: un listener
+por nodo `loop` que ninguna sesión usaba (abierto y cerrado en el acto), y un
+fallo transitorio de bind en `prepare_loop` dejaba `setup.run_tools = None`
+para **todos** los intentos del nodo, contra la política por intento que
+`attempt.rs` documenta.
+
+**Alternativas.**
+
+1. Llamar `open_run_tools` solo por su refusal y seguir derivando el acceso de
+   la capacidad. Cumple la letra; conserva el listener-sonda inútil.
+2. Partir la decisión del bind: una función que responde si el nodo puede
+   mountar las tools, consumida por `open_run_tools` y por `prepare_loop`.
+   Cumple la intención del ítem (que rija `TypedArtifactNeedsRunTools`) sin
+   efecto de lado; introduce un nombre que el plan no fija.
+3. Detenerse sin implementar W-01.
+
+**Lo que hice, y por qué.** La 2, con la función `run_tools_allowed` en
+`runner_resolve.rs`: la 1 deja en el código un recurso que se abre para nada, y
+la 3 dejaba en `main` la regresión que el propio ítem introdujo. El nombre
+`run_tools_allowed` es lo único que el plan no fija; el resto del ítem quedó
+como está escrito.
+
+**Pendiente de decisión.** Si el nombre o el corte no son los que el plan
+quiere, se revisan en un ADR y el ítem se ajusta.
+
+### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
+
+**Evidencia.** §0.9 pide que el ítem cambie su estado a `cerrado(hash)` "en el
+mismo commit que lo cierra, con el hash del commit". Un commit no puede
+contener su propio hash: cualquier edición del tablero lo cambia.
+
+**Alternativas.** (a) dos commits en el mismo PR —el del ítem y el del tablero
+con su hash—; (b) `cerrado` sin hash en el mismo commit, y el hash se lee del
+historial; (c) el hash del commit anterior, que no es el que cierra.
+
+**Lo que hice.** La (a): cada ítem cerrado va en su commit y el tablero lo
+sigue en otro, citando el hash verdadero. Es la única forma en que el hash
+escrito es el del commit que cierra.
+
+**Pendiente de decisión.** Reescribir §0.9 con la forma elegida.
 
 ---
 

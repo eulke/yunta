@@ -164,6 +164,48 @@ fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::
         .find_map(|spec| spec.kind())
 }
 
+/// Whether this node's sessions may mount the run tools, or why they
+/// must not open at all.
+///
+/// The adapter's capability decides, and what the node declared decides
+/// what its absence costs: a document that reaches the engine through
+/// these tools and nowhere else, or a `coordination: blackboard` group
+/// whose semantics the engine never emulates, is a refusal before any
+/// token is spent; anything else runs without them.
+///
+/// Asked once per node, and answered without binding anything: a
+/// listener belongs to a session, and a node that opens many owns none
+/// of them itself.
+pub(super) fn run_tools_allowed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    adapter: &dyn yunta_adapters::Adapter,
+    adapter_id: &AdapterId,
+) -> Result<bool, RunToolsSetupError> {
+    if adapter
+        .capabilities()
+        .declares(yunta_core::Capability::RunTools)
+    {
+        return Ok(true);
+    }
+    // The blackboard's own reason comes first: it is the older one, and
+    // a node can owe both.
+    if ctx.run_tools_host.is_blackboard_member(&node.id) {
+        return Err(RunToolsSetupError::NoRunToolsCapability {
+            node: node.id.clone(),
+            adapter: adapter_id.clone(),
+        });
+    }
+    if let Some(kind) = declared_typed_artifact(ctx, node) {
+        return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
+            node: node.id.clone(),
+            kind,
+            adapter: adapter_id.clone(),
+        });
+    }
+    Ok(false)
+}
+
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -173,29 +215,8 @@ pub(super) async fn open_run_tools(
 ) -> Result<RunToolsResolution, RunToolsSetupError> {
     let host = &ctx.run_tools_host;
     let needs_blackboard = host.is_blackboard_member(&node.id);
-    // An interpreted artifact reaches the engine through these tools and
-    // nowhere else, so a node that declares one and cannot mount them
-    // fails before a session opens rather than after one produced
-    // nothing. The blackboard's own reason comes first: it is the older
-    // one, and a node can owe both.
     let typed = declared_typed_artifact(ctx, node);
-    if !adapter
-        .capabilities()
-        .declares(yunta_core::Capability::RunTools)
-    {
-        if needs_blackboard {
-            return Err(RunToolsSetupError::NoRunToolsCapability {
-                node: node.id.clone(),
-                adapter: adapter_id.clone(),
-            });
-        }
-        if let Some(kind) = typed {
-            return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
-                node: node.id.clone(),
-                kind,
-                adapter: adapter_id.clone(),
-            });
-        }
+    if !run_tools_allowed(ctx, node, adapter, adapter_id)? {
         return Ok(RunToolsResolution {
             session: None,
             degraded: None,
