@@ -1249,3 +1249,105 @@ nodes:
         other => panic!("the node must be refused before it opens a session, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn a_parallel_child_with_fail_if_uncertain_fails_instead_of_restarting() {
+    let bench = Bench::new();
+
+    // `audit` is the child that was running when the engine stopped.
+    // Its work is not safe to repeat, so it says so.
+    let workflow_yaml = r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: audit
+        kind: bash
+        on_interrupt: fail_if_uncertain
+        run: "touch audit-ran-again.txt"
+"#;
+    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        &bench.worktree,
+        &bench.worktree,
+        &HashMap::new(),
+    )
+    .unwrap()
+    .manifest;
+    let run_dir = create_run(
+        CreateRunParams {
+            run_id: &bench.run_id,
+            manifest: &manifest,
+            runs_root: &bench.runs_root,
+            mode: &"default".into(),
+            worktree: &bench.worktree,
+            promoted_from: None,
+            artifacts: &[],
+        },
+        &bench.storage.async_handle(),
+        &FixedClock,
+    )
+    .await
+    .unwrap();
+
+    // A crash mid-group: the group and `audit` both started, and
+    // nothing recorded how `audit` ended.
+    for node in ["pre-launch", "audit"] {
+        bench
+            .storage
+            .append(
+                &yunta_core::events::EventDraft {
+                    run_id: bench.run_id.clone(),
+                    node_id: Some(node.into()),
+                    payload: yunta_core::events::EventPayload::NodeStarted(
+                        yunta_core::events::NodeStartedPayload { attempt: 1 },
+                    ),
+                },
+                &yunta_core::SystemClock,
+            )
+            .unwrap();
+    }
+
+    let report = execute_run(RunEnv {
+        run_id: &bench.run_id,
+        manifest: &manifest,
+        run_dir: &run_dir,
+        worktree: &bench.worktree,
+        adapters: &HashMap::new(),
+        storage: &bench.storage.async_handle(),
+        clock: std::sync::Arc::new(FixedClock),
+        ids: &IDS,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: &NoInteraction,
+        forge: None,
+        cancel: None,
+        adapter_override: None,
+        ambient: None,
+        observer: None,
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        !bench.worktree.join("audit-ran-again.txt").exists(),
+        "a child that refuses to guess whether it finished never runs a second time",
+    );
+    match report.state.nodes.get("audit") {
+        Some(NodeState::Failed { failure, .. }) => {
+            assert!(
+                failure.to_string().contains("fail_if_uncertain"),
+                "the failure says which policy refused, got {failure}",
+            );
+        }
+        other => panic!("the uncertain child is recorded failed, got {other:?}"),
+    }
+    assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
+}

@@ -27,9 +27,46 @@ pub(super) async fn execute_parallel(
     let group_cancel = cancel.child_token();
     let state = ctx.run_view().await?.state;
 
+    // An orphan of this group resolves its `on_interrupt` the same way
+    // an orphan of the run does, and the one policy that changes what
+    // the group may do is `fail_if_uncertain`: its work is not safe to
+    // repeat, so the child is recorded failed here rather than run a
+    // second time. `resume_session` needs nothing of the group — a
+    // restarted child that opened a session continues it when the node
+    // itself dispatches.
+    let uncertain: Vec<yunta_core::NodeId> = super::schedule::resume_policies(
+        children.iter(),
+        &state,
+        ctx.manifest.config.resolved_on_interrupt(),
+    )
+    .into_iter()
+    .filter(|policy| policy.on_interrupt == yunta_core::OnInterrupt::FailIfUncertain)
+    .map(|policy| policy.node)
+    .collect();
+    for child in children
+        .iter()
+        .filter(|child| uncertain.contains(&child.id))
+    {
+        fail(
+            ctx,
+            child,
+            format!(
+                "`{}` was running with no terminal event when the engine last stopped — \
+                 `on_interrupt: fail_if_uncertain` refuses to guess whether it finished; \
+                 verify manually before resuming",
+                child.id
+            ),
+            false,
+        )
+        .await?;
+    }
+
     let already_failed: Vec<&Node> = children
         .iter()
-        .filter(|child| matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. })))
+        .filter(|child| {
+            uncertain.contains(&child.id)
+                || matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. }))
+        })
         .collect();
     // Fresh children start at attempt 1; a child left `running` with no
     // terminal event (crash, root cancel, or a paused child run under a
@@ -39,6 +76,7 @@ pub(super) async fn execute_parallel(
     // recursively.
     let to_run: Vec<(&Node, u32)> = children
         .iter()
+        .filter(|child| !uncertain.contains(&child.id))
         .filter_map(|child| match state.nodes.get(&child.id) {
             None => Some((child, 1)),
             Some(NodeState::Running { attempt }) => Some((child, attempt + 1)),
