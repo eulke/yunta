@@ -385,8 +385,8 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   `NodeEnd::Asked`; `finish_node` es el único emisor de `node_finished`;
   `engine::answers::record` la única puerta de una respuesta, para la consola
   y para la tool MCP `answer_questions`; `FinishAnswered` termina un nodo
-  respondido sin sesión; `node_failed` es siempre `Failed`; la consola
-  pregunta en el lugar sólo con `interactive: true`; `PauseReason::{Questions,
+  respondido sin sesión; `node_failed` es siempre `Failed`; `interactive` se
+  retira del nodo, del trait y del schema; `PauseReason::{Questions,
   AnswersRefused}`; un `questions` vacío deja respuestas vacías `Derived`.
   Especificación completa: `preguntas.md`.
 
@@ -545,7 +545,7 @@ Constructores por dominio, con el invariante que fijan: `mecanismos.md#m03`.
 | `FenceLevel` | `Capabilities.edit_hooks: bool` | un sandbox y un hook dichos con la misma palabra |
 | `Fence { allowed: Vec<ScopeGlob>, roots }` | `edit_constraints: Option<Vec<String>>` + `artifact_dir` como permiso | un glob inválido en una sesión; dos fuentes para lo escribible |
 | `Coverage` en `agent_session_opened` | nada (la sesión no decía qué cercó) | una cobertura declarada y no construida |
-| `questions_asked` (kind) + `Node::asks` + cuatro reglas de `check` | `node_failed { Message "asked N…" }` leído como espera; `produces: [questions, brief.md]` | una espera deducida de un fallo; un nodo que pregunta y debe otra cosa; `interactive` sin preguntas |
+| `questions_asked` (kind) + `Node::asks` + tres reglas de `check` | `node_failed { Message "asked N…" }` leído como espera; `produces: [questions, brief.md]`; `Node.interactive` | una espera deducida de un fallo; un nodo que pregunta y debe otra cosa; un flag que nadie lee |
 
 ### Sesiones y capacidades
 
@@ -603,7 +603,7 @@ lo dice.
 | W-06 | `parallel_exec` ignora `on_interrupt` | `parallel_exec.rs:39-47` reinicia siempre | M07 | `execute_parallel` llama `schedule::resume_policies` y honra `fail_if_uncertain`/`resume_session` | `crates/engine/tests/run_concurrency.rs::a_parallel_child_with_fail_if_uncertain_fails_instead_of_restarting` |
 | W-07 | mock pierde el handle del player | `mock/mod.rs:234` `tokio::spawn` descartado; `MockSession` sin `Drop` | M10 | `MockSession { player: JoinHandle<()> }` + `impl Drop` que aborta | `crates/adapters/tests/mock.rs::a_dropped_session_stops_its_player` |
 | W-08 | tests heredan `/etc/yunta/config.yaml` | `testkit/src/bin.rs:11-19` y `terminal.rs:81-88` no fijan `YUNTA_ORG_CONFIG` | M20 | `run_yunta` y `Terminal::open` fijan `YUNTA_ORG_CONFIG` a un archivo vacío bajo `home`, `USER=yunta-test`, `TERM` y quitan `NO_COLOR` — el núcleo de `hermetic()` | `crates/cli/tests/run_flow.rs::a_run_under_test_reads_no_org_config_from_the_host` |
-| W-11 | un nodo con preguntas contestadas cierra debiendo lo que declaró además; el pack de referencia no corre de punta a punta | `replay.rs:242` deriva `Waiting` de cualquier `node_failed` tras un artifact `questions`; `questions_exec.rs:106-165` cierra sin `close_node` con `node_started` y `node_finished` propios; `packs/fragua`, el fixture canónico y `referencia-schema.md` declaran `[questions, brief.md]` con un prompt que espera un turno que D86 no da | M26 | `preguntas.md` §9: `Node::asks` y las cuatro reglas de `check`; el kind `questions_asked` por F1; `Waiting` sólo desde `questions_asked` y `node_failed` siempre `Failed`; `close_node` registra `questions_asked`, `finish_node` único emisor, la ronda sin ciclo de nodo, `FinishAnswered`; la consola lee `interactive`; el corte `grill`/`brief` en pack, fixture y referencia; D173 | `crates/engine/tests/run_questions_close.rs::a_node_failed_after_a_questions_artifact_derives_failed_not_waiting`; `crates/engine/tests/check.rs::a_node_that_asks_questions_declares_nothing_else` |
+| W-11 | un nodo con preguntas contestadas cierra debiendo lo que declaró además; el pack de referencia no corre de punta a punta | `replay.rs:242` deriva `Waiting` de cualquier `node_failed` tras un artifact `questions`; `questions_exec.rs:106-165` cierra sin `close_node` con `node_started` y `node_finished` propios; `packs/fragua`, el fixture canónico y `referencia-schema.md` declaran `[questions, brief.md]` con un prompt que espera un turno que D86 no da | M26 | `preguntas.md` §9: `Node::asks` y las tres reglas de `check`; `interactive` retirado; el kind `questions_asked` por F1; `Waiting` sólo desde `questions_asked` y `node_failed` siempre `Failed`; `close_node` registra `questions_asked`, `finish_node` único emisor, la ronda sin ciclo de nodo, `FinishAnswered`; el corte `grill`/`brief` en pack, fixture y referencia; D173 | `crates/engine/tests/run_questions_close.rs::a_node_failed_after_a_questions_artifact_derives_failed_not_waiting`; `crates/engine/tests/check.rs::a_node_that_asks_questions_declares_nothing_else` |
 | — | tres capacidades nunca consultadas | AD-D2 D3 D4 | M09 · fase 3 | un quinto gate inline sería V7; depende de P3 | — |
 | — | findings bloqueantes salen con 0 | CLI-D16 | M16 · fase 5 | depende de P5 | — |
 | — | propiedad de resume tautológica | TE-D12 | M21 · fase 6 | ahora: renombrar a `derive_is_deterministic_from_any_prefix` y borrar el `_crashed_at_k`; la real es M21 | W-09 |
@@ -703,7 +703,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | P7 | umbrales sin ADR: `WAIT_DEADLINE`, stagger 60 ms, `QUEUE_DEPTH`, `REDRAW_CEILING_HZ`, `MIN_SAMPLES_FOR_ESTIMATION` | un ADR "umbrales de superficie y arnés"; el ratchet rechaza `const` numérico nuevo sin referencia a ADR | M22, fase 6 |
 | P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | D171 · W-01…W-08 |
 | P9 | ¿Cómo se cerca lo que una sesión escribe, y escala a cualquier adapter futuro? | un juez en core, un nivel por adapter, una cobertura por sesión, un rechazo como kind; el post-check sigue siendo la garantía | D172 · M25, 3-08 |
-| P10 | ¿Un nodo con preguntas debe una segunda sesión con las respuestas, o declarar `questions` excluye declarar otra cosa? | excluye: un nodo que pregunta, pregunta; el hecho es `questions_asked`, par de `questions_answered`; `interactive` es si la consola pregunta en el lugar | D173 · M26, W-11 |
+| P10 | ¿Un nodo con preguntas debe una segunda sesión con las respuestas, o declarar `questions` excluye declarar otra cosa? | excluye: un nodo que pregunta, pregunta; el hecho es `questions_asked`, par de `questions_answered`; `interactive` se retira | D173 · M26, W-11 |
 
 ---
 
@@ -800,7 +800,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | cerrado(99f148a) |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | cerrado(afaf173) |
 | W-10 | `referencia-schema.md` parsea (números planos, CO-14) | — | pendiente |
-| W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, la consola lee `interactive`, el corte `grill`/`brief` | P10 | pendiente |
+| W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `interactive` retirado, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, el corte `grill`/`brief` | P10 | pendiente |
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | cerrado(ebd4d16) |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
@@ -841,7 +841,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 7-04 | glosario; deuda: `yunta replay/diff` (rfc-0003 §2) y la verificación en vivo (status.md) entran como A-16/A-17 con ids estables; `spec-tasks.md` | 7-03 | pendiente |
 | 7-05 | baseline eager en `create_run` (M24, D167) con su test | 3-05 | pendiente |
 | 7-06 | orden de criterios aprendido del log desde `TaskLedger` (M24, D167) con su test | 2-03 | pendiente |
-| 7-07 | el inventario de M24: lo que se registra gana su `A-NN` y su nota Revisada (I-02); lo que se construye cierra en el ítem de su mecanismo | 7-04 | pendiente |
+| 7-07 | el inventario de M24: `manual_review` y `justification` se retiran con D174 (I-02); lo que se construye cierra en el ítem de su mecanismo | 7-04 | pendiente |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
 observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados
@@ -1020,7 +1020,7 @@ CO core, TE tests, DO docs.
 | CO-18 | `ArtifactRefId` untagged | M12 | 4 |
 | CO-19 | `ScopeExpansionPermissions` sin export; `Answer` sin deny | M12 | 4 |
 | CO-20 | HOME/TERM ×2 | M10 | 5 |
-| CO-21 | `interactive: true` se acepta y ninguna superficie lo lee | M26 · W-11 | W |
+| CO-21 | `interactive: true` se acepta y ninguna superficie lo lee | M26 · W-11 (se retira) | W |
 | TE-D1 | `copied_test_helpers 0` falso | M22 | 6 |
 | TE-D2 | 46 `execute_run` a mano | M20 | 6 |
 | TE-D3 | `stored` sin usuarios; 10 builders | M20 | 6 |

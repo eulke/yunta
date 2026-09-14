@@ -1,12 +1,12 @@
 ---
 number: D173
-title: "Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, y lo que depende de las respuestas es del nodo siguiente"
+title: "Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, lo que depende de las respuestas es del nodo siguiente, e `interactive` se retira"
 status: accepted
 revises: [D86]
 revised_by: []
 ---
 
-# D173 — Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, y lo que depende de las respuestas es del nodo siguiente
+# D173 — Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, lo que depende de las respuestas es del nodo siguiente, e `interactive` se retira
 
 ## Contexto
 
@@ -32,7 +32,8 @@ y `node_finished` por su cuenta, sin pasar por `close_node`. El nodo queda
 `finished` debiendo `brief.md`, y el diagnóstico aparece un nodo después,
 prestado. El log registra que alguien respondió (`questions_answered`) y
 nunca que el nodo preguntó. `interactive: true` viaja hasta la única
-superficie y ella lo descarta.
+superficie y ella lo descarta: es el resto del nodo conversacional que D86
+descartó, y nadie le dio nunca la presentación que D86 le reservó.
 
 Un panel de tres diseños independientes —el hecho en el log, la regla en el
 tipo, y la continuación con una segunda sesión— juzgado por tres lentes
@@ -44,8 +45,9 @@ hecho; gana el hecho explícito.
 
 1. **Un nodo que pregunta, pregunta.** Un nodo que declara `questions` es
    `kind: prompt`, no declara ningún otro artifact, no vive dentro de un
-   `parallel`, y sólo un nodo que declara `questions` declara `interactive`.
-   `yunta check` rechaza lo demás nombrando el corte: el artifact que
+   `parallel`. `interactive` se retira del nodo, del trait `HumanInteraction`
+   y del schema: un YAML de autor que lo escriba recibe el rechazo de clave
+   desconocida nombrándola. `yunta check` rechaza lo demás nombrando el corte: el artifact que
    dependía de las respuestas se produce en un nodo que sigue al que
    pregunta y monta sus preguntas y sus respuestas como contexto.
 2. **Preguntar es un hecho del log.** El kind `questions_asked` —hash del
@@ -55,9 +57,10 @@ hecho; gana el hecho explícito.
    dos como un gate interno, sin segundo `node_started`; el `node_finished`
    llega después de la respuesta. `node_failed` es siempre un fallo.
 3. **Una puerta para responder, muchas superficies.** La consola pregunta en
-   el lugar sólo cuando el nodo dice `interactive: true`; sin él, el run se
-   estaciona con sus preguntas registradas y espera a `yunta resume`, a la
-   tool MCP `answer_questions` o a un pull request (A-14). Toda respuesta
+   el lugar cuando está; sin consola, el run se estaciona con sus preguntas
+   registradas y espera a `yunta resume`, a la tool MCP `answer_questions` o
+   a un pull request (A-14). La superficie disponible decide cómo se
+   presentan las preguntas; el nodo no lo declara. Toda respuesta
    entra por la misma función, que valida contra las preguntas y registra la
    aceptación y el `questions_answered`; un nodo respondido termina sin
    sesión, también al reanudar tras un corte y también cuando la respuesta
@@ -83,9 +86,11 @@ nada que el nodo siguiente no dé ya: una sesión fresca con las respuestas en
 su contexto, sin capacidad de adapter. El autor escribe dos nodos donde
 escribía uno, y `check` le dice cuáles.
 
-`interactive` gana su único consumidor en el sentido que D86 le dio: si la
-persona que mira el run es interrumpida. Un run desatendido con TTY no es
-distinto de uno sin TTY.
+`interactive` no sobrevive: un nodo que declara `questions` ya dijo todo lo
+que hay que decir, y el único caso que un flag distinguiría —mirar el run y
+no querer ser interrumpido— se resuelve no mirando. Un flag que el autor
+escribe y nada lee es una clave inerte, y D120/D121 fijan su destino: se
+implementa o se retira.
 
 No hay tag publicado (D141): un log escrito antes de esta decisión, con
 `node_failed { "asked N question(s)…" }` tras la aceptación de `questions`,
@@ -102,7 +107,8 @@ deriva `Failed`; no se lee de las dos formas.
 - **`Failure::Questions` dentro de `node_failed`**: preguntar no es fallar;
   `Failure` se conserva, y cada lector de `node_failed` tendría que saber que
   ese fallo no lo es.
-- **Retirar `interactive`**: D86 lo fija como dato de presentación; darle su
-  consumidor cuesta una lectura y una regla.
+- **Darle a `interactive` el consumidor que nunca tuvo**, la consola
+  preguntando en el lugar sólo con el flag y `check` rechazándolo sin
+  `questions`: un flag más para declarar lo que `questions` ya dice.
 - **Retirar `Channel::Mcp`**: D167 lo conserva, y la tool que lo produce es
   una segunda superficie de una puerta que ya existe.

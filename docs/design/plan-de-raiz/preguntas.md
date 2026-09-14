@@ -8,8 +8,8 @@ después de la respuesta termina con el `node_finished` que el cierre difirió.
 Lo que dependa de las respuestas es del nodo siguiente, que las monta como
 contexto. Vuelve irrepresentable: un `node_failed` que la derivación lee como
 espera, un cierre que salta `close_node`, un artifact que sólo podría
-escribirse después de una respuesta que el nodo nunca recibe, y un
-`interactive: true` que ninguna superficie lee.
+escribirse después de una respuesta que el nodo nunca recibe, y un flag
+`interactive` que ninguna superficie lee.
 
 Decisión: D173 (revisa D86). Prerequisito: W-11. Ítems: 2-01, 2-02, 2-03,
 2-04, 3-01, 3-02, 3-05, 4-02, 4-03, 5-05, 5-06, 6-04. Defectos: EN-D27,
@@ -26,12 +26,13 @@ EN-D28, EN-D29, EV-D20, AR-D19, CO-21, DO-D45; inventario M24 I-01, I-07.
 | **responder** (`questions_answered`) | el hecho de que una persona contestó, por qué canal y quién | kind del dominio `gates`, existe |
 | **ronda** | el par preguntar/responder de un intento del nodo | `GateLedger` |
 | **respuestas** | el documento que el engine escribe con las respuestas, artifact del nodo que preguntó | `ArtifactKind::Answers` (4-02); hasta entonces `questions.answers.yaml` |
-| **en el lugar** (`interactive: true`) | la consola pone las preguntas a la persona que mira el run; sin él, el run se estaciona y las preguntas esperan a `yunta resume`, a la tool MCP o a un pull request | `Node.interactive`, leído por `ConsoleInteraction::ask` |
+| **superficie** | quien pone las preguntas a una persona: la consola cuando está, la tool MCP, un pull request (A-14); sin ninguna, el run se estaciona con sus preguntas registradas | `HumanInteraction::ask` |
 | **canal** (`Channel`) | por dónde llegó la respuesta: `tty`, `mcp`; `pr` es deuda A-14 | `QuestionsAnsweredPayload.channel` |
 
-En prosa: nodo que pregunta, preguntar, responder, ronda, respuestas, en el
-lugar. En YAML, JSON y código: `questions`, `questions_asked`,
-`questions_answered`, `answers`, `interactive`.
+En prosa: nodo que pregunta, preguntar, responder, ronda, respuestas,
+superficie. En YAML, JSON y código: `questions`, `questions_asked`,
+`questions_answered`, `answers`. `interactive` deja de existir: un nodo que
+declara `questions` pregunta, y la superficie disponible decide cómo.
 
 ---
 
@@ -60,18 +61,22 @@ QuestionsOnKind { node: NodeId, kind: &'static str },
 /// The scheduler puts questions to a person one top-level node at a time; a group's child never reaches it.
 #[error("node `{node}` produces `questions` inside parallel group `{group}` — a person answers one node at a time; ask before or after the group")]
 QuestionsInsideParallel { node: NodeId, group: NodeId },
-/// `interactive` says whether the console asks in place; a node that asks nothing gives it nothing to do.
-#[error("node `{node}` declares `interactive: true` but produces no `questions` — declare `questions` in `artifacts.produces`, or drop `interactive`")]
-InteractiveWithoutQuestions { node: NodeId },
 
 // crates/engine/src/check/declarations.rs
-pub(crate) fn check_asking_nodes(workflow: &Workflow, errors: &mut Vec<CheckError>);   // alongside · kind · interactive
+pub(crate) fn check_asking_nodes(workflow: &Workflow, errors: &mut Vec<CheckError>);   // alongside · kind
 // crates/engine/src/check/gates.rs — junto a check_no_gate_in_parallel, misma recursión
 pub(crate) fn check_no_questions_in_parallel(nodes: &[Node], parent_group: Option<&Node>, errors: &mut Vec<CheckError>);
 
 // crates/core/src/workflow/artifacts.rs
 impl ArtifactSpec { pub fn listed(specs: &[ArtifactSpec]) -> String; }   // "`brief.md`, `notes.md`" — una copia, la que ArtifactKind::listed ya tiene
 impl ReservedIdentity { pub fn reference(self) -> String; }   // cómo una referencia de contexto nombra lo que el engine escribe: hoy "name: questions.answers.yaml"; con 4-02 "kind: answers"
+
+// crates/core/src/workflow/node.rs — `interactive` se retira del struct y de la lista de claves: un YAML de autor que lo escriba
+// recibe el rechazo de clave desconocida nombrándola (D110). crates/engine/src/human_interaction.rs:
+pub trait HumanInteraction: Send + Sync {
+    async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
+    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> { None }   // sin `interactive`
+}
 ```
 
 Un `questions` con cero preguntas no pregunta: el nodo termina en el mismo
@@ -167,7 +172,7 @@ pub async fn record(log: &RunLog<'_>, run_dir: &Path, node: &NodeId, questions: 
 pub(super) enum AskOutcome { Answered, Unanswered(PauseReason) }   // W-11: Unanswered { reason: String }, una sola frase en un solo sitio
 pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutcome, RunError>;
 //   relee el documento questions que el run tiene (ArtifactLedger) y exige held.content_hash == asked.questions_hash, si no RunError::Broken;
-//   ask(file, node.interactive) → None: Unanswered(Questions { node, pending }); Some → answers::record → Err(report): Unanswered(AnswersRefused { node, report }); Ok: Answered.
+//   ask(file) → None: Unanswered(Questions { node, pending }); Some → answers::record → Err(report): Unanswered(AnswersRefused { node, report }); Ok: Answered.
 //   Nunca node_started, nunca node_finished, nunca hooks/scope/close_artifacts: ya corrieron.
 
 // crates/engine/src/run/schedule.rs (W-11: next_step; 3-02: decide/waiting_step/answered_step)
@@ -187,7 +192,7 @@ pub enum PauseReason { …, Questions { node: NodeId, pending: NonEmpty<Question
 **Cómo cierra un nodo que pregunta.** `grill` declara `[questions]`; su
 sesión entrega q1, q2.
 
-(a) consola en el lugar (`interactive: true`, TTY):
+(a) con consola (TTY):
 
 | seq | evento | `grill` derivado |
 |---|---|---|
@@ -199,8 +204,7 @@ sesión entrega q1, q2.
 | 8 | `questions_answered { answers_hash: h_a, channel: tty, responder: eulke }` | Running{1}, respondido |
 | 9 | `node_finished { outcome: "questions answered", tokens_used: 0 }` | Finished{tokens: T} |
 
-(b) sin superficie (headless, o `interactive` ausente con TTY), después
-`yunta resume` con TTY: 1–6 iguales; 7 `run_paused { Questions { grill,
+(b) sin superficie (headless), después `yunta resume` con TTY: 1–6 iguales; 7 `run_paused { Questions { grill,
 [q1, q2] } }`; el proceso termina. Resume: 8 `run_resumed { policies: [] }`
 (`Waiting` no es huérfano) → `AskQuestions` → 9 `artifact_accepted { answers }`
 · 10 `questions_answered` · 11 `node_finished`. Ningún `node_started` después
@@ -225,13 +229,14 @@ ata cada ronda a su documento.
 
 ## 5. Las superficies
 
-**Consola.** `ConsoleInteraction::ask(file, interactive)` pregunta en el lugar
-cuando `interactive` es `true` y devuelve `None` cuando no: la convención que
-ya significa "esta superficie no puede preguntar ahora", y el run se estaciona
-con sus preguntas registradas. Es el único consumidor del flag, y lo que D86
-llama dato de presentación: si la persona que mira el run es interrumpida o
-no. `crates/cli/src/ask/form.rs` sigue validando pregunta por pregunta con la
-misma puerta (`AnswersFile::against` sobre un documento de una pregunta).
+**Consola.** `ConsoleInteraction::ask(file)` pregunta en el lugar cuando la
+consola está, pregunta por pregunta; sin consola, `None` es la convención que
+ya significa "esta superficie no puede preguntar ahora" y el run se estaciona
+con sus preguntas registradas. `interactive` se retira: era el resto del nodo
+conversacional que D86 descartó, y un nodo que declara `questions` ya dijo
+todo lo que hay que decir. `crates/cli/src/ask/form.rs` sigue validando
+pregunta por pregunta con la misma puerta (`AnswersFile::against` sobre un
+documento de una pregunta).
 
 **MCP.** `answer_questions { run_id, node, answers: [{ id, value }] }`, la
 segunda superficie de la misma puerta (`engine::answers::record`), como
@@ -275,8 +280,12 @@ brief"`) escribe `brief.md`; los tres casos del pack esperan `brief: finished`.
   `docs/design/adr/D173-un-nodo-que-pregunta-pregunta.md`; con 2-01, los
   brazos de `gates/{kinds,payloads,ledger,happening}.rs`; con 5-06,
   `mcp::tool_answer_questions`.
-- modifica: `crates/core/src/workflow/node.rs` (`asks`; rustdoc de
-  `interactive`: si la consola pregunta en el lugar); `crates/core/src/workflow/artifacts.rs`
+- modifica: `crates/core/src/workflow/node.rs` (`asks`; `interactive` fuera
+  del struct y de la lista de claves); `crates/core/schemas/workflow.json`
+  (regenerado); `crates/core/src/workflow/node_kind.rs:105` (rustdoc);
+  `crates/core/tests/integration.rs` (sin `grill.interactive`);
+  `crates/engine/tests/common/mod.rs` (`ScriptedAnswers::ask` sin el
+  parámetro); `crates/core/src/workflow/artifacts.rs`
   (`ArtifactSpec::listed`, `ReservedIdentity::reference`);
   `crates/core/src/events/payloads.rs` (`QuestionsAskedPayload`, `new`);
   `crates/core/src/events/mod.rs` (variante, `KINDS`, `kind_name`);
@@ -294,11 +303,10 @@ brief"`) escribe `brief.md`; los tres casos del pack esperan `brief: finished`.
   (la contabilidad cierra en `questions_asked`); `crates/engine/src/check/error.rs`
   (cuatro variantes; 4-02 dos más), `check/declarations.rs`
   (`check_asking_nodes`), `check/gates.rs` (`check_no_questions_in_parallel`),
-  `check/mod.rs`; `crates/engine/src/human_interaction.rs` (rustdoc);
-  `crates/cli/src/human_interaction.rs:106` (`ask` lee `interactive`);
+  `check/mod.rs`; `crates/engine/src/human_interaction.rs` (`ask(&QuestionsFile)`);
+  `crates/cli/src/human_interaction.rs:106` (misma firma);
   `crates/cli/src/surface/lines.rs:160-163` (`questions_asked` → "asked 2
   questions: q1, q2"); `crates/cli/src/commands/mcp.rs` (5-06);
-  `crates/cli/tests/console_interaction.rs` (`interactive: true`);
   `crates/engine/tests/run_questions.rs` (las aserciones que hoy esperan
   `node_failed` y un segundo `node_started`); `crates/engine/tests/replay.rs:416-460`
   (ambos logs derivan `Failed`); `crates/engine/tests/properties.rs` (el
@@ -309,8 +317,8 @@ brief"`) escribe `brief.md`; los tres casos del pack esperan `brief: finished`.
   `crates/core/tests/fixtures/build-feature.yaml`;
   `crates/core/tests/integration.rs:56-61`; `docs/design/referencia-schema.md`;
   `docs/design/contrato-del-run.md` (§3 fila del par; §3.2; §4.1: el nodo
-  declara `questions` y nada más, `check` rechaza lo demás, `interactive` es si
-  la consola pregunta en el lugar, las respuestas son artifact del nodo que
+  declara `questions` y nada más, `check` rechaza lo demás, `interactive` no
+  existe, las respuestas son artifact del nodo que
   preguntó, respondible por consola y por la tool MCP, por pull request A-14);
   `docs/design/spec-events.md` (§0 cuenta 37; §5.19 el par);
   `docs/concepts.md` (`waiting`); `docs/guide.md` (4-02: `answers` lo escribe
@@ -353,13 +361,12 @@ Rojo primero, con la razón:
   — hoy no existe artifact de respuestas y el nodo siguiente falla.
 - `::the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_that_asked`
   — el corte `grill`/`brief` con una respuesta; hoy `brief` no existe.
-- `::the_console_asks_in_place_only_when_the_node_says_interactive` —
-  `ConsoleInteraction::ask` devuelve `None` sin `interactive`; hoy pregunta
-  igual (`crates/cli/tests/console_interaction.rs`).
+- `crates/core/tests/strict_keys.rs::interactive_is_not_a_node_key` — un
+  workflow con `interactive: true` se rechaza nombrando la clave; hoy parsea.
 - `crates/engine/tests/check.rs::a_node_that_asks_questions_declares_nothing_else`,
   `::the_refusal_spells_the_split_and_how_to_read_the_answers`,
-  `::only_a_prompt_node_asks`, `::a_node_that_asks_is_refused_inside_a_parallel_group`,
-  `::interactive_without_questions_is_refused` — hoy `check` acepta los cinco.
+  `::only_a_prompt_node_asks`, `::a_node_that_asks_is_refused_inside_a_parallel_group`
+  — hoy `check` acepta los cuatro.
 - `crates/engine/tests/replay.rs::a_log_written_before_origins_derives_the_artifacts_a_newer_one_does`
   — la aserción de `Waiting` (:455-459) pasa a `Failed`.
 - `crates/engine/tests/properties.rs::an_ask_answered_after_any_crash_point_derives_one_finished_node`
@@ -383,7 +390,8 @@ Rojo primero, con la razón:
 ## 9. W-11 y las fases
 
 **W-11, antes de la fase 0**, en los lugares de hoy y con los nombres de
-arriba: `Node::asks`; las cuatro reglas de `check`; el kind `questions_asked`
+arriba: `Node::asks`; las tres reglas de `check`; `interactive` retirado del
+nodo, del trait y del schema; el kind `questions_asked`
 por el flujo F1 tal como existe hoy —`payloads.rs`, `mod.rs`, `events.json`,
 Contrato §3, spec-events §5.19, los literales 36→37— con `Vec<QuestionId>` y
 un `new` que rechaza la lista vacía (2-01 lo migra a `gates/` como a los otros
@@ -392,7 +400,7 @@ un `new` que rechaza la lista vacía (2-01 lo migra a `gates/` como a los otros
 `questions_asked` y `NodeEnd::Asked`; `finish_node` para `close_node` y
 `FinishAnswered`; `engine::answers::record`; `execute_ask` sin ciclo de nodo;
 `next_step` con 0c; `parallel_exec` con `Asked`; la contabilidad en `live.rs`
-y `stats.rs`; la consola leyendo `interactive`; la línea de `lines.rs`; el
+y `stats.rs`; la línea de `lines.rs`; el
 corte `grill`/`brief` en pack, fixture canónico y `referencia-schema.md`;
 Contrato §3/§4.1, spec-events, `concepts.md`; D173 y la nota en D86; todos
 los tests de §8 salvo los marcados 4-02 y 5-06. Con eso el pack de referencia
@@ -437,12 +445,13 @@ kind y sus dos reglas (4-02, M12); `text::counted` en la frase (4-03, M13);
 - **M17/M18**: `answer_questions` como tool MCP con `CliError` y una sola
   puerta (`engine::answers::record`), igual que `resolve_gate`.
 - **M19**: `Gates::Asked`, `Gates::Answered` y sus filas.
-- **M24**: I-01 se construye en 5-06; I-07 se cierra aquí (la consola lee
-  `interactive`; `check` rechaza `interactive` sin `questions`).
+- **M24**: I-01 se construye en 5-06; I-07 se retira aquí (`interactive`
+  deja de existir, con la nota en D86).
 - **D173 revisa D86.** Nota en D86: *(Revisada por D173: el hecho de preguntar
   es `questions_asked`, par de `questions_answered`, y el nodo espera entre los
   dos sin segundo `node_started`; un nodo que declara `questions` no declara
-  otro artifact, y `interactive` es si la consola pregunta en el lugar.)*
+  otro artifact, e `interactive` se retira: la superficie disponible decide
+  cómo se presentan las preguntas.)*
 
 ---
 
@@ -481,9 +490,10 @@ lee, como `gate_waiting`/`gate_resolved`.
   se conserva (§0.5), el scheduler tendría que excluir esa variante del
   re-ruteo, la crónica diría `x grill — failed`, y un hecho del dominio `gates`
   viajaría en un evento del dominio `node`.
-- **Retirar `interactive:`**: D86 y el Contrato lo fijan como dato de
-  presentación; darle su consumidor cuesta una lectura en la consola y una
-  regla de `check`, no una decisión nueva.
+- **Darle a `interactive` el consumidor que nunca tuvo** (la consola pregunta
+  en el lugar sólo con el flag, y `check` lo rechaza sin `questions`): un
+  flag más para declarar lo que `questions` ya dice, y un caso —"miro el run
+  pero no quiero que me interrumpa"— que se resuelve no mirando.
 - **Retirar `Channel::Mcp`** (los tres diseños del panel): D167 lo conserva
   y la tool que lo produce es una segunda superficie de una puerta que ya
   existe; se construye en 5-06.
