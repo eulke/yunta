@@ -130,10 +130,7 @@ fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
         yunta_core::events::CapabilityDegradedPayload::new(
             yunta_core::Capability::RunTools,
             adapter.clone(),
-            "the session runs on — its per-run tool server is mounted and the \
-                         session holds none of its tools, so this node ends owing every \
-                         document it declares"
-                .to_string(),
+            yunta_core::events::Policy::NoRunTools,
         ),
     ))
 }

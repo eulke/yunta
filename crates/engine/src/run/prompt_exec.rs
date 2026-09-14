@@ -80,12 +80,12 @@ async fn resume_target(
     if policy != yunta_core::OnInterrupt::ResumeSession {
         return Ok(None);
     }
-    let degraded = |policy_applied: &str| {
+    let degraded = || {
         EventPayload::Session(SessionEvent::CapabilityDegraded(
             yunta_core::events::CapabilityDegradedPayload::new(
                 yunta_core::Capability::ResumeSession,
                 adapter_id.clone(),
-                policy_applied.to_string(),
+                yunta_core::events::Policy::FreshSession,
             ),
         ))
     };
@@ -101,24 +101,10 @@ async fn resume_target(
             {
                 return Ok(Some(session_id));
             }
-            ctx.emit(
-                Some(&node.id),
-                degraded(
-                    "restart_node — the adapter declares no session resume; a fresh session \
-                     replaces the interrupted one",
-                ),
-            )
-            .await?;
+            ctx.emit(Some(&node.id), degraded()).await?;
         }
         Some(OrphanedSession::NoneRecorded) => {
-            ctx.emit(
-                Some(&node.id),
-                degraded(
-                    "restart_node — no session was recorded before the interruption; started \
-                     fresh",
-                ),
-            )
-            .await?;
+            ctx.emit(Some(&node.id), degraded()).await?;
         }
         None => {}
     }
@@ -167,9 +153,7 @@ pub(super) async fn execute_prompt(
                 yunta_core::events::CapabilityDegradedPayload::new(
                     yunta_core::Capability::Skills,
                     chosen.adapter.clone(),
-                    "skills not mounted — the adapter declares no native \
-                                 mechanism; the session runs without them"
-                        .to_string(),
+                    yunta_core::events::Policy::NoSkills,
                 ),
             )),
         )
@@ -185,14 +169,14 @@ pub(super) async fn execute_prompt(
     // semantics the engine never emulates: that's a node failure.
     let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
         Ok(resolution) => {
-            if let Some(policy_applied) = resolution.degraded {
+            if let Some(policy) = resolution.degraded {
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::Session(SessionEvent::CapabilityDegraded(
                         yunta_core::events::CapabilityDegradedPayload::new(
                             yunta_core::Capability::RunTools,
                             chosen.adapter.clone(),
-                            policy_applied,
+                            policy,
                         ),
                     )),
                 )

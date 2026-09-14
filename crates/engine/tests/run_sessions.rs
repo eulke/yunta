@@ -920,7 +920,7 @@ sessions:
         events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied().contains("no session")
+                    && p.policy_applied() == yunta_core::events::Policy::FreshSession.to_string()
         )),
         "a crash before the session opened restarts WITH an explicit event"
     );
@@ -1080,7 +1080,7 @@ sessions:
     assert_eq!(degraded.adapter, "mock");
     assert_eq!(
         degraded.policy_applied(),
-        "declarative-only — the adapter declares no network isolation; `network: false` is recorded for policy and audit, not enforced"
+        yunta_core::events::Policy::NetworkOpen.to_string()
     );
 }
 

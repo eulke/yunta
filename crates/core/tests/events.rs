@@ -270,9 +270,9 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
             .unwrap()
             .with_timezone(&chrono::Utc),
         node_id: None,
-        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-            "gate waiting".to_string(),
-        )))),
+        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(
+            RunPausedPayload::recorded("gate waiting".to_string()),
+        ))),
     };
 
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
@@ -425,7 +425,7 @@ fn a_draft_names_what_happened_and_nothing_storage_assigns() {
     let draft = EventDraft {
         run_id: RunId::from("run-1"),
         node_id: None,
-        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
             "budget".to_string(),
         ))),
     };

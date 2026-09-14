@@ -23,8 +23,12 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervis
 /// non-zero. `source` is present only in the first case; `stderr` and
 /// `code` carry git's own output and exit status in the second (`code`
 /// stays `None` when a signal killed git before it could exit).
+///
+/// The spawn failure states only what was attempted: the `io::Error`
+/// under it is what went wrong, and a reader following the chain reads
+/// it once rather than in both halves.
 #[derive(Debug, Error)]
-#[error("{}", yunta_core::text::detailed(headline(.args, .cwd), &cause(.stderr, .source)))]
+#[error("{}", yunta_core::text::detailed(headline(.args, .cwd), .stderr.trim()))]
 pub struct GitError {
     pub args: String,
     pub cwd: PathBuf,
@@ -39,7 +43,10 @@ impl GitError {
     /// and failed, or the spawn error itself when it never ran. Empty
     /// when git exited non-zero without writing to stderr.
     pub fn detail(&self) -> String {
-        cause(&self.stderr, &self.source)
+        match &self.source {
+            Some(e) => e.to_string(),
+            None => self.stderr.trim().to_string(),
+        }
     }
 }
 
@@ -56,15 +63,6 @@ fn headline(args: &str, cwd: &Path) -> String {
 /// alone, so a git failure reads the same whichever module reports it.
 pub fn failed(args: &str, cwd: &Path, detail: &str) -> String {
     yunta_core::text::detailed(headline(args, cwd), detail)
-}
-
-/// See [`GitError::detail`]; a free function so the `Display` impl can
-/// reach it from the fields alone.
-fn cause(stderr: &str, source: &Option<std::io::Error>) -> String {
-    match source {
-        Some(e) => e.to_string(),
-        None => stderr.to_string(),
-    }
 }
 
 /// How a module that maps [`GitError`] into an error of its own names a

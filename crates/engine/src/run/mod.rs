@@ -64,7 +64,7 @@ pub(crate) use ctx::RunCtx;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub use exec::record_pause_after_crash;
-pub(in crate::run) use exec::{find_node, pause, record_pause};
+pub(in crate::run) use exec::{find_node, pause};
 pub use promote::{
     create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
 };
@@ -164,8 +164,8 @@ pub enum RunError {
         source: ForgeError,
     },
 
-    #[error("git failed to {context}: {detail}")]
-    Git { context: String, detail: String },
+    #[error(transparent)]
+    Git(#[from] crate::git::GitError),
 
     #[error("failed to serialize the manifest for `{path}`: {detail}")]
     ManifestWrite { path: PathBuf, detail: String },

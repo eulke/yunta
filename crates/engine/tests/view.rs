@@ -133,7 +133,9 @@ fn failed(outcome: &str) -> EventPayload {
 fn rerouted(to: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
         to.into(),
-        "criteria still red".to_string(),
+        yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
+            "criteria still red",
+        )),
         RerouteOrigin::OnFailure,
         Some(1),
         Some(2),
@@ -718,7 +720,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
                 CapabilityDegradedPayload::new(
                     Capability::ResumeSession,
                     "mock".into(),
-                    "restart_node".to_string(),
+                    yunta_core::events::Policy::FreshSession,
                 ),
             )),
         ),
@@ -728,7 +730,10 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
     assert_eq!(frame.degraded.len(), 1);
     assert_eq!(frame.degraded[0].capability, Capability::ResumeSession);
     assert_eq!(frame.degraded[0].adapter, "mock");
-    assert_eq!(frame.degraded[0].policy, "restart_node");
+    assert_eq!(
+        frame.degraded[0].policy,
+        yunta_core::events::Policy::FreshSession.to_string()
+    );
     assert_eq!(frame.degraded[0].node, Some(NodeId::from("build")));
     assert_eq!(frame.degraded[0].at, at(2));
 }
@@ -937,7 +942,7 @@ nodes:
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
                 "waiting on external gate: https://forge/pr/1".to_string(),
             ))),
         ),
@@ -972,7 +977,9 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(asked.to_string()))),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
+                asked.to_string(),
+            ))),
         ),
     ]);
 
@@ -1001,7 +1008,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
                 "token budget exceeded".to_string(),
             ))),
         ),
@@ -1038,7 +1045,7 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
                 "token budget exceeded".to_string(),
             ))),
         ),

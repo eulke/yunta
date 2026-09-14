@@ -3,7 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
-use yunta_core::{JoinPolicy, Node};
+use yunta_core::{JoinPolicy, Node, NodeId};
 
 use crate::replay::NodeState;
 
@@ -104,7 +104,7 @@ pub(super) async fn execute_parallel(
 
             let mut failed_child = None;
             let mut interrupted = false;
-            let mut child_paused: Option<String> = None;
+            let mut child_paused: Option<(NodeId, String)> = None;
             for ((child, _), result) in to_run.iter().zip(results) {
                 match result? {
                     NodeEnd::Failed => {
@@ -119,8 +119,8 @@ pub(super) async fn execute_parallel(
                     NodeEnd::Interrupted => interrupted = true,
                     // Same shape — the group stays open and the
                     // run pauses naming the paused child run.
-                    NodeEnd::ChildPaused { reason } => {
-                        child_paused.get_or_insert(reason);
+                    NodeEnd::ChildPaused { node, reason } => {
+                        child_paused.get_or_insert((node, reason));
                     }
                     NodeEnd::Finished => {}
                     // `check` refuses a child that produces
@@ -144,8 +144,11 @@ pub(super) async fn execute_parallel(
             if interrupted {
                 return Ok(NodeEnd::Interrupted);
             }
-            if let Some(reason) = child_paused {
-                return Ok(NodeEnd::ChildPaused { reason });
+            if let Some((paused, reason)) = child_paused {
+                return Ok(NodeEnd::ChildPaused {
+                    node: paused,
+                    reason,
+                });
             }
             if let Some(id) = failed_child {
                 return fail(
@@ -197,7 +200,7 @@ pub(super) async fn execute_parallel(
                 .collect();
 
             let mut winner = None;
-            let mut child_paused: Option<String> = None;
+            let mut child_paused: Option<(NodeId, String)> = None;
             while winner.is_none() {
                 let Some((child_id, result)) = running.next().await else {
                     break;
@@ -222,8 +225,8 @@ pub(super) async fn execute_parallel(
                     // A paused child run is neither a win nor a
                     // loss — the race stays live: a sibling can still
                     // win the group. Recorded for the no-winner ending.
-                    NodeEnd::ChildPaused { reason } => {
-                        child_paused.get_or_insert(reason);
+                    NodeEnd::ChildPaused { node, reason } => {
+                        child_paused.get_or_insert((node, reason));
                     }
                     // `check` refuses a child that produces `questions`
                     // (see the `join: all` arm): a node inside a group
@@ -264,12 +267,15 @@ pub(super) async fn execute_parallel(
                     .await
                 }
                 None => {
-                    if let Some(reason) = child_paused {
+                    if let Some((paused, reason)) = child_paused {
                         // No winner and a child run waiting on its own
                         // pause: the group can't close over an open
                         // child — the run pauses and resume
                         // re-enters the race.
-                        return Ok(NodeEnd::ChildPaused { reason });
+                        return Ok(NodeEnd::ChildPaused {
+                            node: paused,
+                            reason,
+                        });
                     }
                     fail(
                         ctx,

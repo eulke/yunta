@@ -139,13 +139,13 @@ pub(super) enum RunToolsSetupError {
 }
 
 /// What [`open_run_tools`] resolved. `session` is the listener when one
-/// opened; `degraded` carries the reason to record when the session
+/// opened; `degraded` carries the fallback to record when the session
 /// proceeds without run tools — the caller emits that
 /// `capability_degraded` on the run's log, since this function has no
 /// fallible emit of its own.
 pub(super) struct RunToolsResolution {
     pub session: Option<crate::run_tools::RunToolsSession>,
-    pub degraded: Option<String>,
+    pub degraded: Option<yunta_core::events::Policy>,
 }
 
 /// The first interpreted artifact this node declares, if any: the one a
@@ -254,7 +254,7 @@ pub(super) async fn open_run_tools(
             }
             Ok(RunToolsResolution {
                 session: None,
-                degraded: Some(format!("the session runs without run tools: {e}")),
+                degraded: Some(yunta_core::events::Policy::NoRunTools),
             })
         }
     }
@@ -282,9 +282,7 @@ pub(super) async fn report_declarative_network(
                 yunta_core::events::CapabilityDegradedPayload::new(
                     yunta_core::Capability::NetworkIsolation,
                     adapter_id.clone(),
-                    "declarative-only — the adapter declares no network isolation; \
-                                 `network: false` is recorded for policy and audit, not enforced"
-                        .to_string(),
+                    yunta_core::events::Policy::NetworkOpen,
                 ),
             )),
         )

@@ -132,16 +132,7 @@ async fn has_commit(
         supervision,
     )
     .await
-    .map_err(|e| {
-        let detail = e.detail();
-        RunError::Git {
-            context: format!(
-                "ask whether `{tree}` has commit {commit}",
-                tree = tree.display()
-            ),
-            detail,
-        }
-    })
+    .map_err(RunError::Git)
 }
 
 #[cfg(test)]

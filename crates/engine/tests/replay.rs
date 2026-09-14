@@ -288,7 +288,7 @@ fn replay_stops_deriving_further_state_once_broken() {
         event(
             2,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
                 "irrelevant".to_string(),
             ))),
         ),

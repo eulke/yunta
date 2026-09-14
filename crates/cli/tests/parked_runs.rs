@@ -579,7 +579,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
         "the summary counts the parked node and names it: {text}"
     );
     assert!(
-        text.contains("node `ask` asked 1 question(s) awaiting an answer: summary"),
+        text.contains("node `ask` asked 1 question(s) awaiting an answer: `summary`"),
         "the page names the question still unanswered, not only the node: {text}"
     );
     assert!(

@@ -225,9 +225,9 @@ async fn open_and_dispatch(
         .await
         {
             Ok(session) => Some(session),
-            Err(e) => {
-                // Recorded, not warned: the attempt runs without run tools,
-                // and the log says so and why.
+            Err(_) => {
+                // Recorded, not warned: the attempt runs without run
+                // tools, and the log says so.
                 if let Some((observer, obs_node)) = audit {
                     observer
                         .emit_session_event(
@@ -236,7 +236,7 @@ async fn open_and_dispatch(
                                 CapabilityDegradedPayload::new(
                                     Capability::RunTools,
                                     adapter.id().clone(),
-                                    format!("the attempt runs without run tools: {e}"),
+                                    yunta_core::events::Policy::NoRunTools,
                                 ),
                             )),
                         )

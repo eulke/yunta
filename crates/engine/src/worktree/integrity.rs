@@ -104,14 +104,7 @@ impl WorktreeIntegrity {
             supervision,
         )
         .await
-        .map_err(|e| {
-            let detail = e.detail();
-            WorktreeError::Git {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })?;
+        .map_err(WorktreeError::Git)?;
         Ok(WorktreeIntegrity {
             run_id: run.run_id.clone(),
             path: run.path.to_path_buf(),

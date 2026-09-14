@@ -150,7 +150,7 @@ async fn an_internal_gate_aborted_with_blank_free_text_cites_the_gate_alone() {
 
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "gate `approve` was resolved to abort");
+            assert_eq!(reason, "node `approve`'s gate was resolved to abort");
         }
         other => panic!("expected Paused, got {other:?}"),
     }

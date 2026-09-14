@@ -114,8 +114,9 @@ fn payload() -> impl Strategy<Value = EventPayload> {
                 origin: ArtifactOrigin::Submitted,
             }))
         }),
-        "[a-z ]{0,10}"
-            .prop_map(|reason| EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))),
+        "[a-z ]{0,10}".prop_map(|reason| EventPayload::Run(RunEvent::Paused(
+            RunPausedPayload::recorded(reason)
+        ))),
         ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::Gates(
             GateEvent::QuestionsAsked(
                 yunta_core::events::QuestionsAskedPayload::new(

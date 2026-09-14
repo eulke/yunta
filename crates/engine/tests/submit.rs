@@ -827,10 +827,10 @@ sessions:
             _ => None,
         })
         .expect("a session with no run tool of its own is degraded, not silently failed");
-    assert!(
-        degraded.policy_applied().contains("none of its tools"),
-        "the record names what was missing: {}",
-        degraded.policy_applied()
+    assert_eq!(
+        degraded.policy_applied(),
+        yunta_core::events::Policy::NoRunTools.to_string(),
+        "the record names what was missing and what ran instead"
     );
 
     let degraded_at = events

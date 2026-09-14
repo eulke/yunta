@@ -315,9 +315,12 @@ async fn integrate_task(
         // forward here means that invariant broke, not a legitimate task
         // outcome, so it surfaces as an engine error rather than a
         // `ready` retry.
-        return Err(RunError::Git {
-            context: format!("fast-forward integration of task `{}`", task.id),
-            detail: "expected a clean fast-forward after rebase but git refused it".to_string(),
+        return Err(RunError::Broken {
+            diagnostic: format!(
+                "integrating task `{}`: git refused a fast-forward onto a head this engine \
+                 is the only writer of",
+                task.id
+            ),
         });
     }
     Ok(IntegrationOutcome::Integrated { commit: task_head })
@@ -333,19 +336,15 @@ async fn commit_task_work(
     task: &Task,
     supervision: Supervision<'_>,
 ) -> Result<(), RunError> {
-    let git_error = |e: crate::git::GitError, action: &str| RunError::Git {
-        context: format!("{action} task `{}` work", task.id),
-        detail: e.detail(),
-    };
     crate::git::output(cwd, &["add", "-A"], supervision)
         .await
-        .map_err(|e| git_error(e, "stage"))?;
+        .map_err(RunError::Git)?;
 
     // `diff --cached --quiet` exits 0 with nothing staged, 1 with staged
     // changes — both are answers, not failures.
     if crate::git::success(cwd, &["diff", "--cached", "--quiet"], supervision)
         .await
-        .map_err(|e| git_error(e, "inspect staged work for"))?
+        .map_err(RunError::Git)?
     {
         return Ok(()); // nothing staged — nothing to commit
     }
@@ -361,7 +360,7 @@ async fn commit_task_work(
         supervision,
     )
     .await
-    .map_err(|e| git_error(e, "commit"))?;
+    .map_err(RunError::Git)?;
     Ok(())
 }
 
@@ -372,10 +371,7 @@ async fn run_git_ok(
 ) -> Result<bool, RunError> {
     crate::git::success(cwd, args, supervision)
         .await
-        .map_err(|e| RunError::Git {
-            context: format!("run git {}", e.args),
-            detail: e.detail(),
-        })
+        .map_err(RunError::Git)
 }
 
 fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {

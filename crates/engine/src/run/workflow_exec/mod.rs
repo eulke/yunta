@@ -669,6 +669,7 @@ async fn drive_child(
                     return cancelled_end(ctx, node).await;
                 }
                 return Ok(NodeEnd::ChildPaused {
+                    node: node.id.clone(),
                     reason: format!(
                         "child run `{current_id}` paused, and resuming this run resumes \
                          it:\n  {}",

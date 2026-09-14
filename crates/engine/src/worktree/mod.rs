@@ -42,11 +42,17 @@ pub use integrity::{RunWorktree, WorktreeIntegrity};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
-    #[error("{}", crate::git::failed(.args, .cwd, .detail))]
-    Git {
+    #[error(transparent)]
+    Git(#[from] crate::git::GitError),
+    /// git answered, and its answer is not what it names. `rev-parse`
+    /// promised a commit sha and returned something else — a broken git,
+    /// not a failed command.
+    #[error("git answered `{args}` in `{}` with something that is not a commit sha", .cwd.display())]
+    NotACommit {
         args: String,
         cwd: PathBuf,
-        detail: String,
+        #[source]
+        source: InvalidId,
     },
     #[error(
         "`{path}` has uncommitted changes — isolation `none` requires a clean tree: \
@@ -318,10 +324,10 @@ pub async fn head_commit(
     output
         .trim()
         .parse()
-        .map_err(|e: InvalidId| WorktreeError::Git {
+        .map_err(|source: InvalidId| WorktreeError::NotACommit {
             args: "rev-parse HEAD".to_string(),
             cwd: repo.to_path_buf(),
-            detail: e.to_string(),
+            source,
         })
 }
 
@@ -506,14 +512,7 @@ async fn run_git(
 ) -> Result<String, WorktreeError> {
     crate::git::output(cwd, args, supervision)
         .await
-        .map_err(|e| {
-            let detail = e.detail();
-            WorktreeError::Git {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })
+        .map_err(WorktreeError::Git)
 }
 
 #[cfg(test)]

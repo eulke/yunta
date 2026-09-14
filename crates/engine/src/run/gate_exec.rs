@@ -22,7 +22,7 @@
 
 use yunta_core::events::{
     Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
-    GateResolvedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+    GateResolvedPayload, NodeFinishedPayload, NodeStartedPayload, PauseReason, TokenUsage,
 };
 use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, OptionId, Responder};
@@ -37,7 +37,7 @@ use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
 pub(super) enum GateStep {
-    StillWaiting { reason: String },
+    StillWaiting { reason: PauseReason },
     Resolved,
 }
 
@@ -128,9 +128,8 @@ pub(super) async fn publish_gate(
         )),
     )
     .await?;
-    pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
     Ok(GateStep::StillWaiting {
-        reason: published.url,
+        reason: PauseReason::ExternalGate { url: published.url },
     })
 }
 
@@ -162,7 +161,7 @@ pub(super) async fn poll_gate(
             source,
         })?;
 
-    resolve_from_poll(ctx, node, &polled).await
+    resolve_from_poll(ctx, node, &polled, &published).await
 }
 
 /// The review→outcome mapping, applied uniformly whether resolving a
@@ -205,6 +204,7 @@ async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
     polled: &PolledGate,
+    published: &PublishedGate,
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
@@ -278,16 +278,11 @@ async fn resolve_from_poll(
         // Pending, or an approval that no longer covers the current
         // head — the engine detects that by comparing SHAs — not a
         // decision.
-        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
-            pause(
-                ctx,
-                format!("waiting on external gate for node `{}`", node.id),
-            )
-            .await?;
-            Ok(GateStep::StillWaiting {
-                reason: node.id.to_string(),
-            })
-        }
+        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => Ok(GateStep::StillWaiting {
+            reason: PauseReason::ExternalGate {
+                url: published.url.clone(),
+            },
+        }),
     }
 }
 
@@ -400,7 +395,7 @@ pub(super) async fn resolve_internal_gate(
             Some(choice) => choice,
             None => {
                 return Ok(GateStep::StillWaiting {
-                    reason: escalation.sentence(),
+                    reason: PauseReason::Escalation(Box::new(escalation.clone())),
                 });
             }
         },
@@ -431,10 +426,10 @@ pub(super) async fn resolve_internal_gate(
             .await?;
         }
         return Ok(GateStep::StillWaiting {
-            reason: yunta_core::text::detailed(
-                format!("gate `{}` was resolved to abort", node.id),
-                choice.free_text.as_deref().unwrap_or_default(),
-            ),
+            reason: PauseReason::GateAborted {
+                node: node.id.clone(),
+                free_text: choice.free_text.clone(),
+            },
         });
     }
 
@@ -473,7 +468,9 @@ pub(super) async fn resolve_internal_gate(
                 EventPayload::Node(NodeEvent::Rerouted(
                     yunta_core::events::NodeReroutedPayload::new(
                         target.clone(),
-                        format!("gate `{}` chose `{chosen}`", node.id),
+                        yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
+                            format!("gate `{}` chose `{chosen}`", node.id),
+                        )),
                         yunta_core::events::RerouteOrigin::GateChoice,
                         None,
                         None,
@@ -513,10 +510,6 @@ async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     Ok(())
 }
 
-async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
-    super::record_pause(ctx, &reason).await
-}
-
 fn encode_ref(published: &PublishedGate) -> String {
     serde_json::to_string(published).unwrap_or_default()
 }
@@ -549,9 +542,9 @@ async fn degrade_to_console(
         diagnostic: format!("node `{}`'s gate: {source}", node.id),
     })?;
     let Some(choice) = ctx.ask_human(&escalation).await? else {
-        let reason = escalation.sentence();
-        pause(ctx, reason.clone()).await?;
-        return Ok(GateStep::StillWaiting { reason });
+        return Ok(GateStep::StillWaiting {
+            reason: PauseReason::Escalation(Box::new(escalation)),
+        });
     };
 
     ctx.emit(

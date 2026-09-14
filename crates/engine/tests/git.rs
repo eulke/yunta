@@ -7,8 +7,9 @@
 
 use std::path::PathBuf;
 
+use yunta_core::describe;
 use yunta_engine::scope_expansion::ScopeExpansionError;
-use yunta_engine::{GitError, ScopeCheckError};
+use yunta_engine::{GitError, RunError, ScopeCheckError, WorktreeError};
 
 fn exited_non_zero(stderr: &str) -> GitError {
     GitError {
@@ -70,5 +71,42 @@ fn a_scope_expansion_git_failure_reads_exactly_as_a_scope_check_one() {
     assert_eq!(
         expansion.to_string(),
         "`git diff --name-only HEAD` exited with status 128: fatal: bad revision"
+    );
+}
+
+/// A git failure that crosses a module boundary keeps the `GitError` it
+/// came from rather than a copy of its words: the sentence is composed
+/// once, by `GitError` itself, and a module that carries it adds nothing
+/// and loses nothing.
+#[test]
+fn a_git_failure_keeps_its_cause() {
+    let sentence = exited_non_zero("fatal: not a git repository").to_string();
+
+    let run: RunError = exited_non_zero("fatal: not a git repository").into();
+    assert_eq!(describe(&run), sentence);
+
+    let worktree: WorktreeError = exited_non_zero("fatal: not a git repository").into();
+    assert_eq!(describe(&worktree), sentence);
+}
+
+/// The spawn that never ran keeps the `io::Error` that stopped it: a
+/// reader who follows the chain reaches the real cause rather than a
+/// sentence somebody retyped.
+#[test]
+fn a_git_that_never_ran_keeps_the_io_error_under_it() {
+    let run: RunError = GitError {
+        args: "status --porcelain".to_string(),
+        cwd: PathBuf::from("/repo"),
+        stderr: String::new(),
+        code: None,
+        source: Some(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no such file or directory",
+        )),
+    }
+    .into();
+    assert_eq!(
+        describe(&run),
+        "git status --porcelain in `/repo` failed: no such file or directory"
     );
 }

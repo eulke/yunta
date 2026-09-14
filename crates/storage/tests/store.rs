@@ -445,7 +445,7 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
         .unwrap();
     let mut event = created_draft("run-reopen");
     event.payload = yunta_core::events::EventPayload::Run(RunEvent::Paused(
-        yunta_core::events::RunPausedPayload::new("from the second handle".to_string()),
+        yunta_core::events::RunPausedPayload::recorded("from the second handle".to_string()),
     ));
     let seq2 = second.append(&event, &yunta_core::SystemClock).unwrap();
 
@@ -480,7 +480,9 @@ fn paused_draft(run_id: &str, reason: &str) -> EventDraft {
     EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
-        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason.to_string()))),
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
+            reason.to_string(),
+        ))),
     }
 }
 

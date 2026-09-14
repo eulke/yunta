@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventDraft, EventPayload, FindingSeverity, RunPausedPayload, RunResumedPayload,
+    EventDraft, EventPayload, FindingSeverity, PauseReason, RunPausedPayload, RunResumedPayload,
 };
 use yunta_core::{Clock, ModeName, NodeId, Pid, RunId};
 use yunta_storage::AsyncStorage;
@@ -31,17 +31,18 @@ use yunta_core::events::RunEvent;
 /// finds the engine already dead. The CLI never builds an `EventDraft`
 /// itself: event construction and its clock stamp live here, so every
 /// event on the log is emitted by the engine through one injected clock.
-/// The run-level `run_paused` event — built in one place so every path that
-/// stops a run (the scheduler's [`record_pause`], a crash's
-/// [`record_pause_after_crash`]) writes the same event.
-fn run_paused(reason: &str) -> EventPayload {
-    EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason.to_string())))
+/// The run-level `run_paused` event — built in one place so every path
+/// that stops a run (the scheduler's [`record_pause`], a crash's
+/// [`record_pause_after_crash`]) writes the same event, and its line is
+/// the reason's own `Display`.
+fn run_paused(reason: &PauseReason) -> EventPayload {
+    EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))
 }
 
 pub async fn record_pause_after_crash(
     storage: &AsyncStorage,
     run_id: &RunId,
-    reason: &str,
+    reason: &PauseReason,
     clock: &dyn Clock,
 ) -> Result<(), RunError> {
     storage
@@ -61,10 +62,12 @@ pub async fn record_pause_after_crash(
 /// the paused report — the one place a run stops for a human to resume,
 /// whatever asked for it (a cancellation, an exhausted budget, an
 /// unanswered gate).
-pub(super) async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {
+pub(super) async fn pause(ctx: &RunCtx<'_>, reason: PauseReason) -> Result<RunReport, RunError> {
     record_pause(ctx, &reason).await?;
     Ok(RunReport {
-        terminal: RunTerminal::Paused { reason },
+        terminal: RunTerminal::Paused {
+            reason: reason.to_string(),
+        },
         state: ctx.run_view().await?.state,
     })
 }
@@ -72,7 +75,7 @@ pub(super) async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport,
 /// Emits the run-level `run_paused` event and exports the forensic log — the
 /// one place the pause event is written, shared by the scheduler's own pause
 /// and the gate flow's.
-pub(super) async fn record_pause(ctx: &RunCtx<'_>, reason: &str) -> Result<(), RunError> {
+async fn record_pause(ctx: &RunCtx<'_>, reason: &PauseReason) -> Result<(), RunError> {
     ctx.emit(None, run_paused(reason)).await?;
     ctx.export_events_jsonl().await
 }
@@ -115,7 +118,7 @@ pub(crate) async fn execute_run_at_depth(
         // per-node child tokens below, whose failed nodes land in the
         // log first and then reach this same check.
         if root_cancel.is_cancelled() {
-            return pause(&ctx, "cancelled by user".to_string()).await;
+            return pause(&ctx, PauseReason::Cancelled).await;
         }
         let events = ctx.load_events().await?;
         match schedule::next_step(

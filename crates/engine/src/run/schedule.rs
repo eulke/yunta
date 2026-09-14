@@ -22,7 +22,7 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{ResumePolicy, StoredEvent};
+use yunta_core::events::{PauseReason, RerouteCause, ResumePolicy, StoredEvent};
 use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::modes::dependencies_in_mode;
@@ -58,10 +58,10 @@ pub enum ScheduleStep {
         to: NodeId,
         attempt: u32,
         max_reroutes: u32,
-        cause: String,
+        cause: RerouteCause,
     },
     Pause {
-        reason: String,
+        reason: PauseReason,
     },
     /// A node failed with no re-route of its own and the run's
     /// `defaults.on_failure` closes the run as failed rather than pausing:
@@ -83,7 +83,7 @@ pub enum ScheduleStep {
         node: NodeId,
         goto: NodeId,
         max_reroutes: u32,
-        cause: String,
+        cause: RerouteCause,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,
@@ -359,17 +359,8 @@ pub fn next_step(
             .map(|policy| &policy.node)
             .collect();
         if !uncertain.is_empty() {
-            let names = uncertain
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
             return ScheduleStep::Pause {
-                reason: format!(
-                    "node(s) `{names}` were running with no terminal event when the engine \
-                     last stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether \
-                     they finished; verify manually before resuming"
-                ),
+                reason: PauseReason::UncertainOrphans(uncertain.into_iter().cloned().collect()),
             };
         }
         let orphans: Vec<(NodeId, u32)> = orphaned
@@ -411,14 +402,14 @@ pub fn next_step(
                             to: on_failure.goto.clone(),
                             attempt: h.reroutes + 1,
                             max_reroutes: on_failure.max_reroutes,
-                            cause: failure.to_string(),
+                            cause: RerouteCause(failure.clone()),
                         };
                     }
                     return ScheduleStep::GateExhaustedReroutes {
                         node: node.id.clone(),
                         goto: on_failure.goto.clone(),
                         max_reroutes: on_failure.max_reroutes,
-                        cause: failure.to_string(),
+                        cause: RerouteCause(failure.clone()),
                     };
                 }
                 // No re-route of its own: `defaults.on_failure` decides.
@@ -427,10 +418,17 @@ pub fn next_step(
                 // failed and falls through, so its dependents stay
                 // unscheduled (their dependency is not `Finished`) while
                 // the rest of the graph keeps running.
-                let reason = format!("node `{}` failed: {failure}", node.id);
+                let reason = PauseReason::NodeFailed {
+                    node: node.id.clone(),
+                    failure: failure.clone(),
+                };
                 match default_on_failure {
                     DefaultOnFailure::Pause => return ScheduleStep::Pause { reason },
-                    DefaultOnFailure::Abort => return ScheduleStep::Fail { reason },
+                    DefaultOnFailure::Abort => {
+                        return ScheduleStep::Fail {
+                            reason: reason.to_string(),
+                        }
+                    }
                     DefaultOnFailure::Continue => {}
                 }
             }
@@ -559,8 +557,33 @@ pub fn next_step(
             return ScheduleStep::Fail { reason };
         }
     }
+    // Under `pause` the run freezes resumable, naming the node that is
+    // stuck and the dependencies it is stuck behind — every failure has
+    // already been handled above, so what is left waits on something
+    // that never finished.
+    let Some((node, on)) = nodes.iter().find_map(|node| {
+        if matches!(
+            state.nodes.state(&node.id),
+            Some(NodeState::Finished { .. })
+        ) || (is_reroute_only_target(&node.id) && !state.nodes.has_state(&node.id))
+        {
+            return None;
+        }
+        let unfinished: Vec<NodeId> = deps_of(&node.id)
+            .iter()
+            .filter(|dep| !matches!(state.nodes.state(*dep), Some(NodeState::Finished { .. })))
+            .cloned()
+            .collect();
+        Some((node.id.clone(), unfinished))
+    }) else {
+        return ScheduleStep::Broken {
+            diagnostic: "nothing is runnable and every node this mode declares reached a \
+                         terminal state — the scheduler's own accounting of what is finished \
+                         disagrees with itself"
+                .to_string(),
+        };
+    };
     ScheduleStep::Pause {
-        reason: "no node is runnable: pending nodes are blocked behind unresolved failures"
-            .to_string(),
+        reason: PauseReason::Blocked { node, on },
     }
 }

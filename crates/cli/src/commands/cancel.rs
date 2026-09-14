@@ -133,8 +133,13 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     // `run_paused` is emitted through the engine, not hand-built here, so
     // the CLI never stamps an event with a clock of its own.
     kill_groups(&registry.process_groups);
-    yunta_engine::record_pause_after_crash(&storage, run_id, "cancelled after crash", &ctx.clock)
-        .await?;
+    yunta_engine::record_pause_after_crash(
+        &storage,
+        run_id,
+        &yunta_core::events::PauseReason::CancelledAfterCrash,
+        &ctx.clock,
+    )
+    .await?;
     if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(&run_dir)) {
         if e.kind() != std::io::ErrorKind::NotFound {
             warn(format!("could not delete engine.json: {e}"));

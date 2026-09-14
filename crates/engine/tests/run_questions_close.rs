@@ -534,7 +534,7 @@ async fn a_run_with_no_surface_parks_naming_the_questions_it_asked() {
     match &terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             *reason,
-            "node `grill` asked 1 question(s) awaiting an answer: q1"
+            "node `grill` asked 1 question(s) awaiting an answer: `q1`"
         ),
         other => panic!("expected a pause on the questions, got {other:?}"),
     }

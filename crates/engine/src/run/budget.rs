@@ -11,7 +11,9 @@
 //! resume re-asks; the decision it gets is still audited in the log as
 //! a run-level gate pair (`node_id: None`).
 
-use yunta_core::events::{Escalation, EscalationError, EventPayload, Fact, GateResolvedPayload};
+use yunta_core::events::{
+    Escalation, EscalationError, EventPayload, Fact, GateResolvedPayload, PauseReason,
+};
 use yunta_core::NonEmpty;
 
 use super::{RunCtx, RunError};
@@ -23,7 +25,7 @@ pub enum BudgetDecision {
     /// The cap is lifted for the rest of *this invocation* only.
     Continue,
     /// Pause with this reason — chosen `abort`, or no surface to ask.
-    Pause { reason: String },
+    Pause { reason: PauseReason },
 }
 
 /// The one escalation flow every exhausted limit shares: it puts the
@@ -37,7 +39,7 @@ pub async fn escalate(
     ctx: &RunCtx<'_>,
     node_id: Option<&yunta_core::NodeId>,
     escalation: Escalation,
-    pause_reason: String,
+    pause_reason: PauseReason,
 ) -> Result<BudgetDecision, RunError> {
     match ctx.ask_human(&escalation).await? {
         Some(choice) => {
@@ -73,7 +75,7 @@ pub fn over_budget_escalation(
     ctx: &RunCtx<'_>,
     spent: u64,
     cap: u64,
-) -> Result<(Escalation, String), EscalationError> {
+) -> Result<(Escalation, PauseReason), EscalationError> {
     let escalation = Escalation::new(
         format!("run `{}` exhausted its token budget", ctx.run_id),
         vec![
@@ -89,10 +91,7 @@ pub fn over_budget_escalation(
             vec![offers::abort_on_tokens()],
         )),
     )?;
-    let reason = format!(
-        "budget: run spent {spent} tokens with `limits.max_tokens_per_run: {cap}` — \
-         resume with an interactive surface to continue past the cap or abort"
-    );
+    let reason = PauseReason::BudgetExhausted { spent, cap };
     Ok((escalation, reason))
 }
 
@@ -105,7 +104,7 @@ pub fn loop_overrun_escalation(
     node_id: &yunta_core::NodeId,
     iteration: u32,
     cap: u32,
-) -> Result<(Escalation, String), EscalationError> {
+) -> Result<(Escalation, PauseReason), EscalationError> {
     // The claim is that the loop wants another iteration and the cap
     // stops it; which cap and how many iterations is the record below,
     // stated once.
@@ -125,10 +124,10 @@ pub fn loop_overrun_escalation(
             vec![offers::abort_on_iterations()],
         )),
     )?;
-    let reason = format!(
-        "loop `{node_id}` exceeded `limits.max_loop_iterations` ({cap}) — resume with an \
-         interactive surface to continue past the cap or abort"
-    );
+    let reason = PauseReason::LoopOverrun {
+        node: node_id.clone(),
+        cap,
+    };
     Ok((escalation, reason))
 }
 

@@ -4,8 +4,8 @@
 
 use yunta_core::events::{
     EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
-    PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, StoredEvent, TerminalState,
-    TokenUsage,
+    PauseReason, PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload,
+    StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
@@ -137,7 +137,7 @@ pub(super) async fn reroute(
     to: NodeId,
     attempt: u32,
     max_reroutes: u32,
-    cause: String,
+    cause: RerouteCause,
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&from),
@@ -166,7 +166,7 @@ pub(super) async fn gate_exhausted(
     node: NodeId,
     goto: NodeId,
     max_reroutes: u32,
-    cause: String,
+    cause: RerouteCause,
 ) -> Result<Option<RunReport>, RunError> {
     let suggested_mode = schedule::next_mode_after(&ctx.manifest.workflow, mode_name);
     let escalation = escalation::build_reroute_escalation(
@@ -195,7 +195,9 @@ pub(super) async fn gate_exhausted(
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or a future MCP client) carry the
         // decision instead.
-        return Ok(Some(pause(ctx, escalation.sentence()).await?));
+        return Ok(Some(
+            pause(ctx, PauseReason::Escalation(Box::new(escalation.clone()))).await?,
+        ));
     };
     if !already_recorded {
         ctx.emit(
@@ -236,7 +238,7 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
-        let evidence: Evidence = vec![Fact::bare(cause)].into();
+        let evidence: Evidence = vec![Fact::bare(cause.to_string())].into();
         ctx.emit(
             None,
             EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
@@ -297,11 +299,16 @@ pub(super) async fn gate_exhausted(
         }))
     } else {
         // The menu offers nothing beyond retry, promote and abort.
-        let reason = yunta_core::text::detailed(
-            format!("node `{node}`'s gate was resolved to abort"),
-            choice.free_text.as_deref().unwrap_or_default(),
-        );
-        Ok(Some(pause(ctx, reason).await?))
+        Ok(Some(
+            pause(
+                ctx,
+                PauseReason::GateAborted {
+                    node: node.clone(),
+                    free_text: choice.free_text.clone(),
+                },
+            )
+            .await?,
+        ))
     }
 }
 
@@ -359,15 +366,17 @@ pub(super) async fn execute_batch(
     // waits on the child's *terminal* state) — after the whole batch lands,
     // the parent pauses too, naming the child. A root cancellation takes
     // precedence: the loop-top check handles it as "cancelled by user".
-    let mut child_paused: Option<String> = None;
+    let mut child_paused: Option<(NodeId, String)> = None;
     for result in futures::future::join_all(executions).await {
-        if let node_exec::NodeEnd::ChildPaused { reason } = result? {
-            child_paused.get_or_insert(reason);
+        if let node_exec::NodeEnd::ChildPaused { node, reason } = result? {
+            child_paused.get_or_insert((node, reason));
         }
     }
-    if let Some(reason) = child_paused {
+    if let Some((node, reason)) = child_paused {
         if !ctx.root_cancel.is_cancelled() {
-            return Ok(Some(pause(ctx, reason).await?));
+            return Ok(Some(
+                pause(ctx, PauseReason::ChildPaused { node, reason }).await?,
+            ));
         }
     }
     Ok(None)
@@ -479,10 +488,9 @@ async fn gate_still_waiting(
     step: gate_exec::GateStep,
 ) -> Result<Option<RunReport>, RunError> {
     match step {
-        gate_exec::GateStep::StillWaiting { reason } => Ok(Some(RunReport {
-            terminal: RunTerminal::Paused { reason },
-            state: ctx.run_view().await?.state,
-        })),
+        // The gate decides that it waits; the run is what records the
+        // pause, here and in no other place.
+        gate_exec::GateStep::StillWaiting { reason } => Ok(Some(pause(ctx, reason).await?)),
         gate_exec::GateStep::Resolved => Ok(None),
     }
 }

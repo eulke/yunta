@@ -164,7 +164,7 @@ fn detail(payload: &EventPayload) -> Option<String> {
             view::closed_as(p.terminal_state)
         )),
         EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => Some(detailed(
-            format!("{:?} on {}", p.capability, p.adapter),
+            format!("{} on {}", p.capability.as_str(), p.adapter),
             p.policy_applied(),
         )),
         EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason().to_string()),
@@ -212,12 +212,11 @@ fn resolution(payload: &GateResolvedPayload) -> String {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CapabilityDegradedPayload, EventPayload, Evidence, Finding, FindingPostedPayload,
-        FindingSeverity, NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload,
+        EventPayload, Evidence, Failure, Finding, FindingPostedPayload, FindingSeverity,
+        NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload, RerouteCause,
         RerouteOrigin, RunPausedPayload, StoredEvent, TokenUsage,
     };
-    use yunta_core::events::{FindingEvent, NodeEvent, RunEvent, SessionEvent};
-    use yunta_core::Capability;
+    use yunta_core::events::{FindingEvent, NodeEvent, RunEvent};
 
     use super::{detail, Lines};
 
@@ -247,7 +246,7 @@ mod tests {
     fn rerouted(cause: &str) -> EventPayload {
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             "fix-lint".into(),
-            cause.to_string(),
+            RerouteCause(Failure::message(cause)),
             RerouteOrigin::GateChoice,
             None,
             None,
@@ -294,9 +293,9 @@ mod tests {
 
     #[test]
     fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-            "   ".to_string(),
-        ))));
+        let line = line_for(EventPayload::Run(RunEvent::Paused(
+            RunPausedPayload::recorded("   ".to_string()),
+        )));
         assert_eq!(
             line, "[0s] run_paused",
             "no dash promises what is not there"
@@ -305,9 +304,9 @@ mod tests {
 
     #[test]
     fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-            "budget\n  reached".to_string(),
-        ))));
+        let line = line_for(EventPayload::Run(RunEvent::Paused(
+            RunPausedPayload::recorded("budget\n  reached".to_string()),
+        )));
         assert_eq!(line, "[0s] run_paused — budget reached");
     }
 
@@ -319,11 +318,130 @@ mod tests {
         assert_eq!(line, "[0s] node_finished");
     }
 
+    /// A log written before the engine named its fallbacks carries an
+    /// empty `policy_applied`. The line states what was missing and
+    /// claims nothing about what was done instead.
     #[test]
     fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
-        let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(
-            CapabilityDegradedPayload::new(Capability::RunTools, "codex".into(), String::new()),
-        ));
-        assert_eq!(detail(&payload).as_deref(), Some("RunTools on codex"));
+        let payload: EventPayload = serde_json::from_value(serde_json::json!({
+            "kind": "capability_degraded",
+            "capability": "run_tools",
+            "adapter": "codex",
+            "policy_applied": "",
+        }))
+        .expect("the wire form of a degradation with no policy");
+        assert_eq!(detail(&payload).as_deref(), Some("run_tools on codex"));
+    }
+}
+
+/// The one line a parked run shows, produced once and read by every
+/// surface that has to show it.
+///
+/// `PauseReason` is the fact; its `Display` is the only prose. This
+/// checks the three places a reader meets it — the chronicle's own line,
+/// the closing verdict, and the page a `status` prints — say the same
+/// thing, for every reason a run can park on.
+#[cfg(test)]
+mod pause_reason_tests {
+    use yunta_core::events::{Escalation, Fact, Failure, PauseReason, RunEvent, RunPausedPayload};
+    use yunta_core::{NodeId, QuestionId};
+    use yunta_engine::WaitingOn;
+
+    use crate::commands::advice;
+
+    use super::{detail, EventPayload};
+
+    /// One of every reason a run parks on. The `match` is what keeps it
+    /// complete: a new variant stops compiling here until it is listed.
+    fn every_reason() -> Vec<PauseReason> {
+        let all = vec![
+            PauseReason::Escalation(Box::new(
+                Escalation::published_to(
+                    "Ready to open the PR?",
+                    vec![Fact::labelled("published at", "example/repo#1")].into(),
+                    "https://example.invalid/pull/1",
+                )
+                .expect("the summary states no fact the evidence holds"),
+            )),
+            PauseReason::Cancelled,
+            PauseReason::CancelledAfterCrash,
+            PauseReason::BudgetExhausted {
+                spent: 120_000,
+                cap: 100_000,
+            },
+            PauseReason::LoopOverrun {
+                node: NodeId::from("build"),
+                cap: 8,
+            },
+            PauseReason::ExternalGate {
+                url: "https://example.invalid/pull/1".to_string(),
+            },
+            PauseReason::UncertainOrphans(vec![NodeId::from("review")]),
+            PauseReason::NodeFailed {
+                node: NodeId::from("lint"),
+                failure: Failure::message("exit 1"),
+            },
+            PauseReason::Blocked {
+                node: NodeId::from("ship"),
+                on: vec![NodeId::from("lint")],
+            },
+            PauseReason::GateAborted {
+                node: NodeId::from("approve"),
+                free_text: Some("not this quarter".to_string()),
+            },
+            PauseReason::ChildPaused {
+                node: NodeId::from("fanout"),
+                reason: "cancelled by user".to_string(),
+            },
+            PauseReason::Questions {
+                node: NodeId::from("scope"),
+                pending: (QuestionId::from("q1"), Vec::new()).into(),
+            },
+            PauseReason::AnswersRefused {
+                node: NodeId::from("scope"),
+                violations: vec!["`q2` has no answer".to_string()],
+            },
+        ];
+        for reason in &all {
+            match reason {
+                PauseReason::Escalation(_)
+                | PauseReason::Cancelled
+                | PauseReason::CancelledAfterCrash
+                | PauseReason::BudgetExhausted { .. }
+                | PauseReason::LoopOverrun { .. }
+                | PauseReason::ExternalGate { .. }
+                | PauseReason::UncertainOrphans(_)
+                | PauseReason::NodeFailed { .. }
+                | PauseReason::Blocked { .. }
+                | PauseReason::GateAborted { .. }
+                | PauseReason::ChildPaused { .. }
+                | PauseReason::Questions { .. }
+                | PauseReason::AnswersRefused { .. } => {}
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn a_pause_reason_renders_once_at_the_border() {
+        for reason in every_reason() {
+            let sentence = reason.to_string();
+            assert!(
+                !sentence.is_empty(),
+                "a reason a reader is shown says something"
+            );
+            let payload = RunPausedPayload::new(&reason);
+            assert_eq!(payload.reason(), sentence);
+
+            let chronicle = detail(&EventPayload::Run(RunEvent::Paused(payload.clone())));
+            assert_eq!(chronicle.as_deref(), Some(sentence.as_str()));
+
+            let waiting = WaitingOn::Run {
+                reason: payload.reason().to_string(),
+            };
+            let one_line = yunta_core::text::one_line(&sentence);
+            assert_eq!(advice::parked_on(&waiting), one_line);
+            assert_eq!(advice::parked_in_full(&waiting), one_line);
+        }
     }
 }

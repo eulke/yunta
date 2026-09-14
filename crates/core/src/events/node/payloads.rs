@@ -238,7 +238,7 @@ impl NodeReroutedPayload {
     /// on its last try.
     pub fn new(
         to: NodeId,
-        cause: impl Into<String>,
+        cause: RerouteCause,
         origin: RerouteOrigin,
         attempt: Option<u32>,
         max_reroutes: Option<u32>,
@@ -246,11 +246,24 @@ impl NodeReroutedPayload {
         let retrying = matches!(origin, RerouteOrigin::OnFailure);
         NodeReroutedPayload {
             to_node: to,
-            cause: cause.into(),
+            cause: cause.to_string(),
             attempt: attempt.filter(|_| retrying),
             max_reroutes: max_reroutes.filter(|_| retrying),
             origin,
         }
+    }
+}
+
+/// Why control left a node. A re-route happens for exactly one reason —
+/// the node did not succeed — so the cause is that failure itself, not a
+/// sentence somebody wrote about it: the same `Failure` the
+/// `node_failed` before it carries, and the same words.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RerouteCause(pub Failure);
+
+impl std::fmt::Display for RerouteCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

@@ -144,7 +144,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
         })),
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             "fix-lint".into(),
-            "clippy failed".to_string(),
+            yunta_core::events::RerouteCause(yunta_core::events::Failure::message("clippy failed")),
             yunta_core::events::RerouteOrigin::OnFailure,
             Some(1),
             Some(2),
@@ -271,10 +271,10 @@ pub fn all_kinds() -> Vec<EventPayload> {
             CapabilityDegradedPayload::new(
                 Capability::ResumeSession,
                 "mock".into(),
-                "on_interrupt: resume_session degraded to restart_node".to_string(),
+                yunta_core::events::Policy::FreshSession,
             ),
         )),
-        EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+        EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
             "gate waiting".to_string(),
         ))),
         EventPayload::Run(RunEvent::Resumed(RunResumedPayload {

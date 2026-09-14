@@ -12,7 +12,8 @@
 //! second close to run here. What the round owes the node is its
 //! terminal, and `FinishAnswered` pays it from the log.
 
-use yunta_core::events::{ArtifactId, EventPayload, QuestionsAskedPayload};
+use yunta_core::events::{ArtifactId, EventPayload, PauseReason, QuestionsAskedPayload};
+use yunta_core::NonEmpty;
 use yunta_core::{ArtifactKind, Node};
 
 use crate::answers::{AnswersError, Reply};
@@ -26,7 +27,7 @@ use yunta_core::events::GateEvent;
 /// exactly what is missing.
 pub(super) enum AskOutcome {
     Answered,
-    Pause { reason: String },
+    Pause { reason: PauseReason },
 }
 
 pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutcome, RunError> {
@@ -79,7 +80,17 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         // piped invocation): the run parks, and the questions stand for
         // whichever surface reaches them next.
         return Ok(AskOutcome::Pause {
-            reason: unanswered(node, &asked),
+            reason: PauseReason::Questions {
+                node: node.id.clone(),
+                pending: NonEmpty::new(asked.questions.clone()).ok_or_else(|| {
+                    RunError::Broken {
+                        diagnostic: format!(
+                            "node `{}` recorded that it asked and named no question",
+                            node.id
+                        ),
+                    }
+                })?,
+            },
         });
     };
 
@@ -102,7 +113,10 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         // run parks citing the exact violations, and the next round asks
         // again from the same document.
         Err(error @ AnswersError::Refused { .. }) => Ok(AskOutcome::Pause {
-            reason: format!("node `{}`'s answers were refused: {error}", node.id),
+            reason: PauseReason::AnswersRefused {
+                node: node.id.clone(),
+                violations: error.violations().to_vec(),
+            },
         }),
         Err(other) => Err(RunError::Broken {
             diagnostic: other.to_string(),
@@ -128,20 +142,4 @@ fn pending(
         }
     }
     asked
-}
-
-/// What a run pauses with when nothing could answer: the node and every
-/// id still awaiting one.
-fn unanswered(node: &Node, asked: &QuestionsAskedPayload) -> String {
-    format!(
-        "node `{}` asked {} question(s) awaiting an answer: {}",
-        node.id,
-        asked.questions.len(),
-        asked
-            .questions
-            .iter()
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
 }

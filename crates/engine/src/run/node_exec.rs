@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, Failure, HookPhase};
 use yunta_core::port::PermissionProfile;
-use yunta_core::{HookFailurePolicy, Node, NodeKind};
+use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind};
 
 use yunta_core::template::render_template;
 
@@ -38,6 +38,9 @@ pub(super) enum NodeEnd {
     /// unlike `Interrupted` the *parent run* must pause with this
     /// reason rather than fall through to its loop-top cancel check.
     ChildPaused {
+        /// The parent's own `kind: workflow` node.
+        node: NodeId,
+        /// The line the child run stated for its pause.
         reason: String,
     },
     /// The node closed in full — hooks, scope, artifacts — and handed

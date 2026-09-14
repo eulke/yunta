@@ -98,7 +98,8 @@ pub(super) async fn execute_loop(
             match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { reason } => {
-                    return fail_with_tokens(ctx, node, reason, false, state.tokens).await;
+                    return fail_with_tokens(ctx, node, reason.to_string(), false, state.tokens)
+                        .await;
                 }
             }
         }
@@ -277,9 +278,7 @@ async fn prepare_loop<'a>(
                 yunta_core::events::CapabilityDegradedPayload::new(
                     yunta_core::Capability::Skills,
                     chosen.adapter.clone(),
-                    "skills not mounted — the adapter declares no native \
-                                 mechanism; task sessions run without them"
-                        .to_string(),
+                    yunta_core::events::Policy::NoSkills,
                 ),
             )),
         )

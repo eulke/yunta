@@ -90,6 +90,63 @@ pub struct AgentMessagePayload {
     pub text: Option<String>,
 }
 
+/// What the engine does when an adapter does not declare a capability it
+/// asked for. A closed set: the engine has one fallback per capability
+/// it consults, and a degradation naming anything else would be a
+/// fallback nobody implemented.
+///
+/// The sentence a reader sees is produced here, once, by `Display` — so
+/// the same fallback reads the same way wherever it is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Policy {
+    /// `edit_hooks` absent: the session edits freely and the diff is
+    /// judged afterwards.
+    PostCheckOnly,
+    /// `usage_reporting` absent: the run's token cap cannot be counted
+    /// against this session.
+    NoTokenBudget,
+    /// `skills` absent: the session runs with none mounted.
+    NoSkills,
+    /// `run_tools` absent, or its server unreachable: the session holds
+    /// none of the run's tools.
+    NoRunTools,
+    /// `network_isolation` absent: `network: false` is recorded, not
+    /// enforced.
+    NetworkOpen,
+    /// `resume_session` absent, or nothing to resume: a fresh session
+    /// replaces the interrupted one.
+    FreshSession,
+}
+
+impl std::fmt::Display for Policy {
+    /// What the engine did instead, in the words every surface prints.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Policy::PostCheckOnly => {
+                "post-check only — the session edits unguarded and its diff is judged \
+                 against the declared scope after the fact"
+            }
+            Policy::NoTokenBudget => {
+                "no token budget — the session reports no usage, so the run's cap is \
+                 recorded against it as zero"
+            }
+            Policy::NoSkills => {
+                "skills not mounted — the session runs without the skills the node \
+                 declares"
+            }
+            Policy::NoRunTools => {
+                "run tools unreachable — the session holds none of the run's tools, so \
+                 this node ends owing every document it declares"
+            }
+            Policy::NetworkOpen => {
+                "declarative only — `network: false` is recorded for policy and audit, \
+                 not enforced"
+            }
+            Policy::FreshSession => "restart_node — a fresh session replaces the interrupted one",
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityDegradedPayload {
     /// The capability the engine consulted and the adapter does not declare.
@@ -107,15 +164,11 @@ impl CapabilityDegradedPayload {
     /// and one that names only the fallback hides that something was
     /// asked for and refused. The engine writes them together or not at
     /// all.
-    pub fn new(
-        capability: Capability,
-        adapter: AdapterId,
-        policy_applied: impl Into<String>,
-    ) -> Self {
+    pub fn new(capability: Capability, adapter: AdapterId, policy: Policy) -> Self {
         CapabilityDegradedPayload {
             capability,
             adapter,
-            policy_applied: policy_applied.into(),
+            policy_applied: policy.to_string(),
         }
     }
 
