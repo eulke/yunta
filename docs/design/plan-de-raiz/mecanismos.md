@@ -467,7 +467,7 @@ handle); `adapters/src/claude_code/mod.rs:72-78,272-296`,
 `cli/src/surface/mod.rs:110-111`, `cli/src/commands/doctor.rs:21`
 (reciben `&Env`).
 
-**Prerequisitos.** W-05 (pendiente), W-07 (cerrado).
+**Prerequisitos.** W-05 (cerrado), W-07 (cerrado).
 
 **Tests.** W-05, W-07; `no_engine_module_reads_the_process_clock_or_env`
 (engine/tests/purity.rs: grep-test sobre `crates/engine/src` por
@@ -902,7 +902,7 @@ corre una vez y se borra en el mismo PR) que deshace `\{\{`→`{{`,
 fences ` ```javascript ` sobre YAML/árboles → ` ```yaml `/` ```text `, y
 cierra el fence de `contrato:19`. Se revisa a mano el diff.
 
-**Prerequisito.** W-10 (pendiente): los números planos de `referencia-schema.md` (CO-14).
+**Prerequisito.** W-10 (cerrado): los números planos de `referencia-schema.md` (CO-14).
 
 **Cierra.** EV-D16, AR-D12, AR-D13, AR-D14, CLI-D18, CLI-D19, AD-D22, AD-D23, AD-D24 (con P3), CO-13, CO-14, CO-15, CO-16, TE-D20, TE-D21, TE-D22, DO-D3, DO-D6, DO-D9–D44.
 
@@ -981,7 +981,7 @@ respuesta; `FinishAnswered` en el scheduler), las superficies (la consola;
 `answer_questions` por MCP; `interactive` retirado; crónica y estado), el corte
 `grill`/`brief` en el pack y los ejemplos, archivos, tests, W-11 y ADR D173.
 
-**Prerequisito.** W-11 (pendiente): lo que hace correr el pack de referencia
+**Prerequisito.** W-11 (cerrado): lo que hace correr el pack de referencia
 de punta a punta hoy (`preguntas.md` §9).
 
 **Cierra.** EN-D27, EN-D28, EN-D29, EV-D20, AR-D19, CO-21, DO-D45; M24 I-01
