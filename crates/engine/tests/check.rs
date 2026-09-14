@@ -1875,8 +1875,14 @@ nodes:
 }
 
 #[test]
-fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
-    for name in ["../escape.md", "/tmp/escape.md", "notes/../../escape.md"] {
+fn an_artifact_name_the_run_could_not_take_is_refused() {
+    for name in [
+        "../escape.md",
+        "/tmp/escape.md",
+        "notes/../../escape.md",
+        "tasks.yaml",
+        "questions.answers.yaml",
+    ] {
         let mut node = bash("a", "true", &[]);
         node.artifacts = Some(yunta_core::Artifacts {
             produces: vec![yunta_core::ArtifactSpec::Opaque(name.to_string())],
@@ -1885,8 +1891,8 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                CheckError::ArtifactNameEscapes { node, name: offending }
-                    if node.as_str() == "a" && offending == name
+                CheckError::ArtifactNameRefused { node, said }
+                    if node.as_str() == "a" && said.contains(name)
             )),
             "`{name}` must be refused, got {errors:?}"
         );
@@ -1901,7 +1907,7 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
     assert!(
         !check(&workflow(vec![node]), &ConfigLayer::default())
             .iter()
-            .any(|e| matches!(e, CheckError::ArtifactNameEscapes { .. })),
+            .any(|e| matches!(e, CheckError::ArtifactNameRefused { .. })),
         "a relative name, subdirectory and template included, is fine"
     );
 }

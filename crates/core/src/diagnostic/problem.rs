@@ -182,12 +182,22 @@ impl Problem {
     /// noun against `"document"` makes rewording the noun silently
     /// switch them off.
     pub(super) fn render(&self, _subject: &Subject) -> String {
+        self.to_string()
+    }
+}
+
+/// What is wrong, as one clause. A reader that has no document to name
+/// — a rule about a value the engine holds rather than about a file it
+/// read — takes the clause on its own, and takes it from here rather
+/// than composing its own from the variants.
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Problem::Parse { path, message } => match path.as_str() {
-                "" | "." => format!("does not parse: {message}"),
-                path => format!("does not parse at `{path}`: {message}"),
+                "" | "." => write!(f, "does not parse: {message}"),
+                path => write!(f, "does not parse at `{path}`: {message}"),
             },
-            Problem::Rule { detail, .. } => detail.clone(),
+            Problem::Rule { detail, .. } => f.write_str(detail),
         }
     }
 }

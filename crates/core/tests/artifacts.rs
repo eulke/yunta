@@ -188,7 +188,7 @@ fn an_artifact_name_with_a_parent_segment_is_refused() {
 
 #[test]
 fn an_artifact_name_that_claims_what_the_engine_writes_is_refused() {
-    for identity in yunta_core::ReservedIdentity::ALL {
+    for identity in yunta_core::ReservedIdentity::all() {
         let claimed = identity.file_name();
         assert!(
             yunta_core::ArtifactName::parse(&claimed).is_err(),

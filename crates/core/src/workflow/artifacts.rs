@@ -323,26 +323,42 @@ pub enum ReservedIdentity {
 
 impl ReservedIdentity {
     /// Every identity the engine writes, in the order a catalog lists
-    /// them.
-    pub const ALL: [ReservedIdentity; 4] = [
-        ReservedIdentity::Kind(ArtifactKind::Tasks),
-        ReservedIdentity::Kind(ArtifactKind::Findings),
-        ReservedIdentity::Kind(ArtifactKind::Questions),
-        ReservedIdentity::Answers,
-    ];
+    /// them: one per kind, and the answers beside a questions document.
+    /// Derived from [`ArtifactKind::ALL`], so a kind added there is
+    /// reserved here without anyone remembering to.
+    pub fn all() -> Vec<ReservedIdentity> {
+        ArtifactKind::ALL
+            .into_iter()
+            .map(ReservedIdentity::Kind)
+            .chain(std::iter::once(ReservedIdentity::Answers))
+            .collect()
+    }
 
-    /// The file name this identity takes under a node's view — the one
-    /// place that spelling is written down.
+    /// The file name this identity takes under a node's view, asked of
+    /// the artifact that carries it — naming a view is
+    /// [`crate::events::ArtifactId::view_name`]'s to answer, here and everywhere.
     pub fn file_name(&self) -> String {
         match self {
-            ReservedIdentity::Kind(kind) => format!("{kind}.yaml"),
-            ReservedIdentity::Answers => format!("{}.answers.yaml", ArtifactKind::Questions),
+            ReservedIdentity::Kind(kind) => {
+                crate::events::ArtifactId::Interpreted { kind: *kind }.view_name()
+            }
+            ReservedIdentity::Answers => crate::events::ArtifactId::Opaque {
+                name: format!(
+                    "{}.answers.yaml",
+                    crate::events::ArtifactId::Interpreted {
+                        kind: ArtifactKind::Questions
+                    }
+                    .view_name()
+                    .trim_end_matches(".yaml")
+                ),
+            }
+            .view_name(),
         }
     }
 
     /// The identity `name` claims, when it claims one.
     pub fn of(name: &str) -> Option<Self> {
-        ReservedIdentity::ALL
+        ReservedIdentity::all()
             .into_iter()
             .find(|identity| identity.file_name() == name)
     }

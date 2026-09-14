@@ -131,10 +131,13 @@ pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<
                     }
                 }
                 yunta_core::ArtifactSpec::Opaque(name) => {
-                    if !yunta_core::stays_inside(name) {
-                        errors.push(CheckError::ArtifactNameEscapes {
+                    // The name as written, which is what a reader of the
+                    // workflow sees: a template renders to a name like any
+                    // other and is parsed again once it is known.
+                    if let Err(problem) = yunta_core::ArtifactName::parse(name) {
+                        errors.push(CheckError::ArtifactNameRefused {
                             node: node.id.clone(),
-                            name: name.clone(),
+                            said: problem.to_string(),
                         });
                     }
                 }

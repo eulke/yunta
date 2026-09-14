@@ -123,11 +123,11 @@ pub enum CheckError {
 
     /// An artifact is written under `run.dir/artifacts/`; a name that
     /// is absolute or climbs with `..` would land somewhere else.
-    #[error(
-        "node `{node}` produces `{name}` — an artifact name is a relative path with no `..` \
-         component, so it stays under the run's `artifacts/`"
-    )]
-    ArtifactNameEscapes { node: NodeId, name: String },
+    /// The name a node declares is not one an artifact can take. The
+    /// clause comes from the name's own parser, so `check` and the run
+    /// refuse the same names for the same stated reason.
+    #[error("node `{node}` produces a name that {said}")]
+    ArtifactNameRefused { node: NodeId, said: String },
 
     /// The workflow demands a schema this binary doesn't speak.
     #[error(
