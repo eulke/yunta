@@ -5,11 +5,11 @@
 use yunta_core::events::{
     EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
     PauseReason, PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload,
-    StoredEvent, TerminalState, TokenUsage,
+    TerminalState, TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
-use crate::replay::derive;
+use crate::replay::RunState;
 use crate::reserved::ReservedOption;
 use crate::stats::tasks_done;
 
@@ -33,18 +33,22 @@ pub(super) async fn broken(ctx: &RunCtx<'_>, diagnostic: String) -> RunError {
     RunError::Broken { diagnostic }
 }
 
-/// Every node is done: distill, close the log with `run_finished`, export,
-/// and clean up the worktree if the workflow asked — then report the run
-/// finished.
-pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<RunReport, RunError> {
-    // Distill before `run_finished` — nothing is emitted after the close
-    // event, and its findings are events.
-    super::distill::run_distill(ctx, mode_name).await?;
+/// Closes the run's log, whichever way it ends: the one `run_finished`
+/// any ending writes, the forensic export that follows it, and — only at
+/// a real `Done` — the worktree cleanup `on_finish` asked for. Returns
+/// the state the close recorded, which is what every report carries.
+///
+/// One function because one close: three of them meant three places
+/// that could each decide what a run costs and how many tasks it did.
+pub(super) async fn finish(
+    ctx: &RunCtx<'_>,
+    terminal: TerminalState,
+) -> Result<RunState, RunError> {
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
         EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
-            TerminalState::Done,
+            terminal,
             state.total_tokens(),
             tasks_done(&state),
         ))),
@@ -55,6 +59,9 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
     // (a paused run expects a resume in that tree; a promoted one seeds its
     // successor's worktree from it). A cleanup failure warns and never
     // un-finishes the run the log already closed.
+    if terminal != TerminalState::Done {
+        return Ok(state);
+    }
     let wants_cleanup = ctx.manifest.workflow.on_finish.iter().any(|step| {
         matches!(
             step,
@@ -98,34 +105,33 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
             }
         }
     }
+    Ok(state)
+}
+
+/// Every node is done: distill what the run learned, then close it.
+/// Distillation runs before the close because nothing is emitted after
+/// `run_finished` and its findings are events.
+pub(super) async fn run_finished(
+    ctx: &RunCtx<'_>,
+    mode_name: &ModeName,
+) -> Result<RunReport, RunError> {
+    super::distill::run_distill(ctx, mode_name).await?;
     Ok(RunReport {
         terminal: RunTerminal::Finished,
-        state,
+        state: finish(ctx, TerminalState::Done).await?,
     })
 }
 
 /// Closes the run as failed: a node failed and `defaults.on_failure`
-/// (`abort`/`continue`) ended the run rather than pausing it. Unlike
-/// [`finish`], nothing is distilled and no worktree is cleaned up — a
-/// failed close is not a real finish (D107), it expects no resume, and
-/// its knowledge is not the attempt's knowledge to keep. The `node_failed`
-/// events already on the log name every failed node; `reason` names one
-/// for the report.
+/// (`abort`/`continue`) ended the run rather than pausing it. Nothing is
+/// distilled and no worktree is cleaned up — a failed close is not a
+/// real finish (D107), it expects no resume, and its knowledge is not
+/// the attempt's knowledge to keep. The `node_failed` events already on
+/// the log name every failed node; `reason` names one for the report.
 pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {
-    let state = ctx.run_view().await?.state;
-    ctx.emit(
-        None,
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
-            TerminalState::Failed,
-            state.total_tokens(),
-            tasks_done(&state),
-        ))),
-    )
-    .await?;
-    ctx.export_events_jsonl().await?;
     Ok(RunReport {
         terminal: RunTerminal::Failed { reason },
-        state,
+        state: finish(ctx, TerminalState::Failed).await?,
     })
 }
 
@@ -161,7 +167,7 @@ pub(super) async fn reroute(
 /// else pauses. `None` means the loop continues; `Some` ends the run.
 pub(super) async fn gate_exhausted(
     ctx: &RunCtx<'_>,
-    events: &[StoredEvent],
+    state: &RunState,
     mode_name: &ModeName,
     node: NodeId,
     goto: NodeId,
@@ -185,7 +191,7 @@ pub(super) async fn gate_exhausted(
     // re-asked, and its escalation pair is already recorded so it is never
     // re-emitted. The option is re-validated against the re-derived menu: a
     // mismatch means ask normally.
-    let pre_seeded = escalation::pre_seeded_resolution(&derive(events), &node, &escalation);
+    let pre_seeded = escalation::pre_seeded_resolution(state, &node, &escalation);
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
         Some(choice) => Some(choice),
@@ -280,22 +286,11 @@ pub(super) async fn gate_exhausted(
             )
             .await?;
         }
-        let state = derive(&events_for_close);
-        ctx.emit(
-            None,
-            EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
-                TerminalState::Promoted,
-                state.total_tokens(),
-                tasks_done(&state),
-            ))),
-        )
-        .await?;
-        ctx.export_events_jsonl().await?;
         Ok(Some(RunReport {
             terminal: RunTerminal::Promoted {
                 suggested_mode: next_mode,
             },
-            state: ctx.run_view().await?.state,
+            state: finish(ctx, TerminalState::Promoted).await?,
         }))
     } else {
         // The menu offers nothing beyond retry, promote and abort.
@@ -319,7 +314,7 @@ pub(super) async fn gate_exhausted(
 /// surface to lift it, or a child run that paused; `None` continues the loop.
 pub(super) async fn execute_batch(
     ctx: &RunCtx<'_>,
-    events: &[StoredEvent],
+    state: &RunState,
     batch: Vec<(NodeId, u32)>,
 ) -> Result<Option<RunReport>, RunError> {
     // The budget check guards exactly the steps that spend tokens — a run
@@ -333,7 +328,7 @@ pub(super) async fn execute_batch(
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         {
-            let spent = derive(events).total_tokens().total();
+            let spent = state.total_tokens().total();
             if spent >= cap {
                 let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
                     .map_err(|source| RunError::Broken {
@@ -442,13 +437,12 @@ pub(super) async fn resolve_internal_gate(
             ),
         });
     };
-    let step =
+    gate_still_waiting(
+        ctx,
         gate_exec::resolve_internal_gate(ctx, node, assignee, message.as_deref(), options, on)
-            .await?;
-    if let gate_exec::GateStep::StillWaiting { reason } = step {
-        return Ok(Some(pause(ctx, reason).await?));
-    }
-    Ok(None)
+            .await?,
+    )
+    .await
 }
 
 /// Puts a `kind: questions` node's unanswered questions to a human. `Some`
@@ -480,17 +474,15 @@ pub(super) async fn finish_answered(
     Ok(None)
 }
 
-/// A published/polled gate that is still waiting has already recorded its
-/// pause through the forge round-trip, so the run only needs its paused
-/// report — never a second `run_paused`.
+/// What a gate's own answer does to the run. The gate decides that it
+/// waits and why; the run is what writes `run_paused`, here and in no
+/// other place — three gate shapes, one pause.
 async fn gate_still_waiting(
     ctx: &RunCtx<'_>,
     step: gate_exec::GateStep,
 ) -> Result<Option<RunReport>, RunError> {
     match step {
-        // The gate decides that it waits; the run is what records the
-        // pause, here and in no other place.
-        gate_exec::GateStep::StillWaiting { reason } => Ok(Some(pause(ctx, reason).await?)),
+        gate_exec::GateStep::Waiting(reason) => Ok(Some(pause(ctx, reason).await?)),
         gate_exec::GateStep::Resolved => Ok(None),
     }
 }

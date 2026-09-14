@@ -13,7 +13,7 @@ use yunta_core::events::{
 };
 use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Workflow};
 
-use super::schedule::{self, ScheduleStep};
+use super::schedule::{self, Decision};
 use crate::replay::RunState;
 use crate::reserved::{offers, ReservedOption};
 use yunta_core::events::{GateEvent, RerouteCause, RunEvent};
@@ -102,8 +102,8 @@ pub(crate) fn build_internal_gate_escalation(
 /// currently waiting on, purely from the manifest and its own log — no
 /// live process required. This is what lets `resolve_gate` (a `yunta
 /// mcp` tool call, running in a process that never paused this run)
-/// know what it's answering: `schedule::next_step` is pure, so calling
-/// it again on the same log deterministically reaches the same
+/// know what it's answering: `schedule::decide` is pure, so asking it
+/// again about the same state deterministically reaches the same
 /// `GateExhaustedReroutes`/`ResolveInternalGate` step the paused
 /// invocation saw — same inputs, same escalation, even though nothing
 /// was ever logged for the "no live surface" case (the one who escalates
@@ -122,13 +122,10 @@ pub(crate) fn build_internal_gate_escalation(
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
 /// against the right node, the same one the live pause path would have
 /// used.
-pub fn current_escalation(
-    manifest: &Manifest,
-    events: &[StoredEvent],
-) -> Option<(NodeId, Escalation)> {
-    let mode_name = current_mode_name(events)?;
-    match current_step(manifest, events)? {
-        ScheduleStep::GateExhaustedReroutes {
+pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(NodeId, Escalation)> {
+    let mode_name = state.run.mode().clone();
+    match current_decision(manifest, state, &mode_name)? {
+        Decision::GateExhaustedReroutes {
             node,
             goto,
             max_reroutes,
@@ -145,7 +142,7 @@ pub fn current_escalation(
             .ok()?;
             Some((node, escalation))
         }
-        ScheduleStep::ResolveInternalGate { node } => {
+        Decision::ResolveInternalGate { node } => {
             let node = super::find_node(&manifest.workflow, &node).ok()?;
             let NodeKind::Gate {
                 assignee,
@@ -166,29 +163,21 @@ pub fn current_escalation(
     }
 }
 
-fn current_mode_name(events: &[StoredEvent]) -> Option<ModeName> {
-    match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::Run(RunEvent::Created(p))) => Some(p.mode.clone()),
-        _ => None,
-    }
-}
-
 /// The raw scheduler decision behind [`current_escalation`] — `None`
-/// for every step that isn't one of the two gate shapes.
-fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleStep> {
-    let mode_name = current_mode_name(events)?;
-    let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
-    let step = schedule::next_step(
+/// for every decision that isn't one of the two gate shapes.
+fn current_decision(
+    manifest: &Manifest,
+    state: &RunState,
+    mode_name: &ModeName,
+) -> Option<Decision> {
+    let decision = schedule::decide(
         &manifest.workflow,
-        events,
-        manifest.max_parallel_nodes,
-        manifest.config.resolved_on_interrupt(),
-        manifest.config.resolved_on_failure(),
-        mode_nodes.as_ref(),
+        state,
+        &schedule::Policy::of(manifest, mode_name),
     );
-    match step {
-        ScheduleStep::GateExhaustedReroutes { .. } | ScheduleStep::ResolveInternalGate { .. } => {
-            Some(step)
+    match decision {
+        Decision::GateExhaustedReroutes { .. } | Decision::ResolveInternalGate { .. } => {
+            Some(decision)
         }
         _ => None,
     }
@@ -220,7 +209,8 @@ pub async fn resolve_gate(
     if !events.last().is_some_and(is_run_paused) {
         return Err(ResolveGateError::NotPaused);
     }
-    let Some((node, escalation)) = current_escalation(manifest, &events) else {
+    let Some((node, escalation)) = current_escalation(manifest, &crate::replay::derive(&events))
+    else {
         return Err(ResolveGateError::NothingToResolve);
     };
     if !escalation.offers(&choice.option) {

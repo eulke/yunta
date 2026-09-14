@@ -1,5 +1,5 @@
 //! The run execution driver: the scheduler loop that replays the log,
-//! asks [`schedule::next_step`] what is next, and runs it until the answer
+//! asks [`schedule::decide`] what is next, and runs it until the answer
 //! is terminal — plus the pause paths every stop funnels through and the
 //! node lookup the step handlers share.
 //!
@@ -8,7 +8,6 @@
 //! [`execute_run_at_depth`] and reads what remains off the log, never from
 //! in-process state.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -23,7 +22,7 @@ use crate::replay::RunView;
 use crate::task_cycle::Memo;
 use crate::worktree::{RunWorktree, WorktreeIntegrity};
 
-use super::schedule::{self, ScheduleStep};
+use super::schedule::{self, Decision};
 use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
 use yunta_core::events::RunEvent;
 
@@ -81,15 +80,16 @@ async fn record_pause(ctx: &RunCtx<'_>, reason: &PauseReason) -> Result<(), RunE
 }
 
 /// Everything the scheduler loop runs on, once the run has woken: its
-/// built context, the loop's own handle on the root cancellation, and the
-/// frozen mode. `Finished` short-circuits a run whose log already ends.
+/// built context, the loop's own handle on the root cancellation, the
+/// frozen mode, and the policy every decision reads. `Finished`
+/// short-circuits a run whose log already ends.
 enum Startup<'a> {
     Finished(RunReport),
     Ready {
         ctx: RunCtx<'a>,
         root_cancel: CancellationToken,
         mode_name: ModeName,
-        mode_nodes: Option<HashSet<NodeId>>,
+        policy: schedule::Policy,
     },
 }
 
@@ -102,14 +102,14 @@ pub(crate) async fn execute_run_at_depth(
     env: RunEnv<'_>,
     depth: u32,
 ) -> Result<RunReport, RunError> {
-    let (ctx, root_cancel, mode_name, mode_nodes) = match start(env, depth).await? {
+    let (ctx, root_cancel, mode_name, policy) = match start(env, depth).await? {
         Startup::Finished(report) => return Ok(report),
         Startup::Ready {
             ctx,
             root_cancel,
             mode_name,
-            mode_nodes,
-        } => (ctx, root_cancel, mode_name, mode_nodes),
+            policy,
+        } => (ctx, root_cancel, mode_name, policy),
     };
 
     loop {
@@ -120,74 +120,61 @@ pub(crate) async fn execute_run_at_depth(
         if root_cancel.is_cancelled() {
             return pause(&ctx, PauseReason::Cancelled).await;
         }
+        // One read and one replay per iteration: the decision and every
+        // handler that needs the run's state read the same derivation.
         let events = ctx.load_events().await?;
-        match schedule::next_step(
-            &ctx.manifest.workflow,
-            &events,
-            ctx.manifest.max_parallel_nodes,
-            ctx.manifest.config.resolved_on_interrupt(),
-            ctx.manifest.config.resolved_on_failure(),
-            mode_nodes.as_ref(),
-        ) {
-            ScheduleStep::Broken { diagnostic } => {
-                return Err(steps::broken(&ctx, diagnostic).await)
-            }
-            ScheduleStep::Finish => return steps::finish(&ctx, &mode_name).await,
-            ScheduleStep::Pause { reason } => return pause(&ctx, reason).await,
-            ScheduleStep::Fail { reason } => return steps::run_failed(&ctx, reason).await,
-            ScheduleStep::Reroute {
+        let state = crate::replay::derive(&events);
+        match schedule::decide(&ctx.manifest.workflow, &state, &policy) {
+            Decision::Broken { diagnostic } => return Err(steps::broken(&ctx, diagnostic).await),
+            Decision::Finish => return steps::run_finished(&ctx, &mode_name).await,
+            Decision::Pause { reason } => return pause(&ctx, reason).await,
+            Decision::Fail { reason } => return steps::run_failed(&ctx, reason).await,
+            Decision::Reroute {
                 from,
                 to,
                 attempt,
                 max_reroutes,
                 cause,
             } => steps::reroute(&ctx, from, to, attempt, max_reroutes, cause).await?,
-            ScheduleStep::GateExhaustedReroutes {
+            Decision::GateExhaustedReroutes {
                 node,
                 goto,
                 max_reroutes,
                 cause,
             } => {
-                if let Some(report) = steps::gate_exhausted(
-                    &ctx,
-                    &events,
-                    &mode_name,
-                    node,
-                    goto,
-                    max_reroutes,
-                    cause,
-                )
-                .await?
+                if let Some(report) =
+                    steps::gate_exhausted(&ctx, &state, &mode_name, node, goto, max_reroutes, cause)
+                        .await?
                 {
                     return Ok(report);
                 }
             }
-            ScheduleStep::Execute(batch) => {
-                if let Some(report) = steps::execute_batch(&ctx, &events, batch).await? {
+            Decision::Execute(batch) => {
+                if let Some(report) = steps::execute_batch(&ctx, &state, batch).await? {
                     return Ok(report);
                 }
             }
-            ScheduleStep::PublishGate { node } => {
+            Decision::PublishGate { node } => {
                 if let Some(report) = steps::publish_gate(&ctx, node).await? {
                     return Ok(report);
                 }
             }
-            ScheduleStep::PollGate { node, external_ref } => {
+            Decision::PollGate { node, external_ref } => {
                 if let Some(report) = steps::poll_gate(&ctx, node, external_ref).await? {
                     return Ok(report);
                 }
             }
-            ScheduleStep::ResolveInternalGate { node } => {
+            Decision::ResolveInternalGate { node } => {
                 if let Some(report) = steps::resolve_internal_gate(&ctx, node).await? {
                     return Ok(report);
                 }
             }
-            ScheduleStep::AskQuestions { node } => {
+            Decision::AskQuestions { node } => {
                 if let Some(report) = steps::ask_questions(&ctx, node).await? {
                     return Ok(report);
                 }
             }
-            ScheduleStep::FinishAnswered { node } => {
+            Decision::FinishAnswered { node } => {
                 if let Some(report) = steps::finish_answered(&ctx, node).await? {
                     return Ok(report);
                 }
@@ -259,12 +246,12 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // "resolved once, reused forever" discipline runner resolution
     // already follows.
     let mode_name = yunta_core::events::run_mode(&view.events);
-    let mode_nodes = crate::modes::mode_included_nodes(&ctx.manifest.workflow, &mode_name);
+    let policy = schedule::Policy::of(ctx.manifest, &mode_name);
     Ok(Startup::Ready {
         ctx,
         root_cancel,
         mode_name,
-        mode_nodes,
+        policy,
     })
 }
 

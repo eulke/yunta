@@ -120,6 +120,7 @@ pub use receipt::{
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
 };
+pub use run::schedule::{decide, Decision, Policy as SchedulingPolicy};
 pub use run::{
     create_promotion_successor, create_run, current_escalation, execute_run, read_manifest,
     record_pause_after_crash, resolve_gate, session_token_budget, BirthArtifact, BirthOrigin,

@@ -228,7 +228,8 @@ impl Painter {
         // a walk of the log — asked exactly when the answer changes what
         // the demand line says.
         let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
-            && yunta_engine::current_escalation(manifest, folded.settled()).is_some();
+            && yunta_engine::current_escalation(manifest, &yunta_engine::derive(folded.settled()))
+                .is_some();
         region.show(&frame, run_id, answerable);
     }
 

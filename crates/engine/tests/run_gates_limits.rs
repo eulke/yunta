@@ -887,3 +887,30 @@ async fn a_source_under_the_default_inline_threshold_is_inlined() {
     let (terminal, _) = bench.run(INLINE_CONTEXT_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
+
+/// A gate that waits records exactly one `run_paused`, written by the
+/// run — never by the gate. The gate decides *that* it waits and why;
+/// the scheduler's own pause path is the only writer of the event, so a
+/// parked run's log can never carry two sentences about one stop.
+#[tokio::test]
+async fn a_gate_that_waits_records_one_run_paused_and_the_gate_records_none() {
+    let bench = Bench::new();
+    let (terminal, _) = bench
+        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &NoInteraction)
+        .await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "no surface to ask, so the gate parks the run: {terminal:?}"
+    );
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let paused: Vec<&yunta_core::events::StoredEvent> = events
+        .iter()
+        .filter(|e| e.body.kind_name() == "run_paused")
+        .collect();
+    assert_eq!(paused.len(), 1, "one stop, one event: {paused:?}");
+    assert_eq!(
+        paused[0].node_id, None,
+        "a run's pause is the run's, not a node's"
+    );
+}

@@ -101,7 +101,7 @@ fn print_decision(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], p
     let Some(waiting) = advice::parked(phase) else {
         return;
     };
-    match yunta_engine::current_escalation(manifest, events) {
+    match yunta_engine::current_escalation(manifest, &yunta_engine::derive(events)) {
         Some((node, escalation)) => print!(
             "{}",
             decision::block(decision::Layout::Page, run_id, &node, &escalation)
@@ -386,7 +386,8 @@ fn parked_decision(
     if !matches!(phase, RunPhase::Waiting { .. }) {
         return None;
     }
-    let (node, escalation) = yunta_engine::current_escalation(manifest, events)?;
+    let (node, escalation) =
+        yunta_engine::current_escalation(manifest, &yunta_engine::derive(events))?;
     Some(decision::DecisionJson::new(
         run_id,
         &node,

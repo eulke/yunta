@@ -353,7 +353,7 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
         events: &events,
         prior: closed.prior,
         now: closed.clock.now(),
-        decision: yunta_engine::current_escalation(closed.manifest, &events)
+        decision: yunta_engine::current_escalation(closed.manifest, &yunta_engine::derive(&events))
             .map(|(node, escalation)| (node, escalation.into_payload())),
         outline: Outline {
             run_dir: closed.run_dir,

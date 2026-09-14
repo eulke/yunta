@@ -2,7 +2,7 @@
 //!
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
 //! `run_created`); `execute_run` drives the run forward and is also
-//! `yunta resume` — it replays the log, asks [`schedule::next_action`]
+//! `yunta resume` — it replays the log, asks [`schedule::decide`]
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (`restart_node`).
@@ -38,7 +38,7 @@ mod promote;
 mod prompt_exec;
 mod questions_exec;
 mod runner_resolve;
-mod schedule;
+pub mod schedule;
 mod step;
 mod steps;
 mod workflow_exec;

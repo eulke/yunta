@@ -133,7 +133,7 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
         )))
     )));
 
-    let (node_id, escalation) = current_escalation(&manifest, &events)
+    let (node_id, escalation) = current_escalation(&manifest, &yunta_engine::derive(&events))
         .expect("an exhausted re-route must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
     assert!(escalation.summary().contains("lint"));
@@ -170,7 +170,7 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
         )))
     )));
 
-    let (node_id, escalation) = current_escalation(&manifest, &events)
+    let (node_id, escalation) = current_escalation(&manifest, &yunta_engine::derive(&events))
         .expect("an unresolved internal gate must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "approve");
     assert_eq!(escalation.summary(), "Approve the plan?");
@@ -192,7 +192,7 @@ nodes:
     run: "false"
 "#;
     let (manifest, events) = paused_manifest_and_events(workflow, "sessions: []\n").await;
-    assert!(current_escalation(&manifest, &events).is_none());
+    assert!(current_escalation(&manifest, &yunta_engine::derive(&events)).is_none());
 }
 
 // --- resolve_gate writes ONLY the decision; the engine

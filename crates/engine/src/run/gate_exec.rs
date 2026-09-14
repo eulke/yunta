@@ -37,7 +37,7 @@ use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
 pub(super) enum GateStep {
-    StillWaiting { reason: PauseReason },
+    Waiting(PauseReason),
     Resolved,
 }
 
@@ -128,9 +128,9 @@ pub(super) async fn publish_gate(
         )),
     )
     .await?;
-    Ok(GateStep::StillWaiting {
-        reason: PauseReason::ExternalGate { url: published.url },
-    })
+    Ok(GateStep::Waiting(PauseReason::ExternalGate {
+        url: published.url,
+    }))
 }
 
 pub(super) async fn poll_gate(
@@ -278,11 +278,11 @@ async fn resolve_from_poll(
         // Pending, or an approval that no longer covers the current
         // head — the engine detects that by comparing SHAs — not a
         // decision.
-        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => Ok(GateStep::StillWaiting {
-            reason: PauseReason::ExternalGate {
+        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
+            Ok(GateStep::Waiting(PauseReason::ExternalGate {
                 url: published.url.clone(),
-            },
-        }),
+            }))
+        }
     }
 }
 
@@ -357,7 +357,7 @@ pub(super) async fn recheck_approved_gates(
 /// transfers, and once the target's subgraph completes the gate asks
 /// again; an unmapped option finishes the gate with that choice as its
 /// outcome; the engine-appended `abort` pauses the run (same convention
-/// as every other escalation). No surface → `StillWaiting`, with
+/// as every other escalation). No surface → `Waiting`, with
 /// nothing recorded, so a resume re-asks (the same rule every
 /// unresolved question follows).
 pub(super) async fn resolve_internal_gate(
@@ -394,9 +394,9 @@ pub(super) async fn resolve_internal_gate(
         None => match ctx.ask_human(&escalation).await? {
             Some(choice) => choice,
             None => {
-                return Ok(GateStep::StillWaiting {
-                    reason: PauseReason::Escalation(Box::new(escalation.clone())),
-                });
+                return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
+                    escalation.clone(),
+                ))));
             }
         },
     };
@@ -425,12 +425,10 @@ pub(super) async fn resolve_internal_gate(
             )
             .await?;
         }
-        return Ok(GateStep::StillWaiting {
-            reason: PauseReason::GateAborted {
-                node: node.id.clone(),
-                free_text: choice.free_text.clone(),
-            },
-        });
+        return Ok(GateStep::Waiting(PauseReason::GateAborted {
+            node: node.id.clone(),
+            free_text: choice.free_text.clone(),
+        }));
     }
 
     emit_started(ctx, node).await?;
@@ -542,9 +540,9 @@ async fn degrade_to_console(
         diagnostic: format!("node `{}`'s gate: {source}", node.id),
     })?;
     let Some(choice) = ctx.ask_human(&escalation).await? else {
-        return Ok(GateStep::StillWaiting {
-            reason: PauseReason::Escalation(Box::new(escalation)),
-        });
+        return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
+            escalation,
+        ))));
     };
 
     ctx.emit(

@@ -1410,3 +1410,60 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         "the diagnostic names the document and every task missing from the log: {diagnostic}"
     );
 }
+
+/// However a run ends, its log carries exactly one `run_finished`, and
+/// that event is the run's own — never a node's. One writer, one close:
+/// a green run, a run whose failure aborted it, and a promotion all take
+/// the same path out.
+#[tokio::test]
+async fn a_run_closes_with_one_run_finished_whatever_way_it_closes() {
+    let green = r#"
+name: green
+nodes:
+  - { id: ok, kind: bash, run: "true" }
+"#;
+    let red = r#"
+name: red
+nodes:
+  - { id: nope, kind: bash, run: "exit 1" }
+"#;
+    for (name, workflow, config, expected) in [
+        ("a run that finished", green, MOCK_CONFIG, "done"),
+        (
+            "a run a failure aborted",
+            red,
+            "defaults:\n  on_failure: abort\n",
+            "failed",
+        ),
+    ] {
+        let bench = Bench::new();
+        let (terminal, _) = bench
+            .run_with_config(workflow, "sessions: []\n", config)
+            .await;
+        let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+        let closes: Vec<&yunta_core::events::StoredEvent> = events
+            .iter()
+            .filter(|e| e.body.kind_name() == "run_finished")
+            .collect();
+        assert_eq!(closes.len(), 1, "{name} closes once: {terminal:?}");
+        assert_eq!(
+            closes[0].node_id, None,
+            "{name}: the close is the run's, not a node's"
+        );
+        let Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(p))) =
+            closes[0].payload()
+        else {
+            panic!("{name}: the close carries a run_finished payload");
+        };
+        assert_eq!(
+            format!("{:?}", p.terminal_state).to_lowercase(),
+            expected,
+            "{name} names how it closed"
+        );
+        assert_eq!(
+            closes[0].seq,
+            events.last().expect("a log with events").seq,
+            "{name}: nothing is written after the close"
+        );
+    }
+}
