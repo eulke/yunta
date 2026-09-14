@@ -303,3 +303,107 @@ impl std::str::FromStr for ArtifactKind {
         })
     }
 }
+
+/// A name under a node's artifact view that the engine writes itself,
+/// so an opaque artifact may not claim it.
+///
+/// The run's view of a node holds one file per identity. An interpreted
+/// artifact is written from the document the engine accepted, and the
+/// answers to a questions document are written beside it. A declared
+/// name equal to one of those would put two writers on one path, and
+/// the file a reader opened would say nothing about which of them wrote
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservedIdentity {
+    /// The view of the document of this kind: `<kind>.yaml`.
+    Kind(ArtifactKind),
+    /// The answers the engine records beside a questions document.
+    Answers,
+}
+
+impl ReservedIdentity {
+    /// Every identity the engine writes, in the order a catalog lists
+    /// them.
+    pub const ALL: [ReservedIdentity; 4] = [
+        ReservedIdentity::Kind(ArtifactKind::Tasks),
+        ReservedIdentity::Kind(ArtifactKind::Findings),
+        ReservedIdentity::Kind(ArtifactKind::Questions),
+        ReservedIdentity::Answers,
+    ];
+
+    /// The file name this identity takes under a node's view — the one
+    /// place that spelling is written down.
+    pub fn file_name(&self) -> String {
+        match self {
+            ReservedIdentity::Kind(kind) => format!("{kind}.yaml"),
+            ReservedIdentity::Answers => format!("{}.answers.yaml", ArtifactKind::Questions),
+        }
+    }
+
+    /// The identity `name` claims, when it claims one.
+    pub fn of(name: &str) -> Option<Self> {
+        ReservedIdentity::ALL
+            .into_iter()
+            .find(|identity| identity.file_name() == name)
+    }
+}
+
+impl fmt::Display for ReservedIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReservedIdentity::Kind(kind) => write!(f, "the `{kind}` document"),
+            ReservedIdentity::Answers => write!(f, "the answers to a `questions` document"),
+        }
+    }
+}
+
+/// The name of an opaque artifact: where its file lands under the
+/// node's own directory in the run's view.
+///
+/// Parsed, never assembled. A name reaches the view as a path joined to
+/// the run directory, so one that is absolute or climbs with `..`
+/// writes outside the run the moment it is used, and one that spells a
+/// [`ReservedIdentity`] answers for a document the engine wrote. A name
+/// can carry a template, and what a template renders to is a name like
+/// any other: it is parsed again once it is known.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArtifactName(String);
+
+impl ArtifactName {
+    /// The name `text` spells, or why it is not one.
+    pub fn parse(text: &str) -> Result<Self, crate::diagnostic::Problem> {
+        if text.is_empty() {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                "an artifact is named by a file name, and this one is empty",
+            ));
+        }
+        if !crate::stays_inside(text) {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                format!(
+                    "`{text}` reaches outside the run directory — an artifact name is relative, \
+                     with no `..` component"
+                ),
+            ));
+        }
+        if let Some(identity) = ReservedIdentity::of(text) {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                format!("`{text}` is how the run's view names {identity}, so an artifact cannot take it"),
+            ));
+        }
+        Ok(ArtifactName(text.to_string()))
+    }
+
+    /// The name, as the view spells it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArtifactName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}

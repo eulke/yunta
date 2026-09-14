@@ -666,3 +666,36 @@ fn an_artifact_at_the_cap_or_with_no_cap_passes() {
     assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(10)).is_ok());
     assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).is_ok());
 }
+
+#[tokio::test]
+async fn a_rendered_artifact_name_that_leaves_the_run_dir_fails_the_node() {
+    let bench = yunta_testkit::Bench::new();
+
+    // The name is a template, so what `check` reads is `{{...}}` and
+    // what the view would be given is whatever it stands for — here an
+    // absolute path, which would write the file outside the run
+    // entirely.
+    let workflow = r#"
+name: escaping-name
+nodes:
+  - id: write
+    kind: bash
+    run: "true"
+    artifacts:
+      produces: ["{{node.artifacts}}/report.md"]
+"#;
+
+    let (terminal, state) = bench.run(workflow, "sessions: []\n").await;
+
+    assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
+    match state.nodes.get("write") {
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            let said = failure.to_string();
+            assert!(
+                said.contains("reaches outside the run directory"),
+                "the failure names the rendered name and the rule, got {said}",
+            );
+        }
+        other => panic!("a name that leaves the run directory fails its node, got {other:?}"),
+    }
+}

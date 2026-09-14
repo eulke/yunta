@@ -43,10 +43,6 @@ pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;
 
-/// What the engine appends to the `questions` kind's own name when it
-/// records the answers beside them.
-pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
-
 /// The artifact a node's answers are: an opaque one, named after the
 /// questions it answers, so the two sit side by side in the node's view.
 ///
@@ -54,7 +50,7 @@ pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
 /// holds one questions document, and its answers are the file beside it.
 pub(crate) fn answers_artifact() -> ArtifactId {
     ArtifactId::Opaque {
-        name: format!("{}{ANSWERS_SUFFIX}", ArtifactKind::Questions),
+        name: yunta_core::ReservedIdentity::Answers.file_name(),
     }
 }
 

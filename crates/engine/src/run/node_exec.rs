@@ -345,7 +345,10 @@ pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::P
 /// Only an opaque name: an interpreted artifact is identified by its
 /// kind, which is a closed vocabulary with nothing in it to render, and
 /// the run holds one per node whatever the runner is called.
-pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
+pub(crate) fn render_artifact_names(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Result<Node, ArtifactNamesError> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
     }
@@ -355,8 +358,30 @@ pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Nod
         for spec in &mut artifacts.produces {
             if let yunta_core::ArtifactSpec::Opaque(name) = spec {
                 *name = render_template(name, &vars)?;
+                // What a template renders to is a name like any other,
+                // and this is where it is first known: a name checked
+                // as written says nothing about what its variables
+                // stand for.
+                yunta_core::ArtifactName::parse(name).map_err(|problem| {
+                    ArtifactNamesError::Name {
+                        said: match problem {
+                            yunta_core::diagnostic::Problem::Parse { message, .. } => message,
+                            yunta_core::diagnostic::Problem::Rule { detail, .. } => detail,
+                        },
+                    }
+                })?;
             }
         }
     }
     Ok(rendered)
+}
+
+/// Why this node's declared artifacts are not names it can be held to.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ArtifactNamesError {
+    #[error(transparent)]
+    Template(#[from] TemplateError),
+    /// What a name rendered to is not a name.
+    #[error("{said}")]
+    Name { said: String },
 }
