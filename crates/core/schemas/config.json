@@ -534,7 +534,7 @@
       ]
     },
     "PackPermissions": {
-      "description": "`permissions.packs` — governance over pack contents. Parsed\nand merged here; *enforced* at `pack add`/check once pack support\nlands fully — a key without its consumer yet, kept\nbecause the org ceiling file is one document and its schema shouldn't\ndribble in piecemeal.",
+      "description": "`permissions.packs` — governance over pack contents. Parsed and\nmerged here; enforced by `pack add` and `pack update`, which read the\nmerged value and name the layer that declared it when they refuse.",
       "type": "object",
       "properties": {
         "executors": {

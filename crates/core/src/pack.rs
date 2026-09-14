@@ -178,7 +178,7 @@ pub enum PackManifestError {
 
 /// Whether `path` stays inside the directory it is relative to: not
 /// absolute, and no `..` component anywhere.
-pub fn stays_inside(path: &str) -> bool {
+pub(crate) fn stays_inside(path: &str) -> bool {
     let path = std::path::Path::new(path);
     !path.is_absolute()
         && !path

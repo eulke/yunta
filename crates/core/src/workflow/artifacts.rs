@@ -394,7 +394,7 @@ impl ArtifactName {
                 "an artifact is named by a file name, and this one is empty",
             ));
         }
-        if !crate::stays_inside(text) {
+        if !crate::pack::stays_inside(text) {
             return Err(crate::diagnostic::Problem::parse(
                 "",
                 format!(

@@ -37,8 +37,6 @@ use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::render::StateWord;
 
-/// The run id every case's single run is created under.
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TestCase {

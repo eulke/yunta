@@ -5,8 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::Subject;
-
 /// The stable name of a rule that only holds across a whole document.
 ///
 /// Exhaustive, so a rule cannot be minted by typing a new string, and
@@ -173,16 +171,6 @@ impl Problem {
             Problem::Parse { .. } => "parse",
             Problem::Rule { code, .. } => code.as_str(),
         }
-    }
-
-    /// The sentence a reader acts on.
-    ///
-    /// Takes the subject rather than a noun: two of the sentences below
-    /// differ for the document itself, and deciding that by comparing a
-    /// noun against `"document"` makes rewording the noun silently
-    /// switch them off.
-    pub(super) fn render(&self, _subject: &Subject) -> String {
-        self.to_string()
     }
 }
 

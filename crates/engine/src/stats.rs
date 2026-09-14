@@ -174,10 +174,10 @@ pub struct RunStats {
 impl RunStats {
     /// Tokens grouped by resolved role, node order broken and re-grouped
     /// — the "per role" half of "cost per node, per role, and per
-    /// mode" (mode is a whole-run property today, since `modes:` isn't
-    /// implemented yet — nothing to break out per role *and* per mode
-    /// within one run until it is; `--workflow`'s history view is where
-    /// mode comparison lives).
+    /// mode". Mode is a whole-run property: a run is created in one
+    /// mode, so there is nothing to break out per role *and* per mode
+    /// within one run, and `--workflow`'s history view is where mode
+    /// comparison lives.
     pub fn tokens_by_runner(&self) -> Vec<(RunnerName, TokenUsage)> {
         let mut by_runner: Vec<(RunnerName, TokenUsage)> = Vec::new();
         for node in &self.nodes {

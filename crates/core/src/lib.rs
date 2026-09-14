@@ -74,8 +74,8 @@ pub use ids::{
 pub use inputs::{InputSpec, InputSpecError};
 pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
 pub use pack::{
-    stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
-    PackManifestError, PackRequires, RequiredRunner,
+    PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,
+    PackRequires, RequiredRunner,
 };
 pub use policy::ScopeExpansionMode;
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};

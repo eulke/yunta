@@ -68,8 +68,6 @@ pub enum Subject {
     Question(Named<QuestionId>),
 }
 
-impl Subject {}
-
 /// `the first task`, `the 5th finding` — how an entry is named when its
 /// own id could not be read.
 fn ordinal(noun: &str, index: usize) -> String {

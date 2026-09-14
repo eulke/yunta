@@ -79,7 +79,7 @@ impl Diagnostic {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let rendered = self.problem.render(&self.subject);
+        let rendered = self.problem.to_string();
         // A problem with the file as a whole reads as one sentence
         // ("the document is not YAML: ..."), never as a subject and a
         // restatement of it.

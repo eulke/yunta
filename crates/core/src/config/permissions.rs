@@ -57,11 +57,9 @@ pub struct CommandPermissions {
     pub allow: Vec<String>,
 }
 
-/// `permissions.packs` — governance over pack contents. Parsed
-/// and merged here; *enforced* at `pack add`/check once pack support
-/// lands fully — a key without its consumer yet, kept
-/// because the org ceiling file is one document and its schema shouldn't
-/// dribble in piecemeal.
+/// `permissions.packs` — governance over pack contents. Parsed and
+/// merged here; enforced by `pack add` and `pack update`, which read the
+/// merged value and name the layer that declared it when they refuse.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackPermissions {

@@ -1115,6 +1115,44 @@ excluye declarar otra cosa (alternativa 3). Lo primero devuelve el diagnóstico
 verdadero; lo segundo decide qué significa `interactive: true`, y eso no lo fija
 ningún documento del repo.
 
+### L-08 · 2026-09-14 · §0.15 · D26 llama "append-only" al blackboard que W-04 dejó plegado
+
+**Evidencia.** El Contrato afirmaba dos cosas que el código no hace desde W-04
+(`cerrado(6bf7baa)`): §6.4 decía que el blackboard "es append-only" y §5.9 que
+el join "consolida todos los posteos del grupo". Hoy
+`engine/src/run_tools/blackboard.rs` publica el pliegue vigente:
+`consolidate_blackboard` (:29) y `get_blackboard` (:70) leen
+`FindingLedger::of(events).effective()`, o sea el contenido de la última
+versión de cada hallazgo que su autor sostiene, sin los retirados. El propio
+§6.4 se contradecía tres líneas antes, describiendo `yunta_withdraw_finding`
+como "queda fuera de todo conteo, archivo y vista". Las dos cláusulas del
+Contrato quedaron corregidas en este commit.
+
+`docs/design/adrs.md:32` (D26) repite la palabra: "blackboard append-only
+mediado por el engine vía MCP por-run". Un ADR no se reescribe: registra la
+decisión como se tomó, y el repo la revisa con el marcador
+`*(Revisada por DN: …)*`. Ninguna decisión registrada revisa ésta. `grep` sobre
+`adrs.md` y `adr/` no devuelve ADR alguno que fije el pliegue vigente del
+blackboard; la fila de W-04 en §4 tampoco cita uno, y §9 no enumera D26 entre
+las correcciones a `adrs.md`.
+
+**La ambigüedad.** "Append-only" tiene dos lecturas y D26 no dice cuál. Como
+propiedad del **canal** sigue siendo verdad: cada posteo, actualización y retiro
+es un append al log, nada se muta. Como propiedad de la **vista** es falsa desde
+W-04. El Contrato usaba la segunda; D26 no se pronuncia.
+
+**Alternativas.** (a) D26 gana `*(Revisada por Dn: la lectura del blackboard es
+el pliegue vigente, no el historial)*` con un ADR nuevo que registre lo que W-04
+implementó; (b) D26 se lee como propiedad del canal y no se toca, porque el log
+sigue siendo append-only y la decisión nunca habló de la vista; (c) se corrige
+la palabra dentro de D26, que es reescribir una decisión registrada.
+
+**Recomendación.** La (b), y que la distinción quede dicha donde se lee: el
+Contrato ya la dice en presente después de este commit. La (a) sólo si el pliegue
+vigente merece decisión propia, que es defendible porque cambia qué recibe un
+nodo consolidador. La (c) no: §0.8 permite el pasado en un ADR justamente para
+que el registro no se reescriba.
+
 ---
 
 ## 12. Índice: cada defecto, su mecanismo
