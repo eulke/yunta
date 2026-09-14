@@ -61,6 +61,8 @@ mod sealed {
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
     impl Sealed for crate::AnswersFile {}
+    impl Sealed for crate::FindingEntry {}
+    impl Sealed for crate::Withdrawal {}
 }
 
 /// Reads `bytes` into `T`, or reports every problem the document has.

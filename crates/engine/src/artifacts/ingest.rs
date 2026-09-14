@@ -143,10 +143,9 @@ pub async fn close_artifacts(
     let mut verified = Vec::new();
     let mut failures = Vec::new();
     for spec in &artifacts.produces {
-        let answer = if super::answered_by_the_log(&node.kind, spec.kind()) {
-            held_document(&node.id, spec, &held).await
-        } else {
-            verify_one(&node.id, spec, run_dir, max_bytes).await
+        let answer = match super::answerer(&node.kind, spec.kind()) {
+            super::Answerer::Log => held_document(&node.id, spec, &held).await,
+            super::Answerer::Staging => verify_one(&node.id, spec, run_dir, max_bytes).await,
         };
         match answer {
             Ok(artifact) => verified.push(artifact),

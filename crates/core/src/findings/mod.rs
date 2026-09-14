@@ -55,14 +55,6 @@ pub struct Withdrawal {
     pub reason: String,
 }
 
-impl Withdrawal {
-    /// What the document owes once its keys are known: a reason with
-    /// something in it.
-    pub fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
-        rules::check_withdrawal(self)
-    }
-}
-
 /// A criterion the author proposes to verify the finding's fix.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -132,4 +124,40 @@ impl crate::shape::Document for FindingsFile {
     }
 
     const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
+}
+
+/// The shape one finding takes on its own, as a session hands it over.
+const ENTRY_EXAMPLE: &str = include_str!("entry.yaml");
+
+/// One finding, read the way the document that holds it is read.
+///
+/// A session reports findings one at a time, so a single entry is a
+/// document in its own right at that frontier — and the rules it is held
+/// to are exactly the ones the whole file holds it to, because every
+/// rule of a findings document except the duplicate id is about an
+/// entry.
+impl crate::shape::Document for FindingEntry {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
+    const EXAMPLE: &'static str = ENTRY_EXAMPLE;
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_entry(self, 0)
+    }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::ENTRY_RULES;
+}
+
+/// The shape a withdrawal takes, as a session hands it over.
+const WITHDRAWAL_EXAMPLE: &str = include_str!("withdrawal.yaml");
+
+/// Taking a finding back, read the way every other document is read.
+impl crate::shape::Document for Withdrawal {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
+    const EXAMPLE: &'static str = WITHDRAWAL_EXAMPLE;
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_withdrawal(self)
+    }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::WITHDRAWAL_RULES;
 }

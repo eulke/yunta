@@ -17,6 +17,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::catalog::RunTool;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
 };
@@ -24,7 +25,7 @@ use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{ArtifactKind, ArtifactSpec, NodeId, TaskId};
+use yunta_core::{ArtifactSpec, NodeId, NodeKind, TaskId};
 
 use super::host::RunToolsHost;
 use crate::run_log::RunLog;
@@ -39,6 +40,9 @@ use crate::run_log::RunLog;
 pub(super) struct SessionTools {
     pub(super) host: Arc<RunToolsHost>,
     pub(super) node: NodeId,
+    /// What the node is, so a verdict asks who answers for an artifact
+    /// the same way its close does.
+    pub(super) node_kind: NodeKind,
     pub(super) task: Option<TaskId>,
     pub(super) cwd: PathBuf,
     /// The artifacts this node's close will verify, names already
@@ -168,24 +172,20 @@ impl ServerHandler for SessionTools {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
-        let outcome = match request.name.as_ref() {
-            "yunta_check_artifact" => self.check_artifact(&args).await,
-            "yunta_post_finding" => self.post_finding(args).await,
-            name if name == ArtifactKind::UPDATE_FINDING_TOOL => self.update_finding(args).await,
-            name if name == ArtifactKind::WITHDRAW_FINDING_TOOL => {
-                self.withdraw_finding(args).await
-            }
-            "yunta_get_blackboard" => self.get_blackboard().await,
-            "yunta_task_status" => self.task_status().await,
-            "yunta_request_scope_expansion" => self.request_scope_expansion(args).await,
-            // A submission tool names its own kind, so the name that
-            // matched is the kind that answers it.
-            other => match ArtifactKind::from_submit_tool(other) {
-                Some(kind) => self.submit(kind, args).await,
-                None => Err(RunToolError::UnknownTool {
-                    name: other.to_string(),
-                }),
-            },
+        // Exhaustive over the same set the catalog mounts from, so a
+        // tool offered without an answer here does not compile.
+        let outcome = match RunTool::parse(request.name.as_ref()) {
+            Some(RunTool::CheckArtifact) => self.check_artifact(&args).await,
+            Some(RunTool::PostFinding) => self.post_finding(args).await,
+            Some(RunTool::UpdateFinding) => self.update_finding(args).await,
+            Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
+            Some(RunTool::GetBlackboard) => self.get_blackboard().await,
+            Some(RunTool::TaskStatus) => self.task_status().await,
+            Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
+            Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
+            None => Err(RunToolError::UnknownTool {
+                name: request.name.to_string(),
+            }),
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),

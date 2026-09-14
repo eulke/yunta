@@ -67,27 +67,38 @@ pub enum AcceptError {
     },
 }
 
-/// Whether the run's own log answers for an artifact a node of
-/// `node_kind` declares under `kind`, rather than a file that node wrote
-/// in its staging.
+/// Who answers for one artifact a node declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answerer {
+    /// The run's own log: the artifact entered where it was produced,
+    /// with the origin that produced it, so the acceptance standing now
+    /// is both the only answer and the whole answer.
+    Log,
+    /// A file the node wrote in its own staging, which the close reads.
+    Staging,
+}
+
+/// Who answers for an artifact a node of `node_kind` declares under
+/// `kind`.
 ///
 /// A typed artifact of a session node is never a file that session
 /// wrote: `tasks` and `questions` arrive through the submission tool and
 /// `findings` are derived from what the node posted. A `kind: workflow`
 /// node produces no file at all: everything it declares is taken over
-/// from its child run's log. Each is accepted where it is produced, with
-/// the origin that produced it — so for those the log is both the only
-/// answer and the whole answer. Everything else a node declares is a
-/// file it wrote, and the close is where that file enters the run.
+/// from its child run's log. The answers to a questions document are the
+/// engine's own whatever node asked, because a person replied and the
+/// engine wrote them. Everything else a node declares is a file it
+/// wrote, and the close is where that file enters the run.
 ///
-/// Two decisions turn on this one question — where a close looks for
-/// what a node declared, and whether its acceptance is still owed — so
-/// it is answered once here.
-pub(crate) fn answered_by_the_log(node_kind: &NodeKind, kind: Option<ArtifactKind>) -> bool {
-    match node_kind {
-        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => kind.is_some(),
-        NodeKind::Workflow { .. } => true,
-        _ => false,
+/// Three decisions turn on this one question — where a close looks for
+/// what a node declared, whether its acceptance is still owed, and what
+/// a session reads back when it asks — so it is answered once here.
+pub(crate) fn answerer(node_kind: &NodeKind, kind: Option<ArtifactKind>) -> Answerer {
+    match (node_kind, kind) {
+        (_, Some(ArtifactKind::Answers)) => Answerer::Log,
+        (NodeKind::Prompt { .. } | NodeKind::Loop { .. }, Some(_)) => Answerer::Log,
+        (NodeKind::Workflow { .. }, _) => Answerer::Log,
+        _ => Answerer::Staging,
     }
 }
 

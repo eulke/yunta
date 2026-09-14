@@ -268,21 +268,29 @@ pub(super) async fn gate_exhausted(
         let events_for_close = ctx.load_events().await?;
         let inherited = crate::findings::inherited_findings(&events_for_close);
         if !inherited.is_empty() {
-            let file = yunta_core::FindingsFile::from_findings(inherited);
-            let yaml = yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
-                diagnostic: format!("failed to serialize inherited findings: {e}"),
+            // The one door a findings document is rendered through, so
+            // the run's own is held to `limits.max_artifact_bytes` like
+            // every other artifact it accepts. The run's artifact, not
+            // any node's: it is what this log adds up to, and the
+            // successor inherits it as it does every other one.
+            let derived = crate::artifacts::derive_findings(
+                None,
+                inherited,
+                ctx.manifest
+                    .config
+                    .limits
+                    .as_ref()
+                    .and_then(|limits| limits.max_artifact_bytes),
+            )
+            .map_err(|error| RunError::Broken {
+                diagnostic: error.to_string(),
             })?;
-            // The run's own artifact, not any node's: it is what this
-            // log adds up to, and the successor inherits it as it does
-            // every other artifact this run holds.
             crate::artifacts::accept(
                 &ctx.log(),
                 ctx.run_dir,
                 None,
-                yunta_core::events::ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Findings,
-                },
-                yaml.as_bytes(),
+                derived.artifact.clone(),
+                &derived.bytes,
                 yunta_core::events::RecordedOrigin::Derived,
             )
             .await?;

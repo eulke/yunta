@@ -3,12 +3,16 @@
 //! should have had available to whoever writes one.
 
 use yunta_core::shape::{read, Document};
-use yunta_core::{Answer, AnswersFile, FindingsFile, QuestionsFile, TasksFile};
+use yunta_core::{
+    Answer, AnswersFile, FindingEntry, FindingsFile, QuestionsFile, TasksFile, Withdrawal,
+};
 
 const PLAN: &str = "artifacts/plan.yaml";
 const FINDINGS: &str = "artifacts/findings.yaml";
 const QUESTIONS: &str = "artifacts/questions.yaml";
 const ANSWERS: &str = "artifacts/answers.yaml";
+const POST: &str = "yunta_post_finding";
+const WITHDRAW: &str = "yunta_withdraw_finding";
 
 // --- the example is the shape, and it stays true -----------------------
 //
@@ -216,6 +220,42 @@ fn a_value_outside_a_closed_set_lists_the_set() {
     for rung in ["blocking", "major", "minor", "note"] {
         assert!(text.contains(rung), "the ladder, in full: {text}");
     }
+}
+
+#[test]
+fn a_finding_entry_reads_through_the_document_door() {
+    // A session reports one finding at a time, so a single entry is a
+    // document at that frontier — read by the same door, refused with
+    // the same report, and publishing the same shape.
+    read::<FindingEntry>(<FindingEntry as Document>::EXAMPLE.as_bytes(), POST)
+        .expect("the published entry shape parses");
+
+    let report = read::<FindingEntry>(
+        b"id: f1\nseverity: major\ntitle: \"\"\nlocation: src/lib.rs\ndetail: D\n",
+        POST,
+    )
+    .expect_err("a title says something");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-title",
+        "{report}"
+    );
+
+    let report = read::<FindingEntry>(b"id: f1\nseverity: major\nnote: x\n", POST)
+        .expect_err("a key nobody declared");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
+    assert!(report.to_string().contains("note"), "{report}");
+
+    // And a withdrawal the same way.
+    read::<Withdrawal>(<Withdrawal as Document>::EXAMPLE.as_bytes(), WITHDRAW)
+        .expect("the published withdrawal shape parses");
+    let report = read::<Withdrawal>(b"id: f1\nreason: \"  \"\n", WITHDRAW)
+        .expect_err("a withdrawal says why");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-reason",
+        "{report}"
+    );
 }
 
 #[test]

@@ -73,9 +73,11 @@ impl SessionTools {
         spec: &ArtifactSpec,
         held: &crate::artifacts::RunArtifacts<'_>,
     ) -> String {
-        let verified = match spec.kind() {
-            Some(_) => crate::artifacts::held_document(&self.node, spec, held).await,
-            None => {
+        let verified = match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
+            crate::artifacts::Answerer::Log => {
+                crate::artifacts::held_document(&self.node, spec, held).await
+            }
+            crate::artifacts::Answerer::Staging => {
                 crate::artifacts::verify_one(
                     &self.node,
                     spec,

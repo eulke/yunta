@@ -12,7 +12,7 @@ use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, Toke
 use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
-    accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
+    accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
 use crate::tasks::{Provenance, Standing};
@@ -59,7 +59,7 @@ pub(super) async fn derive_findings(
     }
     let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
         .effective_of(&node.id);
-    let derived = match crate::artifacts::derive_findings(&node.id, posted, ceiling) {
+    let derived = match crate::artifacts::derive_findings(Some(&node.id), posted, ceiling) {
         Ok(derived) => derived,
         Err(error) => {
             return Ok(Some(
@@ -261,7 +261,7 @@ pub(super) async fn record_artifacts(
         // under the origin that produced it: there is nothing left for
         // the close to accept. Everything else is a file the node wrote,
         // and this is where it enters the run.
-        if !answered_by_the_log(&node.kind, artifact.content.kind()) {
+        if answerer(&node.kind, artifact.content.kind()) == Answerer::Staging {
             let bytes = canonical(artifact).map_err(|error| RunError::Broken {
                 diagnostic: error.to_string(),
             })?;

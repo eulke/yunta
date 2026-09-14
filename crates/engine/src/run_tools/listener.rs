@@ -50,6 +50,7 @@ pub async fn open_session_listener(
     let RunToolsAccess {
         host,
         node,
+        node_kind,
         declared,
     } = access;
     let token = mint_token();
@@ -60,6 +61,7 @@ pub async fn open_session_listener(
     let tools = SessionTools {
         host,
         node,
+        node_kind,
         task,
         cwd,
         declared,

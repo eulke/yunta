@@ -42,7 +42,7 @@
 //! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
 
 mod blackboard;
-mod catalog;
+pub mod catalog;
 mod findings;
 mod host;
 mod listener;
@@ -53,6 +53,7 @@ mod tasks;
 mod verdicts;
 
 pub use blackboard::consolidate_blackboard;
+pub use catalog::RunTool;
 pub use host::{HostOf, RunToolsAccess, RunToolsHost};
 pub use listener::{open_session_listener, RunToolsSession};
 pub(crate) use notice::submission_notice;

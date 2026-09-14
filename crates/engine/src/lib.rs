@@ -126,7 +126,7 @@ pub use run::{
     ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_tools::{
-    consolidate_blackboard, open_session_listener, HostOf, RunToolsAccess, RunToolsHost,
+    consolidate_blackboard, open_session_listener, HostOf, RunTool, RunToolsAccess, RunToolsHost,
     RunToolsSession,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};

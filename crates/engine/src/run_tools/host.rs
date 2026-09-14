@@ -123,5 +123,9 @@ impl RunToolsHost {
 pub struct RunToolsAccess {
     pub host: Arc<RunToolsHost>,
     pub node: NodeId,
+    /// What the node is, because who answers for an artifact it
+    /// declared is the node's kind's to say — the same question its
+    /// close asks, answered by the same function.
+    pub node_kind: NodeKind,
     pub declared: Vec<ArtifactSpec>,
 }

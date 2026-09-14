@@ -146,6 +146,11 @@ impl Bench {
             yunta_engine::RunToolsAccess {
                 host: self.host.clone(),
                 node: NodeId::from(node),
+                // Run tools belong to a session, and a `prompt` node is
+                // the one that opens one of its own.
+                node_kind: yunta_core::NodeKind::Prompt {
+                    prompt: yunta_core::PromptSource::Inline(String::new()),
+                },
                 declared,
             },
             task.map(TaskId::from),
@@ -978,4 +983,35 @@ async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
     assert_eq!(listed.status(), 200, "the list is answered");
     let listed = result_of(&listed.text().await.unwrap());
     assert_serves_the_session_tools(&listed);
+}
+
+#[test]
+fn the_catalog_and_the_dispatch_name_the_same_tools() {
+    // A tool's name is written once. These are the two readings of that
+    // one place: the catalog offers a session the name, and the dispatch
+    // reads a call back by it — so a name that parses is a name the
+    // catalog can offer, and a name the catalog offers is one the
+    // dispatch answers.
+    for tool in yunta_engine::RunTool::all() {
+        assert_eq!(
+            yunta_engine::RunTool::parse(tool.name()),
+            Some(tool),
+            "`{}` is offered and must be answered",
+            tool.name()
+        );
+        assert!(
+            tool.name().starts_with("yunta_"),
+            "a run tool is named in the engine's own namespace: {}",
+            tool.name()
+        );
+    }
+    assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
+
+    // And the set is exactly the submittable kinds plus the seven fixed
+    // tools, so a kind that gains a submission tool gains its tool here.
+    let submissions = yunta_core::ArtifactKind::ALL
+        .into_iter()
+        .filter(|kind| kind.submit_tool().is_some())
+        .count();
+    assert_eq!(yunta_engine::RunTool::all().len(), 7 + submissions);
 }

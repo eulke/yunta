@@ -167,6 +167,7 @@ async fn tools_access(
         .then(|| crate::run_tools::RunToolsAccess {
             host: ctx.run_tools_host.clone(),
             node: node.id.clone(),
+            node_kind: node.kind.clone(),
             declared: crate::run::node_exec::declared_artifacts(ctx, node),
         })))
 }
