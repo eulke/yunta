@@ -126,10 +126,14 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let started = dir.path().join("started");
+    // The stub publishes its pid by renaming a file it has already
+    // written, never by writing the file the test watches: a rename is
+    // atomic, so the moment the path exists it holds the whole pid, and
+    // the watcher below needs no interval to be sure of that.
     std::fs::write(
         bin.join("git"),
         format!(
-            "#!/bin/sh\necho $$ > {}\ntail -f /dev/null\n",
+            "#!/bin/sh\necho $$ > {0}.partial\nmv {0}.partial {0}\ntail -f /dev/null\n",
             started.display()
         ),
     )
