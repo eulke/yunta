@@ -148,12 +148,10 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
                     // speaking the protocol, and a retry would read the
                     // same lines.
                     other => AgentEvent::Failed {
-                        error: AgentError {
-                            message: format!(
-                                "the CLI reported {} before opening the session",
-                                describe(&other)
-                            ),
-                        },
+                        error: AgentError::message(format!(
+                            "the CLI reported {} before opening the session",
+                            describe(&other)
+                        )),
                         retryable: false,
                     },
                 };

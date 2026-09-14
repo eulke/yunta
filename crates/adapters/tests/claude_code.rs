@@ -9,6 +9,7 @@
 //! in a test — cargo runs tests concurrently in one process, and a
 //! process-global env var would race across them.
 
+use std::error::Error as _;
 use std::path::PathBuf;
 
 use yunta_adapters::ClaudeCodeAdapter;
@@ -84,8 +85,8 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::Usage {
-            input_tokens: 10,
-            output_tokens: 4,
+            input_tokens: Some(10),
+            output_tokens: Some(4),
             cached_input_tokens: Some(2)
         }
     )));
@@ -879,5 +880,138 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     assert_eq!(
         targets[0].digest,
         yunta_core::sha256_hex(command.as_bytes())
+    );
+}
+
+/// A count the CLI did not report is absent, never zero. A run that
+/// recorded zero would say the session cost nothing, which is a
+/// different claim from "the CLI said nothing about it".
+#[tokio::test]
+async fn a_missing_token_count_is_absent_not_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            // A `usage` naming only what it counted.
+            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":40}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
+            _ => None,
+        })
+        .expect("the result reported its usage");
+    assert_eq!(usage, (Some(40), None, None));
+}
+
+/// A line kind this adapter does not read is tolerated: the stream goes
+/// on, and the line contributes nothing rather than failing the session
+/// or being mistaken for something it is not.
+#[tokio::test]
+async fn an_unknown_stream_line_is_tolerated_and_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            // A kind the CLI could add tomorrow, one it already has that
+            // this adapter does not read, and a `system` that is not the
+            // init subtype.
+            r#"{"type":"compact_boundary","reason":"context"}"#,
+            r#"{"type":"user","message":{"content":[]}}"#,
+            r#"{"type":"system","subtype":"status","note":"still here"}"#,
+            r#"{"type":"result","is_error":false,"result":"done"}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Completed { .. })),
+        "the session reached its terminal past the lines it does not read: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Failed { .. })),
+        "an unread line is not a failure: {events:?}"
+    );
+}
+
+/// Settings that do not read fail the session rather than fall back: a
+/// session opened under settings nobody could parse runs under
+/// something nobody asked for, and silently.
+#[tokio::test]
+async fn a_session_never_opens_under_settings_that_do_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
+        adapter_settings: Some(
+            serde_json::from_str(r#"{"sandbox": "read-only"}"#).expect("the settings parse"),
+        ),
+        binary: Some(stub_path()),
+    });
+
+    let Err(error) = adapter.spawn(request(dir.path().to_path_buf())).await else {
+        panic!("a session must not open under settings nobody could read");
+    };
+    let text = yunta_core::describe(&error);
+    assert!(
+        text.contains("cannot read its `adapter_settings`") && text.contains("sandbox"),
+        "the refusal names what it could not read: {text}"
+    );
+}
+
+/// A field the CLI filled with something that cannot be a session id
+/// fails the session, and the failure keeps what rejected the value so a
+/// reader following the chain reaches the rule it broke.
+#[tokio::test]
+async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
+    let events = events_of(&[
+        r#"{"type":"system","subtype":"init","session_id":"","model":"claude-sonnet-5"}"#,
+    ])
+    .await;
+
+    let AgentEvent::Failed { error, retryable } = &events[0] else {
+        panic!("expected Failed, got {:?}", events[0]);
+    };
+    assert!(!retryable, "not a failure to retry: {error}");
+    let described = yunta_core::describe(error);
+    assert!(
+        described.starts_with("the CLI's init line's `session_id`"),
+        "the failure names the field: {described}"
+    );
+    assert!(
+        error.source().is_some(),
+        "the failure keeps what rejected the value: {described}"
+    );
+    assert!(
+        described.len() > error.message.len(),
+        "the cause is read, not dropped: {described}"
     );
 }

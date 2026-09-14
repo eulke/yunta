@@ -148,12 +148,59 @@ pub struct AgentOutcome {
     pub summary: String,
 }
 
-/// A session's failure, kept intentionally minimal until a real adapter
-/// shows what richer information is actually available to report.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+/// A session's failure: what went wrong, and whatever the adapter has
+/// under it.
+///
+/// The cause is kept rather than flattened into the message, so a caller
+/// following the chain reaches what the adapter actually caught — a
+/// broken line, an I/O error, a CLI that answered something the protocol
+/// does not allow — instead of a sentence somebody assembled about it.
+#[derive(Debug, Error)]
 #[error("{message}")]
 pub struct AgentError {
     pub message: String,
+    #[source]
+    pub cause: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl AgentError {
+    /// A failure the adapter states in one sentence, with nothing under
+    /// it.
+    pub fn message(message: impl Into<String>) -> Self {
+        AgentError {
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    /// The same, keeping what the adapter caught.
+    pub fn caused_by(
+        message: impl Into<String>,
+        cause: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        AgentError {
+            message: message.into(),
+            cause: Some(Box::new(cause)),
+        }
+    }
+}
+
+/// Two failures are the same failure when they say the same thing: the
+/// cause is what a reader follows, never what a test compares.
+impl PartialEq for AgentError {
+    fn eq(&self, other: &Self) -> bool {
+        self.message == other.message
+    }
+}
+
+impl Eq for AgentError {}
+
+impl Clone for AgentError {
+    /// The message travels; the cause does not, because a boxed error is
+    /// not clonable and the sentence is what every caller reads.
+    fn clone(&self) -> Self {
+        AgentError::message(self.message.clone())
+    }
 }
 
 /// Events a session's stream carries.
@@ -181,9 +228,13 @@ pub enum AgentEvent {
         /// so what it typed never reaches the log.
         target: crate::events::ToolTarget,
     },
+    /// What the CLI reported it spent. Every count is optional and
+    /// absent means absent: a CLI that says nothing about a count has
+    /// not said zero, and a run that recorded zero would report a
+    /// session that cost nothing.
     Usage {
-        input_tokens: u64,
-        output_tokens: u64,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
         cached_input_tokens: Option<u64>,
     },
     Note {

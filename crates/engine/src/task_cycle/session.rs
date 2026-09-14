@@ -392,8 +392,8 @@ async fn apply_agent_event(
                         message_type: yunta_core::events::AgentMessageType::Usage,
                         tool_name: None,
                         target: None,
-                        input_tokens: Some(input_tokens),
-                        output_tokens: Some(output_tokens),
+                        input_tokens,
+                        output_tokens,
                         cached_input_tokens,
                         text: None,
                     },
@@ -401,8 +401,10 @@ async fn apply_agent_event(
             )
             .await
             .map_err(DispatchError::Audit)?;
-            tokens.input += input_tokens;
-            tokens.output += output_tokens;
+            // A count the CLI did not report adds nothing: a session
+            // that said nothing about its input has not said zero.
+            tokens.input += input_tokens.unwrap_or(0);
+            tokens.output += output_tokens.unwrap_or(0);
             if let Some(cached) = cached_input_tokens {
                 tokens.cached = Some(tokens.cached.unwrap_or(0) + cached);
             }
@@ -420,9 +422,11 @@ async fn apply_agent_event(
         } => return Ok(Some(DispatchOutcome::Completed { summary })),
         AgentEvent::Failed { error, retryable } => {
             return Ok(Some(DispatchOutcome::Failed {
-                message: error.message,
+                // Whatever the adapter caught travels with the sentence
+                // it states: the cause is read here or it is lost.
+                message: yunta_core::describe(&error),
                 retryable,
-            }))
+            }));
         }
     }
     Ok(None)

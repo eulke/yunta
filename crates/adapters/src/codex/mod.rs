@@ -82,6 +82,8 @@ impl CodexAdapter {
             args.push("--model".to_string());
             args.push(model.to_string());
         }
+        // `launch` refused already for settings that do not read, so
+        // the fallback here is a node whose settings named no sandbox.
         let edit_sandbox = self
             .settings
             .as_ref()
@@ -112,6 +114,15 @@ impl CodexAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
+        // Settings that do not read fail the session rather than fall
+        // back: a `sandbox:` nobody could parse would run the agent
+        // under a confinement the team never asked for, and silently.
+        if let Err(unreadable) = &self.settings {
+            return Err(AdapterError::UnreadableSettings {
+                adapter: ID.clone(),
+                detail: unreadable.to_string(),
+            });
+        }
         let args = self.build_args(&req, resume);
         // The credential the config names, placed where a secret is
         // allowed to travel: the child's own environment.

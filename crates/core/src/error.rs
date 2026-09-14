@@ -16,6 +16,12 @@ pub enum AdapterError {
         what: Capability,
     },
 
+    /// An adapter was handed `adapter_settings` it cannot read. No
+    /// session opens under them: a setting nobody could parse would run
+    /// the agent under something the config never asked for, silently.
+    #[error("adapter `{adapter}` cannot read its `adapter_settings`: {detail}")]
+    UnreadableSettings { adapter: AdapterId, detail: String },
+
     /// An adapter operation failed at the I/O boundary — e.g. `mock`
     /// applying a fixture's filesystem effects, or a real adapter
     /// failing to spawn its CLI subprocess.

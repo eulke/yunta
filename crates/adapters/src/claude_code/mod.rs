@@ -160,6 +160,15 @@ impl ClaudeCodeAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
+        // Settings that do not read fail the session rather than fall
+        // back: a session opened under settings nobody could parse runs
+        // under something nobody asked for, and silently.
+        if let Err(unreadable) = &self.settings {
+            return Err(AdapterError::UnreadableSettings {
+                adapter: ID.clone(),
+                detail: unreadable.to_string(),
+            });
+        }
         stage_skills(&req)?;
         let mcp_config = write_mcp_config(&req)?;
         let args = self.build_args(&req, resume, mcp_config.as_deref());

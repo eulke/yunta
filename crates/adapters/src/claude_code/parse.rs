@@ -14,26 +14,55 @@
 //! atomic-turn execution model can't reliably support anyway.
 
 use serde_json::Value;
-use yunta_core::{ModelName, SessionId};
+use yunta_core::{InvalidId, ModelName, SessionId};
 
 use crate::failure;
 use yunta_core::events::ToolTarget;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
 
-pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return Vec::new();
-    };
-    match value.get("type").and_then(Value::as_str) {
-        Some("system") if is_init(&value) => opened(&value),
-        Some("assistant") => assistant_message(&value),
-        Some("result") => result_events(&value),
-        _ => Vec::new(),
-    }
+/// One line of the CLI's stream-json, by the `type` it declares.
+///
+/// Tagged rather than matched on a string, so the set this adapter reads
+/// is a type and a line outside it has a name. `Unknown` is that name:
+/// a CLI that adds a line kind — or one this adapter was never taught —
+/// is tolerated and says so, never mistaken for something it is not and
+/// never a silent nothing.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ClaudeLine {
+    System(SystemLine),
+    Assistant(Value),
+    Result(Value),
+    /// A line kind this adapter does not read: `user`, a kind the CLI
+    /// adds after this build, or a CLI speaking a different protocol.
+    #[serde(other)]
+    Unknown,
 }
 
-fn is_init(value: &Value) -> bool {
-    value.get("subtype").and_then(Value::as_str) == Some("init")
+/// A `system` line. Only its `init` subtype opens a session; the others
+/// report nothing this adapter acts on.
+#[derive(Debug, serde::Deserialize)]
+struct SystemLine {
+    #[serde(default)]
+    subtype: Option<String>,
+    #[serde(flatten)]
+    rest: Value,
+}
+
+pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
+    // A line that is not JSON at all is not this protocol: the stream
+    // carries whatever the CLI wrote to stdout, warnings included.
+    let Ok(parsed) = serde_json::from_str::<ClaudeLine>(line) else {
+        return Vec::new();
+    };
+    match parsed {
+        ClaudeLine::System(system) if system.subtype.as_deref() == Some("init") => {
+            opened(&system.rest)
+        }
+        ClaudeLine::Assistant(value) => assistant_message(&value),
+        ClaudeLine::Result(value) => result_events(&value),
+        ClaudeLine::System(_) | ClaudeLine::Unknown => Vec::new(),
+    }
 }
 
 /// Everything the init line reports: the session it opens, and — when
@@ -78,13 +107,13 @@ fn session_opened(value: &Value) -> AgentEvent {
     };
     let session_id = match session_id.parse::<SessionId>() {
         Ok(session_id) => session_id,
-        Err(error) => return malformed(&format!("init line's `session_id`: {error}")),
+        Err(error) => return unreadable("init line's `session_id`", error),
     };
     let model = match value.get("model").and_then(Value::as_str) {
         None => None,
         Some(model) => match model.parse::<ModelName>() {
             Ok(model) => Some(model),
-            Err(error) => return malformed(&format!("init line's `model`: {error}")),
+            Err(error) => return unreadable("init line's `model`", error),
         },
     };
     AgentEvent::SessionOpened { session_id, model }
@@ -94,10 +123,19 @@ fn session_opened(value: &Value) -> AgentEvent {
 /// stream-json as this adapter reads it, and a retry would read it
 /// again.
 fn malformed(what: &str) -> AgentEvent {
+    failed(AgentError::message(format!("the CLI's {what}")))
+}
+
+/// The same, for a field that is present and cannot be what it claims:
+/// the failure keeps what rejected it, so a reader following the chain
+/// reaches the rule the value broke.
+fn unreadable(what: &str, cause: InvalidId) -> AgentEvent {
+    failed(AgentError::caused_by(format!("the CLI's {what}"), cause))
+}
+
+fn failed(error: AgentError) -> AgentEvent {
     AgentEvent::Failed {
-        error: AgentError {
-            message: format!("the CLI's {what}"),
-        },
+        error,
         retryable: false,
     }
 }
@@ -153,8 +191,8 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     if let Some(usage) = value.get("usage") {
         events.push(AgentEvent::Usage {
-            input_tokens: field_u64(usage, "input_tokens"),
-            output_tokens: field_u64(usage, "output_tokens"),
+            input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
+            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
             cached_input_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
         });
     }
@@ -171,7 +209,7 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
             .to_string();
         let retryable = failure::classify(&message).retryable();
         AgentEvent::Failed {
-            error: AgentError { message },
+            error: AgentError::message(message),
             retryable,
         }
     } else {
@@ -186,8 +224,4 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
         }
     });
     events
-}
-
-fn field_u64(value: &Value, key: &str) -> u64 {
-    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }

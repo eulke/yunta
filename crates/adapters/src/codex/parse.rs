@@ -43,20 +43,45 @@ use crate::failure;
 use yunta_core::events::ToolTarget;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
+/// One `codex exec --json` event, by the `type` it declares — the same
+/// closed set `ThreadEvent` defines, as this module's own doc
+/// transcribes it.
+///
+/// Tagged rather than matched on a string, so a line outside the set has
+/// a name. `Unknown` is that name: `turn.started`, `item.started` and
+/// `item.updated` are kinds this adapter deliberately does not act on,
+/// and a kind the CLI adds later lands here too — tolerated and named,
+/// never mistaken for something else.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type")]
+enum ThreadEvent {
+    #[serde(rename = "thread.started")]
+    ThreadStarted(Value),
+    #[serde(rename = "item.completed")]
+    ItemCompleted(Value),
+    #[serde(rename = "turn.completed")]
+    TurnCompleted(Value),
+    #[serde(rename = "turn.failed")]
+    TurnFailed { error: Option<Value> },
+    #[serde(rename = "error")]
+    Error(Value),
+    #[serde(other)]
+    Unknown,
+}
+
 pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
+    // A line that is not JSON at all is not this protocol: the stream
+    // carries whatever the CLI wrote to stdout, warnings included.
+    let Ok(parsed) = serde_json::from_str::<ThreadEvent>(line) else {
         return Vec::new();
     };
-    match value.get("type").and_then(Value::as_str) {
-        Some("thread.started") => thread_started(&value).into_iter().collect(),
-        Some("item.completed") => item_completed(&value).into_iter().collect(),
-        Some("turn.completed") => turn_completed(&value, last_message),
-        Some("turn.failed") => vec![failed(value.get("error"), "turn failed")],
-        Some("error") => vec![failed(Some(&value), "the CLI reported an error")],
-        // "turn.started", "item.started"/"item.updated" (this adapter
-        // only acts once an item is done) and anything future: nothing
-        // this adapter needs.
-        _ => Vec::new(),
+    match parsed {
+        ThreadEvent::ThreadStarted(value) => thread_started(&value).into_iter().collect(),
+        ThreadEvent::ItemCompleted(value) => item_completed(&value).into_iter().collect(),
+        ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
+        ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
+        ThreadEvent::Error(value) => vec![failed(Some(&value), "the CLI reported an error")],
+        ThreadEvent::Unknown => Vec::new(),
     }
 }
 
@@ -71,9 +96,9 @@ fn thread_started(value: &Value) -> Option<AgentEvent> {
             model: None,
         },
         Err(error) => AgentEvent::Failed {
-            error: AgentError {
-                message: format!("the CLI's `thread.started` line is malformed: {error}"),
-            },
+            // The failure keeps what rejected the id, so a reader
+            // following the chain reaches the rule the value broke.
+            error: AgentError::caused_by("the CLI's `thread.started` line is malformed", error),
             retryable: false,
         },
     })
@@ -150,8 +175,8 @@ fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     if let Some(usage) = value.get("usage") {
         events.push(AgentEvent::Usage {
-            input_tokens: field_u64(usage, "input_tokens"),
-            output_tokens: field_u64(usage, "output_tokens"),
+            input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
+            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
             // The real `Usage` struct always sends this field (no
             // `#[serde(default)]` on it, unlike `cache_write_input_tokens`)
             // — `Option` here is yunta's own `Usage` type accommodating
@@ -181,11 +206,7 @@ fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
         );
     let retryable = failure::classify(&message).retryable();
     AgentEvent::Failed {
-        error: AgentError { message },
+        error: AgentError::message(message),
         retryable,
     }
-}
-
-fn field_u64(value: &Value, key: &str) -> u64 {
-    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }

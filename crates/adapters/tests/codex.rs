@@ -6,6 +6,7 @@
 //! credentials exist in this environment. See `codex/mod.rs`'s own doc
 //! comment for the details.
 
+use std::error::Error as _;
 use std::path::PathBuf;
 
 use yunta_adapters::CodexAdapter;
@@ -80,8 +81,8 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::Usage {
-            input_tokens: 10,
-            output_tokens: 4,
+            input_tokens: Some(10),
+            output_tokens: Some(4),
             cached_input_tokens: Some(2)
         }
     )));
@@ -911,5 +912,141 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     assert_eq!(
         targets[0].digest,
         yunta_core::sha256_hex(command.as_bytes())
+    );
+}
+
+/// A count the CLI did not report is absent, never zero. A run that
+/// recorded zero would say the session cost nothing, which is a
+/// different claim from "the CLI said nothing about it".
+#[tokio::test]
+async fn a_missing_token_count_is_absent_not_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            // A `usage` naming only what it counted.
+            r#"{"type":"turn.completed","usage":{"input_tokens":40}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
+            _ => None,
+        })
+        .expect("the turn reported its usage");
+    assert_eq!(usage, (Some(40), None, None));
+}
+
+/// A line kind this adapter does not read is tolerated: the stream goes
+/// on, and the line contributes nothing rather than failing the session
+/// or being mistaken for something it is not.
+#[tokio::test]
+async fn an_unknown_stream_line_is_tolerated_and_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            // A kind the CLI could add tomorrow, and one it already has
+            // that this adapter deliberately ignores.
+            r#"{"type":"thread.renamed","name":"something new"}"#,
+            r#"{"type":"turn.started"}"#,
+            r#"{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"still here"}}"#,
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Note { text } if text == "still here")),
+        "the stream went on past the line it does not read: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Completed { .. })),
+        "and the session still reached its terminal: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Failed { .. })),
+        "an unread line is not a failure: {events:?}"
+    );
+}
+
+/// Settings that do not read fail the session rather than fall back to
+/// a default: a `sandbox:` nobody could parse would run the agent under
+/// a confinement the team never asked for.
+#[tokio::test]
+async fn a_session_never_opens_under_settings_that_do_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = yunta_core::AdapterSettings {
+        adapter_settings: Some(
+            serde_json::from_str(r#"{"sandbox": "no-such-mode"}"#).expect("the settings parse"),
+        ),
+        ..Default::default()
+    };
+    let adapter = yunta_adapters::CodexAdapter::new(&settings);
+
+    let Err(error) = adapter.spawn(request(dir.path().to_path_buf())).await else {
+        panic!("a session must not open under settings nobody could read");
+    };
+    let text = yunta_core::describe(&error);
+    assert!(
+        text.contains("cannot read its `adapter_settings`") && text.contains("no-such-mode"),
+        "the refusal names what it could not read: {text}"
+    );
+}
+
+/// A thread id the CLI states and nothing can be fails the session, and
+/// the failure keeps what rejected the value so a reader following the
+/// chain reaches the rule it broke.
+#[tokio::test]
+async fn a_thread_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
+    let events = events_of(&[r#"{"type":"thread.started","thread_id":""}"#]).await;
+
+    let AgentEvent::Failed { error, retryable } = &events[0] else {
+        panic!("expected Failed, got {:?}", events[0]);
+    };
+    assert!(!retryable, "not a failure to retry: {error}");
+    let described = yunta_core::describe(error);
+    assert!(
+        described.starts_with("the CLI's `thread.started` line is malformed"),
+        "the failure names the line: {described}"
+    );
+    assert!(
+        error.source().is_some(),
+        "the failure keeps what rejected the value: {described}"
+    );
+    assert!(
+        described.len() > error.message.len(),
+        "the cause is read, not dropped: {described}"
     );
 }

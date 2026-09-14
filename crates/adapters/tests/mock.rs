@@ -32,8 +32,8 @@ steps:
     assert!(matches!(
         events[1],
         AgentEvent::Usage {
-            input_tokens: 10,
-            output_tokens: 5,
+            input_tokens: Some(10),
+            output_tokens: Some(5),
             ..
         }
     ));

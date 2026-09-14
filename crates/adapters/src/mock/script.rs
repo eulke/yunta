@@ -115,7 +115,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
             Ok(event) => event,
             Err(message) => {
                 let _ = events.send(AgentEvent::Failed {
-                    error: AgentError { message },
+                    error: AgentError::message(message),
                     retryable: false,
                 });
                 return;
@@ -146,8 +146,8 @@ async fn played(
             cached_input_tokens,
             ..
         } => AgentEvent::Usage {
-            input_tokens,
-            output_tokens,
+            input_tokens: Some(input_tokens),
+            output_tokens: Some(output_tokens),
             cached_input_tokens,
         },
         MockStep::Note { text, .. } => AgentEvent::Note { text },
@@ -201,7 +201,7 @@ async fn end(outcome: MockOutcome, events: &mpsc::UnboundedSender<AgentEvent>, s
         }
         MockOutcome::Failed { message, retryable } => {
             let _ = events.send(AgentEvent::Failed {
-                error: AgentError { message },
+                error: AgentError::message(message),
                 retryable,
             });
         }
