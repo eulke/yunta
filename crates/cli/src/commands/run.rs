@@ -243,27 +243,9 @@ pub(super) struct Estimated {
 /// warning survives both — it asks for a decision before tokens are
 /// spent, and a run that stops halfway on a badly chosen cap is the most
 /// expensive waste there is.
-async fn estimate(
-    ctx: &Context,
-    storage: &AsyncStorage,
-    manifest: &Manifest,
-    quiet: bool,
-    json: bool,
-) -> Estimated {
-    let history = {
-        let runs_root = ctx.project.runs_root.clone();
-        let workflow_name = manifest.workflow.name.clone();
-        storage
-            .blocking("collect the workflow's history", move |storage| {
-                Ok(super::stats::collect_history(
-                    &runs_root,
-                    storage,
-                    &workflow_name,
-                ))
-            })
-            .await
-            .unwrap_or_default()
-    };
+async fn estimate(ctx: &Context, manifest: &Manifest, quiet: bool, json: bool) -> Estimated {
+    let history =
+        super::stats::summaries(&super::stats::history(ctx, &manifest.workflow.name).await);
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
         if !(quiet || json) {

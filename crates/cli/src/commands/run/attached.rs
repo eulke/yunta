@@ -51,7 +51,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
 
     let (frozen, real_adapters) =
         runnable(ctx, workflow_path, raw_inputs, adapter, mock_fixture).await?;
-    let estimated = estimate(ctx, storage, &frozen.manifest, quiet, json).await;
+    let estimated = estimate(ctx, &frozen.manifest, quiet, json).await;
 
     let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
     // The documents the run was born with are on its log now; what the

@@ -166,16 +166,16 @@ fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) 
 /// `run.dir` is still reclaimed, its worktree (if any) left for a human,
 /// never guessed at from the current config.
 fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<PathBuf> {
-    let manifest: Manifest = match crate::load_yaml(
-        &yunta_engine::run_dir::manifest_path(run_dir),
-        "run manifest",
-    ) {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            warn(format!("run `{run_id}`: {e}"));
-            return None;
-        }
-    };
+    let manifest: Manifest =
+        match crate::load_manifest(&yunta_engine::run_dir::manifest_path(run_dir))
+            .map(|manifest| manifest.doc)
+        {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                warn(format!("run `{run_id}`: {e}"));
+                return None;
+            }
+        };
     match manifest.isolation {
         Isolation::Worktree => Some(project.worktrees_root_for(&manifest).join(run_id.as_str())),
         Isolation::None => None,

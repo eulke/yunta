@@ -2986,3 +2986,53 @@ nodes:
         "the refusal names what the workflow reaches for and does not have: {text}"
     );
 }
+
+#[test]
+fn every_command_that_opens_a_run_refuses_a_missing_one_with_the_same_sentence() {
+    // A person who mistyped a run id gets one answer, not eight — and
+    // the answer names every root this binary looked under, so they can
+    // see where it did look.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let ghost = "01GHOSTGHOSTGHOSTGHOSTGHOST";
+    let mut said: Vec<(&str, String)> = Vec::new();
+    for command in [
+        vec!["status", ghost],
+        vec!["stats", ghost],
+        vec!["receipt", ghost],
+        vec!["cancel", ghost],
+        vec!["resume", ghost],
+        vec!["resolve-gate", ghost, "approve"],
+    ] {
+        let name = command[0];
+        let out = yunta_in!(&repo, &home, &command);
+        assert!(
+            !out.status.success(),
+            "`{name}` must refuse a run it has no record of"
+        );
+        let text = stderr(&out);
+        let line = text
+            .lines()
+            .find(|line| line.contains("no run"))
+            .unwrap_or_else(|| panic!("`{name}` says which run it could not find: {text}"))
+            .to_string();
+        said.push((name, line));
+    }
+
+    let (first_name, first) = &said[0];
+    for (name, line) in &said[1..] {
+        assert_eq!(
+            line, first,
+            "`{name}` and `{first_name}` say the same thing about a run neither has"
+        );
+    }
+    assert!(first.contains(ghost), "the id the person typed: {first}");
+    assert!(
+        first.contains("runs"),
+        "and where this binary looked for it: {first}"
+    );
+}

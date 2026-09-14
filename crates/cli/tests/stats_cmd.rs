@@ -209,3 +209,40 @@ nodes:
     assert!(row("passes").contains("done"), "got: {}", row("passes"));
     assert!(row("breaks").contains("fail"), "got: {}", row("breaks"));
 }
+
+#[test]
+fn history_sees_a_run_under_the_default_state_root() {
+    // A run is found where a run is found: the project's own runs root,
+    // then the default under the state root. History used to join the
+    // current root itself, so a run created before `paths.runs` moved
+    // was invisible to the sparkline and the estimation — the workflow
+    // looked like it had never run.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(&repo.join("wf.yaml"), bash_only_workflow());
+    for _ in 0..2 {
+        let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+        assert!(run.status.success(), "{}", stdout(&run));
+    }
+
+    // The project now keeps its runs somewhere else. The two already
+    // there are still this workflow's history.
+    let elsewhere = root.path().join("elsewhere");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!("paths:\n  runs: {}\n", elsewhere.display()),
+    );
+
+    let stats = yunta_in!(&repo, &home, &["stats", "--workflow", "bash-only-stats"]);
+    assert!(stats.status.success(), "{}", stdout(&stats));
+    let text = stdout(&stats);
+    assert!(
+        text.lines()
+            .any(|line| line == "workflow `bash-only-stats` — 2 runs"),
+        "the runs under the default root are still this workflow's history: {text}"
+    );
+}

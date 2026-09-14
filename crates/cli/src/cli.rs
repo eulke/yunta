@@ -316,7 +316,9 @@ enum PackAction {
 /// caller turns into a line on stderr and a failing exit code.
 async fn dispatch(command: Command) -> Result<Outcome, CliError> {
     match command {
-        Command::Check { workflow, config } => commands::check::check(&workflow, config.as_deref()),
+        Command::Check { workflow, config } => {
+            commands::check::check(&workflow, config.as_deref()).await
+        }
         Command::Run {
             workflow,
             input,
@@ -339,7 +341,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             )
             .await
         }
-        Command::Status { run_id, json } => commands::status::status(&run_id, json),
+        Command::Status { run_id, json } => commands::status::status(&run_id, json).await,
         Command::Resume {
             run_id,
             quiet,
@@ -364,7 +366,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             if runs {
                 commands::list::list_runs()
             } else {
-                commands::list::list_workflows()
+                commands::list::list_workflows().await
             }
         }
         Command::Doctor => commands::doctor::doctor().await,
@@ -377,7 +379,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
         } => graph::graph(&workflow, run.as_ref(), format),
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
         Command::Verify { run_id } => commands::verify::verify(&run_id).await,
-        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
+        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json).await,
         Command::Pack { action } => match action {
             PackAction::Add {
                 source,
@@ -396,7 +398,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             run_id,
             workflow,
             json,
-        } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json),
+        } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json).await,
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
         Command::Fence { adapter } => fence_hook(&adapter),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),

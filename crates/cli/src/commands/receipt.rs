@@ -18,9 +18,9 @@ use yunta_storage::ChainVerification;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 
-pub fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+pub async fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let (run_dir, receipt) = gathered(&ctx, run_id)?;
+    let (run_dir, receipt) = gathered(&ctx, run_id).await?;
 
     let markdown = render_receipt_markdown(&receipt);
     let json_text = render_receipt_json(&receipt)
@@ -45,21 +45,10 @@ pub fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
 /// The run's receipt and the directory it belongs beside, derived from
 /// what this command reads off disk: the log, the manifest the run
 /// froze, and the hash chain's own verdict.
-fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), CliError> {
+async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), CliError> {
     let storage = ctx.storage()?;
-    let events = storage.events_for_run(run_id)?;
-    if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        )));
-    }
-
-    let run_dir = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
+    let open = ctx.open_run(run_id).await?;
+    let (run_dir, events, manifest) = (open.run_dir, open.events, open.manifest.doc);
 
     let chain = match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => EventChainStatus::Intact { events },

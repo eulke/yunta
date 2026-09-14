@@ -28,7 +28,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
-use yunta_core::{AdapterId, ArtifactKind, Clock, Manifest, ModeName, RunId};
+use yunta_core::{AdapterId, ArtifactKind, Clock, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -251,11 +251,8 @@ async fn tool_list_workflows(cwd: &Path) -> Result<String, String> {
     // out to a subprocess would print onto this server's own stdout — the
     // very stream its JSON-RPC replies travel on. Best-effort storage, so
     // a repo with no state root yet still lists, just without estimates.
-    let history_source = Context::resolve_in(cwd.to_path_buf()).ok().and_then(|ctx| {
-        let storage = ctx.storage().ok()?;
-        Some((ctx.project, storage))
-    });
-    Ok(super::list::render_catalog(cwd, history_source.as_ref()))
+    let ctx = Context::resolve_in(cwd.to_path_buf()).ok();
+    Ok(super::list::render_catalog(cwd, ctx.as_ref()).await)
 }
 
 async fn tool_workflow_status(
@@ -264,25 +261,8 @@ async fn tool_workflow_status(
 ) -> Result<String, String> {
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
-    let events = storage
-        .events_for_run(run_id.clone())
-        .await
-        .map_err(|e| e.to_string())?;
-    if events.is_empty() {
-        return Err(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        ));
-    }
-    let manifest_path = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest: Manifest = crate::load_manifest(&manifest_path)
-        .map_err(|e| e.to_string())?
-        .doc;
+    let open = ctx.open_run(&run_id).await.map_err(|e| e.to_string())?;
+    let (events, manifest) = (open.events, open.manifest.doc);
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
@@ -356,12 +336,11 @@ async fn tool_resume_run(
 ) -> Result<String, String> {
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let run_dir = ctx.project.run_dir(run_id.as_str()).ok_or_else(|| {
-        format!(
-            "no run `{run_id}` under {}",
-            ctx.project.runs_root.display()
-        )
-    })?;
+    let run_dir = ctx
+        .open_run(&run_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .run_dir;
     super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
         .map_err(|source| super::DetachedResumeError::new(&run_id, source).to_string())?;
@@ -385,16 +364,8 @@ async fn tool_resolve_gate(
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
     let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let run_dir = ctx.project.run_dir(run_id.as_str()).ok_or_else(|| {
-        format!(
-            "no run `{run_id}` under {}",
-            ctx.project.runs_root.display()
-        )
-    })?;
-    let manifest: yunta_core::Manifest =
-        std::fs::read_to_string(yunta_engine::run_dir::manifest_path(&run_dir))
-            .map_err(|e| e.to_string())
-            .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
+    let open = ctx.open_run(&run_id).await.map_err(|e| e.to_string())?;
+    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
 
     yunta_engine::resolve_gate(

@@ -37,15 +37,9 @@ struct Parked {
 /// Everything comes from the manifest the run froze, never the project's
 /// current config: a run never re-reads config after it is created, and
 /// the worktree it works in is the one its own frozen roots name.
-fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
-    let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` under {} (or the default state root) — nothing to resume; a run \
-             created under roots no longer in any config layer needs YUNTA_HOME pointing there",
-            ctx.project.runs_root.display()
-        )));
-    };
-    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
+async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
+    let open = ctx.open_run(run_id).await?;
+    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
     let worktree = match manifest.isolation {
@@ -70,7 +64,7 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         manifest,
         worktree,
         adapters,
-    } = parked(&ctx, run_id)?;
+    } = parked(&ctx, run_id).await?;
     let storage = ctx.async_storage().await?;
     if !json {
         println!("run {run_id}: resuming at {}", run_dir.display());

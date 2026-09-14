@@ -14,7 +14,7 @@ use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 use crate::{load_yaml, project};
 
-pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
+pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
     // The one directory this command resolves everything against: the
     // catalog reference, the config layers, and the composition graph.
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
@@ -59,9 +59,9 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
     // ever ran) or an unnamed workflow simply shows nothing, the same
     // stance `list_workflows` takes on missing history.
     if let Ok(ctx) = Context::load() {
-        if let Ok(storage) = ctx.storage() {
-            let (history, _) =
-                super::stats::collect_raw_history(&ctx.project.runs_root, &storage, &workflow.name);
+        {
+            let opened = super::stats::history(&ctx, &workflow.name).await;
+            let (history, _) = super::stats::raw_history(&opened);
             let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
             let text = super::stats::render_verification_findings(&findings);
             if !text.is_empty() {

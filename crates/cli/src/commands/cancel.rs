@@ -38,13 +38,8 @@ const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
-    let events = storage.events_for_run(run_id.clone()).await?;
-    if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        )));
-    }
+    let open = ctx.open_run(run_id).await?;
+    let events = open.events;
 
     let state = yunta_engine::derive(&events);
     let has_terminal_run_event = events.iter().any(|e| {

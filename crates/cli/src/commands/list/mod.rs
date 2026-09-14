@@ -16,11 +16,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use yunta_core::InputSpec;
-use yunta_storage::Storage;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project::Project;
 use crate::render::INDENT;
 
 pub use runs::list_runs;
@@ -33,18 +31,16 @@ struct CatalogEntry {
     path: PathBuf,
 }
 
-pub fn list_workflows() -> Result<Outcome, CliError> {
+pub async fn list_workflows() -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
 
     // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
     // runs" does; neither is an error worth refusing the catalog over.
-    let history_source = Context::load().ok().and_then(|ctx| {
-        let storage = ctx.storage().ok()?;
-        Some((ctx.project, storage))
-    });
-
-    print!("{}", render_catalog(&cwd, history_source.as_ref()));
+    print!(
+        "{}",
+        render_catalog(&cwd, Context::load().ok().as_ref()).await
+    );
     Ok(Outcome::Success)
 }
 
@@ -54,7 +50,7 @@ pub fn list_workflows() -> Result<Outcome, CliError> {
 /// prints and the `list_workflows` control-plane tool returns, so the two
 /// never drift. Given a project's storage, each workflow carries its prior
 /// estimation; a broken pack is named, never silently dropped.
-pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Storage)>) -> String {
+pub(crate) async fn render_catalog(cwd: &Path, history_source: Option<&Context>) -> String {
     let mut out = String::new();
     let mut entries = repo_catalog_entries(cwd);
     let shadowed: HashSet<String> = entries.iter().map(|e| e.display_name.clone()).collect();
@@ -119,9 +115,9 @@ pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Stora
                 }
             ));
         }
-        if let Some((project, storage)) = history_source {
+        if let Some(ctx) = history_source {
             let history =
-                super::stats::collect_history(&project.runs_root, storage, &workflow.name);
+                super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
             if let Some(estimation) = yunta_engine::prior_estimation(&history) {
                 out.push_str(&format!(
                     "{INDENT}{}\n",

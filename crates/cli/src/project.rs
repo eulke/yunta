@@ -101,7 +101,7 @@ pub(crate) fn process_env() -> yunta_core::Env {
     }
 }
 
-fn user_root() -> Result<PathBuf, ProjectError> {
+pub(crate) fn user_root() -> Result<PathBuf, ProjectError> {
     yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
 }
 

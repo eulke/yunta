@@ -23,14 +23,8 @@ pub async fn resolve_gate(
     free_text: Option<&str>,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` under {} (or the default state root)",
-            ctx.project.runs_root.display()
-        )));
-    };
-    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
-
+    let open = ctx.open_run(run_id).await?;
+    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
 
     yunta_engine::resolve_gate(

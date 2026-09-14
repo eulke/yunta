@@ -27,37 +27,22 @@ use crate::error::{CliError, Outcome};
 use crate::render::{indent, NodeDisplay, INDENT};
 use yunta_core::events::NodeEvent;
 
-pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
-    let events = storage.events_for_run(run_id)?;
-    if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        )));
-    }
-
-    // Search order (current runs root, then the default) — the run's
-    // own frozen paths take over once the manifest is open.
-    let manifest_path = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest = crate::load_manifest(&manifest_path)?;
+    let open = ctx.open_run(run_id).await?;
+    let events = open.events;
     // What this binary did not understand in a file a later one wrote:
     // said, because a reader acting on a manifest whose newer half is
     // invisible to them should know that is what they are doing.
-    if !manifest.unknown.is_empty() {
+    if !open.manifest.unknown.is_empty() {
         note(format!(
             "this run's manifest carries {} this binary does not know: {} — a newer yunta \
              wrote it, and what it recorded there is not read here",
-            yunta_core::text::counted(manifest.unknown.len(), "key"),
-            manifest.unknown_keys().join(", ")
+            yunta_core::text::counted(open.manifest.unknown.len(), "key"),
+            open.manifest.unknown_keys().join(", ")
         ));
     }
-    let manifest = manifest.doc;
+    let manifest = open.manifest.doc;
 
     let now = ctx.clock.now();
     if json {

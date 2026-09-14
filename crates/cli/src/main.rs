@@ -89,8 +89,6 @@ fn drive(cli: cli::Cli) -> Result<Outcome, CliError> {
     outcome
 }
 
-/// Reads and parses a YAML file into `T`, naming what it was reading and
-/// where when it can't — the one loader every command reaches for.
 /// The run manifest at `path`, read through the one door every
 /// persisted document goes through — so a manifest from a newer binary
 /// is refused naming both versions, and a key this one does not know
@@ -114,6 +112,9 @@ pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliErro
         .map_err(|report| CliError::msg(report.to_string()))
 }
 
+/// Reads and parses a YAML file into `T`, naming what it was reading and
+/// where when it can't — the loader for everything that is neither a
+/// workflow nor a persisted document.
 pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
     path: &Path,
     what: &str,

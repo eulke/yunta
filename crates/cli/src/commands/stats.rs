@@ -9,32 +9,30 @@
 //! words and glyphs all come from `crate::render`, which is where both
 //! rules live.
 
-use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
 use yunta_core::events::StoredEvent;
-use yunta_core::{ContentHash, Manifest, ModeName, RunId, WorkflowName};
+use yunta_core::{ContentHash, ModeName, RunId, Workflow, WorkflowName};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
 };
-use yunta_storage::Storage;
 
-use crate::context::Context;
+use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::render::{
     bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay, INDENT,
     LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
 };
 
-pub fn stats(
+pub async fn stats(
     run_id: Option<&RunId>,
     workflow: Option<&WorkflowName>,
     json: bool,
 ) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
-        (Some(run_id), None) => stats_run(run_id, json),
-        (None, Some(workflow)) => stats_workflow(workflow, json),
+        (Some(run_id), None) => stats_run(run_id, json).await,
+        (None, Some(workflow)) => stats_workflow(workflow, json).await,
         (None, None) => Err(CliError::msg(
             "`yunta stats` needs a run id or `--workflow <name>`",
         )),
@@ -44,25 +42,11 @@ pub fn stats(
     }
 }
 
-fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
-    let events = storage.events_for_run(run_id)?;
-    if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        )));
-    }
-
-    // Search order (current runs root, then the default) — the run's
-    // own frozen paths take over once the manifest is open.
-    let manifest_path = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest = crate::load_manifest(&manifest_path)?.doc;
+    let open = ctx.open_run(run_id).await?;
+    let events = open.events;
+    let manifest = open.manifest.doc;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
     let mode = yunta_core::events::run_mode(&events);
@@ -83,11 +67,11 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, CliError> {
+async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
 
-    let history = collect_history(&ctx.project.runs_root, &storage, workflow_name);
+    let opened = history(&ctx, workflow_name).await;
+    let history = summaries(&opened);
     if history.is_empty() {
         println!("no runs of workflow `{workflow_name}` yet");
         return Ok(Outcome::Success);
@@ -96,8 +80,7 @@ fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, C
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
     // criteria/re-routes/gates against.
-    let (raw_history, workflow) =
-        collect_raw_history(&ctx.project.runs_root, &storage, workflow_name);
+    let (raw_history, workflow) = raw_history(&opened);
     let findings = workflow
         .as_ref()
         .map(|wf| yunta_engine::analyze_verification_effectiveness(wf, &raw_history));
@@ -116,101 +99,75 @@ fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, C
     Ok(Outcome::Success)
 }
 
-/// Every past run of `workflow_name` this project's storage knows about,
-/// oldest first — the unit `--workflow`'s sparkline, mode table and
-/// prior estimation all fold over. Skips a run whose manifest is
-/// unreadable or belongs to a different workflow, same "degrade past
-/// what a for-display command can't use" stance `list_runs` already
-/// takes for its own unreadable entries.
-pub(crate) fn collect_history(
-    runs_root: &Path,
-    storage: &Storage,
-    workflow_name: &WorkflowName,
-) -> Vec<RunSummary> {
+/// Every past run of `workflow_name` this project knows about, oldest
+/// first, each opened.
+///
+/// The one walk over a project's history. Two readings used to make it
+/// separately — a summary for the sparkline and the whole log for the
+/// verification analysis — and both found a run's directory by joining
+/// this project's current runs root, so a run created under the default
+/// state root was invisible to both. `open_run` is where a run is
+/// found, so this walks through it and the two readings fold over what
+/// it hands back.
+///
+/// A run whose manifest cannot be read, or that belongs to a different
+/// workflow, is skipped: the same "degrade past what a for-display
+/// command cannot use" stance `list_runs` already takes.
+pub(crate) async fn history(ctx: &Context, workflow_name: &WorkflowName) -> Vec<Opened> {
+    let Ok(storage) = ctx.storage() else {
+        return Vec::new();
+    };
     let run_ids: Vec<RunId> = storage
         .list_runs()
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
         .unwrap_or_default();
-    let mut dated: Vec<(chrono::DateTime<chrono::Utc>, RunSummary)> = Vec::new();
+    let mut dated: Vec<(chrono::DateTime<chrono::Utc>, Opened)> = Vec::new();
     for run_id in run_ids {
-        let Ok(events) = storage.events_for_run(&run_id) else {
+        let Ok(open) = ctx.open_run(&run_id).await else {
             continue;
         };
-        let Some(first) = events.first() else {
+        let Some(first) = open.events.first() else {
             continue;
         };
-        let manifest_path = yunta_engine::run_dir::manifest_path(&runs_root.join(run_id.as_str()));
-        let Some(manifest) = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
-        else {
-            continue;
-        };
-        if manifest.workflow.name != *workflow_name {
+        if open.manifest.doc.workflow.name != *workflow_name {
             continue;
         }
-        let mode = yunta_core::events::run_mode(&events);
-        let summary = run_summary(
-            run_id,
-            mode,
-            manifest.workflow_hash.clone(),
-            &manifest.workflow,
-            &events,
-        );
-        dated.push((first.timestamp, summary));
+        dated.push((first.timestamp, open));
     }
-    dated.sort_by_key(|(ts, _)| *ts);
-    dated.into_iter().map(|(_, s)| s).collect()
+    dated.sort_by_key(|(timestamp, _)| *timestamp);
+    dated.into_iter().map(|(_, open)| open).collect()
 }
 
-/// Every past run's own full event log for `workflow_name`, plus the
-/// most recent run's own frozen workflow definition —
-/// [`collect_history`]'s raw-events twin: `RunSummary` throws away
-/// exactly the per-criterion/re-route/gate detail
-/// `analyze_verification_effectiveness` needs, so this keeps the whole
-/// log instead. The returned workflow isn't necessarily byte-identical
-/// to what's on disk right now — it's the shape those runs actually
-/// exercised, close enough for `analyze` to match nodes/`on_failure`/
-/// gates against. Same skip-what-can't-be-read stance as
-/// [`collect_history`].
-pub(crate) fn collect_raw_history(
-    runs_root: &Path,
-    storage: &Storage,
-    workflow_name: &WorkflowName,
-) -> (Vec<Vec<StoredEvent>>, Option<yunta_core::Workflow>) {
-    let run_ids: Vec<RunId> = storage
-        .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
-        .unwrap_or_default();
-    let mut logs = Vec::new();
-    let mut latest_workflow = None;
-    for run_id in run_ids {
-        let Ok(events) = storage.events_for_run(&run_id) else {
-            continue;
-        };
-        let Some(first) = events.first() else {
-            continue;
-        };
-        let manifest_path = yunta_engine::run_dir::manifest_path(&runs_root.join(run_id.as_str()));
-        let Some(manifest) = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
-        else {
-            continue;
-        };
-        if manifest.workflow.name != *workflow_name {
-            continue;
-        }
-        let is_newer = match &latest_workflow {
-            Some((ts, _)) => first.timestamp > *ts,
-            None => true,
-        };
-        if is_newer {
-            latest_workflow = Some((first.timestamp, manifest.workflow));
-        }
-        logs.push(events);
-    }
-    (logs, latest_workflow.map(|(_, wf)| wf))
+/// What `--workflow`'s sparkline, mode table and prior estimation fold
+/// over: one summary per past run, oldest first.
+pub(crate) fn summaries(history: &[Opened]) -> Vec<RunSummary> {
+    history
+        .iter()
+        .map(|open| {
+            run_summary(
+                open.run_id.clone(),
+                yunta_core::events::run_mode(&open.events),
+                open.manifest.doc.workflow_hash.clone(),
+                &open.manifest.doc.workflow,
+                &open.events,
+            )
+        })
+        .collect()
+}
+
+/// The whole log of every past run, plus the most recent one's own
+/// frozen workflow — what `analyze_verification_effectiveness` needs
+/// and a `RunSummary` throws away. The workflow is not necessarily
+/// byte-identical to what is on disk now: it is the shape those runs
+/// actually exercised, which is what the analysis matches against.
+pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<Workflow>) {
+    let latest = history
+        .last()
+        .map(|open| open.manifest.doc.workflow.clone());
+    (
+        history.iter().map(|open| open.events.clone()).collect(),
+        latest,
+    )
 }
 
 // --- Terminal rendering — every shape, width and word comes from

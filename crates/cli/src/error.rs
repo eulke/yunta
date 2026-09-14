@@ -7,6 +7,7 @@
 //! belongs on top of it.
 
 use std::fmt::Display;
+use yunta_core::RunId;
 
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,15 @@ pub enum CliError {
     Cwd {
         #[source]
         source: std::io::Error,
+    },
+
+    /// A run this binary has no record of, wherever it looked. One
+    /// sentence, because a person who mistyped an id gets the same
+    /// answer whichever command they typed it into.
+    #[error("no run `{id}` under {}", .roots.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(" or "))]
+    RunNotFound {
+        id: RunId,
+        roots: Vec<std::path::PathBuf>,
     },
 
     #[error(transparent)]
