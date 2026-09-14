@@ -14,7 +14,7 @@ use std::sync::Arc;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::RunToolsEndpoint;
+use yunta_core::port::RunToolsEndpoint;
 use yunta_core::TaskId;
 
 use super::host::RunToolsAccess;

@@ -2,8 +2,8 @@
 //! per-run tools it may mount, and the orphaned session it may resume.
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::SessionRequest;
 use yunta_core::events::EventPayload;
+use yunta_core::port::SessionRequest;
 use yunta_core::{Node, PromptSource};
 
 use crate::run_dir::Opening;
@@ -69,7 +69,7 @@ async fn assemble_prompt(
 async fn resume_target(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
+    adapter: &dyn yunta_core::port::Adapter,
     adapter_id: &yunta_core::AdapterId,
 ) -> Result<Option<yunta_core::SessionId>, RunError> {
     let policy = node

@@ -31,7 +31,7 @@ mod integrity;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_adapters::signal::Liveness;
+use yunta_core::process::signal::Liveness;
 use yunta_core::{CommitSha, InvalidId, Isolation, Pid, SystemClock};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};

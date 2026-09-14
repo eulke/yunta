@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_adapters::Forge;
+use yunta_core::port::Forge;
 use yunta_core::{IdSource, Manifest, RunId, SystemClock};
 use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;

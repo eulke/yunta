@@ -4,7 +4,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use yunta_core::Pid;
+use crate::Pid;
 
 /// Clock ticks per second in the times `/proc` reports since boot —
 /// fixed at 100 in the kernel's user-space ABI, whatever the

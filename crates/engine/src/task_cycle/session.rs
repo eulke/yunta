@@ -8,8 +8,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, AgentEvent, AgentOutcome, SessionRequest};
 use yunta_core::events::{EventPayload, TokenUsage};
+use yunta_core::port::{Adapter, AgentEvent, AgentOutcome, SessionRequest};
 use yunta_core::AdapterError;
 use yunta_storage::StorageError;
 

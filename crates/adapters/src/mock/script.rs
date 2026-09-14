@@ -21,8 +21,8 @@ use yunta_core::{ModelName, SessionId};
 
 use super::run_tool::call_run_tool;
 use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation};
-use crate::session::{AgentError, AgentEvent, AgentOutcome};
-use crate::RunToolsEndpoint;
+use yunta_core::port::RunToolsEndpoint;
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
 /// One session's script, cut loose from the fixture it was claimed from.
 pub(super) struct Script {

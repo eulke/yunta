@@ -193,7 +193,7 @@ async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliE
 async fn finish(
     env: &Driving<'_>,
     shown: &Presentation,
-    forge: Option<&dyn yunta_adapters::Forge>,
+    forge: Option<&dyn yunta_core::port::Forge>,
     cancel: &tokio_util::sync::CancellationToken,
     watching: Watching,
     report: RunReport,

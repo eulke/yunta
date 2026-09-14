@@ -7,11 +7,11 @@
 
 use std::fmt;
 
+use crate::{AdapterError, AdapterId, Pid};
 use nix::errno::Errno;
 use nix::sys::signal;
 pub use nix::sys::signal::Signal;
 use thiserror::Error;
-use yunta_core::{AdapterError, AdapterId, Pid};
 
 /// What a signal is addressed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

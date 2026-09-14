@@ -8,7 +8,7 @@
 //! digest: the audit stream carries evidence that a call happened and
 //! what it answered, never the content itself.
 
-use crate::RunToolsEndpoint;
+use yunta_core::port::RunToolsEndpoint;
 
 /// Why the mock's own MCP call failed — the session fails with it.
 #[derive(Debug, thiserror::Error)]

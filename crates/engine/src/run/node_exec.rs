@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::PermissionProfile;
 use yunta_core::events::{EventPayload, Failure, HookPhase};
+use yunta_core::port::PermissionProfile;
 use yunta_core::{HookFailurePolicy, Node, NodeKind};
 
 use crate::template::render_template;

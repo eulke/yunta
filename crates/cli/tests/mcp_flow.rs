@@ -10,7 +10,7 @@ use rmcp::model::CallToolRequestParams;
 use rmcp::transport::TokioChildProcess;
 use rmcp::ServiceExt;
 use serde_json::{json, Value};
-use yunta_adapters::signal::{signal_process, Signal};
+use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{git, init_repo, run_id_from, stderr, wait_until_async, write, yunta_in};
 

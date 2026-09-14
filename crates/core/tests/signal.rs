@@ -1,11 +1,13 @@
-//! `yunta_adapters::signal`: the one way a signal leaves the workspace,
+//! `yunta_core::process::signal`: the one way a signal leaves the workspace,
 //! answering with the kernel's own `errno` instead of a `kill` binary's
 //! exit status.
 
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
-use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal, Target};
+use yunta_core::process::signal::{
+    liveness, signal_group, signal_process, Liveness, Signal, Target,
+};
 use yunta_core::Pid;
 
 /// A blocker leading its own process group, so a group signal reaches

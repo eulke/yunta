@@ -14,7 +14,7 @@
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use yunta_adapters::ProbeReport;
+use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 
 fn command_on_path(command: &str) -> bool {

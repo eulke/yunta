@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
+use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
     git, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_in,

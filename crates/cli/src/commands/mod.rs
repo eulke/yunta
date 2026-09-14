@@ -28,10 +28,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_adapters::{
-    Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
-    CODEX_ID,
-};
+use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, GitHubForge, CLAUDE_CODE_ID, CODEX_ID};
+use yunta_core::port::{Adapter, Forge, ProbeReport};
 use yunta_core::{describe, AdapterId, ConfigLayer, Pid, RunId, Secret, Workflow};
 use yunta_engine::UnknownKindCount;
 

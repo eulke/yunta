@@ -16,7 +16,8 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, MockAdapter};
+use yunta_adapters::MockAdapter;
+use yunta_core::port::Adapter;
 use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{

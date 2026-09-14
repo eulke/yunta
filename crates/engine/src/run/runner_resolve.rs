@@ -170,7 +170,7 @@ fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::
 pub(super) fn run_tools_allowed(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
+    adapter: &dyn yunta_core::port::Adapter,
     adapter_id: &AdapterId,
 ) -> Result<bool, RunToolsSetupError> {
     if adapter
@@ -209,7 +209,7 @@ pub(super) fn run_tools_allowed(
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
+    adapter: &dyn yunta_core::port::Adapter,
     adapter_id: &AdapterId,
     task: Option<&yunta_core::TaskId>,
 ) -> Result<RunToolsResolution, RunToolsSetupError> {
@@ -267,7 +267,7 @@ pub(super) async fn open_run_tools(
 pub(super) async fn report_declarative_network(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
+    adapter: &dyn yunta_core::port::Adapter,
     adapter_id: &AdapterId,
 ) -> Result<(), RunError> {
     if node.network == Some(false)

@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
-use yunta_adapters::{
-    Adapter, AgentEvent, Budget, CodexAdapter, PermissionProfile, ProbeReport, SessionRequest,
+use yunta_adapters::CodexAdapter;
+use yunta_core::port::{
+    Adapter, AgentEvent, Budget, PermissionProfile, ProbeReport, SessionRequest,
 };
 use yunta_core::{AdapterSettings, SessionId};
 
@@ -45,7 +46,7 @@ fn request(cwd: PathBuf) -> SessionRequest {
     }
 }
 
-async fn drain(mut session: Box<dyn yunta_adapters::AgentSession>) -> Vec<AgentEvent> {
+async fn drain(mut session: Box<dyn yunta_core::port::AgentSession>) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     let mut stream = session.events();
     while let Some(event) = stream.next().await {
@@ -645,7 +646,7 @@ fn debug_of_a_session_request_never_prints_secrets() {
     let mut req = request(std::path::PathBuf::from("/tmp"));
     req.env
         .insert("API_TOKEN".to_string(), "hunter2".to_string().into());
-    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
         url: "http://127.0.0.1:1/mcp".to_string(),
         token: "bearer-secret".to_string().into(),
     });
@@ -854,7 +855,7 @@ async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environm
     let env_file = dir.path().join("env.txt");
 
     let mut req = request(dir.path().to_path_buf());
-    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });
@@ -920,7 +921,7 @@ async fn no_dead_config_override_reaches_the_cli() {
     let args_file = dir.path().join("args.txt");
 
     let mut req = request(dir.path().to_path_buf());
-    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });

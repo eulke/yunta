@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Budget, PermissionProfile, SessionRequest};
 use yunta_core::events::{CapabilityDegradedPayload, EventPayload, TokenUsage};
+use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
 use yunta_core::Capability;
 use yunta_core::Task;
 

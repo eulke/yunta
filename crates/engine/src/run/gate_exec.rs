@@ -20,11 +20,11 @@
 //! exactly), so a still-unresolved degraded gate asks fresh on every
 //! wake rather than remembering a decision that was never really made.
 
-use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
     EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity, GateResolvedPayload,
     GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
+use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
 
 use super::node_close::{fail, write_progress};

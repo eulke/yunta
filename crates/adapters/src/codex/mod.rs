@@ -41,10 +41,10 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
 
-use crate::session::{
+use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
-use crate::subprocess::{self, Launch, LineParser};
+use yunta_core::process::subprocess::{self, Launch, LineParser};
 
 use config::ConfigOverride;
 

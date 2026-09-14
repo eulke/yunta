@@ -12,16 +12,47 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+use crate::{AdapterError, AdapterId, Pid, Result, Secret};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Child;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use yunta_core::{AdapterError, AdapterId, Pid, Result, Secret};
 
-use crate::session::{write_prompt, AgentError, AgentEvent, AgentSession, ProbeReport};
-use crate::signal::{signal_group, Signal};
+use crate::port::{AgentError, AgentEvent, AgentSession, ProbeReport};
+use crate::process::signal::{signal_group, Signal};
+
+/// Hands `prompt` to a just-spawned CLI on its stdin and closes the
+/// pipe, so the CLI sees end-of-input and the prompt never appears in
+/// an argument list. Called once the CLI's output is being read, so a
+/// CLI that talks before it listens cannot deadlock the exchange. A CLI
+/// that exits before reading closes the pipe on its side; that is the
+/// session's own ending, reported by its stream, never a failure of the
+/// write.
+pub async fn write_prompt(
+    mut stdin: tokio::process::ChildStdin,
+    prompt: &str,
+    adapter: &'static AdapterId,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let io_error = |action: &str, source: std::io::Error| AdapterError::AdapterIo {
+        adapter: adapter.clone(),
+        action: action.to_string(),
+        source,
+    };
+    match stdin.write_all(prompt.as_bytes()).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+        Err(e) => return Err(io_error("write the prompt to the subprocess's stdin", e)),
+    }
+    match stdin.shutdown().await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(io_error("close the subprocess's stdin", e)),
+    }
+}
 
 /// The longest line the reader accepts from a CLI. A stream-json event
 /// carrying a whole tool result stays far below it; the bound exists

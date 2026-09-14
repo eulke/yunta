@@ -13,12 +13,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockAdapter};
+use yunta_adapters::MockAdapter;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
+use yunta_core::port::Adapter;
 use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{

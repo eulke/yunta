@@ -30,7 +30,7 @@ use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
 use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, ModelName, Result, SessionId};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use yunta_core::port::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("mock");
@@ -64,7 +64,7 @@ pub struct MockAdapter {
     /// record-the-mount principle as `skills_seen`: engine tests prove
     /// the endpoint reached the session (or deliberately didn't)
     /// without a real CLI.
-    endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
+    endpoints_seen: Mutex<Vec<Option<yunta_core::port::RunToolsEndpoint>>>,
     /// Every session's `req.artifact_dir`, in claim order — same
     /// record-the-mount principle as `skills_seen`: engine tests prove
     /// which sessions were granted the run's artifact directory without
@@ -124,7 +124,7 @@ impl MockAdapter {
     }
 
     /// The `run_tools_endpoint` of every session so far, in claim order.
-    pub fn endpoints_seen(&self) -> Vec<Option<crate::RunToolsEndpoint>> {
+    pub fn endpoints_seen(&self) -> Vec<Option<yunta_core::port::RunToolsEndpoint>> {
         read(&self.endpoints_seen)
     }
 

@@ -62,7 +62,7 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
     pub(super) base_commit: &'a CommitSha,
-    pub(super) adapter: &'a dyn yunta_adapters::Adapter,
+    pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
     pub(super) cancel: &'a tokio_util::sync::CancellationToken,

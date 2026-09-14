@@ -1,4 +1,5 @@
-use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
+use yunta_adapters::MockAdapter;
+use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Criterion;
 use yunta_core::Task;
 use yunta_engine::process::Supervision;

@@ -17,7 +17,8 @@ use serde_json::Value;
 use yunta_core::{ModelName, SessionId};
 
 use crate::failure;
-use crate::session::{target_digest, AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
+use crate::session::target_digest;
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
 
 pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {

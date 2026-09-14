@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Budget, PermissionProfile};
 use yunta_core::events::TokenUsage;
+use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::{AdapterError, Task, TaskId};
 use yunta_storage::StorageError;
 

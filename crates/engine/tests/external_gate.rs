@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use yunta_adapters::{Adapter, MockForge, MockForgeState};
+use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::port::Adapter;
 use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
@@ -124,7 +125,7 @@ impl Bench {
     /// nothing here carries state across calls except the log itself.
     async fn wake(
         &self,
-        forge: Option<&dyn yunta_adapters::Forge>,
+        forge: Option<&dyn yunta_core::port::Forge>,
     ) -> (RunTerminal, yunta_engine::RunState) {
         let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
         let report = execute_run(RunEnv {
@@ -274,7 +275,7 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     forge_state.request_changes(
         bench.run_id.as_str(),
         &"person-b".into(),
-        vec![yunta_adapters::ReviewComment {
+        vec![yunta_core::port::ReviewComment {
             author: "person-b".to_string(),
             body: "please add a test".to_string(),
             path: Some("src/lib.rs".to_string()),

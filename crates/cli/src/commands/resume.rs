@@ -29,7 +29,7 @@ struct Parked {
     run_dir: PathBuf,
     manifest: Manifest,
     worktree: PathBuf,
-    adapters: HashMap<AdapterId, Arc<dyn yunta_adapters::Adapter>>,
+    adapters: HashMap<AdapterId, Arc<dyn yunta_core::port::Adapter>>,
 }
 
 /// Opens the run `run_id` names, refusing one this project cannot reach

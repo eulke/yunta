@@ -5,8 +5,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockAdapter};
+use yunta_adapters::MockAdapter;
 use yunta_core::events::{EventPayload, StoredEvent};
+use yunta_core::port::Adapter;
 use yunta_core::AdapterId;
 use yunta_engine::{
     build_manifest, create_run, derive, execute_run, CreateRunParams, NoInteraction, NodeState,

@@ -11,7 +11,8 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, ProbeReport};
+use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter};
+use yunta_core::port::{Adapter, ProbeReport};
 use yunta_core::AdapterSettings;
 
 use crate::error::{warn, CliError, Outcome};

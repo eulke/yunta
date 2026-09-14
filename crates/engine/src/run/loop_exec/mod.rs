@@ -188,7 +188,7 @@ pub(super) async fn execute_loop(
 /// Everything one loop invocation resolves once, before its first iteration.
 struct LoopPrep<'a> {
     instruction: String,
-    adapter: std::sync::Arc<dyn yunta_adapters::Adapter>,
+    adapter: std::sync::Arc<dyn yunta_core::port::Adapter>,
     setup: crate::task_cycle::SessionSetup,
     tasks: TasksFile,
     concurrency: u32,

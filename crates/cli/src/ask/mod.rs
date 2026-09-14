@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dialoguer::console::{Key, Term};
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios};
-use yunta_adapters::signal::{signal_process, Signal};
+use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Pid, Responder};
 
 use crate::error::warn;

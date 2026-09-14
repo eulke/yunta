@@ -21,7 +21,7 @@
 //! flag alone is what each profile maps to.
 
 use super::settings::Sandbox;
-use crate::session::PermissionProfile;
+use yunta_core::port::PermissionProfile;
 
 /// `edit_sandbox` is the mode the `Edit` profile runs under — the
 /// adapter's `sandbox` setting, `workspace-write` by default.

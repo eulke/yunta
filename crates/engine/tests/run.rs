@@ -1369,11 +1369,11 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         )
         .unwrap();
 
-    let adapters: HashMap<yunta_core::AdapterId, std::sync::Arc<dyn yunta_adapters::Adapter>> =
+    let adapters: HashMap<yunta_core::AdapterId, std::sync::Arc<dyn yunta_core::port::Adapter>> =
         HashMap::from([(
             "mock".into(),
             std::sync::Arc::new(yunta_adapters::MockAdapter::from_yaml("sessions: []\n").unwrap())
-                as std::sync::Arc<dyn yunta_adapters::Adapter>,
+                as std::sync::Arc<dyn yunta_core::port::Adapter>,
         )]);
     let error = execute_run(RunEnv {
         run_id: &bench.run_id,

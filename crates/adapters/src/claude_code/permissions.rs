@@ -27,7 +27,7 @@
 //! live CLI restriction — `capabilities().edit_hooks` says so (`false`,
 //! see mod.rs).
 
-use crate::session::PermissionProfile;
+use yunta_core::port::PermissionProfile;
 
 /// The tools a profile allows, as the CLI names them; `None` leaves the
 /// CLI's whole tool set available.

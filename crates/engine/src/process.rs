@@ -14,7 +14,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::signal::{signal_group, Signal, SignalError};
+use yunta_core::process::signal::{signal_group, Signal, SignalError};
 use yunta_core::Pid;
 
 use crate::process_registry::{self, ProcessRegistry};

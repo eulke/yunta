@@ -49,7 +49,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge, ForgeError};
+use yunta_core::port::{Adapter, Forge, ForgeError};
 use yunta_core::{AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 

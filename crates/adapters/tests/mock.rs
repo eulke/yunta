@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
-use yunta_adapters::{
-    Adapter, AgentEvent, Budget, Forge, ForgeError, MockAdapter, MockForge, MockForgeState,
-    PermissionProfile, ProbeReport, PublishRequest, PublishedGate, ReviewOutcome, SessionRequest,
+use yunta_adapters::{MockAdapter, MockForge, MockForgeState};
+use yunta_core::port::{
+    Adapter, AgentEvent, Budget, Forge, ForgeError, PermissionProfile, ProbeReport, PublishRequest,
+    PublishedGate, ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
 
@@ -27,7 +28,7 @@ fn request(cwd: PathBuf) -> SessionRequest {
     }
 }
 
-async fn drain(mut session: Box<dyn yunta_adapters::AgentSession>) -> Vec<AgentEvent> {
+async fn drain(mut session: Box<dyn yunta_core::port::AgentSession>) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     let mut stream = session.events();
     while let Some(event) = stream.next().await {

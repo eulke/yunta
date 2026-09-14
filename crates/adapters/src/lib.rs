@@ -1,5 +1,5 @@
-//! The `Adapter`/`AgentSession` traits and their implementations
-//! (`claude-code`, `codex`, `mock`) — Spec Adapter v0.2.
+//! The adapters that implement `yunta_core::port`: `claude-code`,
+//! `codex` and `mock` — Spec Adapter v0.2.
 //!
 //! `claude-code` and `codex` are built. `mock` is what CI exercises the
 //! engine against — the two real adapters are each tested against their
@@ -25,22 +25,12 @@ mod codex;
 pub mod failure;
 mod forge;
 mod mock;
-pub mod process_start;
 mod session;
-pub mod signal;
-pub mod subprocess;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};
-pub use forge::{
-    Forge, ForgeError, GitHubForge, MockForge, MockForgeState, PolledGate, PublishRequest,
-    PublishedGate, ReviewComment, ReviewOutcome,
-};
+pub use forge::{GitHubForge, MockForge, MockForgeState};
 pub use mock::{
     MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript,
     ID as MOCK_ID,
-};
-pub use session::{
-    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
-    ProbeReport, RunToolsEndpoint, SessionRequest,
 };

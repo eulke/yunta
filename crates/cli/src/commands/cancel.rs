@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use yunta_adapters::signal::{liveness, signal_group, signal_process, Liveness, Signal};
+use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::{describe, events::EventPayload, Pid, RunId};
 use yunta_engine::NodeState;
 

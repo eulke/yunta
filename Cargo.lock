@@ -2886,9 +2886,12 @@ dependencies = [
 name = "yunta-core"
 version = "0.0.4"
 dependencies = [
+ "async-trait",
  "chrono",
+ "futures",
  "globset",
  "indexmap",
+ "nix",
  "proptest",
  "schemars",
  "serde",
@@ -2897,6 +2900,8 @@ dependencies = [
  "serde_path_to_error",
  "sha2",
  "thiserror",
+ "tokio",
+ "tracing",
  "ulid",
  "yunta-core",
 ]

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use yunta_adapters::signal::{self, Liveness};
+use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
 /// What the host says about a lock's holder. `Send + Sync` so a
@@ -37,7 +37,7 @@ impl OwnerProbe for SystemProbe {
     }
 
     fn started(&self, pid: Pid) -> Option<DateTime<Utc>> {
-        yunta_adapters::process_start::process_start(pid).map(DateTime::from)
+        yunta_core::process::process_start::process_start(pid).map(DateTime::from)
     }
 }
 

@@ -8,11 +8,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload, HumanChoice,
     StoredEvent,
 };
+use yunta_core::port::{Adapter, Forge};
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -229,7 +229,7 @@ impl RunCtx<'_> {
     /// must not resurface as a zero-token session budget). `timeout`
     /// stays `None`: `defaults.timeout_minutes` is resolved separately,
     /// outside this function's scope.
-    pub(crate) async fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
+    pub(crate) async fn session_budget(&self) -> Result<yunta_core::port::Budget, RunError> {
         // `defaults.timeout_minutes` applies on every path —
         // the wall clock is orthogonal to the token cap and to a
         // human's `continue`.
@@ -238,7 +238,7 @@ impl RunCtx<'_> {
             .budget_lifted
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            return Ok(yunta_adapters::Budget {
+            return Ok(yunta_core::port::Budget {
                 timeout,
                 ..Default::default()
             });
@@ -250,7 +250,7 @@ impl RunCtx<'_> {
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         else {
-            return Ok(yunta_adapters::Budget {
+            return Ok(yunta_core::port::Budget {
                 timeout,
                 ..Default::default()
             });
@@ -267,7 +267,7 @@ impl RunCtx<'_> {
                 )
             })
             .count();
-        Ok(yunta_adapters::Budget {
+        Ok(yunta_core::port::Budget {
             max_tokens: Some(budget::session_token_budget(
                 cap,
                 state.total_tokens.total(),
