@@ -62,6 +62,8 @@ quien implementa, y no admite interpretación:
 - **Lo marcado "se conserva" no se toca.** Se generaliza; nunca se reimplementa.
 - **Rojo primero, gate completo después.** El test del ítem falla por su razón
   antes del código; el ítem cierra con el gate de §0.6 ejecutado entero.
+- **Lo que deja de usarse se borra** en el mismo commit (§0.15). Un ítem no
+  deja atrás lo que reemplazó.
 
 ## Juicio
 
@@ -100,6 +102,12 @@ mejor.
 - **Un lugar.** Cada convención, umbral, mensaje y helper vive en un único sitio y
   todo lo demás lo consume. La segunda copia señala el lugar que falta, y se crea en
   el mismo PR.
+- **Sin basura.** Lo que deja de usarse se borra en el mismo commit que lo deja
+  sin uso: el tipo reemplazado, la función sin llamador, el campo que nadie lee,
+  el archivo huérfano, el test que prueba algo que ya no existe, el párrafo que
+  describe lo que el repo no tiene. Un envoltorio que sólo delega y un alias
+  "por compatibilidad" son deuda con otro nombre. Lo que se conserva a propósito
+  lo dice una decisión registrada; lo demás se saca.
 - **La documentación gana** al código cuando difieren, salvo decisión registrada en
   contra. Su silencio es un paso 2.
 
