@@ -794,7 +794,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-02 | `ArtifactName::parse` después de renderizar | P8 | cerrado(aa437f7) |
 | W-03 | `target_digest` siempre `ContentHash::abbreviated()` | P8 | cerrado(56ad092) |
 | W-04 | blackboard por `FindingLedger`; una regla de dedup, la que colapsa espacios y mayúsculas | P8 | cerrado(6bf7baa) |
-| W-05 | `git.rs`: las tres funciones async por `spawn_governed` | P8 | pendiente |
+| W-05 | `git.rs`: las tres funciones async por `spawn_governed` | P8 | cerrado(98de13f) |
 | W-06 | `parallel_exec` por `resume_policies` | P8 | cerrado(1dd753b) |
 | W-07 | `MockSession` con handle y `Drop` | P8 | cerrado(48b93e3) |
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | cerrado(99f148a) |
