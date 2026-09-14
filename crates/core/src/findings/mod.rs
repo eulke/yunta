@@ -108,6 +108,9 @@ impl From<events::ProposedCriterion> for ProposedCriterionEntry {
     }
 }
 
+pub use location::{InvalidLocation, LineRange, Location, RelativePath};
+
+mod location;
 mod rules;
 
 /// The shape this document publishes, as the YAML it is.

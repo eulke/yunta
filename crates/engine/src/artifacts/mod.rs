@@ -30,7 +30,7 @@ use std::path::Path;
 
 use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload, StoredEvent,
+    ArtifactAcceptedPayload, ArtifactId, EventPayload, RecordedOrigin, StoredEvent,
 };
 use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
 
@@ -118,7 +118,7 @@ pub(crate) async fn accept(
     producer: Option<&NodeId>,
     artifact: ArtifactId,
     bytes: &[u8],
-    origin: ArtifactOrigin,
+    origin: RecordedOrigin,
 ) -> Result<ArtifactRef, AcceptError> {
     let store = ObjectStore::at(run_dir);
     let name = artifact.view_name();
@@ -151,7 +151,7 @@ pub(crate) async fn accept(
         producer: producer.cloned(),
         artifact,
         content_hash,
-        origin,
+        origin: yunta_core::events::ArtifactOrigin::Recorded(origin),
         seq,
     })
 }

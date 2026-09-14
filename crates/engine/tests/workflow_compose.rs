@@ -1018,7 +1018,7 @@ nodes:
     );
     // The parent's own artifact comes from the parent's log; the
     // sibling's comes from the child run that produced it.
-    let from_parent = yunta_core::events::ArtifactOrigin::Inherited {
+    let from_parent = yunta_core::events::RecordedOrigin::Inherited {
         run: run_id.clone(),
         producer: Some("plan".into()),
     };
@@ -1031,7 +1031,7 @@ nodes:
         .expect("the prod child is linked on the parent's log");
     assert_eq!(
         mounted[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: prod_id,
             producer: Some("work".into()),
         }
@@ -1225,7 +1225,7 @@ nodes:
     assert_eq!(mounted.len(), 1, "{mounted:?}");
     assert_eq!(
         mounted[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: run_id.clone(),
             producer: Some("plan".into()),
         },
@@ -1295,7 +1295,7 @@ nodes:
     assert_eq!(parent_held[0].artifact.to_string(), "report.md");
     assert_eq!(
         parent_held[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: child_id.clone(),
             producer: Some("work".into()),
         },

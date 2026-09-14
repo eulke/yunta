@@ -282,7 +282,7 @@ pub(super) async fn gate_exhausted(
                     kind: yunta_core::ArtifactKind::Findings,
                 },
                 yaml.as_bytes(),
-                yunta_core::events::ArtifactOrigin::Derived,
+                yunta_core::events::RecordedOrigin::Derived,
             )
             .await?;
         }

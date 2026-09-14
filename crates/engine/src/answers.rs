@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use yunta_core::events::{ArtifactOrigin, Channel, EventPayload, QuestionsAnsweredPayload};
+use yunta_core::events::{Channel, EventPayload, QuestionsAnsweredPayload, RecordedOrigin};
 use yunta_core::{Answer, AnswersFile, ContentHash, NodeId, QuestionsFile, Responder};
 
 use crate::artifacts::{accept, answers_artifact, AcceptError};
@@ -79,7 +79,7 @@ pub async fn record(
     let file = AnswersFile {
         answers: reply.answers,
     };
-    let accepted = write(log, run_dir, node, &file, ArtifactOrigin::Answered).await?;
+    let accepted = write(log, run_dir, node, &file, RecordedOrigin::Answered).await?;
     log.record(
         Some(node),
         EventPayload::Gates(GateEvent::QuestionsAnswered(QuestionsAnsweredPayload {
@@ -109,7 +109,7 @@ pub(crate) async fn record_nothing_asked(
     let file = AnswersFile {
         answers: Vec::new(),
     };
-    write(log, run_dir, node, &file, ArtifactOrigin::Derived).await
+    write(log, run_dir, node, &file, RecordedOrigin::Derived).await
 }
 
 async fn write(
@@ -117,7 +117,7 @@ async fn write(
     run_dir: &Path,
     node: &NodeId,
     file: &AnswersFile,
-    origin: ArtifactOrigin,
+    origin: RecordedOrigin,
 ) -> Result<Recorded, AnswersError> {
     let bytes = yunta_core::yaml::to_string(file)
         .map_err(AnswersError::Render)?

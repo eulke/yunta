@@ -3,8 +3,8 @@
 //! full run.
 
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
-    EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, StoredEvent,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventBody, EventPayload, Failure,
+    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RecordedOrigin, StoredEvent,
     TokenUsage,
 };
 use yunta_core::events::{ArtifactEvent, NodeEvent};
@@ -103,7 +103,7 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
                     kind: yunta_core::ArtifactKind::Tasks,
                 },
                 yunta_core::sha256_hex(b"deadbeef"),
-                ArtifactOrigin::Submitted,
+                RecordedOrigin::Submitted,
             ))),
         ),
         event(

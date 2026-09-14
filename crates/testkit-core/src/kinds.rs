@@ -7,6 +7,7 @@
 //! here, once, so the two ask about the same thirty-seven.
 
 use std::collections::BTreeMap;
+use yunta_core::events::RecordedOrigin;
 
 use yunta_core::events::*;
 use yunta_core::{Capability, RunId, RunnerCandidate, ScopeExpansionMode};
@@ -248,7 +249,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 kind: yunta_core::ArtifactKind::Tasks,
             },
             yunta_core::sha256_hex(b"plan"),
-            ArtifactOrigin::Inherited {
+            RecordedOrigin::Inherited {
                 run: RunId::from("run-parent"),
                 producer: Some(yunta_core::NodeId::from("plan")),
             },

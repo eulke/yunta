@@ -218,7 +218,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
                 }
         })
         .expect("the answers are an artifact the run holds");
-    assert_eq!(held.origin, yunta_core::events::ArtifactOrigin::Answered);
+    assert_eq!(held.origin, yunta_core::events::RecordedOrigin::Answered);
     assert_eq!(held.content_hash, answered.answers_hash);
     assert_eq!(
         std::fs::read(

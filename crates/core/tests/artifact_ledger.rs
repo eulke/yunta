@@ -8,7 +8,8 @@ use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::ArtifactEvent;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload,
-    ArtifactWrittenPayload, EventBody, EventPayload, StoredEvent, SubmissionOutcome,
+    ArtifactWrittenPayload, EventBody, EventPayload, RecordedOrigin, StoredEvent,
+    SubmissionOutcome,
 };
 use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId, RunId};
 
@@ -30,11 +31,11 @@ fn accepted(seq: u64, node: Option<&str>, artifact: ArtifactId, content: &str) -
     event(
         seq,
         node,
-        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
+        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
             artifact,
-            content_hash: hash(content),
-            origin: ArtifactOrigin::Submitted,
-        })),
+            hash(content),
+            RecordedOrigin::Submitted,
+        ))),
     )
 }
 
@@ -142,7 +143,7 @@ fn a_written_artifact_with_a_kind_folds_as_that_interpreted_identity() {
         .latest(&interpreted(ArtifactKind::Tasks), None)
         .expect("an earlier log still names its tasks document");
     assert_eq!(stood.content_hash, hash("artifacts/plan.yaml"));
-    assert_eq!(stood.origin, ArtifactOrigin::Legacy);
+    assert!(matches!(stood.origin, ArtifactOrigin::Legacy(_)));
 }
 
 #[test]
@@ -272,4 +273,19 @@ proptest! {
             .collect();
         prop_assert_eq!(held, stated);
     }
+}
+
+/// Only a fold over a log written before origins were recorded produces
+/// `Legacy`. Everything a run records today says where the artifact came
+/// from, and the type is what makes the other answer unreachable: a
+/// constructor takes a [`RecordedOrigin`], which has no `Legacy` arm.
+#[test]
+fn a_fresh_acceptance_cannot_be_legacy() {
+    let accepted = ArtifactAcceptedPayload::new(
+        interpreted(ArtifactKind::Findings),
+        yunta_core::sha256_hex(b"findings"),
+        RecordedOrigin::Derived,
+    );
+
+    assert_eq!(accepted.origin, RecordedOrigin::Derived);
 }

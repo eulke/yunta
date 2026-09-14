@@ -16,7 +16,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, NodeEvent, RunEvent};
+use yunta_core::events::{ArtifactEvent, NodeEvent, RecordedOrigin, RunEvent};
 
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
@@ -689,7 +689,7 @@ nodes:
             name: "report.md".to_string()
         }
     );
-    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(held[0].origin, RecordedOrigin::Ingested);
     assert_eq!(
         bench.object(&held[0].content_hash).expect("the object"),
         b"the-report\n"
@@ -720,7 +720,7 @@ nodes:
 
     let held = bench.accepted();
     assert_eq!(held.len(), 1, "{held:?}");
-    assert_eq!(held[0].origin, yunta_core::events::ArtifactOrigin::Ingested);
+    assert_eq!(held[0].origin, RecordedOrigin::Ingested);
     assert_eq!(
         held[0].artifact,
         yunta_core::events::ArtifactId::Interpreted {
@@ -872,7 +872,7 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     );
     assert_eq!(
         accepted[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        RecordedOrigin::Inherited {
             run: from,
             producer: Some("write".into()),
         }
@@ -1022,7 +1022,7 @@ nodes:
     );
     assert_eq!(
         accepted[0].origin,
-        yunta_core::events::ArtifactOrigin::Input {
+        RecordedOrigin::Input {
             input: "tasks".into()
         }
     );
@@ -1373,16 +1373,16 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
                 run_id: bench.run_id.clone(),
                 node_id: None,
                 payload: yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(
-                    yunta_core::events::ArtifactAcceptedPayload {
-                        artifact: yunta_core::events::ArtifactId::Interpreted {
+                    yunta_core::events::ArtifactAcceptedPayload::new(
+                        yunta_core::events::ArtifactId::Interpreted {
                             kind: yunta_core::ArtifactKind::Tasks,
                         },
                         content_hash,
-                        origin: yunta_core::events::ArtifactOrigin::Inherited {
+                        RecordedOrigin::Inherited {
                             run: "run-elsewhere".into(),
                             producer: None,
                         },
-                    },
+                    ),
                 )),
             },
             &yunta_core::SystemClock,

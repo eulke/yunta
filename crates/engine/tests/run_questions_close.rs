@@ -167,7 +167,7 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
                         kind: yunta_core::ArtifactKind::Questions,
                     },
                     yunta_core::sha256_hex(b"questions"),
-                    yunta_core::events::ArtifactOrigin::Submitted,
+                    yunta_core::events::RecordedOrigin::Submitted,
                 ),
             )),
         ),
@@ -477,7 +477,7 @@ sessions:
         .origin;
     assert_eq!(
         origin,
-        yunta_core::events::ArtifactOrigin::Derived,
+        yunta_core::events::RecordedOrigin::Derived,
         "nobody answered: the engine derived them"
     );
 }

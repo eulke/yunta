@@ -446,7 +446,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     );
     assert_eq!(
         held.origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: closed.run_id.clone(),
             producer: None,
         },
@@ -608,7 +608,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     );
     assert_eq!(
         inherited[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: closed.run_id.clone(),
             producer: None,
         },

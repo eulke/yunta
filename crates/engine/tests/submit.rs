@@ -11,8 +11,8 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
-use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, SessionEvent};
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, SubmissionOutcome};
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
+use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
 use yunta_core::ArtifactKind;
 use yunta_engine::{NodeState, RunTerminal};
 use yunta_testkit::Bench;
@@ -131,7 +131,7 @@ sessions:
             kind: ArtifactKind::Tasks
         }
     );
-    assert_eq!(held.origin, ArtifactOrigin::Submitted);
+    assert_eq!(held.origin, RecordedOrigin::Submitted);
 
     // The bytes are in the store under the hash the event names, and
     // the view under the node that produced it says the same.
@@ -439,7 +439,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "the engine derived the file from what the node posted"
     );
 }
@@ -466,7 +466,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "a review that found nothing still holds its findings artifact"
     );
 }

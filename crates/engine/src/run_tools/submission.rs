@@ -17,7 +17,7 @@
 use serde_json::Value;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
@@ -187,7 +187,7 @@ impl SessionTools {
                 Some(&self.node),
                 verified.artifact.clone(),
                 &verified.bytes,
-                ArtifactOrigin::Submitted,
+                RecordedOrigin::Submitted,
             )
             .await?;
         }

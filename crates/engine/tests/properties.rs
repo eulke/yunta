@@ -23,9 +23,9 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 }
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
-    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventBody, EventPayload, Failure,
+    Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
+    NodeStartedPayload, RecordedOrigin, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
     TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
@@ -119,11 +119,11 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             }))
         }),
         (artifact_id(), "[a-z]{1,4}").prop_map(|(artifact, content)| {
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
                 artifact,
-                content_hash: yunta_core::sha256_hex(content.as_bytes()),
-                origin: ArtifactOrigin::Submitted,
-            }))
+                yunta_core::sha256_hex(content.as_bytes()),
+                RecordedOrigin::Submitted,
+            )))
         }),
         "[a-z ]{0,10}".prop_map(|reason| EventPayload::Run(RunEvent::Paused(
             RunPausedPayload::recorded(reason)
@@ -227,7 +227,7 @@ fn a_questions_round() -> Vec<StoredEvent> {
                     kind: ArtifactKind::Questions,
                 },
                 questions.clone(),
-                ArtifactOrigin::Submitted,
+                RecordedOrigin::Submitted,
             ))),
         ),
         event(
@@ -254,7 +254,7 @@ fn a_questions_round() -> Vec<StoredEvent> {
                     name: "questions.answers.yaml".to_string(),
                 },
                 answers.clone(),
-                ArtifactOrigin::Answered,
+                RecordedOrigin::Answered,
             ))),
         ),
         event(
@@ -451,11 +451,7 @@ proptest! {
             log.push(event(
                 log.len(),
                 *node,
-                EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-                    artifact: artifact.clone(),
-                    content_hash,
-                    origin: ArtifactOrigin::Submitted,
-                })),
+                EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(artifact.clone(), content_hash, RecordedOrigin::Submitted))),
             ));
         }
         for name in &older {

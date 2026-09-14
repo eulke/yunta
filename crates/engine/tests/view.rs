@@ -545,7 +545,7 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
                     name: name.to_string(),
                 },
                 ContentHash::sha256(name.as_bytes()),
-                yunta_core::events::ArtifactOrigin::Ingested,
+                yunta_core::events::RecordedOrigin::Ingested,
             ),
         ))
     };

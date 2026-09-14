@@ -95,7 +95,7 @@ impl ArtifactLedger {
             ArtifactEvent::Written(written) => (
                 legacy_identity(written),
                 written.content_hash.clone(),
-                ArtifactOrigin::Legacy,
+                ArtifactOrigin::Legacy(crate::events::Unrecorded::Legacy),
             ),
             // A submission is the handover; what the run holds is the
             // acceptance that follows it.

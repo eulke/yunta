@@ -5,7 +5,7 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
+use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
 use yunta_core::{
     Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId, ARTIFACTS_DIR,
 };
@@ -23,7 +23,7 @@ use yunta_core::events::RunEvent;
 /// predecessor, a parent, a sibling — hands over. Nothing else exists at
 /// birth, so nothing else is representable here.
 ///
-/// Narrower than [`ArtifactOrigin`], which every acceptance of a run's
+/// Narrower than [`yunta_core::events::RecordedOrigin`], which every acceptance of a run's
 /// whole life shares: what a run is born holding it did not produce,
 /// derive or receive an answer to, and a birth that names one of those
 /// is a state nobody can reach.
@@ -39,13 +39,13 @@ pub enum BirthOrigin {
     },
 }
 
-impl From<&BirthOrigin> for ArtifactOrigin {
+impl From<&BirthOrigin> for RecordedOrigin {
     fn from(origin: &BirthOrigin) -> Self {
         match origin {
-            BirthOrigin::Input { input } => ArtifactOrigin::Input {
+            BirthOrigin::Input { input } => RecordedOrigin::Input {
                 input: input.clone(),
             },
-            BirthOrigin::Inherited { run, producer } => ArtifactOrigin::Inherited {
+            BirthOrigin::Inherited { run, producer } => RecordedOrigin::Inherited {
                 run: run.clone(),
                 producer: producer.clone(),
             },

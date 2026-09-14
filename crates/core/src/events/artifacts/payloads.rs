@@ -87,11 +87,11 @@ impl ArtifactAcceptedPayload {
     /// All three together, always: an acceptance without its hash names
     /// no bytes, and one without its origin cannot say whether a person,
     /// a session or the engine itself produced them.
-    pub fn new(artifact: ArtifactId, content_hash: ContentHash, origin: ArtifactOrigin) -> Self {
+    pub fn new(artifact: ArtifactId, content_hash: ContentHash, origin: RecordedOrigin) -> Self {
         ArtifactAcceptedPayload {
             artifact,
             content_hash,
-            origin,
+            origin: ArtifactOrigin::Recorded(origin),
         }
     }
 }
@@ -203,8 +203,41 @@ impl std::fmt::Display for ArtifactId {
 /// inherited it, and every rule about who may replace an artifact reads
 /// that difference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum ArtifactOrigin {
+    /// Where the run says the artifact came from.
+    Recorded(RecordedOrigin),
+    /// A log that recorded the artifact without saying where it came
+    /// from — every `artifact_written` there is. The honest origin of a
+    /// fact stated before origins were: the run held it, and the log
+    /// does not say how.
+    ///
+    /// Only the fold over such a log produces it: everything a run
+    /// records today is a [`RecordedOrigin`], and the split is what
+    /// makes the other answer unreachable from a constructor.
+    Legacy(Unrecorded),
+}
+
+impl From<RecordedOrigin> for ArtifactOrigin {
+    fn from(origin: RecordedOrigin) -> Self {
+        ArtifactOrigin::Recorded(origin)
+    }
+}
+
+/// An origin a run recorded compares equal to the same origin read back
+/// off the log: a reader that knows what it expects says so directly,
+/// rather than spelling the wrapper at every assertion.
+impl PartialEq<RecordedOrigin> for ArtifactOrigin {
+    fn eq(&self, other: &RecordedOrigin) -> bool {
+        matches!(self, ArtifactOrigin::Recorded(recorded) if recorded == other)
+    }
+}
+
+/// Where a run says one of its artifacts came from. The closed set a
+/// fresh acceptance can state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecordedOrigin {
     /// A session handed the whole document over through its submission
     /// tool.
     Submitted,
@@ -225,9 +258,12 @@ pub enum ArtifactOrigin {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         producer: Option<NodeId>,
     },
-    /// A log that recorded the artifact without saying where it came
-    /// from — every `artifact_written` there is. The honest origin of a
-    /// fact stated before origins were: the run held it, and the log
-    /// does not say how.
+}
+
+/// What an origin nobody recorded looks like on the wire: the tag the
+/// fold writes for an `artifact_written` that said nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Unrecorded {
     Legacy,
 }

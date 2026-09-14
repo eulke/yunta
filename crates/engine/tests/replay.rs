@@ -1,8 +1,8 @@
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
     EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage, UnknownEvent,
+    NodeFinishedPayload, NodeStartedPayload, RecordedOrigin, StoredEvent, TaskStatus,
+    TaskStatusChangedPayload, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
@@ -449,7 +449,7 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
                 kind: yunta_core::ArtifactKind::Questions,
             },
             hash.clone(),
-            ArtifactOrigin::Submitted,
+            RecordedOrigin::Submitted,
         ),
     )));
 
@@ -486,7 +486,7 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     assert_eq!(identities(&old), identities(&new));
     assert_eq!(
         old.artifacts.every().next().unwrap().origin,
-        ArtifactOrigin::Legacy,
+        ArtifactOrigin::Legacy(yunta_core::events::Unrecorded::Legacy),
         "the one thing an old log cannot state is how the run came by it"
     );
 }

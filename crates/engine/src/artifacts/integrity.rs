@@ -62,7 +62,7 @@ impl ArtifactIntegrity {
         let artifacts = RunArtifacts::of(run_dir, events);
         let mut integrity = ArtifactIntegrity::default();
         for held in artifacts.ledger().every() {
-            if held.origin == ArtifactOrigin::Legacy {
+            if matches!(held.origin, ArtifactOrigin::Legacy(_)) {
                 integrity.unverifiable += 1;
                 continue;
             }

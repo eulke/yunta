@@ -67,7 +67,10 @@ pub use diagnostic::{
     Subject,
 };
 pub use error::{describe, AdapterError, Result, Unbuildable};
-pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry, Withdrawal};
+pub use findings::{
+    FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
+    RelativePath, Withdrawal,
+};
 pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
 pub use hash::{sha256_hex, CommitSha, ContentHash};
 pub use id_source::{IdSource, SystemIdSource};

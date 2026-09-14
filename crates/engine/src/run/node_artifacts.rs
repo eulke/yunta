@@ -8,7 +8,7 @@
 //! holds once it has.
 
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, Failure, TokenUsage};
+use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, TokenUsage};
 use yunta_core::{ArtifactSpec, ContentHash, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
@@ -73,7 +73,7 @@ pub(super) async fn derive_findings(
         Some(&node.id),
         derived.artifact.clone(),
         &derived.bytes,
-        ArtifactOrigin::Derived,
+        RecordedOrigin::Derived,
     )
     .await?;
     Ok(None)
@@ -226,7 +226,7 @@ pub(super) async fn acquire_from_child(
             Some(&node.id),
             ArtifactId::from(item.spec),
             &item.bytes,
-            ArtifactOrigin::Inherited {
+            RecordedOrigin::Inherited {
                 run: child.id.clone(),
                 producer: item.producer,
             },
@@ -271,7 +271,7 @@ pub(super) async fn record_artifacts(
                 Some(&node.id),
                 artifact.artifact.clone(),
                 &bytes,
-                ArtifactOrigin::Ingested,
+                RecordedOrigin::Ingested,
             )
             .await?;
         }
