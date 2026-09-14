@@ -37,6 +37,9 @@ jobs:
       - name: the audit's smell counts have not risen
         run: cargo xtask smells --check
 
+      - name: the decisions and their index agree
+        run: cargo xtask adr --check
+
       - name: rustdoc has no warnings
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
