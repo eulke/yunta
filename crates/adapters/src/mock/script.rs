@@ -15,6 +15,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use yunta_core::fence::Coverage;
 
 use tokio::sync::{mpsc, Notify};
 use yunta_core::{ModelName, SessionId};
@@ -31,7 +32,8 @@ pub(super) struct Script {
     /// The edits this session's effects would have made and the request's
     /// constraints blocked — reported as tool use, which is how a
     /// hook-capable CLI reports an edit it refused.
-    pub(super) blocked_markers: Vec<PathBuf>,
+    pub(super) refused: Vec<PathBuf>,
+    pub(super) fence: Option<Coverage>,
     pub(super) steps: Vec<MockStep>,
     pub(super) outcome: MockOutcome,
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
@@ -89,16 +91,16 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         .send(AgentEvent::SessionOpened {
             session_id: script.session_id,
             model: Some(script.model),
+            fence: script.fence,
         })
         .is_err()
     {
         return;
     }
 
-    for path in script.blocked_markers {
+    for path in script.refused {
         if events
-            .send(AgentEvent::ToolUse {
-                name: "edit".to_string(),
+            .send(AgentEvent::WriteRefused {
                 target: yunta_core::events::ToolTarget::of_path(&path),
             })
             .is_err()

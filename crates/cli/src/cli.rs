@@ -217,6 +217,15 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// The hook an agent's CLI runs before it writes: reads the call on
+    /// stdin, answers whether the fence allows it. Hidden because no
+    /// person invokes it — a session's own CLI does, and the adapter
+    /// that opened the session is what put the command there.
+    #[command(name = yunta_core::fence::SUBCOMMAND, hide = true)]
+    Fence {
+        /// The adapter whose codec reads this call.
+        adapter: yunta_core::AdapterId,
+    },
     /// Prints the shape of a document Yunta reads and validates, so
     /// nobody has to guess it. With no arguments, lists the kinds.
     Schema {
@@ -389,6 +398,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             json,
         } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json),
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
+        Command::Fence { adapter } => fence_hook(&adapter),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {
             name,
@@ -397,4 +407,34 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             force,
         } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
     }
+}
+
+/// Runs the hook and leaves the CLI that called it exactly what its own
+/// protocol expects: the streams, and the exit code as the outcome.
+///
+/// Reading stdin and the environment happens here, at the shell's edge,
+/// and the judgement itself is a pure function below it.
+fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
+    use std::io::{Read, Write};
+
+    let mut stdin = Vec::new();
+    std::io::stdin().read_to_end(&mut stdin).map_err(|source| {
+        CliError::msg(format!("the fence hook cannot read its call: {source}"))
+    })?;
+    let built = commands::built_adapter(adapter);
+    let reply = commands::fence::run(
+        built.as_ref().and_then(|built| built.fence_codec()),
+        std::env::var(yunta_core::fence::ENV_VAR).ok().as_deref(),
+        &stdin,
+    );
+    // A hook that cannot deliver its answer has not answered, and the
+    // exit code alone is what the calling CLI then reads: a failure
+    // here leaves the refusal, which is the safe side of it.
+    std::io::stdout()
+        .write_all(&reply.stdout)
+        .and_then(|()| std::io::stderr().write_all(&reply.stderr))
+        .map_err(|source| {
+            CliError::msg(format!("the fence hook cannot answer its call: {source}"))
+        })?;
+    Ok(Outcome::Code(u8::try_from(reply.exit).unwrap_or(1)))
 }

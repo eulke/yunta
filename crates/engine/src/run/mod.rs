@@ -282,6 +282,12 @@ pub struct RunEnv<'a> {
     /// variables layered onto every subprocess. `None` means no user layer
     /// and no injected variables — the shape most tests want.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// The hook a CLI runs to ask the judge about one write: this
+    /// binary's own path, resolved once by the shell that started the
+    /// run. `None` in a harness with no binary to run — an adapter
+    /// whose fence needs it then fails the session rather than opening
+    /// one that writes freely.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
     /// Where the values of the variables `secrets:` names come from. The
     /// config names them; only the shell that started the run may read
     /// their values, so the engine asks here and never the process.

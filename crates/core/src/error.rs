@@ -16,6 +16,16 @@ pub enum AdapterError {
         what: Capability,
     },
 
+    /// An adapter cannot build the fence this session needs. A
+    /// capability that is absent fails rather than opening a session
+    /// that writes where the run never said it could.
+    #[error("adapter `{adapter}`: {source}")]
+    FenceUnbuildable {
+        adapter: AdapterId,
+        #[source]
+        source: Unbuildable,
+    },
+
     /// An adapter was handed `adapter_settings` it cannot read. No
     /// session opens under them: a setting nobody could parse would run
     /// the agent under something the config never asked for, silently.
@@ -50,6 +60,19 @@ pub enum AdapterError {
         key: String,
         known: Vec<&'static str>,
     },
+}
+
+/// Why an adapter cannot build a session's fence.
+#[derive(Debug, thiserror::Error)]
+pub enum Unbuildable {
+    #[error("this adapter cannot run its fence hook: no yunta binary was handed to the session")]
+    HookUnavailable,
+    #[error(
+        "this adapter cannot keep {} writable under a read-only profile; hand the files over \
+         through the run tools or raise the profile to `edit`",
+        .0.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(", ")
+    )]
+    SealedRoots(Vec<std::path::PathBuf>),
 }
 
 /// Convenience alias for an adapter's typed `Result`.

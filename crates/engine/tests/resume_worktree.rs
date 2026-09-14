@@ -70,6 +70,7 @@ impl Paused {
             ambient: None,
             secrets: None,
             observer: None,
+            fence_hook: None,
         })
         .await
     }

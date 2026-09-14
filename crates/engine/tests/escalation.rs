@@ -87,6 +87,7 @@ async fn paused_manifest_and_events(
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -290,6 +291,7 @@ impl GateBench {
             ambient: None,
             secrets: None,
             observer: None,
+            fence_hook: None,
         })
         .await
         .unwrap();
@@ -451,6 +453,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             ambient: None,
             secrets: None,
             observer: None,
+            fence_hook: None,
         })
         .await
         .unwrap()

@@ -340,6 +340,7 @@ sessions:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -478,6 +479,7 @@ sessions:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -831,6 +833,7 @@ nodes:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await;
 
@@ -1356,5 +1359,93 @@ nodes:
     assert!(
         brief.contains("the parser lives in src/lex.rs"),
         "the brief carries what the document noted: {brief}"
+    );
+}
+
+/// Every session carries what it may write, always: a node that
+/// declared a scope carries it, and a `read_only` node carries a
+/// ceiling that admits nothing under the worktree.
+#[tokio::test]
+async fn every_session_carries_its_fence_and_read_only_allows_nothing_under_the_worktree() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: two-nodes
+nodes:
+  - id: scoped
+    kind: prompt
+    runner: executor
+    prompt: "Do the scoped thing."
+    scope: ["src/**"]
+  - id: reading
+    kind: prompt
+    runner: executor
+    depends_on: [scoped]
+    permissions: read-only
+    prompt: "Read the thing."
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "scoped" }
+  - outcome: { type: completed, summary: "reading" }
+"#;
+    let (terminal, _) = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(
+        requests[0].fence.allowed.as_deref(),
+        Some(["src/**".into()].as_slice()),
+        "the node's declared scope is the ceiling it works to"
+    );
+    assert_eq!(
+        requests[1].fence.allowed.as_deref(),
+        Some([].as_slice()),
+        "a read-only node may write nothing under the worktree"
+    );
+}
+
+/// A session that can ask for more scope is told to ask; one that
+/// cannot is told to report the need and move on.
+#[tokio::test]
+async fn a_task_session_advises_expansion_and_a_prompt_session_advises_a_finding() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: plan-then-work
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the tasks."
+    artifacts:
+      produces: [tasks]
+  - id: work
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
+    );
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(
+        requests[0].fence.advice,
+        yunta_core::fence::Advice::ReportFinding,
+        "a prompt session has no tool to ask with"
+    );
+    assert_eq!(
+        requests[1].fence.advice,
+        yunta_core::fence::Advice::RequestExpansion,
+        "a task session mounted the tool that asks"
     );
 }

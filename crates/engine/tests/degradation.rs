@@ -115,6 +115,7 @@ impl Bench {
             ambient: None,
             secrets: None,
             observer: None,
+            fence_hook: None,
         })
         .await
         .unwrap();
@@ -233,12 +234,12 @@ on_finish:
     );
 }
 
-/// A fallback the whole run works under is stated once. `edit_hooks` is
+/// A fallback the whole run works under is stated once. The fence is
 /// the run's condition, not a node's choice: every node with a declared
-/// scope runs unguarded on an adapter that has none, and repeating that
-/// per node says nothing new and buries what does.
+/// scope runs unfenced on an adapter that can build none, and repeating
+/// that per node says nothing new and buries what does.
 #[tokio::test]
-async fn a_run_on_an_adapter_without_edit_hooks_says_so_once() {
+async fn a_run_on_an_adapter_without_a_fence_says_so_once() {
     let bench = yunta_testkit::Bench::new();
     let workflow = r#"
 name: two-scoped-nodes
@@ -263,7 +264,7 @@ sessions:
     let (terminal, _) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let stated = degradations_of(&bench, yunta_core::Capability::EditHooks);
+    let stated = degradations_of(&bench, yunta_core::Capability::Fence);
     assert_eq!(
         stated.len(),
         1,
@@ -380,4 +381,94 @@ nodes:
         log.contains(yunta_core::REDACTED),
         "and the log says where it was: {log}"
     );
+}
+
+/// An adapter that says it judged every write before it happened, and
+/// a write that reached the diff anyway: that is something to look at in
+/// the adapter, filed beside the failure the violation causes either way.
+#[tokio::test]
+async fn a_write_that_escapes_an_exact_fence_is_an_engine_finding() {
+    let bench = yunta_testkit::Bench::new();
+    let workflow = r#"
+name: scoped
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+    scope: ["a.txt"]
+"#;
+    // A fixture that reports an exact fence and writes outside it
+    // anyway: the hook timed out, which this CLI lets through.
+    let fixture = r#"
+capabilities: { fence: none }
+fence_coverage: exact
+effects:
+  - { path: b.txt, content: "outside the scope\n" }
+outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(workflow, fixture).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "the violation fails the node and pauses the run: {terminal:?}"
+    );
+
+    assert!(
+        breaches(&bench).len() == 1,
+        "one breach, naming what escaped: {:?}",
+        breaches(&bench)
+    );
+    assert!(
+        breaches(&bench)[0].detail.contains("b.txt"),
+        "the finding names the path that reached the diff: {:?}",
+        breaches(&bench)[0]
+    );
+}
+
+/// Under a widened or tool-only coverage a violation is what it always
+/// was: the node fails with the list, and nobody claimed more.
+#[tokio::test]
+async fn a_write_inside_widened_roots_is_a_scope_violation_and_nothing_more() {
+    let bench = yunta_testkit::Bench::new();
+    let workflow = r#"
+name: scoped
+nodes:
+  - id: work
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+    scope: ["a.txt"]
+"#;
+    let fixture = r#"
+capabilities: { fence: filesystem }
+effects:
+  - { path: b.txt, content: "outside the scope\n" }
+outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run(workflow, fixture).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "the violation fails the node and pauses the run: {terminal:?}"
+    );
+    assert!(
+        breaches(&bench).is_empty(),
+        "a sandbox never claimed to judge by glob: {:?}",
+        breaches(&bench)
+    );
+}
+
+/// Every fence breach the run filed.
+fn breaches(bench: &yunta_testkit::Bench) -> Vec<Finding> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Findings(FindingEvent::Posted(p)))
+                if p.finding.id == yunta_engine::Breach::ID =>
+            {
+                Some(p.finding.clone())
+            }
+            _ => None,
+        })
+        .collect()
 }

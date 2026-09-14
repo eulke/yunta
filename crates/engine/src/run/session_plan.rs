@@ -14,7 +14,9 @@
 
 use std::path::PathBuf;
 
+use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
+use yunta_core::ScopeGlob;
 use yunta_core::{Node, Task};
 
 use crate::run::node_exec::NodeEnd;
@@ -49,6 +51,7 @@ pub(crate) async fn resolve_setup(
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
         run_tools,
+        fence_hook: ctx.fence_hook.clone(),
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),
         chosen: chosen.clone(),
@@ -69,8 +72,7 @@ async fn state_run_wide_absences(
     adapter: &dyn Adapter,
 ) -> Result<(), crate::run::RunError> {
     if declares_edit_scope(node) {
-        crate::run::capability::require(ctx, adapter, yunta_core::Capability::EditHooks, node)
-            .await?;
+        crate::run::capability::require(ctx, adapter, yunta_core::Capability::Fence, node).await?;
     }
     if ctx
         .manifest
@@ -199,6 +201,10 @@ pub(crate) struct SessionPlan<'a> {
     pub profile: PermissionProfile,
     /// What it may spend.
     pub budget: Budget,
+    /// The expansions this session's task has already been granted:
+    /// part of what it may write, exactly as the post-check evaluates
+    /// it.
+    pub granted: Vec<ScopeGlob>,
 }
 
 /// What stops a session from opening.
@@ -233,8 +239,8 @@ pub(crate) async fn open_session(
     observer: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<OpenedSession, OpenSessionError> {
     let run_tools = mount_tools(setup, &plan, adapter, observer).await?;
-    let edit_constraints = edit_constraints(&plan);
     let scratch_dir = scratch_dir(setup, &plan);
+    let fence = fence(setup, &plan, run_tools.is_some());
 
     // The tool sentence is produced by the mount, so a session is never
     // told to call something this adapter did not give it.
@@ -259,7 +265,8 @@ pub(crate) async fn open_session(
             agent: setup.chosen.agent.clone(),
             permissions: plan.profile,
             env: setup.env.clone(),
-            edit_constraints,
+            fence,
+            fence_hook: setup.fence_hook.clone(),
             budget: plan.budget,
             adapter_settings: setup.adapter_settings.clone(),
             skills: setup.skills.clone(),
@@ -268,19 +275,40 @@ pub(crate) async fn open_session(
             // sessions hand over, so a session that has one to write is
             // told where it belongs.
             artifact_dir: setup.artifact_dir.clone(),
-            scratch_dir: Some(scratch_dir),
+            scratch_dir,
         },
         run_tools,
     })
 }
 
-/// The globs this session may edit: a task session works to its task's
-/// scope, a node's own session to the node's, when it declares one.
-fn edit_constraints(plan: &SessionPlan<'_>) -> Option<Vec<yunta_core::port::Glob>> {
-    match plan.task {
-        Some(task) => Some(task.scope.clone()),
-        None => (!plan.node.scope.is_empty()).then(|| plan.node.scope.clone()),
-    }
+/// What this session may write: its profile, the scope it works to — a
+/// task session its task's, a node's own session the node's — the
+/// expansions already granted, and the one directory outside the
+/// worktree its declared files belong in.
+///
+/// A session that mounted the scope-expansion tool is told to ask for
+/// more when it is refused; one that did not is told to report the need
+/// and move on, because asking is not something it can do.
+fn fence(setup: &SessionSetup, plan: &SessionPlan<'_>, holds_run_tools: bool) -> Fence {
+    // Scope expansion is task-keyed, so only a task session is offered
+    // the tool that asks for it: every other session is told to report
+    // the need instead of asking with something it does not hold.
+    let advice = if holds_run_tools && plan.task.is_some() {
+        Advice::RequestExpansion
+    } else {
+        Advice::ReportFinding
+    };
+    let scope: Option<&[ScopeGlob]> = match plan.task {
+        Some(task) => Some(&task.scope),
+        None => (!plan.node.scope.is_empty()).then_some(plan.node.scope.as_slice()),
+    };
+    Fence::for_session(
+        plan.profile,
+        scope,
+        &plan.granted,
+        setup.artifact_dir.as_deref(),
+        advice,
+    )
 }
 
 /// Where this session may drop its own scaffolding. Concurrent sessions

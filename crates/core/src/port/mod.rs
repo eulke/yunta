@@ -15,6 +15,6 @@ pub use forge::{
 };
 pub use policy::{absence_of, Absence, POLICY};
 pub use session::{
-    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
-    ProbeReport, RunToolsEndpoint, SessionRequest,
+    Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, CodecError, FenceCodec,
+    HookReply, PermissionProfile, ProbeReport, RunToolsEndpoint, SessionRequest,
 };

@@ -157,6 +157,60 @@ conjunto cerrado, y se cuenta junto con la kind del documento que la violó
 (D135).
 _Evitar_: constraint, chequeo semántico, validación extra.
 
+## El cerco
+
+**Cerco** (`Fence`):
+Lo que una sesión puede escribir: los globs que puede escribir bajo el
+worktree —el scope declarado más las ampliaciones ya concedidas— y las raíces
+absolutas fuera de él, que son el registro del run y no el trabajo de la
+tarea. Es la única fuente de permiso de escritura de una sesión, y viaja
+siempre (D172).
+_Evitar_: edit_constraints, restricciones de edición, permisos de escritura.
+
+**Nivel** (`FenceLevel`):
+Lo que un adapter sabe construir del cerco: nada, un juicio por llamada de
+herramienta, o un sandbox de filesystem. Es del adapter, constante, y viaja en
+`capabilities.fence`. Un transporte distinto —hook, extensión, programa
+delegado— no es un nivel distinto.
+_Evitar_: edit_hooks, modo de enforcement.
+
+**Cobertura** (`Coverage`):
+Cuánto de una sesión concreta cercó lo que su adapter construyó: exacta,
+ensanchada a raíces, o solo herramientas. Se calcula de lo construido, nunca
+se declara, y viaja en `agent_session_opened.fence`.
+_Evitar_: nivel de la sesión, enforcement efectivo.
+
+**Canal**:
+Por dónde una sesión escribe: las herramientas de archivo del CLI, o todo lo
+demás —shell, MCP, tareas delegadas—. La cobertura de una sesión es la del
+canal más débil.
+
+**Cercado** (`Fenced`):
+Lo que un canal tiene: cerco exacto, o raíces.
+
+**Juez** (`Fence::judge`):
+La función pura que decide si un path está dentro del cerco. No toca disco:
+resuelve `.` y `..` lexicalmente contra el worktree y responde. Es una sola
+para todo el workspace — el hook de cada CLI, los efectos del mock y el
+comando `yunta fence` preguntan la misma.
+_Evitar_: validador de scope, checker.
+
+**Hook** (`FenceHook`):
+El comando que un CLI ejecuta antes de escribir y que invoca al juez: este
+binario, su subcomando `fence`, y el adapter cuyo codec lee la llamada. Lo
+resuelve la cáscara una sola vez.
+
+**Codec** (`FenceCodec`):
+La traducción entre el juez y el hook de un CLI: qué path nombra la llamada
+que llegó por stdin, y en qué forma ese CLI lee la respuesta. Un adapter
+escribe solo el codec; el juicio es de core.
+
+**Rechazo** (`write_refused`):
+El hecho de que una escritura fue rechazada antes de ocurrir. Su texto para el
+modelo nace una sola vez, empieza por un marcador fijo y dice la salida: pedir
+ampliación, o reportar un finding.
+_Evitar_: bloqueo, edición bloqueada.
+
 ## Fallas
 
 **Falla de nodo**:

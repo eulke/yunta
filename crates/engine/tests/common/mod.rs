@@ -820,6 +820,7 @@ pub async fn run_with_recording_mock(
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -943,6 +944,7 @@ pub async fn resume_orphan_with_mock(
                     agent: None,
                     model: Some("mock-model".into()),
                     capabilities: yunta_core::Capabilities::default(),
+                    fence: None,
                 },
             )),
         );
@@ -974,6 +976,7 @@ pub async fn resume_orphan_with_mock(
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

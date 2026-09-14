@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::fence::Coverage;
 use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId};
 use crate::{Capabilities, Capability};
@@ -66,6 +67,24 @@ pub struct AgentSessionOpenedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelName>,
     pub capabilities: Capabilities,
+    /// How much of this session the adapter's fence covered — derived
+    /// from what it built, never declared. Absent when it built none.
+    /// The level travels once, in `capabilities.fence`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fence: Option<Coverage>,
+}
+
+/// A write the fence refused before it happened.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WriteRefusedPayload {
+    pub session_id: SessionId,
+    pub target: ToolTarget,
+}
+
+impl WriteRefusedPayload {
+    pub fn new(session_id: SessionId, target: ToolTarget) -> Self {
+        WriteRefusedPayload { session_id, target }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

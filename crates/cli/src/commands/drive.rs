@@ -119,6 +119,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         ambient: Some(&ambient),
         secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
         observer: watching.observer.clone(),
+        fence_hook: Some(env.ctx.fence_hook.clone()),
     })
     .await
     {

@@ -39,7 +39,7 @@ pub const POLICY: [(Capability, Absence); 8] = [
         Absence::DegradeWith(Policy::FreshSession),
     ),
     (
-        Capability::EditHooks,
+        Capability::Fence,
         Absence::DegradeWith(Policy::PostCheckOnly),
     ),
     (Capability::PermissionProfiles, Absence::FailAtCheck),

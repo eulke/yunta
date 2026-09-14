@@ -268,6 +268,7 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .expect_err("an off-menu answer is not a decision");
@@ -383,6 +384,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -517,6 +519,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -556,6 +559,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -741,6 +745,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -767,6 +772,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

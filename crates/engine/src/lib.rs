@@ -130,7 +130,9 @@ pub use run_tools::{
     RunToolsSession,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
-pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
+pub use scope::{
+    audited_scope, fence_breach, scope_check, Breach, ScopeCheckError, ScopeCheckResult,
+};
 pub use stats::{
     compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
     Submissions,

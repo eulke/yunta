@@ -158,6 +158,7 @@ fn session_opened(index: u64, offset_secs: i64, node_id: &str, session: &str) ->
             agent: Some("reviewer".into()),
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
+            fence: None,
         })),
     )
 }

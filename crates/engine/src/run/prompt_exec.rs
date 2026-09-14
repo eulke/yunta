@@ -153,6 +153,9 @@ pub(super) async fn execute_prompt(
             cwd: ctx.worktree.to_path_buf(),
             profile: session_profile(node),
             budget: ctx.session_budget().await?,
+            // A node's own session works a task nobody granted
+            // anything to: its scope is what it declared, whole.
+            granted: Vec::new(),
         },
         adapter.as_ref(),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
@@ -188,7 +191,11 @@ pub(super) async fn execute_prompt(
     .await?;
 
     let staged = adapter.staged_paths(&request);
-    let (outcome, tokens) = dispatch_session(
+    let crate::task_cycle::Dispatched {
+        outcome,
+        tokens,
+        fence: _fence,
+    } = dispatch_session(
         adapter.as_ref(),
         request,
         cancel,

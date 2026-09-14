@@ -131,6 +131,7 @@ async fn cancel_pauses_a_hanging_run_as_cancelled_by_user() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     });
 
     let (report, ()) = tokio::join!(run, cancel_once_started(&bench, &token));
@@ -170,6 +171,7 @@ async fn cancel_then_resume_finishes_the_run() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     });
     let (first, ()) = tokio::join!(run, cancel_once_started(&bench, &token));
     assert!(matches!(
@@ -198,6 +200,7 @@ async fn cancel_then_resume_finishes_the_run() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .expect("resume run");

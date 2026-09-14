@@ -46,6 +46,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             agent: None,
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
+            fence: None,
         })),
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
@@ -272,6 +273,12 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 Capability::ResumeSession,
                 "mock".into(),
                 yunta_core::events::Policy::FreshSession,
+            ),
+        )),
+        EventPayload::Session(SessionEvent::WriteRefused(
+            yunta_core::events::WriteRefusedPayload::new(
+                "sess-1".into(),
+                yunta_core::events::ToolTarget::of_path(std::path::Path::new("docs/readme.md")),
             ),
         )),
         EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(

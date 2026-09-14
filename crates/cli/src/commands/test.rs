@@ -297,6 +297,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         // A case's verdict is its report, compared against `expect:` —
         // there is no live surface drawing it.
         observer: None,
+        fence_hook: Some(crate::context::fence_hook()),
     })
     .await
     .map_err(|e| yunta_core::describe(&e))?;

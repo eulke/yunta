@@ -103,6 +103,17 @@
         "capabilities": {
           "$ref": "#/$defs/Capabilities"
         },
+        "fence": {
+          "description": "How much of this session the adapter's fence covered — derived\nfrom what it built, never declared. Absent when it built none.\nThe level travels once, in `capabilities.fence`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "model": {
           "description": "The model the CLI reported for the session; absent when it\nreported none.",
           "anyOf": [
@@ -491,10 +502,10 @@
           "type": "boolean",
           "default": false
         },
-        "edit_hooks": {
-          "description": "Can block edits outside a set of globs as they happen (hot\nenforcement of scope).",
-          "type": "boolean",
-          "default": false
+        "fence": {
+          "description": "What this adapter can build to keep a session's writes inside\nits fence. `None` means nothing: the post-check diff is the only\nthing that catches a write outside the scope. A log written\nbefore the fence existed carries `edit_hooks` instead, which this\nfield's `default` reads as `None`.",
+          "$ref": "#/$defs/FenceLevel",
+          "default": "none"
         },
         "network_isolation": {
           "description": "Can confine a session's process to no network access, enforcing a\nnode's `network: false`. Declarative policy is never an OS sandbox\nYunta core promises (D105): where this is absent, a node's\n`network: false` degrades with `capability_degraded` — recorded for\npolicy and audit, never enforced.",
@@ -533,7 +544,7 @@
       "type": "string",
       "enum": [
         "resume_session",
-        "edit_hooks",
+        "fence",
         "permission_profiles",
         "custom_agents",
         "usage_reporting",
@@ -673,6 +684,54 @@
         "source_id",
         "kind",
         "content_hash"
+      ]
+    },
+    "Coverage": {
+      "description": "How much of a session the fence actually covered, derived from what\nthe adapter could build — never declared.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "exact"
+            }
+          },
+          "required": [
+            "coverage"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "widened_to_roots"
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "coverage",
+            "roots"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "tools_only"
+            }
+          },
+          "required": [
+            "coverage"
+          ]
+        }
       ]
     },
     "CriteriaCheckedPayload": {
@@ -1450,6 +1509,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "write_refused"
+            }
+          },
+          "$ref": "#/$defs/WriteRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_paused"
             }
           },
@@ -1518,6 +1590,15 @@
       },
       "required": [
         "value"
+      ]
+    },
+    "FenceLevel": {
+      "description": "What an adapter can build to keep a session's writes inside its\nfence. Three levels, because three is what the market has: nothing;\na judgement before each file-tool call; or a filesystem sandbox the\nprocess itself runs under.",
+      "type": "string",
+      "enum": [
+        "none",
+        "tool_calls",
+        "filesystem"
       ]
     },
     "FileProblem": {
@@ -2829,6 +2910,22 @@
       },
       "required": [
         "digest"
+      ]
+    },
+    "WriteRefusedPayload": {
+      "description": "A write the fence refused before it happened.",
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "target": {
+          "$ref": "#/$defs/ToolTarget"
+        }
+      },
+      "required": [
+        "session_id",
+        "target"
       ]
     }
   }

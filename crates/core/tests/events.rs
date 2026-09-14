@@ -45,6 +45,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Children(ChildEvent::Created(_))
         | EventPayload::Children(ChildEvent::Finished(_))
         | EventPayload::Session(SessionEvent::CapabilityDegraded(_))
+        | EventPayload::Session(SessionEvent::WriteRefused(_))
         | EventPayload::Run(RunEvent::Paused(_))
         | EventPayload::Run(RunEvent::Resumed(_))
         | EventPayload::Run(RunEvent::Finished(_)) => {}
@@ -180,12 +181,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_37_kinds_with_distinct_names() {
+fn there_are_exactly_38_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 37);
+    assert_eq!(kinds.len(), 38);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 37, "expected 37 distinct kind names");
+    assert_eq!(names.len(), 38, "expected 38 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -253,6 +254,7 @@ fn kind_names_match_the_spec_exactly() {
         "child_run_created",
         "child_run_finished",
         "capability_degraded",
+        "write_refused",
         "run_paused",
         "run_resumed",
         "run_finished",
@@ -501,4 +503,39 @@ fn a_capability_parses_to_the_capabilities_field_it_names() {
         panic!("a capability_degraded body parses as its payload: {body:?}");
     };
     assert_eq!(payload.capability, Capability::NetworkIsolation);
+}
+
+/// A refusal moves the session it belongs to, so a reader can say what
+/// a node's sessions were stopped from writing.
+#[test]
+fn write_refused_is_a_session_kind_that_moves_the_ledger() {
+    assert!(yunta_core::events::SessionEvent::KINDS.contains(&"write_refused"));
+
+    let refused = yunta_core::events::WriteRefusedPayload::new(
+        "sess-1".into(),
+        yunta_core::events::ToolTarget::of_path(std::path::Path::new("docs/readme.md")),
+    );
+    let event = yunta_core::events::SessionEvent::WriteRefused(refused);
+    assert!(
+        !event.is_audit(),
+        "a refusal is state a reader derives, not a note beside it"
+    );
+}
+
+/// A log written before the fence existed carries `edit_hooks`, and a
+/// reader takes that as an adapter that built no fence at all.
+#[test]
+fn an_old_log_without_a_fence_level_reads_as_none() {
+    let old = serde_json::json!({
+        "resume_session": true,
+        "edit_hooks": true,
+        "permission_profiles": true,
+        "custom_agents": false,
+        "usage_reporting": true,
+        "run_tools": false,
+    });
+    let read: yunta_core::Capabilities = serde_json::from_value(old).unwrap();
+
+    assert_eq!(read.fence, yunta_core::FenceLevel::None);
+    assert!(read.resume_session, "what it did say still reads");
 }

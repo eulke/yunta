@@ -255,6 +255,16 @@ async fn scope_violation(
     if result.violations.is_empty() {
         return Ok(None);
     }
+    // A write the adapter said it judged before it happened, and which
+    // reached the diff anyway: the adapter answers for it, beside the
+    // failure the violation causes either way.
+    let coverage = ctx.last_coverage(&node.id).await?;
+    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &result) {
+        let adapter = ctx.resolved_adapter(&node.id).await?;
+        if let Some(adapter) = adapter {
+            ctx.record_breach(&node.id, &adapter, &breach).await?;
+        }
+    }
     Ok(Some(
         fail_with_tokens(
             ctx,

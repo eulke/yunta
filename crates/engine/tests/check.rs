@@ -2071,7 +2071,7 @@ fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
         yunta_core::Capability::PermissionProfiles => declared.permission_profiles = true,
         yunta_core::Capability::CustomAgents => declared.custom_agents = true,
         yunta_core::Capability::ResumeSession => declared.resume_session = true,
-        yunta_core::Capability::EditHooks => declared.edit_hooks = true,
+        yunta_core::Capability::Fence => declared.fence = yunta_core::FenceLevel::ToolCalls,
         yunta_core::Capability::UsageReporting => declared.usage_reporting = true,
         yunta_core::Capability::Skills => declared.skills = true,
         yunta_core::Capability::RunTools => declared.run_tools = true,

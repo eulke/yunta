@@ -369,6 +369,7 @@ fn build_ctx(
         ambient,
         secrets,
         observer,
+        fence_hook,
     } = env;
     // Resolved once, when the run wakes: every append this invocation
     // makes takes the same values back out, and a run that declares no
@@ -392,6 +393,7 @@ fn build_ctx(
     let clock_for_host = clock.clone();
     let observer_for_host = observer.clone();
     let ctx = RunCtx {
+        fence_hook,
         run_id,
         manifest,
         run_dir,

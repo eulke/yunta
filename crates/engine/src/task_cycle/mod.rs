@@ -11,6 +11,7 @@
 mod attempt;
 mod criteria;
 mod session;
+mod stream;
 
 use std::path::{Path, PathBuf};
 use yunta_core::ScopeGlob;
@@ -28,6 +29,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 
 pub use criteria::{post_check, pre_check, Memo};
 pub(crate) use session::dispatch_session;
+pub(crate) use session::Dispatched;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 
 #[derive(Debug, Error)]
@@ -143,6 +145,11 @@ pub struct AttemptRecord {
     /// finding conversion from this; `run_task` only decides and
     /// widens `scope` for this attempt's own check when granted.
     pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
+    /// A write the session's fence said it would have stopped and the
+    /// diff carries anyway. `run_task` has no `RunCtx` to record it on,
+    /// so it hands the breach to the caller that already records this
+    /// attempt's `scope_checked`.
+    pub fence_breach: Option<crate::scope::Breach>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

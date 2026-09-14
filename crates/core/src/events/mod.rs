@@ -401,6 +401,7 @@ wire_kinds! {
     ChildRunCreated => "child_run_created",
     ChildRunFinished => "child_run_finished",
     CapabilityDegraded => "capability_degraded",
+    WriteRefused => "write_refused",
     RunPaused => "run_paused",
     RunResumed => "run_resumed",
     RunFinished => "run_finished",

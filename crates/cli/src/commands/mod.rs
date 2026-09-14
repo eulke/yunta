@@ -6,6 +6,7 @@ pub mod cancel;
 pub mod check;
 pub mod doctor;
 pub(crate) mod drive;
+pub mod fence;
 pub mod gc;
 pub mod init;
 pub mod list;
@@ -114,9 +115,7 @@ pub(crate) async fn spawn_detached_resume(
         .join("detached.log");
     let log = std::fs::File::create(&log_path)?;
     let log_err = log.try_clone()?;
-    let mut child_cmd = tokio::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
-    );
+    let mut child_cmd = tokio::process::Command::new(crate::context::own_binary());
     child_cmd
         .arg("resume")
         .arg(run_id)
@@ -171,6 +170,14 @@ pub(crate) fn declared_capabilities(adapter: &AdapterId) -> Option<yunta_core::C
         .iter()
         .find(|built| built.id() == adapter)
         .map(|built| built.capabilities())
+}
+
+/// The adapter this binary built under `id`, constructed without a
+/// probe: what the fence hook needs to reach one adapter's codec.
+pub(crate) fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter>> {
+    built_adapters(|_| AdapterSettings::default())
+        .into_iter()
+        .find(|built| built.id() == id)
 }
 
 /// What this binary can run on, as a person reads it: every built

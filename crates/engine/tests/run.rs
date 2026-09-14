@@ -369,6 +369,7 @@ nodes:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -1133,6 +1134,7 @@ nodes:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -1410,6 +1412,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap_err();

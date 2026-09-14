@@ -75,12 +75,13 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
-**A-13 · El cerco en los adapters.** Ningún adapter cerca lo que una sesión
-escribe; el scope se verifica después de la sesión por diff, y el engine lo
-dice con `capability_degraded(PostCheckOnly)` una vez por run. Lo resuelve el
-cerco (D172, `plan-de-raiz/cerco.md`, ítem 3-08): un juez en core, un hook
-en claude-code, el sandbox en codex, el juez en el mock; este ítem se cierra
-con 3-08.
+**A-13 · El cerco en los adapters.** Cerrada por D172 (`plan-de-raiz/cerco.md`,
+ítem 3-08): `yunta_core::fence::Fence::judge` es el único juez, `yunta fence
+<adapter-id>` el hook que los CLIs ejecutan, `claude-code` lo instala como
+`PreToolUse`, `codex` cerca por el sandbox de su proceso, y el mock juzga
+cada efecto de su fixture por la misma función. Lo que el cerco no pudo
+evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un
+cerco declarado exacto es además un `engine_finding`.
 
 **A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
 un `kind: questions` se responde por consola. Lo resolvería una forja que

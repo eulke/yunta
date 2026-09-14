@@ -26,6 +26,7 @@ mod config;
 pub mod diagnostic;
 mod error;
 pub mod events;
+pub mod fence;
 mod findings;
 mod glob;
 pub mod graph;
@@ -50,7 +51,7 @@ pub mod text;
 mod workflow;
 pub mod yaml;
 
-pub use capabilities::{Capabilities, Capability};
+pub use capabilities::{Capabilities, Capability, FenceLevel};
 pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
@@ -65,7 +66,7 @@ pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,
 };
-pub use error::{describe, AdapterError, Result};
+pub use error::{describe, AdapterError, Result, Unbuildable};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry, Withdrawal};
 pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
 pub use hash::{sha256_hex, CommitSha, ContentHash};

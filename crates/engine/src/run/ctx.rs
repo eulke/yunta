@@ -64,6 +64,9 @@ pub(crate) struct RunCtx<'a> {
     /// `on_interrupt`) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
+    /// The fence hook this invocation was given, handed to every
+    /// session the run opens.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
     pub(crate) adapter_override: Option<&'a AdapterId>,
     /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
@@ -232,6 +235,60 @@ impl RunCtx<'_> {
         )
         .await?;
         Ok(())
+    }
+
+    /// How much of its last session's writes the adapter's fence
+    /// covered. What a post-check diff is read against: a violation
+    /// under an exact fence is one the adapter said could not happen.
+    pub(crate) async fn last_coverage(
+        &self,
+        node: &NodeId,
+    ) -> Result<Option<yunta_core::fence::Coverage>, RunError> {
+        Ok(self
+            .run_view()
+            .await?
+            .state
+            .nodes
+            .get(node)
+            .and_then(|record| record.sessions.last())
+            .and_then(|session| session.fence.clone()))
+    }
+
+    /// The adapter this node's runner resolved to; `None` before it
+    /// resolved one.
+    pub(crate) async fn resolved_adapter(
+        &self,
+        node: &NodeId,
+    ) -> Result<Option<AdapterId>, RunError> {
+        Ok(self
+            .run_view()
+            .await?
+            .state
+            .nodes
+            .get(node)
+            .and_then(|record| record.runner.as_ref())
+            .map(|resolved| resolved.chosen.adapter.clone()))
+    }
+
+    /// Records a write the fence should have stopped, when the coverage
+    /// says it should have. A breach is the adapter's to answer for, so
+    /// it is filed beside the failure the violation already causes,
+    /// never instead of it.
+    pub(crate) async fn record_breach(
+        &self,
+        node: &NodeId,
+        adapter: &AdapterId,
+        breach: &crate::scope::Breach,
+    ) -> Result<(), RunError> {
+        self.engine_finding(
+            Some(node),
+            crate::scope::Breach::ID,
+            FindingSeverity::Major,
+            crate::scope::Breach::title(),
+            breach.location(),
+            breach.detail(adapter),
+        )
+        .await
     }
 
     /// The [`Budget`] for one agent session: an equal

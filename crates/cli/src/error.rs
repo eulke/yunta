@@ -16,6 +16,10 @@ pub enum Outcome {
     /// The command ran and reports a failing verdict — the detail is
     /// already on its output. Exit non-zero, no error banner.
     Reported,
+    /// The command's whole answer is its exit code, because the process
+    /// that ran it reads one: the fence hook, whose calling CLI takes
+    /// `2` as a refusal and `0` as consent.
+    Code(u8),
 }
 
 /// Everything a subcommand can fail with, phrased so its `Display` names

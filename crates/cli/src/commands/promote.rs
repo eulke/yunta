@@ -108,6 +108,7 @@ pub(crate) async fn drive_promotions(
             ambient: Some(&ambient),
             secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: env.observer.clone(),
+            fence_hook: Some(crate::context::fence_hook()),
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -242,6 +243,7 @@ nodes:
             ambient: None,
             secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: Some(recorder.clone()),
+            fence_hook: Some(crate::context::fence_hook()),
         })
         .await
         .unwrap();

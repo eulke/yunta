@@ -112,6 +112,7 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

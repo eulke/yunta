@@ -58,7 +58,7 @@ pub(super) async fn run_one_attempt(
     params: &AttemptParams<'_>,
     attempt: u32,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
-    let (last_staged, dispatch_outcome, tokens) = open_and_dispatch(params).await?;
+    let (last_staged, dispatch_outcome, tokens, covered) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
         cwd,
@@ -86,6 +86,7 @@ pub(super) async fn run_one_attempt(
             attempt,
             dispatch: DispatchOutcome::Cancelled,
             tokens,
+            fence_breach: None,
             post_check: Vec::new(),
             scope: crate::scope::ScopeCheckResult::default(),
             succeeded: false,
@@ -141,6 +142,7 @@ pub(super) async fn run_one_attempt(
         attempt,
         dispatch: dispatch_outcome,
         tokens,
+        fence_breach: crate::scope::fence_breach(covered.as_ref(), &scope),
         post_check: post_runs,
         scope,
         succeeded,
@@ -199,7 +201,15 @@ pub(super) async fn run_one_attempt(
 /// tokens it spent.
 async fn open_and_dispatch(
     params: &AttemptParams<'_>,
-) -> Result<(Vec<PathBuf>, DispatchOutcome, TokenUsage), TaskCycleError> {
+) -> Result<
+    (
+        Vec<PathBuf>,
+        DispatchOutcome,
+        TokenUsage,
+        Option<yunta_core::fence::Coverage>,
+    ),
+    TaskCycleError,
+> {
     let &AttemptParams {
         task,
         instruction,
@@ -211,6 +221,7 @@ async fn open_and_dispatch(
         audit,
         cancel,
         setup,
+        already_granted_paths,
         ..
     } = params;
     // One door for every session: the per-attempt listener (its bind
@@ -228,6 +239,7 @@ async fn open_and_dispatch(
             cwd: cwd.to_path_buf(),
             profile,
             budget,
+            granted: already_granted_paths.to_vec(),
         },
         adapter,
         audit,
@@ -244,7 +256,11 @@ async fn open_and_dispatch(
         },
     })?;
     let last_staged = adapter.staged_paths(&request);
-    let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
+    let crate::task_cycle::Dispatched {
+        outcome: dispatch_outcome,
+        tokens,
+        fence,
+    } = dispatch_session(adapter, request, cancel, audit, None)
         .await
         .map_err(|error| match error {
             DispatchError::Adapter(source) => TaskCycleError::Spawn {
@@ -256,7 +272,7 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    Ok((last_staged, dispatch_outcome, tokens))
+    Ok((last_staged, dispatch_outcome, tokens, fence))
 }
 
 /// Reads the agent's own scope-expansion request from this attempt's

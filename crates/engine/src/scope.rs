@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::process::Supervision;
+use yunta_core::fence::Coverage;
 use yunta_core::ScopeGlob;
 
 use thiserror::Error;
@@ -142,4 +143,57 @@ pub fn audited_scope(node: &yunta_core::Node) -> Option<&[ScopeGlob]> {
         return Some(&[]);
     }
     (!node.scope.is_empty()).then_some(node.scope.as_slice())
+}
+
+/// A write that reached the diff despite an exact fence.
+///
+/// Only an exact fence makes this a finding: the adapter said it judged
+/// every write before it happened and one got through anyway, which is
+/// something to look at in the adapter. Under a widened or tool-only
+/// coverage a violation is what it always was — the task fails with the
+/// list, and nobody claimed more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Breach {
+    pub paths: Vec<PathBuf>,
+}
+
+/// Pure: what the coverage and the diff together mean.
+pub fn fence_breach(coverage: Option<&Coverage>, result: &ScopeCheckResult) -> Option<Breach> {
+    if coverage != Some(&Coverage::Exact) || result.violations.is_empty() {
+        return None;
+    }
+    Some(Breach {
+        paths: result.violations.clone(),
+    })
+}
+
+impl Breach {
+    /// The id every fence breach is filed under, in the `engine-*`
+    /// scheme the engine's own findings use.
+    pub const ID: &'static str = "engine-fence-breach";
+
+    /// What the finding says, for one adapter.
+    pub fn title() -> String {
+        "the fence declared exact let a write through".to_string()
+    }
+
+    /// The first path, which is where a reader looks.
+    pub fn location(&self) -> String {
+        self.paths
+            .first()
+            .map(|path| path.display().to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn detail(&self, adapter: &yunta_core::AdapterId) -> String {
+        format!(
+            "fence exact on {adapter}; {} paths reached the diff outside it: {}",
+            self.paths.len(),
+            self.paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }

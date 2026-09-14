@@ -206,6 +206,7 @@ sessions:
         ambient: Some(&ambient),
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

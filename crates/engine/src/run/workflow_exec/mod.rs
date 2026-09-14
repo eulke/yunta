@@ -532,6 +532,9 @@ async fn drive_child(
                     adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
                     secrets: ctx.secrets.clone(),
+                    // A child run's sessions ask the same judge the
+                    // parent's do: the hook is the binary, not the run.
+                    fence_hook: ctx.fence_hook.clone(),
                     // One observer serves the whole invocation, this
                     // child included: its frames name the child's own
                     // run_id, because the child emits through its own

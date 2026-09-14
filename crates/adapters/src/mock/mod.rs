@@ -25,6 +25,8 @@ pub use fixture::{
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use yunta_core::fence::{Fence, Verdict};
+use yunta_core::FenceLevel;
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
@@ -153,25 +155,31 @@ impl MockAdapter {
         Ok(Self::new(MockFixture::parse_without_a_run(yaml)?))
     }
 
-    /// Whether an effect at `path` is blocked by the request's edit
-    /// constraints: only a hook-capable adapter blocks, and only a path
-    /// no declared glob matches. No constraints means nothing to block.
-    fn is_blocked(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
-        self.fixture.capabilities.edit_hooks
-            && req.edit_constraints.as_ref().is_some_and(|globs| {
-                yunta_core::scope_globset(globs).is_ok_and(|set| !set.is_match(path))
-            })
+    /// Whether the fence refuses an effect at `path` — by the same
+    /// judge every adapter asks, so a fixture exercises the rule the
+    /// real ones enforce.
+    ///
+    /// A filesystem sandbox knows nothing of globs: at that level the
+    /// judgement is against the directories alone. A fixture with no
+    /// fence at all writes whatever it scripts, and the engine's own
+    /// post-check diff is what catches it.
+    fn refuses(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
+        let fence = match self.fixture.capabilities.fence {
+            FenceLevel::None => return false,
+            FenceLevel::ToolCalls => req.fence.clone(),
+            FenceLevel::Filesystem => Fence::everything(req.fence.roots.clone(), req.fence.advice),
+        };
+        matches!(fence.judge(&req.cwd, path), Verdict::Refused(_))
     }
 
     /// Applies one session's filesystem effects under the request's
-    /// `cwd`, leaving out the ones its edit constraints block: a
-    /// hook-capable adapter installs the block before the edit ever
-    /// lands; without the capability, the engine's own post-check scope
-    /// diff is what catches it instead.
+    /// `cwd`, leaving out the ones the fence refuses: an adapter that
+    /// can judge a write blocks it before it lands, and the session
+    /// says so.
     fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
         let cwd = &req.cwd;
         for effect in &script.effects {
-            if self.is_blocked(req, &effect.path) {
+            if self.refuses(req, &effect.path) {
                 continue;
             }
             let full_path = cwd.join(&effect.path);
@@ -251,7 +259,14 @@ impl MockAdapter {
         let played = script::Script {
             session_id: self.session_id(resume_as)?,
             model: script.model.clone(),
-            blocked_markers: self.blocked_markers(script, &req),
+            refused: self.refused(script, &req),
+            fence: self.fixture.fence_coverage.map(|coverage| {
+                coverage.resolve(
+                    std::iter::once(req.cwd.clone())
+                        .chain(req.fence.roots.iter().cloned())
+                        .collect(),
+                )
+            }),
 
             steps: script.steps.clone(),
             outcome: script.outcome.clone(),
@@ -370,13 +385,13 @@ impl MockAdapter {
         }
     }
 
-    /// The effects this request's edit constraints kept from landing —
-    /// what the session reports as refused edits.
-    fn blocked_markers(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
+    /// The effects the fence kept from landing — what the session
+    /// reports as writes it refused.
+    fn refused(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
         script
             .effects
             .iter()
-            .filter(|e| self.is_blocked(req, &e.path))
+            .filter(|e| self.refuses(req, &e.path))
             .map(|e| e.path.clone())
             .collect()
     }

@@ -66,7 +66,10 @@ fi
 lines_file="${CODEX_STUB_LINES_FILE:-.codex-stub-lines.jsonl}"
 if [ -f "$lines_file" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
-    echo "$line"
+    # `printf '%s\n'` rather than `echo`: a shell whose `echo` reads
+    # backslash escapes (dash's does) would split a JSON line carrying
+    # `\n` in a string into two lines, and neither half is this protocol.
+    printf '%s\n' "$line"
   done < "$lines_file"
 fi
 

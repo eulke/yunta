@@ -17,9 +17,12 @@ use serde::{Deserialize, Serialize};
 pub struct Capabilities {
     /// Can resume a previous conversation via `resume()`.
     pub resume_session: bool,
-    /// Can block edits outside a set of globs as they happen (hot
-    /// enforcement of scope).
-    pub edit_hooks: bool,
+    /// What this adapter can build to keep a session's writes inside
+    /// its fence. `None` means nothing: the post-check diff is the only
+    /// thing that catches a write outside the scope. A log written
+    /// before the fence existed carries `edit_hooks` instead, which this
+    /// field's `default` reads as `None`.
+    pub fence: FenceLevel,
     /// Distinguishes permission profiles (`read_only`/`edit`/`full`).
     pub permission_profiles: bool,
     /// Supports the CLI's own named agents, selectable via the portable
@@ -44,6 +47,21 @@ pub struct Capabilities {
     pub network_isolation: bool,
 }
 
+/// What an adapter can build to keep a session's writes inside its
+/// fence. Three levels, because three is what the market has: nothing;
+/// a judgement before each file-tool call; or a filesystem sandbox the
+/// process itself runs under.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FenceLevel {
+    #[default]
+    None,
+    ToolCalls,
+    Filesystem,
+}
+
 /// One capability an adapter can declare: the closed set of
 /// [`Capabilities`] fields, spelled the way `capability_degraded` records
 /// them (`resume_session`, `run_tools`, …). The engine names the
@@ -53,7 +71,7 @@ pub struct Capabilities {
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     ResumeSession,
-    EditHooks,
+    Fence,
     PermissionProfiles,
     CustomAgents,
     UsageReporting,
@@ -69,7 +87,7 @@ impl Capability {
     /// else stops compiling or fails its test.
     pub const ALL: [Capability; 8] = [
         Capability::ResumeSession,
-        Capability::EditHooks,
+        Capability::Fence,
         Capability::PermissionProfiles,
         Capability::CustomAgents,
         Capability::UsageReporting,
@@ -82,7 +100,7 @@ impl Capability {
     pub fn as_str(self) -> &'static str {
         match self {
             Capability::ResumeSession => "resume_session",
-            Capability::EditHooks => "edit_hooks",
+            Capability::Fence => "fence",
             Capability::PermissionProfiles => "permission_profiles",
             Capability::CustomAgents => "custom_agents",
             Capability::UsageReporting => "usage_reporting",
@@ -107,7 +125,7 @@ impl Capabilities {
     pub fn declares(&self, capability: Capability) -> bool {
         match capability {
             Capability::ResumeSession => self.resume_session,
-            Capability::EditHooks => self.edit_hooks,
+            Capability::Fence => self.fence != FenceLevel::None,
             Capability::PermissionProfiles => self.permission_profiles,
             Capability::CustomAgents => self.custom_agents,
             Capability::UsageReporting => self.usage_reporting,
@@ -126,7 +144,7 @@ mod tests {
     fn the_spelling_is_the_one_serde_writes() {
         for capability in [
             Capability::ResumeSession,
-            Capability::EditHooks,
+            Capability::Fence,
             Capability::PermissionProfiles,
             Capability::CustomAgents,
             Capability::UsageReporting,

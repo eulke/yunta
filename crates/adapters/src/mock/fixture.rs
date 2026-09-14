@@ -17,14 +17,20 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use yunta_core::fence::{Coverage, Fenced};
 use yunta_core::yaml::{self, Value};
-use yunta_core::{Capabilities, ModelName};
+use yunta_core::{Capabilities, FenceLevel, ModelName};
 
 /// A parsed fixture: adapter-level capabilities plus one script per
 /// expected `spawn()`, in order.
 #[derive(Debug, Clone)]
 pub struct MockFixture {
     pub capabilities: Capabilities,
+    /// How much of a session this fixture's adapter reports it fenced.
+    /// A fixture that says nothing gets what its level implies: a
+    /// judgement per tool call is exact, a filesystem sandbox is widened
+    /// to the directories it confines.
+    pub fence_coverage: Option<FixtureCoverage>,
     pub sessions: Vec<SessionScript>,
 }
 
@@ -114,11 +120,17 @@ impl<'de> Deserialize<'de> for MockFixture {
             struct Multi {
                 #[serde(default)]
                 capabilities: FixtureCapabilities,
+                #[serde(default)]
+                fence_coverage: Option<FixtureCoverage>,
                 sessions: Vec<SessionScript>,
             }
             let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
+            let capabilities: Capabilities = multi.capabilities.into();
             Ok(MockFixture {
-                capabilities: multi.capabilities.into(),
+                fence_coverage: multi
+                    .fence_coverage
+                    .or_else(|| FixtureCoverage::of(capabilities.fence)),
+                capabilities,
                 sessions: multi.sessions,
             })
         } else {
@@ -135,12 +147,52 @@ impl<'de> Deserialize<'de> for MockFixture {
                 Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
                 None => FixtureCapabilities::default(),
             };
+            let declared: Option<FixtureCoverage> = match mapping.remove("fence_coverage") {
+                Some(value) => Some(yaml::from_value(value).map_err(D::Error::custom)?),
+                None => None,
+            };
             let script: SessionScript =
                 yaml::from_value(Value::Mapping(mapping)).map_err(D::Error::custom)?;
+            let capabilities: Capabilities = capabilities.into();
             Ok(MockFixture {
-                capabilities: capabilities.into(),
+                fence_coverage: declared.or_else(|| FixtureCoverage::of(capabilities.fence)),
+                capabilities,
                 sessions: vec![script],
             })
+        }
+    }
+}
+
+/// What a fixture says its adapter's fence covered. The shapes of
+/// [`Coverage`] as a fixture spells them; the roots of a widened one are
+/// the session's own, so a fixture names the shape and never the paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixtureCoverage {
+    Exact,
+    Widened,
+    ToolsOnly,
+}
+
+impl FixtureCoverage {
+    /// What a fixture's level reports when it names no coverage.
+    pub fn of(level: FenceLevel) -> Option<Self> {
+        match level {
+            FenceLevel::None => None,
+            FenceLevel::ToolCalls => Some(FixtureCoverage::Exact),
+            FenceLevel::Filesystem => Some(FixtureCoverage::Widened),
+        }
+    }
+
+    /// This coverage for a session confined to `directories`.
+    pub fn resolve(self, directories: Vec<std::path::PathBuf>) -> Coverage {
+        match self {
+            FixtureCoverage::Exact => Coverage::of(Fenced::Exact, Some(Fenced::Exact)),
+            FixtureCoverage::Widened => Coverage::of(
+                Fenced::Roots(directories.clone()),
+                Some(Fenced::Roots(directories)),
+            ),
+            FixtureCoverage::ToolsOnly => Coverage::of(Fenced::Exact, None),
         }
     }
 }
@@ -153,7 +205,7 @@ impl<'de> Deserialize<'de> for MockFixture {
 #[serde(default, deny_unknown_fields)]
 pub struct FixtureCapabilities {
     pub resume_session: bool,
-    pub edit_hooks: bool,
+    pub fence: FenceLevel,
     pub permission_profiles: bool,
     pub custom_agents: bool,
     pub usage_reporting: bool,
@@ -166,7 +218,7 @@ impl From<FixtureCapabilities> for Capabilities {
     fn from(fixture: FixtureCapabilities) -> Self {
         Capabilities {
             resume_session: fixture.resume_session,
-            edit_hooks: fixture.edit_hooks,
+            fence: fixture.fence,
             permission_profiles: fixture.permission_profiles,
             custom_agents: fixture.custom_agents,
             usage_reporting: fixture.usage_reporting,
@@ -289,7 +341,7 @@ impl MockStep {
 /// A file the session writes under the request's `cwd`, simulating the
 /// agent's own edits. Whether it lands is the request's business: with
 /// `edit_hooks` declared, a path outside the request's
-/// `edit_constraints` is blocked before it is written, exactly as a
+/// the fence refuses is never written, exactly as a
 /// hook-capable CLI would; without the capability every effect lands
 /// and the engine's post-check scope diff is what catches it.
 #[derive(Debug, Clone, Deserialize)]

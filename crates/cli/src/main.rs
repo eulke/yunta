@@ -56,6 +56,7 @@ fn main() -> ExitCode {
     match outcome {
         Ok(Outcome::Success) => ExitCode::SUCCESS,
         Ok(Outcome::Reported) => ExitCode::FAILURE,
+        Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
             eprintln!("error: {error}");
             ExitCode::FAILURE

@@ -32,6 +32,28 @@ itself, which wins) names a custom agent definition, for adapters that
 support one (`custom_agents` capability) — an adapter that doesn't declares
 this openly rather than silently ignoring the field.
 
+## What a session may write
+
+A node declares a `scope:`, and every session runs behind a **fence**: the
+globs it may write under the worktree, plus the run's own directories, which
+stay writable wherever the session sits. One function decides whether a path
+is inside it, and every adapter asks that same function — what differs is how
+much of the fence each CLI can be made to enforce, and each session's opening
+says which:
+
+| Adapter | How it fences | What it covers |
+|---|---|---|
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta fence`, which answers before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
+| `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
+| `mock` | The fixture says which of the three levels it builds, and every scripted effect goes through the same judge. | Whatever the fixture declares. |
+
+A refusal reaches the model with the reason and the way out — ask for more
+scope, or report the need as a finding — and reaches the log as
+`write_refused`. The fence is what keeps a write outside the scope from
+happening; the diff Yunta takes after the session is still the guarantee, and
+a write that reaches that diff despite an exact fence is reported as a finding
+against the adapter.
+
 Whatever the adapter, the session's prompt reaches the CLI on its standard
 input, never as a command-line argument, so it is not readable from the
 process list; and the values of the secrets a config declares live only in

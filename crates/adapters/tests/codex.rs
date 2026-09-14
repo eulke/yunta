@@ -8,6 +8,7 @@
 
 use std::error::Error as _;
 use std::path::PathBuf;
+use yunta_core::fence::{Advice, Fence};
 
 use yunta_adapters::CodexAdapter;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport};
@@ -27,6 +28,9 @@ fn adapter() -> CodexAdapter {
 
 const THREAD_STARTED_LINE: &str = r#"{"type":"thread.started","thread_id":"thread-abc"}"#;
 
+const TURN_COMPLETED_LINE: &str =
+    r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#;
+
 #[tokio::test]
 async fn probe_reports_the_stub_as_healthy_with_its_version() {
     let report = adapter().probe().await.unwrap();
@@ -44,7 +48,8 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.usage_reporting);
     // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
-    assert!(!caps.edit_hooks);
+    // The sandbox the process runs under confines writes by directory.
+    assert_eq!(caps.fence, yunta_core::FenceLevel::Filesystem);
     assert!(caps.run_tools);
 }
 
@@ -409,7 +414,7 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("gpt-5-codex".into());
     req.permissions = PermissionProfile::Edit;
-    req.artifact_dir = Some(artifacts);
+    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),
@@ -635,8 +640,17 @@ async fn an_unknown_adapter_setting_is_reported_by_probe() {
 /// event it produced.
 async fn events_of(lines: &[&str]) -> Vec<AgentEvent> {
     let dir = tempfile::tempdir().unwrap();
+    let req = request(dir.path().to_path_buf());
+    events_with(&dir, req, lines).await
+}
+
+/// The same, for a request a test shaped itself.
+async fn events_with(
+    dir: &tempfile::TempDir,
+    mut req: yunta_core::port::SessionRequest,
+    lines: &[&str],
+) -> Vec<AgentEvent> {
     let lines = write_lines(dir.path(), "lines.jsonl", lines);
-    let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
@@ -680,14 +694,14 @@ async fn a_fatal_error_event_ends_the_session_as_failed() {
 }
 
 #[tokio::test]
-async fn a_declared_artifact_directory_is_writable_by_the_session() {
+async fn a_codex_session_keeps_the_fence_roots_writable_beside_the_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
     std::fs::create_dir_all(&artifacts).unwrap();
     let args_file = dir.path().join("args.txt");
 
     let mut req = request(dir.path().to_path_buf());
-    req.artifact_dir = Some(artifacts.clone());
+    req.fence = Fence::everything(vec![artifacts.clone()], Advice::ReportFinding);
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),
@@ -706,7 +720,7 @@ async fn a_declared_artifact_directory_is_writable_by_the_session() {
     );
     assert!(
         args.lines().any(|arg| arg == expected),
-        "the artifact directory joins the writable roots as {expected}: {args}"
+        "a fence root joins the writable roots as {expected}: {args}"
     );
 }
 
@@ -716,7 +730,7 @@ async fn a_declared_artifact_directory_is_writable_by_the_session() {
 /// quoting carries it — basic or literal — is the renderer's call, so
 /// the claim here is what the CLI parses, never how it was spelled.
 #[tokio::test]
-async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_whole() {
+async fn a_writable_root_with_toml_metacharacters_reaches_the_cli_whole() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join(r#"quote"and\slash"#);
     std::fs::create_dir_all(&artifacts).unwrap();
@@ -724,7 +738,7 @@ async fn an_artifact_directory_with_toml_metacharacters_reaches_the_cli_whole() 
 
     let expected_dir = artifacts.clone();
     let mut req = request(dir.path().to_path_buf());
-    req.artifact_dir = Some(artifacts);
+    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),
@@ -1048,5 +1062,74 @@ async fn a_thread_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     assert!(
         described.len() > error.message.len(),
         "the cause is read, not dropped: {described}"
+    );
+}
+
+/// The sandbox is by directory in both channels, so the coverage a
+/// session reports is the widened one, naming the directories.
+#[tokio::test]
+async fn a_codex_session_reports_widened_coverage_with_its_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    let mut req = request(dir.path().to_path_buf());
+    req.fence = Fence::everything(vec![artifacts.clone()], Advice::ReportFinding);
+
+    let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
+
+    let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+        panic!("a session opens first: {events:?}");
+    };
+    assert_eq!(
+        fence.as_ref(),
+        Some(&yunta_core::fence::Coverage::WidenedToRoots {
+            roots: vec![dir.path().to_path_buf(), artifacts],
+        })
+    );
+}
+
+/// The sandbox has one setting for the whole filesystem: `read-only`
+/// seals the roots along with everything else, so a session that must
+/// write a declared file could never produce one. A capability that is
+/// absent fails instead of spending the session.
+#[tokio::test]
+async fn a_read_only_codex_session_with_declared_files_fails_before_spawning() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = PermissionProfile::ReadOnly;
+    req.fence = Fence::read_only(
+        vec![dir.path().join("run/artifacts")],
+        Advice::ReportFinding,
+    );
+
+    let refused = adapter()
+        .spawn(req)
+        .await
+        .err()
+        .expect("a fence this sandbox cannot build fails before spawning");
+    let said = yunta_core::describe(&refused);
+    assert!(
+        said.contains("read-only profile"),
+        "the refusal names what it cannot keep writable: {said}"
+    );
+}
+
+/// A command the sandbox refused is a write that did not happen, not
+/// activity to chronicle as a tool call.
+#[tokio::test]
+async fn a_sandbox_denial_becomes_write_refused() {
+    let denied = r#"{"type":"item.completed","item":{"type":"command_execution","command":"tee /etc/hosts","status":"sandbox_denied"}}"#;
+    let events = events_of(&[THREAD_STARTED_LINE, denied, TURN_COMPLETED_LINE]).await;
+
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::WriteRefused { .. })),
+        "the denial is recorded as a refused write: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::ToolUse { .. })),
+        "and never also as a tool call: {events:?}"
     );
 }

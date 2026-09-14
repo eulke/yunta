@@ -11,6 +11,7 @@
 
 use std::error::Error as _;
 use std::path::PathBuf;
+use yunta_core::fence::{Advice, Coverage, Fence};
 
 use yunta_adapters::ClaudeCodeAdapter;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport, SessionRequest};
@@ -31,6 +32,8 @@ fn adapter() -> ClaudeCodeAdapter {
 const INIT_LINE: &str =
     r#"{"type":"system","subtype":"init","session_id":"sess-abc","model":"claude-sonnet-5"}"#;
 
+const RESULT_LINE: &str = r#"{"type":"result","is_error":false,"result":"all done"}"#;
+
 #[tokio::test]
 async fn probe_reports_the_stub_as_healthy_with_its_version() {
     let report = adapter().probe().await.unwrap();
@@ -47,10 +50,9 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.permission_profiles);
     assert!(caps.custom_agents);
     assert!(caps.usage_reporting);
-    // Never claim a capability that isn't wired end-to-end yet — there
-    // is no live edit-hook blocking for the real CLI, only the engine's
-    // post-hoc scope check.
-    assert!(!caps.edit_hooks);
+    // Every writing tool goes through the hook that runs the judge
+    // before the write happens.
+    assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
     assert!(caps.run_tools);
 }
 
@@ -198,10 +200,7 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
         .iter()
         .position(|a| a == "--tools")
         .expect("ReadOnly restricts the tools");
-    assert_eq!(
-        args[tools_pos + 1],
-        "Read,Grep,Glob,WebFetch,WebSearch,Write"
-    );
+    assert_eq!(args[tools_pos + 1], "Read,Grep,Glob,WebFetch,WebSearch");
     let mode_pos = args
         .iter()
         .position(|a| a == "--permission-mode")
@@ -565,8 +564,17 @@ async fn an_unknown_adapter_setting_is_reported_by_probe() {
 /// event it produced.
 async fn events_of(lines: &[&str]) -> Vec<AgentEvent> {
     let dir = tempfile::tempdir().unwrap();
+    let req = request(dir.path().to_path_buf());
+    spawn_with(&dir, req, lines).await
+}
+
+/// The same, for a request a test shaped itself.
+async fn spawn_with(
+    dir: &tempfile::TempDir,
+    mut req: SessionRequest,
+    lines: &[&str],
+) -> Vec<AgentEvent> {
     let lines = write_lines(dir.path(), "lines.jsonl", lines);
-    let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
@@ -677,49 +685,85 @@ async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String>
         .collect()
 }
 
+/// Everything the fence installs, and nothing of it under the worktree:
+/// the judge as a `PreToolUse` hook, the roots the CLI would otherwise
+/// refuse, and the fence itself in the child's environment.
 #[tokio::test]
-async fn a_declared_artifact_directory_is_writable_by_the_session() {
+async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing_under_cwd() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
     std::fs::create_dir_all(&artifacts).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.artifact_dir = Some(artifacts.clone());
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: vec![artifacts.clone()],
+        advice: Advice::ReportFinding,
+    };
     let args = argv_for(dir.path(), req).await;
 
-    // The CLI confines writes to its working directory, and the run's
-    // artifact directory is never inside it: without this the agent is
-    // told to write a file it is then refused permission to create.
+    // The CLI confines writes to its working directory, and a root the
+    // fence keeps writable is never inside it: without this the agent
+    // is told to write a file it is then refused permission to create.
     let pos = args
         .iter()
         .position(|a| a == "--add-dir")
-        .expect("a declared artifact directory is added to the writable set");
+        .expect("every fence root is added to the writable set");
     assert_eq!(args[pos + 1], artifacts.display().to_string());
-}
 
-#[tokio::test]
-async fn no_declared_artifact_widens_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    let settings = args
+        .iter()
+        .position(|a| a == "--settings")
+        .map(|pos| args[pos + 1].clone())
+        .expect("the judge is installed as the CLI's own pre-write hook");
     assert!(
-        !args.iter().any(|a| a == "--add-dir"),
-        "a node that declares no artifact needs no widening: {args:?}"
+        settings.contains("PreToolUse") && settings.contains("fence"),
+        "the hook runs `yunta fence` before every writing tool: {settings}"
+    );
+    assert!(
+        !dir.path().join(".claude").exists(),
+        "nothing of the session's configuration lands under the worktree"
     );
 }
 
 #[tokio::test]
-async fn read_only_still_writes_its_own_declared_artifact() {
+async fn a_fence_with_no_roots_widens_nothing() {
     let dir = tempfile::tempdir().unwrap();
+    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(
+        !args.iter().any(|a| a == "--add-dir"),
+        "a session with nothing to write outside its worktree needs no widening: {args:?}"
+    );
+}
+
+/// `read_only` means the node does not touch the project. Its own
+/// declared file is the node's output, written to a root the fence keeps
+/// writable — so the writing tools stay exactly when there is such a
+/// root, and go when there is not.
+#[tokio::test]
+async fn a_read_only_claude_session_keeps_write_only_for_its_declared_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::ReadOnly;
+    req.fence = Fence::read_only(vec![artifacts], Advice::ReportFinding);
     let args = argv_for(dir.path(), req).await;
-
-    // `read-only` means the node does not touch the project. Its own
-    // declared artifact is the node's output, not the project.
     let pos = args.iter().position(|a| a == "--tools").unwrap();
     assert!(
-        args[pos + 1].split(',').any(|t| t == "Write"),
-        "read-only must still be able to produce what it declares: {}",
+        args[pos + 1].split(',').any(|tool| tool == "Write"),
+        "read-only must still produce what it declares: {}",
+        args[pos + 1]
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = PermissionProfile::ReadOnly;
+    req.fence = Fence::read_only(Vec::new(), Advice::ReportFinding);
+    let args = argv_for(dir.path(), req).await;
+    let pos = args.iter().position(|a| a == "--tools").unwrap();
+    assert!(
+        !args[pos + 1].split(',').any(|tool| tool == "Write"),
+        "with nothing declared there is nothing at all to write: {}",
         args[pos + 1]
     );
 }
@@ -731,7 +775,7 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
     std::fs::create_dir_all(&scratch).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.scratch_dir = Some(scratch.clone());
+    req.scratch_dir = scratch.clone();
     req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
@@ -1013,5 +1057,86 @@ async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     assert!(
         described.len() > error.message.len(),
         "the cause is read, not dropped: {described}"
+    );
+}
+
+/// The judge reaches this CLI only by a hook it can run. Without one
+/// there is no fence to build, and a session that opened anyway would
+/// write wherever it liked.
+#[tokio::test]
+async fn a_claude_session_without_a_hook_fails_before_spawning() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.fence_hook = None;
+
+    let refused = adapter()
+        .spawn(req)
+        .await
+        .err()
+        .expect("a session never opens without a fence to build");
+    let said = yunta_core::describe(&refused);
+    assert!(
+        said.contains("fence hook"),
+        "the refusal names what it could not build: {said}"
+    );
+}
+
+/// An `edit` session exposes no shell, so both channels are exact; a
+/// `full` one does, and nothing fences a shell by path.
+#[tokio::test]
+async fn an_edit_profile_reports_exact_coverage_and_full_reports_tools_only() {
+    for (profile, expected) in [
+        (PermissionProfile::Edit, Coverage::Exact),
+        (PermissionProfile::Full, Coverage::ToolsOnly),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        req.permissions = profile;
+        let events = spawn_with(&dir, req, &[INIT_LINE, RESULT_LINE]).await;
+
+        let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+            panic!("a session opens first: {events:?}");
+        };
+        assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
+    }
+}
+
+/// The hook's refusal comes back through the conversation, as an errored
+/// tool result. The one parser of the marker reads the path out of it.
+#[tokio::test]
+async fn a_refused_write_in_the_stream_becomes_write_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let refusal = yunta_core::fence::Refusal {
+        target: dir.path().join("docs/readme.md"),
+        worktree: dir.path().to_path_buf(),
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: yunta_core::fence::Advice::ReportFinding,
+    };
+    let user_line = serde_json::json!({
+        "type": "user",
+        "message": { "content": [{
+            "type": "tool_result",
+            "is_error": true,
+            "content": refusal.to_string(),
+        }] },
+    })
+    .to_string();
+
+    let events = spawn_with(
+        &dir,
+        request(dir.path().to_path_buf()),
+        &[INIT_LINE, &user_line, RESULT_LINE],
+    )
+    .await;
+
+    let refused = events.iter().find_map(|event| match event {
+        AgentEvent::WriteRefused { target } => Some(target),
+        _ => None,
+    });
+    assert_eq!(
+        refused.and_then(|target| target.display.as_deref()),
+        Some("docs/readme.md"),
+        "the refused path reaches the log relative to the work: {events:?}"
     );
 }

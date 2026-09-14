@@ -6,6 +6,7 @@
 //! `crates/adapters/tests/claude_code.rs` against a scripted fake binary,
 //! plus one manual smoke test.
 
+mod fence;
 mod parse;
 mod permissions;
 mod settings;
@@ -13,8 +14,12 @@ mod settings;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
+use yunta_core::{
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, Secret, SessionId,
+    Unbuildable,
+};
 
+use yunta_core::fence::{Coverage, Fenced};
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
@@ -38,14 +43,7 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
     let Some(endpoint) = &req.run_tools_endpoint else {
         return Ok(None);
     };
-    let Some(scratch) = &req.scratch_dir else {
-        return Err(AdapterError::Adapter {
-            adapter: ID.clone(),
-            message: "per-run tools were granted with no scratch directory to configure them in: \
-                     the session would be told to call tools it cannot reach"
-                .to_string(),
-        });
-    };
+    let scratch = &req.scratch_dir;
     let config = serde_json::json!({
         "mcpServers": {
             RunToolsEndpoint::SERVER_NAME: {
@@ -77,6 +75,28 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(io)?;
     }
     Ok(Some(path))
+}
+
+/// How the fence reaches this CLI: the roots it would otherwise refuse
+/// to write, and the judge as the hook it runs before every writing
+/// tool.
+///
+/// The CLI confines file writes to its working directory, and a root the
+/// fence keeps writable is never inside it — without this the session is
+/// told to write a file it is then refused permission to create.
+/// `launch` refused already when there is no hook to run, so a session
+/// never opens without one.
+fn fence_args(req: &SessionRequest) -> Vec<String> {
+    let mut args = Vec::new();
+    for root in &req.fence.roots {
+        args.push("--add-dir".to_string());
+        args.push(root.display().to_string());
+    }
+    if let Some(hook) = &req.fence_hook {
+        args.push("--settings".to_string());
+        args.push(fence::settings_json(hook));
+    }
+    args
 }
 
 pub struct ClaudeCodeAdapter {
@@ -123,17 +143,11 @@ impl ClaudeCodeAdapter {
             args.push("--agent".to_string());
             args.push(agent.to_string());
         }
-        args.extend(permissions::permission_args(req.permissions));
-        // The CLI confines file writes to its working directory. The
-        // directory a declared file belongs in sits in the run
-        // directory, which is never inside it, so without this the
-        // session is told to write a file it is then refused permission
-        // to create — and the node fails at close for a document that
-        // was never producible.
-        if let Some(dir) = &req.artifact_dir {
-            args.push("--add-dir".to_string());
-            args.push(dir.display().to_string());
-        }
+        args.extend(permissions::permission_args(
+            req.permissions,
+            !req.fence.roots.is_empty(),
+        ));
+        args.extend(fence_args(req));
         if let Some(path) = mcp_config {
             args.push("--mcp-config".to_string());
             args.push(path.display().to_string());
@@ -169,28 +183,56 @@ impl ClaudeCodeAdapter {
                 detail: unreadable.to_string(),
             });
         }
+        // The judge reaches this CLI only by a hook it can run. Without
+        // one there is no fence to build, and a session that opens
+        // anyway writes wherever it likes.
+        if req.fence_hook.is_none() {
+            return Err(AdapterError::FenceUnbuildable {
+                adapter: ID.clone(),
+                source: Unbuildable::HookUnavailable,
+            });
+        }
         stage_skills(&req)?;
         let mcp_config = write_mcp_config(&req)?;
         let args = self.build_args(&req, resume, mcp_config.as_deref());
+        // The fence travels in the child's own environment: globs and
+        // paths, never a secret, read back by the hook this CLI runs.
+        let (var, value) = req.fence.to_env(&req.cwd);
+        let mut env = req.env.clone();
+        env.insert(var.to_string(), Secret::new(value));
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
             args,
             cwd: &req.cwd,
-            env: &req.env,
+            env: &env,
             prompt: &req.prompt,
-            parser: Box::new(ClaudeParser),
+            parser: Box::new(ClaudeParser::new(
+                req.cwd.clone(),
+                Coverage::of(Fenced::Exact, permissions::other_channels(req.permissions)),
+            )),
         })
         .await
     }
 }
 
-/// The CLI's stream-json lines, one event list per line.
-struct ClaudeParser;
+/// The CLI's stream-json lines, one event list per line. Holds the
+/// worktree because a refusal names an absolute path and the log
+/// records it relative to the work.
+struct ClaudeParser {
+    cwd: PathBuf,
+    fence: Coverage,
+}
+
+impl ClaudeParser {
+    fn new(cwd: PathBuf, fence: Coverage) -> Self {
+        ClaudeParser { cwd, fence }
+    }
+}
 
 impl LineParser for ClaudeParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        parse::parse_line(line)
+        parse::parse_line(line, &self.cwd, Some(&self.fence))
     }
 }
 
@@ -207,14 +249,16 @@ impl Adapter for ClaudeCodeAdapter {
             .collect()
     }
 
+    fn fence_codec(&self) -> Option<&dyn yunta_core::port::FenceCodec> {
+        Some(&fence::ClaudeFenceCodec)
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
-            // No live edit-hook blocking wired for the real CLI — a
-            // capability must never claim more than is actually built,
-            // so this stays false. The engine's own post-hoc scope
-            // check is the real boundary today.
-            edit_hooks: false,
+            // Every writing tool goes through a `PreToolUse` hook that
+            // runs the judge before the write happens.
+            fence: FenceLevel::ToolCalls,
             permission_profiles: true,
             custom_agents: true,
             usage_reporting: true,

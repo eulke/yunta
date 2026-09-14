@@ -119,6 +119,8 @@ pub struct NodeRecord {
     /// per-session close event, so a session is open exactly while the
     /// attempt that opened it has not reached a terminal.
     pub sessions: Vec<OpenSession>,
+    /// Every write this node's sessions had refused, oldest first.
+    pub refused: Vec<RefusedWrite>,
     /// The tool calls the open attempt made, oldest first.
     pub calls: Vec<ToolCall>,
     pub last_event_at: Option<DateTime<Utc>>,
@@ -149,7 +151,18 @@ pub struct OpenSession {
     /// The model the CLI reported for the session; `None` when it
     /// reported none.
     pub model: Option<crate::ids::ModelName>,
+    /// How much of this session the adapter's fence covered; `None`
+    /// when it built none.
+    pub fence: Option<crate::fence::Coverage>,
     pub opened_at: DateTime<Utc>,
+}
+
+/// One write the fence refused: which session tried it, and what it
+/// would have touched.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefusedWrite {
+    pub session_id: crate::ids::SessionId,
+    pub target: crate::events::ToolTarget,
 }
 
 /// One tool call, as `agent_message` recorded it.
@@ -363,7 +376,12 @@ impl NodeLedger {
                 session_id: p.session_id.clone(),
                 agent: p.agent.clone(),
                 model: p.model.clone(),
+                fence: p.fence.clone(),
                 opened_at: meta.at,
+            }),
+            SessionEvent::WriteRefused(p) => record.refused.push(RefusedWrite {
+                session_id: p.session_id.clone(),
+                target: p.target.clone(),
             }),
             SessionEvent::Message(p) => match p.message_type {
                 AgentMessageType::ToolUse => record.calls.push(ToolCall {

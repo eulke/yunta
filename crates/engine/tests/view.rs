@@ -165,6 +165,7 @@ fn session_opened(session: &str) -> EventPayload {
         agent: Some("builder".into()),
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
+        fence: None,
     }))
 }
 

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use yunta_core::fence::{Advice, Fence};
 
 use futures::StreamExt;
 use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
@@ -112,12 +113,14 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
+/// The mock judges by the same function every real adapter asks, so a
+/// fixture exercises the rule rather than a second implementation of it.
 #[tokio::test]
-async fn blocked_is_derived_from_edit_constraints() {
+async fn a_fixture_effect_outside_the_fence_is_refused_and_recorded() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { edit_hooks: true }
+capabilities: { fence: tool_calls }
 effects:
   - { path: src/lib.rs, content: "pub fn hello() {}\n" }
   - { path: outside/scope.rs, content: "should never land" }
@@ -127,7 +130,11 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".into()]);
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: Advice::ReportFinding,
+    };
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
 
@@ -136,22 +143,22 @@ outcome: { type: completed, summary: "done" }
 
     // The refused path reaches the log as the path it is: a path names
     // the repository, which is what a reader needs to see.
-    let blocked_marker = events.iter().any(|e| {
-        matches!(e, AgentEvent::ToolUse { name, target }
-            if name == "edit" && target.display.as_deref() == Some("outside/scope.rs"))
+    let refused = events.iter().any(|e| {
+        matches!(e, AgentEvent::WriteRefused { target }
+            if target.display.as_deref() == Some("outside/scope.rs"))
     });
     assert!(
-        blocked_marker,
-        "the blocked edit is marked, naming the path it refused: {events:?}"
+        refused,
+        "the refused write is recorded, naming the path: {events:?}"
     );
 }
 
 #[tokio::test]
-async fn without_edit_hooks_the_engine_never_asked_for_the_constraint_is_not_enforced() {
+async fn without_a_fence_the_adapter_builds_none_and_the_effect_lands() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { edit_hooks: false }
+capabilities: { fence: none }
 effects:
   - { path: outside/scope.rs, content: "lands anyway" }
 outcome: { type: completed, summary: "done" }
@@ -160,13 +167,16 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".into()]);
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: Advice::ReportFinding,
+    };
     let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;
 
-    // Without the capability, the adapter ignores the constraint
-    // instead of failing — the engine's own post-check scope diff
-    // is what would catch this later.
+    // With no fence to build, the adapter writes what it scripted —
+    // the engine's own post-check scope diff is what catches it later.
     assert!(dir.path().join("outside/scope.rs").exists());
 }
 
@@ -217,7 +227,7 @@ outcome: { type: completed, summary: ok }
     let caps: Capabilities = fixture.capabilities();
     assert!(caps.resume_session);
     assert!(caps.run_tools);
-    assert!(!caps.edit_hooks);
+    assert_eq!(caps.fence, yunta_core::FenceLevel::None);
 }
 
 #[tokio::test]
@@ -759,15 +769,21 @@ sessions:
     );
 }
 
-/// The fixture's capability twin names the same eight flags the port
+/// The fixture's capability twin names the same eight fields the port
 /// does, and each one a fixture declares reaches the adapter. A twin
 /// that drifted would let a test claim a capability the engine never
 /// saw — or hide one it did.
 #[test]
 fn every_capability_round_trips_through_a_fixture() {
     for capability in yunta_core::Capability::ALL {
+        // The fence is a level, not a flag: a fixture names which of
+        // the three it builds, and the other seven stay booleans.
+        let declares = match capability {
+            yunta_core::Capability::Fence => "tool_calls",
+            _ => "true",
+        };
         let fixture = MockFixture::parse_without_a_run(&format!(
-            "capabilities: {{ {}: true }}\nsessions:\n  - outcome: {{ type: completed, summary: ok }}\n",
+            "capabilities: {{ {}: {declares} }}\nsessions:\n  - outcome: {{ type: completed, summary: ok }}\n",
             capability.as_str()
         ))
         .unwrap_or_else(|e| panic!("a fixture declaring `{capability}` parses: {e}"));

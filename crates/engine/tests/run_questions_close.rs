@@ -362,6 +362,7 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

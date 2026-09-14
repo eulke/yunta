@@ -41,6 +41,7 @@ use yunta_core::SessionId;
 
 use crate::failure;
 use yunta_core::events::ToolTarget;
+use yunta_core::fence::Coverage;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
 /// One `codex exec --json` event, by the `type` it declares — the same
@@ -69,14 +70,14 @@ enum ThreadEvent {
     Unknown,
 }
 
-pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
+pub(super) fn parse_line(line: &str, last_message: &str, fence: &Coverage) -> Vec<AgentEvent> {
     // A line that is not JSON at all is not this protocol: the stream
     // carries whatever the CLI wrote to stdout, warnings included.
     let Ok(parsed) = serde_json::from_str::<ThreadEvent>(line) else {
         return Vec::new();
     };
     match parsed {
-        ThreadEvent::ThreadStarted(value) => thread_started(&value).into_iter().collect(),
+        ThreadEvent::ThreadStarted(value) => thread_started(&value, fence).into_iter().collect(),
         ThreadEvent::ItemCompleted(value) => item_completed(&value).into_iter().collect(),
         ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
         ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
@@ -88,12 +89,13 @@ pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
 /// `thread.started` names the session; a thread id that cannot be one
 /// fails the session explicitly instead of opening it under a name
 /// nothing can resume.
-fn thread_started(value: &Value) -> Option<AgentEvent> {
+fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
     let thread_id = value.get("thread_id")?.as_str()?;
     Some(match thread_id.parse::<SessionId>() {
         Ok(session_id) => AgentEvent::SessionOpened {
             session_id,
             model: None,
+            fence: Some(fence.clone()),
         },
         Err(error) => AgentEvent::Failed {
             // The failure keeps what rejected the id, so a reader
@@ -104,11 +106,23 @@ fn thread_started(value: &Value) -> Option<AgentEvent> {
     })
 }
 
+/// Whether a finished process item is one the sandbox refused. The CLI
+/// says so in the item's own status; a command that merely exited
+/// non-zero did run.
+fn sandbox_denied(item: &Value) -> bool {
+    item.get("status").and_then(Value::as_str) == Some("sandbox_denied")
+}
+
 fn item_completed(value: &Value) -> Option<AgentEvent> {
     let item = value.get("item")?;
     match item.get("type").and_then(Value::as_str)? {
         "agent_message" => Some(AgentEvent::Note {
             text: item.get("text")?.as_str()?.to_string(),
+        }),
+        // A command the sandbox refused is a write that did not
+        // happen, not activity to chronicle as a tool call.
+        "command_execution" if sandbox_denied(item) => Some(AgentEvent::WriteRefused {
+            target: opaque_field(item, "command"),
         }),
         "command_execution" => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),

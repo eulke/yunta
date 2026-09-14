@@ -118,6 +118,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -147,6 +148,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -319,6 +321,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();
@@ -358,6 +361,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

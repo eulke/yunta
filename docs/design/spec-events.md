@@ -12,10 +12,10 @@ su parser.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 30 filas y **37 `kind` distintos**
-(24 filas de 1 kind, 4 filas de 2 kinds, 1 fila de 3 kinds y 1 fila de 2 kinds para
+La tabla de eventos del Contrato del Run tiene 31 filas y **38 `kind` distintos**
+(25 filas de 1 kind, 4 filas de 2 kinds, 1 fila de 3 kinds y 1 fila de 2 kinds para
 el par de preguntas). La tabla es el contenido normativo; este documento especifica
-esos 37 kinds tal como la tabla los enumera.
+esos 38 kinds tal como la tabla los enumera.
 
 ## 1. Envelope común
 
@@ -168,7 +168,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `session_id` | `SessionId` (opaco) | sí | persiste para `resume` |
 | `agent` | `Option<String>` | no | agente nombrado del adapter, si se pidió (`agent:`) |
 | `model` | string | sí | modelo efectivamente usado |
-| `capabilities` | `Capabilities` (bools: resume_session, edit_hooks, permission_profiles, custom_agents, usage_reporting, run_tools) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción |
+| `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none` |
+| `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
 
 ### 5.6 `agent_message` — adapter
 **Fuente:** resumen/uso de tokens (nunca el texto completo)
@@ -177,7 +178,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `message_type` [inferido] | enum `tool_use \| usage \| note` | sí | distingue cuál variante de `AgentEvent` originó el mensaje |
 | `tool_name` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.name` |
-| `target_digest` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.target_digest` — nunca contenido completo |
+| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre, `display` solo cuando el argumento nombra el repositorio — nunca contenido completo |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché |
 | `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado |
@@ -497,7 +498,15 @@ tuvo el artifact y el log no dice cómo.
 | `adapter` | string (`id()` del adapter) | sí | — |
 | `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir, o cuando abrió y la sesión no recibió ninguna de sus tools— el texto que dice que la sesión corre sin run tools y por qué |
 
-### 5.25 `run_paused` / `run_resumed` / `run_finished` — engine
+### 5.25 `write_refused` — adapter (por el engine)
+**Fuente:** la sesión que la rechazó, y qué iba a escribir
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | sí | la sesión abierta cuando el cerco rechazó la escritura |
+| `target` | `ToolTarget` | sí | el path, relativo al worktree cuando está bajo él — el mismo tipo que `agent_message.target` |
+
+### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas
 
 | Campo | Tipo | Oblig. | Notas |

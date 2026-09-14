@@ -377,6 +377,7 @@ impl Bench {
             ambient: None,
             secrets: None,
             observer: None,
+            fence_hook: None,
         })
         .await
         .unwrap();
@@ -491,6 +492,7 @@ nodes:
         ambient: None,
         secrets: None,
         observer: None,
+        fence_hook: None,
     })
     .await
     .unwrap();

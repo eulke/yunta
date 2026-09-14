@@ -76,6 +76,11 @@ pub(super) async fn integrate_batch(
                 })),
             )
             .await?;
+            // `run_task` has no ctx to record on, so it hands the
+            // breach here, beside the check that found it.
+            if let Some(breach) = &attempt.fence_breach {
+                record_breach(ctx, node, breach).await?;
+            }
 
             if let Some(outcome) = &attempt.scope_expansion {
                 emit_scope_expansion_events(
@@ -295,6 +300,10 @@ async fn integrate_task(
         })),
     )
     .await?;
+    let coverage = ctx.last_coverage(&node.id).await?;
+    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &scope) {
+        record_breach(ctx, node, &breach).await?;
+    }
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     if !criteria_green || !scope.violations.is_empty() {
@@ -384,4 +393,17 @@ fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
             duration_ms: run.duration_ms,
         })
         .collect()
+}
+
+/// A write the adapter said its fence would have stopped, filed against
+/// the adapter that said so.
+async fn record_breach(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    breach: &crate::scope::Breach,
+) -> Result<(), RunError> {
+    if let Some(adapter) = ctx.resolved_adapter(&node.id).await? {
+        ctx.record_breach(&node.id, &adapter, breach).await?;
+    }
+    Ok(())
 }

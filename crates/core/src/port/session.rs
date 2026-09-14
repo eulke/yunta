@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::fence::{Coverage, Fence, FenceHook, Verdict};
 use crate::{
     AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
     SessionId,
@@ -24,12 +25,6 @@ use crate::{
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use thiserror::Error;
-
-/// A node's declared write scope, passed through to an adapter with
-/// `edit_hooks` so it can block edits outside it as they happen. The
-/// same pattern the workflow declared and `check` read, so an adapter
-/// blocks by the rule core compiled, never by one of its own.
-pub type Glob = crate::glob::ScopeGlob;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionProfile {
@@ -61,10 +56,17 @@ pub struct SessionRequest {
     /// any other way — and stay wrapped until the child process is
     /// spawned.
     pub env: HashMap<String, Secret<String>>,
-    /// Globs the node/task declares, if the adapter has `edit_hooks`. An
-    /// adapter without that capability ignores this field rather than
-    /// failing — the engine already degraded and warned.
-    pub edit_constraints: Option<Vec<Glob>>,
+    /// What this session may write: the one source of write permission,
+    /// always present. An adapter builds as much of it as its CLI can
+    /// (`capabilities().fence`) and reports how much that was; an
+    /// adapter that can build none of it ignores the field, and the
+    /// engine already recorded the degradation.
+    pub fence: Fence,
+    /// The command a CLI runs to ask [`Fence::judge`] about one write.
+    /// `None` only in a harness with no binary to run; an adapter whose
+    /// fence needs it and does not have it fails the session rather
+    /// than opening one that writes freely.
+    pub fence_hook: Option<FenceHook>,
     pub budget: Budget,
     /// Adapter-specific settings with no portable expression — model,
     /// agent and permissions are typed fields above precisely so this
@@ -81,7 +83,7 @@ pub struct SessionRequest {
     /// the session ends — a resume always carries fresh credentials,
     /// never a reused pair. The adapter translates it to its CLI's
     /// native external-MCP mechanism (same pattern as
-    /// `agent:`/`edit_hooks`); only populated when it declared
+    /// `agent:`/`fence`); only populated when it declared
     /// `capabilities().run_tools` (same rule: never claim more than is
     /// actually built).
     pub run_tools_endpoint: Option<RunToolsEndpoint>,
@@ -104,10 +106,10 @@ pub struct SessionRequest {
     /// It belongs to this session alone: sessions of one run that can be
     /// alive at the same moment each get their own, so an adapter may
     /// name a file inside it for what the file is rather than having to
-    /// make the name unique. The engine creates the path; an adapter
-    /// creates the directory when it has something to put there. `None`
-    /// leaves an adapter that needs one to degrade explicitly.
-    pub scratch_dir: Option<PathBuf>,
+    /// make the name unique. The engine resolves the path for every
+    /// session; an adapter creates the directory when it has something
+    /// to put there.
+    pub scratch_dir: PathBuf,
 }
 
 /// Where a session's per-run MCP server listens: a loopback URL plus
@@ -214,6 +216,14 @@ pub enum AgentEvent {
     SessionOpened {
         session_id: SessionId,
         model: Option<ModelName>,
+        /// How much of the session the adapter's fence actually covers,
+        /// derived from what it built. `None` when it built nothing.
+        fence: Option<Coverage>,
+    },
+    /// A write the fence refused before it happened. Chronicle and
+    /// count, never node state: the session went on.
+    WriteRefused {
+        target: crate::events::ToolTarget,
     },
     /// How many of the run tools this session actually holds, as its
     /// CLI reported them. An adapter emits it only when its CLI names
@@ -270,6 +280,14 @@ pub trait Adapter: Send + Sync {
         Vec::new()
     }
 
+    /// How this adapter translates between [`Fence::judge`] and its
+    /// CLI's hook. `Some` exactly when `capabilities().fence` is
+    /// [`crate::FenceLevel::ToolCalls`]: a sandbox needs no codec, and nothing
+    /// to build needs none either.
+    fn fence_codec(&self) -> Option<&dyn FenceCodec> {
+        None
+    }
+
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
 
     /// Default: unsupported. Only called if `capabilities().resume_session`.
@@ -308,4 +326,35 @@ pub trait AgentSession: Send {
     fn pgid(&self) -> Option<Pid> {
         None
     }
+}
+
+/// What one CLI's hook sends and expects back. The adapter writes only
+/// this: the judgement itself is [`Fence::judge`], the same function for
+/// every adapter.
+pub trait FenceCodec: Send + Sync {
+    /// The path this call would write, read out of what the CLI sent on
+    /// stdin. `None` when the call writes no path at all, which is
+    /// allowed without a judgement.
+    fn decode(&self, stdin: &[u8]) -> std::result::Result<Option<PathBuf>, CodecError>;
+
+    /// The answer in the shape this CLI reads.
+    fn encode(&self, verdict: &Verdict) -> HookReply;
+}
+
+/// What the hook process leaves behind: a CLI reads the exit code, the
+/// streams, or both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookReply {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub exit: i32,
+}
+
+/// A hook call this adapter's codec cannot read.
+#[derive(Debug, thiserror::Error)]
+pub enum CodecError {
+    #[error("the hook call is not JSON")]
+    Json(#[from] serde_json::Error),
+    #[error("the hook call has no `{0}`")]
+    MissingField(&'static str),
 }

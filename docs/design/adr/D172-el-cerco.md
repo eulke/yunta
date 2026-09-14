@@ -33,12 +33,15 @@ por path sin sandbox. Todos alimentan la razón del rechazo al modelo.
 
 ## Decisión
 
-1. **Un juez.** `yunta_core::fence::Fence { allowed: Vec<ScopeGlob>, roots: Vec<PathBuf>, advice }`
+1. **Un juez.** `yunta_core::fence::Fence { allowed: Option<Vec<ScopeGlob>>, roots: Vec<PathBuf>, advice }`
    con `judge(worktree, target) -> Verdict`, función pura, es el único lugar
    que decide si un path está dentro de lo que una sesión puede escribir.
    `allowed` es el scope declarado más las ampliaciones ya concedidas, lo
    mismo que el post-check evalúa (Contrato §6.2); una ampliación pedida
-   durante un intento rige desde el siguiente.
+   durante un intento rige desde el siguiente. `None` es un nodo que no
+   declaró scope —todo bajo el worktree— y `Some([])` es `read_only`, que no
+   admite nada: dos hechos distintos, distinguidos por tipo y no por un
+   patrón que los represente a los dos.
 2. **Un hook y un codec por adapter.** El CLI construye `FenceHook` una vez
    con su propio binario; el subcomando `yunta fence <adapter-id>` invoca al
    juez y responde con el codec del adapter. El nombre del subcomando vive en

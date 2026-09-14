@@ -82,10 +82,7 @@ pub(crate) async fn require(
 /// node's choice: nothing a node declares turns them on, so the log
 /// states them once and every node after reads that one event.
 fn stated_once_per_run(capability: Capability) -> bool {
-    matches!(
-        capability,
-        Capability::UsageReporting | Capability::EditHooks
-    )
+    matches!(capability, Capability::UsageReporting | Capability::Fence)
 }
 
 /// Whether this run's log already carries a degradation of `capability`.

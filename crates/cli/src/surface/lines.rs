@@ -11,6 +11,7 @@
 //! I11 forbids, so the reason travels with the change.
 
 use std::io::Write;
+use yunta_core::fence::Coverage;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{EventPayload, GateResolvedPayload, StoredEvent};
@@ -167,6 +168,10 @@ fn detail(payload: &EventPayload) -> Option<String> {
             format!("{} on {}", p.capability.as_str(), p.adapter),
             p.policy_applied(),
         )),
+        // A write that did not happen, and what it would have touched.
+        EventPayload::Session(SessionEvent::WriteRefused(p)) => {
+            Some(format!("write refused: {}", p.target.sentence()))
+        }
         EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason().to_string()),
         EventPayload::Run(RunEvent::Finished(p)) => {
             Some(view::closed_as(p.terminal_state).to_string())
@@ -182,14 +187,28 @@ fn detail(payload: &EventPayload) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
+        // How much of the session the adapter's fence covered — what
+        // says whether a write that reaches the diff should have been
+        // possible at all.
+        EventPayload::Session(SessionEvent::Opened(p)) => p.fence.as_ref().map(fence_covered),
         EventPayload::Node(NodeEvent::BaselineCaptured(_))
-        | EventPayload::Session(SessionEvent::Opened(_))
         | EventPayload::Node(NodeEvent::ContextAssembled(_))
         | EventPayload::Scope(ScopeEvent::Requested(_))
         | EventPayload::Scope(ScopeEvent::Granted(_))
         | EventPayload::Scope(ScopeEvent::Denied(_))
         | EventPayload::Gates(GateEvent::QuestionsAnswered(_))
         | EventPayload::Run(RunEvent::Resumed(_)) => None,
+    }
+}
+
+/// What a session's fence covered, in one phrase.
+fn fence_covered(coverage: &Coverage) -> String {
+    match coverage {
+        Coverage::Exact => "fence exact".to_string(),
+        Coverage::WidenedToRoots { roots } => {
+            format!("fence widened to {} root(s)", roots.len())
+        }
+        Coverage::ToolsOnly => "fence on tool calls".to_string(),
     }
 }
 

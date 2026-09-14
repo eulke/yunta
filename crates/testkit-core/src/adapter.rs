@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use yunta_core::fence::{Advice, Fence, FenceHook};
 
 use futures::StreamExt;
 use yunta_core::port::{AgentEvent, AgentSession, Budget, PermissionProfile, SessionRequest};
@@ -18,6 +19,7 @@ use yunta_core::port::{AgentEvent, AgentSession, Budget, PermissionProfile, Sess
 /// A session request with nothing declared: the baseline a test varies
 /// one field of, so what it asserts about is the field it set.
 pub fn request(cwd: PathBuf) -> SessionRequest {
+    let cwd_scratch = cwd.join(".yunta-scratch");
     SessionRequest {
         prompt: "do the thing".to_string(),
         cwd,
@@ -25,13 +27,14 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         agent: None,
         permissions: PermissionProfile::Edit,
         env: HashMap::new(),
-        edit_constraints: None,
+        fence: Fence::everything(Vec::new(), Advice::ReportFinding),
+        fence_hook: Some(FenceHook::new(PathBuf::from("yunta"))),
         budget: Budget::default(),
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),
         run_tools_endpoint: None,
         artifact_dir: None,
-        scratch_dir: None,
+        scratch_dir: cwd_scratch,
     }
 }
 

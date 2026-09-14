@@ -8,6 +8,7 @@
 //! touches the event log or the agents.
 
 use std::path::PathBuf;
+use yunta_core::fence::FenceHook;
 
 use yunta_core::{SystemClock, SystemIdSource};
 use yunta_storage::{AsyncStorage, Storage};
@@ -23,6 +24,10 @@ pub struct Context {
     pub project: Project,
     pub clock: SystemClock,
     pub ids: SystemIdSource,
+    /// This binary, as the hook a CLI runs to ask the judge about one
+    /// write. Resolved once here, so nothing below the shell reads the
+    /// process to find out where it lives.
+    pub fence_hook: FenceHook,
 }
 
 impl Context {
@@ -44,6 +49,7 @@ impl Context {
             project,
             clock: SystemClock,
             ids: SystemIdSource,
+            fence_hook: fence_hook(),
         })
     }
 
@@ -64,4 +70,17 @@ impl Context {
     pub fn adapters(&self) -> crate::commands::Adapters {
         crate::commands::real_adapters(&self.project.config)
     }
+}
+
+/// Where this binary lives, for the child processes that run it back:
+/// the fence hook, and the detached `resume` a `--detach` run spawns. A
+/// host that will not say falls back to the name on `PATH`.
+pub fn own_binary() -> PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta"))
+}
+
+/// The hook a CLI runs to ask the judge about one write. Resolved in
+/// the shell — every path below it takes the value, never the process.
+pub fn fence_hook() -> FenceHook {
+    FenceHook::new(own_binary())
 }
