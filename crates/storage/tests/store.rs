@@ -354,7 +354,9 @@ fn a_single_byte_flip_at_any_position_breaks_the_chain() {
     for seq in 1..=drafts.len() as i64 {
         let (_dir, storage) = open_temp();
         for draft in &drafts {
-            storage.append(draft, &yunta_testkit::FixedClock).unwrap();
+            storage
+                .append(draft, &yunta_testkit_core::FixedClock)
+                .unwrap();
         }
 
         storage
@@ -490,7 +492,7 @@ fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
     let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    let clock = yunta_testkit::AtClock(instant);
+    let clock = yunta_testkit_core::AtClock(instant);
 
     let first = storage.append(&created_draft("run-1"), &clock).unwrap();
     let second = storage
@@ -571,7 +573,7 @@ fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
 fn runs_are_listed_by_their_first_timestamp() {
     let (_dir, storage) = open_temp();
     let at = |text: &str| {
-        yunta_testkit::AtClock(
+        yunta_testkit_core::AtClock(
             chrono::DateTime::parse_from_rfc3339(text)
                 .unwrap()
                 .with_timezone(&chrono::Utc),

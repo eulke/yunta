@@ -1,0 +1,25 @@
+[package]
+name = "yunta-testkit-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Test scaffolding for the Yunta crates that depend on yunta-core alone — clocks, id sources, a capturing writer, and a session request."
+# A dev-only crate: every dependent uses it under [dev-dependencies], so it
+# is never part of a published package and never itself published.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
+chrono.workspace = true
+# A session request carries an adapter's own settings as JSON.
+serde_json.workspace = true
+# The session helpers read an adapter's event stream to its end.
+futures.workspace = true
+# A scripted CLI announces its grandchild's pid through a fifo the test
+# opens without blocking the runtime it is asserting on.
+tokio = { workspace = true, features = ["rt", "fs", "io-util", "time"] }

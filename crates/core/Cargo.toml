@@ -63,5 +63,6 @@ schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
 testkit = []
 
 [dev-dependencies]
+yunta-testkit-core.workspace = true
 yunta-core = { path = ".", features = ["testkit"] }
 proptest.workspace = true

@@ -12,12 +12,14 @@ use tokio_util::sync::CancellationToken;
 use yunta_adapters::MockAdapter;
 use yunta_core::events::EventPayload;
 use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, Manifest, SeqIdSource, Workflow};
+use yunta_core::{AdapterId, ConfigLayer, Manifest, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
     DEFAULT_MAX_RETRIES,
 };
-use yunta_testkit::{Bench, FixedClock, MOCK_CONFIG};
+use yunta_testkit::{Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::SeqIdSource;
 
 const HANGING_WORKFLOW: &str = "\
 name: cancel-me

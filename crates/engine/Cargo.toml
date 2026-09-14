@@ -94,6 +94,7 @@ yunta-core = { workspace = true, features = ["testkit"] }
 yunta-adapters.workspace = true
 # The shared test harness: git-repo fixture, fixed clock, run bench.
 yunta-testkit.workspace = true
+yunta-testkit-core.workspace = true
 # Property tests for the replay guarantees (derive, JSONL wire form, resume).
 proptest.workspace = true
 # Tests write their workflows and fixtures as YAML literals.

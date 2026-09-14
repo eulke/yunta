@@ -369,7 +369,7 @@ fn write_line(out: &mut Box<dyn Write + Send>, line: &str) {
 #[derive(Clone, Debug)]
 pub(crate) struct Watched {
     term: indicatif::InMemoryTerm,
-    written: yunta_testkit::Captured,
+    written: yunta_testkit_core::Captured,
 }
 
 #[cfg(test)]
@@ -378,7 +378,7 @@ impl Watched {
     pub(crate) fn sized(rows: u16, columns: u16) -> Self {
         Self {
             term: indicatif::InMemoryTerm::new(rows, columns),
-            written: yunta_testkit::Captured::default(),
+            written: yunta_testkit_core::Captured::default(),
         }
     }
 

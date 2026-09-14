@@ -134,7 +134,8 @@ mod tests {
         Clock, CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId, Seq, SystemClock,
     };
     use yunta_storage::AsyncStorage;
-    use yunta_testkit::{wait_until_async, Captured, FixedClock};
+    use yunta_testkit::wait_until_async;
+    use yunta_testkit_core::{Captured, FixedClock};
 
     use crate::render::Glyphs;
     use crate::surface::feed::{Beat, Diagnostics, Feed};

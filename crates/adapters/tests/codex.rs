@@ -6,16 +6,12 @@
 //! credentials exist in this environment. See `codex/mod.rs`'s own doc
 //! comment for the details.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
-use futures::StreamExt;
 use yunta_adapters::CodexAdapter;
-use yunta_core::port::{
-    Adapter, AgentEvent, Budget, PermissionProfile, ProbeReport, SessionRequest,
-};
+use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport};
 use yunta_core::{AdapterSettings, SessionId};
+use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
 
 fn stub_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex_stub.sh")
@@ -26,44 +22,6 @@ fn adapter() -> CodexAdapter {
         adapter_settings: None,
         binary: Some(stub_path()),
     })
-}
-
-fn request(cwd: PathBuf) -> SessionRequest {
-    SessionRequest {
-        prompt: "do the thing".to_string(),
-        cwd,
-        model: None,
-        agent: None,
-        permissions: PermissionProfile::Edit,
-        env: HashMap::new(),
-        edit_constraints: None,
-        budget: Budget::default(),
-        adapter_settings: serde_json::Map::new(),
-        skills: Vec::new(),
-        run_tools_endpoint: None,
-        artifact_dir: None,
-        scratch_dir: None,
-    }
-}
-
-async fn drain(mut session: Box<dyn yunta_core::port::AgentSession>) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-    let mut stream = session.events();
-    while let Some(event) = stream.next().await {
-        events.push(event);
-    }
-    events
-}
-
-fn write_lines(dir: &std::path::Path, name: &str, lines: &[&str]) -> PathBuf {
-    let path = dir.join(name);
-    let contents = if lines.is_empty() {
-        String::new()
-    } else {
-        lines.join("\n") + "\n"
-    };
-    std::fs::write(&path, contents).unwrap();
-    path
 }
 
 const THREAD_STARTED_LINE: &str = r#"{"type":"thread.started","thread_id":"thread-abc"}"#;
@@ -582,37 +540,6 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     assert!(!grandchild_running, "grandchild process survived kill()");
 }
 
-/// The fifo the stub records its child pid into. A fifo, not a plain file, so
-/// [`grandchild_pid`] blocks on it and wakes the instant the stub writes, a
-/// rendezvous with the child rather than a poll of the filesystem.
-fn child_pid_fifo(dir: &std::path::Path) -> PathBuf {
-    let path = dir.join("child.pid");
-    let status = std::process::Command::new("mkfifo")
-        .arg(&path)
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success(), "mkfifo creates the child-pid fifo");
-    path
-}
-
-/// The pid of the blocking child the stub spawned. The path is a fifo, so the
-/// read blocks until the stub opens it and writes the pid: an explicit
-/// rendezvous with the child, not a timed poll. The deadline turns a stub that
-/// never records the pid into a failed test rather than a hung one.
-async fn grandchild_pid(child_pid_fifo: &std::path::Path) -> String {
-    let fifo = child_pid_fifo.to_path_buf();
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || std::fs::read_to_string(fifo)),
-    )
-    .await
-    .expect("the stub records the child pid before the deadline")
-    .expect("the pid reader joins")
-    .expect("the child-pid fifo reads")
-    .trim()
-    .to_string()
-}
-
 #[tokio::test]
 async fn prompt_travels_by_stdin_never_argv() {
     let dir = tempfile::tempdir().unwrap();
@@ -639,35 +566,6 @@ async fn prompt_travels_by_stdin_never_argv() {
     );
     let stdin = std::fs::read_to_string(&stdin_file).unwrap();
     assert_eq!(stdin, "the whole brief, with a --flag-looking line");
-}
-
-#[test]
-fn debug_of_a_session_request_never_prints_secrets() {
-    let mut req = request(std::path::PathBuf::from("/tmp"));
-    req.env
-        .insert("API_TOKEN".to_string(), "hunter2".to_string().into());
-    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
-        url: "http://127.0.0.1:1/mcp".to_string(),
-        token: "bearer-secret".to_string().into(),
-    });
-    let debug = format!("{req:?}");
-    assert!(
-        debug.contains("API_TOKEN"),
-        "the name stays visible: {debug}"
-    );
-    assert!(
-        !debug.contains("hunter2"),
-        "the value never prints: {debug}"
-    );
-    assert!(
-        !debug.contains("bearer-secret"),
-        "the token never prints: {debug}"
-    );
-    assert_eq!(
-        debug.matches("[redacted]").count(),
-        2,
-        "both the env value and the endpoint token are redacted: {debug}"
-    );
 }
 
 /// `adapter_settings.sandbox` is the mode the `Edit` profile runs

@@ -9,14 +9,15 @@ use std::sync::Arc;
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{EventBody, EventPayload};
 use yunta_core::port::Adapter;
-use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
+use yunta_testkit::init_repo;
+use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::SeqIdSource;
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.

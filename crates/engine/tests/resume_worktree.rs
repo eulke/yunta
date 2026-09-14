@@ -20,7 +20,8 @@ use yunta_engine::{
     build_manifest, create_run, execute_run, run_branch, CreateRunParams, NoInteraction, RunEnv,
     RunError, RunReport, RunTerminal, WorktreeError, DEFAULT_MAX_RETRIES,
 };
-use yunta_testkit::{git, git_output, Bench, FixedClock, MOCK_CONFIG};
+use yunta_testkit::{git, git_output, Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;

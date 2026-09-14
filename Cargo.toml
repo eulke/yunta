@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/cli",
     "crates/testkit",
+    "crates/testkit-core",
     "xtask",
 ]
 
@@ -30,6 +31,7 @@ yunta-engine = { path = "crates/engine", version = "0.0.4" }
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
 yunta-testkit = { path = "crates/testkit", version = "0.0.4" }
+yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.4" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22"

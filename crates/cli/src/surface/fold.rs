@@ -81,7 +81,7 @@ mod tests {
     use super::*;
     use yunta_core::events::{EventBody, EventPayload, NodeStartedPayload};
     use yunta_core::RunId;
-    use yunta_testkit::FixedClock;
+    use yunta_testkit_core::FixedClock;
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
 

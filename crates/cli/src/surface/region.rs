@@ -216,7 +216,8 @@ fn row(style: &ProgressStyle) -> ProgressBar {
 mod tests {
     use yunta_core::NodeId;
     use yunta_engine::{Counter, NodeStanding, NodeState, RunPhase, WaitingOn};
-    use yunta_testkit::{child_link, node_frame, run_frame, Captured};
+    use yunta_testkit::{child_link, node_frame, run_frame};
+    use yunta_testkit_core::Captured;
 
     use crate::surface::Watched;
 

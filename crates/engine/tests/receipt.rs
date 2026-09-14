@@ -20,7 +20,6 @@ use yunta_core::events::{
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::port::Adapter;
-use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
     build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
@@ -28,7 +27,9 @@ use yunta_engine::{
     DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
 };
 use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
+use yunta_testkit::init_repo;
+use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::SeqIdSource;
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.

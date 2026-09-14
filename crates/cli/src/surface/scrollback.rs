@@ -99,7 +99,8 @@ mod tests {
     use yunta_core::events::TerminalState;
     use yunta_core::RunId;
     use yunta_engine::{NodeStanding, NodeState, RunFrame, RunPhase};
-    use yunta_testkit::{child_link, node_frame, run_frame, Captured};
+    use yunta_testkit::{child_link, node_frame, run_frame};
+    use yunta_testkit_core::Captured;
 
     use crate::render::Glyphs;
     use crate::surface::region::Region;

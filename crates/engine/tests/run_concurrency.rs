@@ -9,7 +9,8 @@ use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
-use yunta_testkit::{git, Bench, FixedClock, MOCK_CONFIG};
+use yunta_testkit::{git, Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;

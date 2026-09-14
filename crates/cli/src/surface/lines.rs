@@ -205,13 +205,13 @@ mod tests {
     /// The line one event writes, as a reader meets it: the surface's
     /// own output, not the private field it is built from.
     fn line_for(payload: EventPayload) -> String {
-        let captured = yunta_testkit::Captured::default();
+        let captured = yunta_testkit_core::Captured::default();
         let mut lines = Lines::open(Box::new(captured.clone()), "a test is reading");
         lines.event(&StoredEvent {
             seq: yunta_core::Seq::from(1),
             run_id: "01JQ0000000000000000000000".into(),
             node_id: None,
-            timestamp: yunta_core::Clock::now(&yunta_testkit::FixedClock),
+            timestamp: yunta_core::Clock::now(&yunta_testkit_core::FixedClock),
             body: yunta_core::events::EventBody::Known(payload),
         });
         captured

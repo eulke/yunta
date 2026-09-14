@@ -18,14 +18,15 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::MockAdapter;
 use yunta_core::port::Adapter;
-use yunta_core::SeqIdSource;
 use yunta_core::{AdapterId, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
     DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
+use yunta_testkit::init_repo;
+use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::SeqIdSource;
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.

@@ -1,21 +1,22 @@
 //! Shared test harness for the Yunta workspace.
 //!
-//! One canonical copy of every piece of scaffolding an integration test
-//! needs — a git-repo fixture, a fixed clock, a binary runner, a pty a
-//! run is driven on, a writer a test reads back, a run bench, the
-//! frames a surface draws, gate doubles, a recording run observer — so a
-//! change to the shape of a test run happens in one place, and so the
-//! fixtures are hermetic by construction (git isolated from the
-//! developer's global config, a fixed clock, an injected home and
-//! terminal) rather than by each test remembering to be.
+//! One canonical copy of every piece of scaffolding a whole run takes —
+//! a git-repo fixture, a binary runner, a pty a run is driven on, a run
+//! bench, the frames a surface draws, gate doubles, a recording run
+//! observer — so a change to the shape of a test run happens in one
+//! place, and so the fixtures are hermetic by construction (git isolated
+//! from the developer's global config, a fixed clock, an injected home
+//! and terminal) rather than by each test remembering to be.
+//!
+//! What a test needs below a run — the clocks, the id source, the
+//! capturing writer, a session request — is `yunta-testkit-core`, which
+//! the crates with no run to build depend on directly.
 //!
 //! It is a dev-dependency only: nothing here ships in a published crate.
 
 mod bench;
 mod bin;
-mod capture;
 mod checkout;
-mod clock;
 mod events;
 mod frames;
 mod interaction;
@@ -27,9 +28,7 @@ mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout};
-pub use capture::Captured;
 pub use checkout::Checkout;
-pub use clock::{AtClock, FixedClock, FIXED_NOW};
 pub use events::{accepted, stored, stored_for, task_registered, task_status_changed, SourceLog};
 pub use frames::{child_link, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};

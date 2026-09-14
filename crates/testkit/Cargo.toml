@@ -15,6 +15,9 @@ workspace = true
 
 [dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# The clocks, the id source and the capturing writer live one layer
+# down, with the crates that have no run to build.
+yunta-testkit-core.workspace = true
 yunta-storage.workspace = true
 yunta-adapters.workspace = true
 # The run bench drives the real engine against the mock adapter, so a run

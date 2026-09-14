@@ -11,7 +11,8 @@ use yunta_engine::{
     RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_storage::Storage;
-use yunta_testkit::{init_repo, Bench, FixedClock, MOCK_CONFIG};
+use yunta_testkit::{init_repo, Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;

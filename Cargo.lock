@@ -2859,6 +2859,7 @@ dependencies = [
  "yunta-engine",
  "yunta-storage",
  "yunta-testkit",
+ "yunta-testkit-core",
 ]
 
 [[package]]
@@ -2880,6 +2881,7 @@ dependencies = [
  "toml",
  "tracing",
  "yunta-core",
+ "yunta-testkit-core",
 ]
 
 [[package]]
@@ -2904,6 +2906,7 @@ dependencies = [
  "tracing",
  "ulid",
  "yunta-core",
+ "yunta-testkit-core",
 ]
 
 [[package]]
@@ -2935,6 +2938,7 @@ dependencies = [
  "yunta-core",
  "yunta-storage",
  "yunta-testkit",
+ "yunta-testkit-core",
 ]
 
 [[package]]
@@ -2950,6 +2954,7 @@ dependencies = [
  "yunta-core",
  "yunta-storage",
  "yunta-testkit",
+ "yunta-testkit-core",
 ]
 
 [[package]]
@@ -2966,6 +2971,18 @@ dependencies = [
  "yunta-core",
  "yunta-engine",
  "yunta-storage",
+ "yunta-testkit-core",
+]
+
+[[package]]
+name = "yunta-testkit-core"
+version = "0.0.4"
+dependencies = [
+ "chrono",
+ "futures",
+ "serde_json",
+ "tokio",
+ "yunta-core",
 ]
 
 [[package]]

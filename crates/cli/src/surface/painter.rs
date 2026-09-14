@@ -402,7 +402,7 @@ mod tests {
         TokenUsage,
     };
     use yunta_core::{ContentHash, Seq};
-    use yunta_testkit::FixedClock;
+    use yunta_testkit_core::FixedClock;
 
     use super::*;
 

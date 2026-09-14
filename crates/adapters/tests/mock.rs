@@ -1,41 +1,14 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
 use yunta_core::port::{
-    Adapter, AgentEvent, Budget, Forge, ForgeError, PermissionProfile, ProbeReport, PublishRequest,
-    PublishedGate, ReviewOutcome, SessionRequest,
+    Adapter, AgentEvent, Forge, ForgeError, ProbeReport, PublishRequest, PublishedGate,
+    ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
-
-fn request(cwd: PathBuf) -> SessionRequest {
-    SessionRequest {
-        prompt: "do the thing".to_string(),
-        cwd,
-        model: None,
-        agent: None,
-        permissions: PermissionProfile::Edit,
-        env: HashMap::new(),
-        edit_constraints: None,
-        budget: Budget::default(),
-        adapter_settings: serde_json::Map::new(),
-        skills: Vec::new(),
-        run_tools_endpoint: None,
-        artifact_dir: None,
-        scratch_dir: None,
-    }
-}
-
-async fn drain(mut session: Box<dyn yunta_core::port::AgentSession>) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-    let mut stream = session.events();
-    while let Some(event) = stream.next().await {
-        events.push(event);
-    }
-    events
-}
+use yunta_testkit_core::adapter::{drain, request};
 
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
