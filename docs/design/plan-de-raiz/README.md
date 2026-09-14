@@ -823,7 +823,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 3-08 | el cerco (`cerco.md`): `core::fence`, `FenceLevel`, `Coverage`, `FenceHook`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (§6), mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | cerrado (9c3a0d1) |
 | 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime`; `pack add` rechaza un rango que excluye la versión (M24 I-04) | 2-01 | cerrado (4f124c7) |
 | 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers` (con `declarable`, `AnswersFile::against`, el montaje `kind: answers` y sus dos reglas de `check`, M26), `RecordedOrigin` (cerrado en `51a259c`), `Location` (con los findings del engine por la misma puerta, L-45), `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01, P11 | cerrado (`6c095f8`, `60a9b6c`, `89d8b59`, `18b6704`, `67fd28d`) |
-| 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | pendiente |
+| 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | cerrado (`d843f37`, `c707dbb`, `e8a446b`) |
 | 4-04 | `PersistedDoc<T>` en manifest, lock, engine.json, lock de aislamiento, receipt | 4-01 | pendiente |
 | 5-01 | `Context::open_run`; `collect_history` único | 4-04 | pendiente |
 | 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::`; `stats` publica entregas y findings (M24 I-05) | 5-01 | pendiente |
