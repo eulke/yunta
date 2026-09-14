@@ -804,7 +804,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | cerrado(ebd4d16) |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002, rfc-0003) | — | cerrado(d9306bf) |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | cerrado(8edcdeb) |
-| 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | pendiente |
+| 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | cerrado(38f99dc) |
 | 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | pendiente |
 | 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
 | 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | pendiente |
@@ -873,6 +873,7 @@ uno están en el commit que lo escribió.
 | L-07 | §4 | el nodo con preguntas contestadas cierra debiendo `brief.md`: la derivación borra el `node_failed` que nombra el faltante, la ronda de respuestas cierra sin `close_node`, y el prompt de `grill` supone un turno después de las respuestas que D86 no da | un nodo que pregunta, pregunta: M26, con W-11 como el subconjunto que hace correr el pack de referencia hoy, y D173 que revisa D86 | M26 (`mecanismos.md#m26`); filas W-11 y las de M26 (§4, §10); P10 (§6) |
 | L-08 | §0.15 | D26 llama "append-only" al blackboard que W-04 dejó plegado; ningún ADR revisa esa palabra | como propiedad del canal sigue siendo verdad y un ADR no se reescribe: D26 queda, el Contrato dice el pliegue en presente | Contrato §5.9 y §6.4 |
 | L-09 | 0-02 | `rfc-0003.md` carga el mismo tag `javascript` sobre un bloque de texto que el ítem nombra en los otros tres, y el pase de corpus se borra en el commit que lo corre | el ítem des-corrompe los cuatro documentos: el pase corre una vez, y lo que no arregle queda sin herramienta que lo arregle | fila 0-02 (§10); M23 |
+| L-10 | 1-01 | el engine importa `Forge` y sus tipos de `yunta_adapters`, así que "quita `yunta-adapters`" los mueve al puerto; `ForgeError::{Transport,Response}` llevan `reqwest::Error` (`adapters/src/forge/mod.rs:35,60`), y moverlos tal cual mete un cliente HTTP en `yunta-core` | el puerto lleva `Forge` con las dos causas como `Box<dyn Error + Send + Sync>`: nadie matchea el tipo concreto (`engine/src/run/mod.rs:164` sólo la encadena) y la causa se conserva; `GitHubForge` la envuelve al construirla | fila 1-01 (§10); M01 |
 
 ---
 
