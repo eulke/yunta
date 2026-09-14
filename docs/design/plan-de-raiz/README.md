@@ -755,7 +755,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-07 | `MockSession` con handle y `Drop` | P8 | cerrado(48b93e3) |
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | cerrado(99f148a) |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | cerrado(afaf173) |
-| W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | pendiente |
+| W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | levantado(§11 L-04) |
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | pendiente |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
@@ -886,6 +886,50 @@ propio de la fase que implementa M10 entero, con su propio tablero.
 
 **Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El ítem
 queda `levantado(§11)` hasta que el humano decida.
+
+### L-04 · 2026-09-14 · W-10 · el recorrido recursivo choca con el ejemplo de composición
+
+**Evidencia.** Con `every_yaml_example_in_the_docs_is_one_the_binary_accepts`
+recorriendo `docs/design/` aparecen dos fallas. La primera es CO-14 y §9 la
+nombra: `referencia-schema.md:85,89,90` escribe `2_000_000`, `50_000_000` y
+`32_000`, y el parser pide `u64` (`limits.max_tokens_per_run: invalid type:
+string "2_000_000"`). Se corrige escribiendo los números planos.
+
+La segunda no está prevista: el bloque `name: release-cycle`
+(`referencia-schema.md:229`) es una composición cuyos nodos declaran
+`use: design-review`, `use: build-feature` y `use: qa-review`, y `yunta check`
+la rechaza con "cannot be resolved — no workflow `design-review`". De los tres
+nombres, sólo `build-feature` está declarado en el corpus
+(`referencia-schema.md:103`); los otros dos son ilustrativos y no existen en
+ningún documento.
+
+El plan da a ese archivo un test propio en M23,
+`the_reference_config_parses_and_its_workflows_check` ("`referencia-schema.md`
+bloques", `mecanismos.md#m23`), que es donde vive el proyecto alrededor del
+cual esos bloques se verifican. W-10 pide el recorrido recursivo antes, y el
+recorrido genérico arrastra esos bloques a un proyecto que no los sostiene.
+
+**Alternativas.**
+
+1. Sembrar en el proyecto del test los workflows que los propios documentos
+   declaran, y stubs para los que no. Los stubs hacen pasar el ejemplo contra
+   hijos falsos: el test diría que la composición verifica cuando lo que
+   verificó es otra cosa.
+2. Declarar `design-review` y `qa-review` en `referencia-schema.md`. Es un
+   cambio de documento que §9 no enumera, y agranda un documento de
+   referencia con dos workflows que sólo existen para el test.
+3. Que el recorrido recursivo trate un workflow cuyos `use:` no resuelven
+   como "parsea" en vez de "verifica". Es una regla nueva de clasificación
+   que el plan no da.
+4. Mover el recorrido recursivo al ítem de M23 que ya tiene el test propio de
+   `referencia-schema.md`, y dejar en W-10 sólo la corrección de los números.
+
+**Recomendación.** La 4: la corrección de CO-14 es independiente y se cierra
+sola; el recorrido recursivo entra con `the_reference_config_parses_and_its_workflows_check`,
+que es el test que el plan ya le asigna a ese archivo.
+
+**Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El
+ítem queda `levantado(§11)`; la corrección de los números no se commiteó.
 
 ### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
 
