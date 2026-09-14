@@ -111,8 +111,12 @@ nodes:
     assert!(
         stderr
             .lines()
-            .any(|l| l == "a test case under .yunta/tests/ and run `yunta test`."),
+            .any(|l| l == ".yunta/tests/ and run `yunta test`."),
         "the refusal's closing line directs the user to the mock adapter via `yunta test`: {stderr}"
+    );
+    assert!(
+        stderr.contains("`claude-code`") && stderr.contains("`codex`"),
+        "the refusal names every adapter this binary builds: {stderr}"
     );
     assert!(
         !home.join("runs").exists(),

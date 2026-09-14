@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, GitHubForge, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::port::{Adapter, Forge, ProbeReport};
-use yunta_core::{describe, AdapterId, ConfigLayer, Pid, RunId, Secret, Workflow};
+use yunta_core::{describe, AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Secret, Workflow};
 use yunta_engine::UnknownKindCount;
 
 use crate::error::{warn, CliError};
@@ -145,14 +145,49 @@ pub(crate) async fn spawn_detached_resume(
 /// every caller that passes a registry around spells the same type.
 pub(crate) type Adapters = HashMap<AdapterId, Arc<dyn Adapter>>;
 
-/// The adapter registry a real invocation can offer: `claude-code` and
-/// `codex`, each built only when `runners:` names it as a candidate
-/// somewhere in the merged config, with that adapter's own settings (a
-/// `binary` override, if declared). Mock fixtures stay routed through
-/// `yunta test` only — real invocations never touch the mock, and a
-/// real run never gets a simulated agent either.
+/// Every adapter this binary builds, with `settings` applied to each —
+/// the composition root's one declaration of what a real invocation can
+/// run on. Adding an adapter is adding a line here: what `runners:` may
+/// name, what `doctor` probes, what `init` offers and what a refusal
+/// lists all read from this.
+///
+/// The mock is not among them. Mock fixtures stay routed through `yunta
+/// test`, so a real run never gets a simulated agent.
+pub(crate) fn built_adapters(
+    settings: impl Fn(&AdapterId) -> AdapterSettings,
+) -> Vec<Arc<dyn Adapter>> {
+    vec![
+        Arc::new(ClaudeCodeAdapter::new(&settings(&CLAUDE_CODE_ID))),
+        Arc::new(CodexAdapter::new(&settings(&CODEX_ID))),
+    ]
+}
+
+/// What this binary can run on, as a person reads it: every built
+/// adapter's own id, in order, comma-separated — the phrase a refusal
+/// ends with, derived rather than written.
+pub(crate) fn built_adapter_names() -> String {
+    let names: Vec<String> = built_adapters(|_| AdapterSettings::default())
+        .iter()
+        .map(|adapter| format!("`{}`", adapter.id()))
+        .collect();
+    names.join(", ")
+}
+
+/// The id a surface names when it shows what a `runners:` entry looks
+/// like. The first this binary builds, so the example is always an
+/// adapter that exists.
+pub(crate) fn first_built_adapter() -> AdapterId {
+    built_adapters(|_| AdapterSettings::default())
+        .first()
+        .map(|adapter| adapter.id().clone())
+        .unwrap_or_else(|| CLAUDE_CODE_ID.clone())
+}
+
+/// The adapters a real invocation offers: those of [`built_adapters`]
+/// that `runners:` names as a candidate somewhere in the merged config,
+/// each with that adapter's own settings (a `binary` override, if
+/// declared).
 pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
-    let mut adapters: Adapters = HashMap::new();
     let named: Vec<&AdapterId> = config
         .runners
         .iter()
@@ -161,29 +196,18 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
         .map(|candidate| &candidate.adapter)
         .collect();
 
-    let settings_for = |id: &AdapterId| {
+    built_adapters(|id| {
         config
             .adapters
             .as_ref()
             .and_then(|adapters| adapters.get(id))
             .cloned()
             .unwrap_or_default()
-    };
-
-    if named.contains(&&CLAUDE_CODE_ID) {
-        adapters.insert(
-            CLAUDE_CODE_ID.clone(),
-            Arc::new(ClaudeCodeAdapter::new(&settings_for(&CLAUDE_CODE_ID))),
-        );
-    }
-    if named.contains(&&CODEX_ID) {
-        adapters.insert(
-            CODEX_ID.clone(),
-            Arc::new(CodexAdapter::new(&settings_for(&CODEX_ID))),
-        );
-    }
-
-    adapters
+    })
+    .into_iter()
+    .filter(|adapter| named.contains(&adapter.id()))
+    .map(|adapter| (adapter.id().clone(), adapter))
+    .collect()
 }
 
 /// The forge a real invocation can offer — `None` when either
@@ -220,12 +244,13 @@ pub(crate) fn refuse_unrunnable(workflow: &Workflow, adapters: &Adapters) -> Res
         )
     });
     if needs_sessions && adapters.is_empty() {
-        return Err(CliError::msg(
+        return Err(CliError::msg(format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (only `claude-code` and `codex`\n\
-             are built). To exercise this workflow with the `mock` adapter instead, declare\n\
-             a test case under .yunta/tests/ and run `yunta test`.",
-        ));
+             names no adapter this binary can run (built: {}). To exercise this\n\
+             workflow with the `mock` adapter instead, declare a test case under\n\
+             .yunta/tests/ and run `yunta test`.",
+            built_adapter_names()
+        )));
     }
     Ok(())
 }
@@ -347,4 +372,54 @@ pub(crate) fn check_or_refuse(
         "the workflow fails `yunta check`",
         &errors,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every sentence that tells a person which adapters exist reads
+    /// from the one place they are declared. Before this, three of them
+    /// spelled the pair out, so a third adapter would have landed with
+    /// the refusal, the probe listing and the `init` template all still
+    /// naming two.
+    #[test]
+    fn what_a_refusal_names_is_what_this_binary_builds() {
+        let built = built_adapters(|_| AdapterSettings::default());
+        assert!(
+            !built.is_empty(),
+            "a binary with no adapter can run no session"
+        );
+
+        let refusal = refuse_unrunnable(
+            &yunta_core::yaml::parse::<Workflow>(
+                "name: w\nnodes:\n  - id: a\n    kind: prompt\n    runner: r\n    prompt: p\n",
+            )
+            .expect("the workflow parses"),
+            &Adapters::new(),
+        )
+        .expect_err("a prompt node with no adapter is unrunnable");
+
+        let text = describe(&refusal);
+        for adapter in &built {
+            assert!(
+                text.contains(adapter.id().as_str()),
+                "the refusal names `{}`, which this binary builds: {text}",
+                adapter.id()
+            );
+        }
+    }
+
+    /// The example a surface offers is an adapter that exists, so
+    /// copying the line it prints produces a config this binary can run.
+    #[test]
+    fn the_example_a_surface_offers_is_an_adapter_this_binary_builds() {
+        let example = first_built_adapter();
+        assert!(
+            built_adapters(|_| AdapterSettings::default())
+                .iter()
+                .any(|adapter| *adapter.id() == example),
+            "`{example}` is offered as an example and is not built"
+        );
+    }
 }

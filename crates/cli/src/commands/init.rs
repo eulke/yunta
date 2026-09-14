@@ -11,9 +11,8 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter};
-use yunta_core::port::{Adapter, ProbeReport};
-use yunta_core::AdapterSettings;
+use yunta_core::port::ProbeReport;
+use yunta_core::{AdapterId, AdapterSettings};
 
 use crate::error::{warn, CliError, Outcome};
 
@@ -105,20 +104,19 @@ fn detect_base_branch(repo: &Path) -> String {
 }
 
 struct ProbedAdapter {
-    id: &'static str,
+    id: AdapterId,
     healthy: bool,
     detail: String,
 }
 
+/// Probes every adapter this binary builds, in the order the
+/// composition root declares them — the id each reports about itself,
+/// never one re-spelled here.
 async fn probe_known_adapters() -> Vec<ProbedAdapter> {
-    let claude_code = ClaudeCodeAdapter::new(&AdapterSettings::default());
-    let codex = CodexAdapter::new(&AdapterSettings::default());
     let mut probed = Vec::new();
-    for (id, report) in [
-        ("claude-code", claude_code.probe().await),
-        ("codex", codex.probe().await),
-    ] {
-        probed.push(match report {
+    for adapter in super::built_adapters(|_| AdapterSettings::default()) {
+        let id = adapter.id().clone();
+        probed.push(match adapter.probe().await {
             Ok(ProbeReport::Healthy { version }) => ProbedAdapter {
                 id,
                 healthy: true,
@@ -172,7 +170,10 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
             healthy.id
         ));
     } else {
-        out.push_str("#     - { adapter: claude-code, model: <model-name> }\n");
+        out.push_str(&format!(
+            "#     - {{ adapter: {}, model: <model-name> }}\n",
+            super::first_built_adapter()
+        ));
     }
     out
 }

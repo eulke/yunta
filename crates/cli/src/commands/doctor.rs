@@ -32,7 +32,8 @@ pub async fn doctor() -> Result<Outcome, CliError> {
     if adapters.is_empty() {
         println!(
             "no adapter to probe — `runners:` in the merged config names none this build \
-             supports (only `claude-code` and `codex` are built)"
+             supports (built: {})",
+            super::built_adapter_names()
         );
     } else {
         let mut names: Vec<&AdapterId> = adapters.keys().collect();
@@ -106,7 +107,8 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
                 println!(
                     "  runner `{runner}` — not resolvable: `runners:` doesn't define it, or \
                      defines it with zero candidates; add e.g.:\n      runners:\n        \
-                     {runner}:\n          - {{ adapter: claude-code, model: <model> }}"
+                     {runner}:\n          - {{ adapter: {}, model: <model> }}",
+                    super::first_built_adapter()
                 );
             }
             for server in &gap.missing_mcp_servers {
