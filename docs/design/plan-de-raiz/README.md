@@ -752,7 +752,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | cerrado(6bf7baa) |
 | W-05 | `git.rs` por `spawn_governed` | P8 | levantado(§11 L-03) |
 | W-06 | `parallel_exec` por `resume_policies` | P8 | cerrado(1dd753b) |
-| W-07 | `MockSession` con handle y `Drop` | P8 | pendiente |
+| W-07 | `MockSession` con handle y `Drop` | P8 | cerrado(48b93e3) |
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | pendiente |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | pendiente |
 | W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | pendiente |
