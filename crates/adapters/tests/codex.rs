@@ -186,7 +186,7 @@ async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
         e,
         AgentEvent::ToolUse { name, target_digest }
             if name == "command_execution"
-                && target_digest == &yunta_core::sha256_hex(b"cargo test").as_str()[..12]
+                && target_digest == &yunta_core::sha256_hex(b"cargo test").abbreviated()
     )));
 }
 
@@ -214,7 +214,7 @@ async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
         e,
         AgentEvent::ToolUse { name, target_digest }
             if name == "file_change"
-                && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").as_str()[..12]
+                && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").abbreviated()
     )));
 }
 
@@ -242,7 +242,7 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
         e,
         AgentEvent::ToolUse { name, target_digest }
             if name == "mcp_tool_call"
-                && target_digest == &yunta_core::sha256_hex(b"yunta:query").as_str()[..12]
+                && target_digest == &yunta_core::sha256_hex(b"yunta:query").abbreviated()
     )));
 }
 
@@ -271,7 +271,7 @@ async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
         AgentEvent::ToolUse { name, target_digest }
             if name == "web_search"
                 && target_digest
-                    == &yunta_core::sha256_hex(b"codex exec json schema").as_str()[..12]
+                    == &yunta_core::sha256_hex(b"codex exec json schema").abbreviated()
     )));
 }
 
@@ -1006,6 +1006,6 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     }
     assert_eq!(
         digests[0],
-        &yunta_core::sha256_hex(command.as_bytes()).as_str()[..12],
+        &yunta_core::sha256_hex(command.as_bytes()).abbreviated(),
     );
 }

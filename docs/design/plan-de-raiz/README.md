@@ -950,6 +950,37 @@ que es el test que el plan ya le asigna a ese archivo.
 **Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El
 ítem queda `levantado(§11)`; la corrección de los números no se commiteó.
 
+### L-05 · 2026-09-14 · W-03 · truncar en el productor deja a M11 sin su `ContentHash`
+
+**Evidencia.** La fila de W-03 pide que ambos parsers produzcan
+`sha256_hex(input)[..12]`. M11 fija el tipo del campo:
+`pub struct ToolTarget { pub display: Option<String>, pub digest: ContentHash }`
+(`mecanismos.md#m11`). Un `ContentHash` es el hash entero
+(`core/src/hash.rs`), y truncar en el productor es irreversible: cuando M11
+llegue, esos eventos no pueden dar el hash que el tipo declara.
+
+Además W-03 deja sin identificación a un ítem que sólo se distinguía por el
+campo hasheado: una llamada MCP de codex viajaba como `server:tool`, que no es
+contenido de nadie, y ahora viaja como digest bajo el nombre genérico
+`mcp_tool_call`. M11 lo resuelve con `display`, que W-03 no tiene.
+
+**Lo que hice.** El valor sale de `ContentHash::abbreviated()`, que es el
+único lugar del workspace donde vive "doce dígitos" y ya existía para esto
+(`core/src/hash.rs`); el digest queda `sha256:` más doce dígitos en vez de
+doce dígitos pelados. Es la misma abreviatura que la fila pide, con el
+algoritmo adelante y sin una tercera copia del umbral.
+
+**Alternativas para la contradicción de fondo.** (a) que W-03 guarde el
+`ContentHash` entero y la abreviatura sea cosa del borde que lo muestra —
+entonces la fila dice `[..12]` de más; (b) que M11 acepte un digest abreviado
+y `ToolTarget.digest` no sea `ContentHash`; (c) dejar los dos y que M11
+reinterprete lo viejo, que el log no permite.
+
+**Recomendación.** La (a): el log guarda el hash entero, y doce dígitos son
+cómo se lee, no cómo se guarda. Es lo que `ContentHash::abbreviated()` ya
+dice de sí mismo ("Prose, not an identifier — what compares, and what a log
+records, is the whole value").
+
 ### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
 
 **Evidencia.** §0.9 pide que el ítem cambie su estado a `cerrado(hash)` "en el

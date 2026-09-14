@@ -31,8 +31,9 @@ autenticada (`codex login status`).
    - `agent_session_opened` con `session_id` = el `thread_id` real y
      `model` = el pedido (el stream de codex no lo reporta —
      `openai/codex#14736`; confirmar si sigue así).
-   - `agent_message` de tipo `tool_use` con digests coherentes
-     (`command_execution` → el comando; `file_change` → un path).
+   - `agent_message` de tipo `tool_use` con digests: `sha256:` y doce
+     dígitos, nunca el comando ni el path (el mismo digest para dos
+     llamadas idénticas, distinto para dos distintas).
    - `Usage` con `input_tokens`/`output_tokens`/`cached_input_tokens`
      reales (nombres de campo literales — cualquier rename del CLI
      rompe `parse.rs` y se ve acá).

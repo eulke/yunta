@@ -238,6 +238,7 @@ impl MockAdapter {
             session_id: self.session_id(resume_as)?,
             model: script.model.clone(),
             blocked_markers: self.blocked_markers(script, &req),
+
             steps: script.steps.clone(),
             outcome: script.outcome.clone(),
             run_tools_endpoint: req.run_tools_endpoint.clone(),

@@ -160,13 +160,16 @@ outcome: { type: completed, summary: "done" }
     assert!(dir.path().join("src/lib.rs").exists());
     assert!(!dir.path().join("outside/scope.rs").exists());
 
+    // The refused path reaches the log as a digest, like every other
+    // thing a tool acted on.
+    let refused = yunta_core::sha256_hex(b"blocked:outside/scope.rs").abbreviated();
     let blocked_marker = events.iter().any(|e| {
         matches!(e, AgentEvent::ToolUse { name, target_digest }
-            if name == "edit" && target_digest.contains("outside/scope.rs"))
+            if name == "edit" && target_digest == &refused)
     });
     assert!(
         blocked_marker,
-        "expected a ToolUse marking the blocked edit"
+        "the blocked edit is marked, and names nothing: {events:?}"
     );
 }
 

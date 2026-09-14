@@ -189,7 +189,7 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "Edit" && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").as_str()[..12]
+            if name == "Edit" && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").abbreviated()
     )));
 }
 
@@ -975,6 +975,6 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     }
     assert_eq!(
         digests[0],
-        &yunta_core::sha256_hex(command.as_bytes()).as_str()[..12],
+        &yunta_core::sha256_hex(command.as_bytes()).abbreviated(),
     );
 }

@@ -99,7 +99,10 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         if events
             .send(AgentEvent::ToolUse {
                 name: "edit".to_string(),
-                target_digest: format!("blocked:{}", path.display()),
+                target_digest: crate::session::target_digest(&format!(
+                    "blocked:{}",
+                    path.display()
+                )),
             })
             .is_err()
         {

@@ -86,7 +86,7 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
         }),
         "command_execution" => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
-            target_digest: field_or_hash(item, "command"),
+            target_digest: digest_of_field(item, "command"),
         }),
         "file_change" => Some(AgentEvent::ToolUse {
             name: "file_change".to_string(),
@@ -98,7 +98,7 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
         }),
         "web_search" => Some(AgentEvent::ToolUse {
             name: "web_search".to_string(),
-            target_digest: field_or_hash(item, "query"),
+            target_digest: digest_of_field(item, "query"),
         }),
         // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
         // operator-facing tool activity — see this module's own doc.
@@ -106,9 +106,11 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
     }
 }
 
-fn field_or_hash(item: &Value, key: &str) -> String {
+/// The digest of the field this kind of item acts on, or of the whole
+/// item when it carries none — either way a digest, never the value.
+fn digest_of_field(item: &Value, key: &str) -> String {
     match item.get(key).and_then(Value::as_str) {
-        Some(s) => target_digest(s),
+        Some(found) => target_digest(found),
         None => target_digest(&item.to_string()),
     }
 }
