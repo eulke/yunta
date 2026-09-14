@@ -79,6 +79,9 @@ pub fn child_link(
     ChildLink {
         run_id: run_id.clone(),
         node: node.cloned(),
+        // The child's frozen workflow, which a frame never renders: a
+        // fixture states the link, not the document behind it.
+        workflow_hash: yunta_core::sha256_hex(run_id.as_str().as_bytes()),
         terminal,
     }
 }

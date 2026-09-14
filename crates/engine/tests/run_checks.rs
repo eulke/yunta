@@ -263,7 +263,7 @@ nodes:
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("probe") {
+    match state.nodes.state("probe") {
         Some(NodeState::Finished { outcome, .. }) => {
             assert_eq!(outcome, "threshold was 80");
         }
@@ -582,7 +582,21 @@ nodes:
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(yunta_engine::derive(&round_tripped), state);
+    // The export carries the run's own close, which the report the run
+    // hands back was taken just before: what has to round-trip is every
+    // node's state, and then the close on top of it.
+    let exported = yunta_engine::derive(&round_tripped);
+    let states = |ledger: &yunta_core::events::NodeLedger| {
+        ledger
+            .iter()
+            .map(|(id, record)| (id.clone(), record.state.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(states(&exported.nodes), states(&state.nodes));
+    assert_eq!(
+        exported.run.closed().map(|(terminal, _)| *terminal),
+        Some(yunta_core::events::TerminalState::Done)
+    );
     assert!(
         jsonl.contains("\"kind\":\"run_finished\""),
         "the closing event itself must be included in the export"

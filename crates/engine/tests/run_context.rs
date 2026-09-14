@@ -113,7 +113,7 @@ nodes:
     let fixture = "sessions: []";
 
     let (terminal, state) = bench.run(workflow, fixture).await;
-    match &state.nodes.get("plan") {
+    match &state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
         }
@@ -547,7 +547,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     let fixture = "sessions: []";
 
     let (terminal, state) = bench.run(&workflow, fixture).await;
-    match &state.nodes.get("ask") {
+    match &state.nodes.state("ask") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             assert_eq!(failure.to_string(), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
@@ -837,7 +837,7 @@ sessions:
     );
 
     let (terminal, state) = bench.run(workflow, &fixture).await;
-    match state.nodes.get("plan") {
+    match state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
             assert!(

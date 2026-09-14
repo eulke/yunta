@@ -58,7 +58,7 @@ pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standin
     let done = state
         .tasks
         .iter()
-        .filter(|(_, status)| **status == TaskStatus::Done)
+        .filter(|(_, record)| record.status == TaskStatus::Done)
         .map(|(id, _)| (id.clone(), placed.get(id).cloned().flatten()))
         .collect();
     Ok(Standing { done })

@@ -33,8 +33,8 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     let (terminal, state) = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
-        state.tasks.get("task-s"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
+        state.tasks.status("task-s"),
+        Some(yunta_core::events::TaskStatus::Blocked),
         "an out-of-scope write with no request must block the task, never silently pass"
     );
     match terminal {
@@ -81,8 +81,8 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         "an auto-rejected request must never pause the run, even under ask mode"
     );
     assert_eq!(
-        state.tasks.get("task-p"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-p"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -138,8 +138,8 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-d"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-d"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -198,8 +198,8 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
         granted_bench.run(&granted_workflow, &granted_fixture).await;
     assert_eq!(granted_terminal, RunTerminal::Finished);
     assert_eq!(
-        granted_state.tasks.get("task-w"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        granted_state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Done),
         "a granted expansion must let b.txt through the final scope check"
     );
 
@@ -215,8 +215,8 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let (_denied_terminal, denied_state) =
         denied_bench.run(&denied_workflow, &denied_fixture).await;
     assert_eq!(
-        denied_state.tasks.get("task-w"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
+        denied_state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Blocked),
         "without a grant, b.txt stays a scope violation on the same diff"
     );
 }
@@ -316,8 +316,8 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "grant must unblock the run"
     );
     assert_eq!(
-        state.tasks.get("task-h"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("task-h"),
+        Some(yunta_core::events::TaskStatus::Done),
         "the retry's b.txt write must pass the widened scope check"
     );
 
@@ -384,8 +384,8 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-n"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-n"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -526,12 +526,12 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-c"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-c"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -663,12 +663,12 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-c"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-c"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();

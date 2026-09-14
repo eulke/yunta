@@ -349,7 +349,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     let (terminal, state) = bench.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     // The consuming engine never re-emits the recorded pair.
@@ -520,7 +520,7 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
     let (terminal, state) = bench.execute("sessions: []\n", &NoInteraction).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("approve") {
+    match state.nodes.state("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }
@@ -631,11 +631,16 @@ sessions:
     let (seeded_terminal, seeded_state) = seeded.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
 
     assert_eq!(live_terminal, seeded_terminal);
+    // The state each node reached, not where its events landed: the
+    // seeded log carries two events the live one does not — the pair a
+    // `resolve_gate` wrote while the run was parked — so every later
+    // `seq` differs by exactly that, and saying so proves nothing about
+    // the two runs agreeing.
     let project = |state: &RunState| -> std::collections::BTreeMap<String, String> {
         state
             .nodes
             .iter()
-            .map(|(id, node)| (id.to_string(), format!("{node:?}")))
+            .map(|(id, record)| (id.to_string(), format!("{:?}", record.state)))
             .collect()
     };
     assert_eq!(project(&live_state), project(&seeded_state));

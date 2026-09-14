@@ -20,7 +20,7 @@ mod shape;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use shape::{functions_over, has_inner_space_run, production_only};
+use shape::{functions_over, has_inner_space_run, production_only, strip_noise};
 
 /// Where the committed baseline lives, next to this crate.
 fn baseline_path() -> PathBuf {
@@ -195,6 +195,15 @@ fn measure() -> BTreeMap<String, usize> {
         }),
     );
 
+    // A `_ =>` inside a ledger's fold is a kind that derives nothing
+    // with nothing saying so: the arm exists, the reader sees no
+    // diagnostic, and the state is simply wrong. Every kind is named,
+    // and one that moves nothing says `is_audit`.
+    counts.insert(
+        "wildcard_in_ledger_apply".to_string(),
+        wildcards_in_folds(&workspace_root()),
+    );
+
     // A word this repository retired still naming the thing it retired it
     // for, and a text that describes a plan or a past instead of what the
     // repository does. Both read prose, over a corpus wider than `.rs`.
@@ -232,6 +241,58 @@ fn parse_baseline(text: &str) -> BTreeMap<String, usize> {
             Some((name.to_string(), count.trim().parse().ok()?))
         })
         .collect()
+}
+
+/// Wildcard match arms inside the functions that fold the log: every
+/// `ledger.rs` under `crates/core/src/events/`, plus the engine's own
+/// derivation. A `_ =>` there is a kind that derives nothing with
+/// nothing saying so.
+fn wildcards_in_folds(root: &Path) -> usize {
+    let mut folds: Vec<PathBuf> = Vec::new();
+    if let Ok(domains) = std::fs::read_dir(root.join("crates/core/src/events")) {
+        for domain in domains.flatten() {
+            let ledger = domain.path().join("ledger.rs");
+            if ledger.is_file() {
+                folds.push(ledger);
+            }
+        }
+    }
+    folds.push(root.join("crates/engine/src/replay.rs"));
+    folds.sort();
+    folds
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| wildcards_in_apply(&text))
+        .sum()
+}
+
+/// Wildcard arms inside a fold's `apply`, and nowhere else in the file:
+/// a `match` over an `Option` or a pair of them is ordinary reading, and
+/// what this measures is a kind of event nothing names.
+fn wildcards_in_apply(source: &str) -> usize {
+    let mut count = 0;
+    let mut depth = 0usize;
+    let mut inside = false;
+    let mut block = false;
+    for line in source.lines() {
+        let (code, next) = strip_noise(line, block);
+        block = next;
+        if !inside && code.contains("fn apply") {
+            inside = true;
+            depth = 0;
+        }
+        if inside {
+            if code.trim_start().starts_with("_ =>") {
+                count += 1;
+            }
+            let before = depth;
+            depth = depth + code.matches(['{', '(']).count() - code.matches(['}', ')']).count();
+            if before > 0 && depth == 0 {
+                inside = false;
+            }
+        }
+    }
+    count
 }
 
 /// `cargo xtask smells`: measure and write the baseline.

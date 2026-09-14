@@ -65,7 +65,7 @@ pub(super) async fn execute_parallel(
         .iter()
         .filter(|child| {
             uncertain.contains(&child.id)
-                || matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. }))
+                || matches!(state.nodes.state(&child.id), Some(NodeState::Failed { .. }))
         })
         .collect();
     // Fresh children start at attempt 1; a child left `running` with no
@@ -77,7 +77,7 @@ pub(super) async fn execute_parallel(
     let to_run: Vec<(&Node, u32)> = children
         .iter()
         .filter(|child| !uncertain.contains(&child.id))
-        .filter_map(|child| match state.nodes.get(&child.id) {
+        .filter_map(|child| match state.nodes.state(&child.id) {
             None => Some((child, 1)),
             Some(NodeState::Running { attempt }) => Some((child, attempt + 1)),
             _ => None,
@@ -170,7 +170,10 @@ pub(super) async fn execute_parallel(
             use futures::stream::{FuturesUnordered, StreamExt};
 
             if let Some(already_won) = children.iter().find(|child| {
-                matches!(state.nodes.get(&child.id), Some(NodeState::Finished { .. }))
+                matches!(
+                    state.nodes.state(&child.id),
+                    Some(NodeState::Finished { .. })
+                )
             }) {
                 return close_node(
                     ctx,

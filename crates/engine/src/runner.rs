@@ -11,7 +11,7 @@
 
 use thiserror::Error;
 use yunta_core::events::DiscardedCandidate;
-use yunta_core::{AdapterId, ConfigLayer, RunnerCandidate, RunnerName};
+use yunta_core::{AdapterId, ConfigLayer, RunnerName};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RunnerError {
@@ -47,15 +47,7 @@ fn list(adapters: &[AdapterId]) -> String {
         .join(", ")
 }
 
-/// The outcome of resolving one runner: the winning candidate plus every
-/// candidate passed over, with reasons — exactly what `runner_resolved`
-/// records.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedRunner {
-    pub runner: RunnerName,
-    pub chosen: RunnerCandidate,
-    pub discarded: Vec<DiscardedCandidate>,
-}
+pub use yunta_core::events::ResolvedRunner;
 
 /// Picks the first candidate of `runner` whose adapter `available`
 /// accepts. Pure: availability is injected, so tests and the CLI shell

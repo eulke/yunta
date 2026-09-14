@@ -9,42 +9,24 @@ use yunta_core::{CommitSha, Isolation, Node, Task};
 use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
 use crate::worktree::prepare_worktree;
 
+use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
-use yunta_core::events::{ScopeEvent, TaskEvent};
+use yunta_core::events::TaskEvent;
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
 /// never fed into retry-limit logic (that's `run_task`'s own
 /// `max_retries`, scoped to one dispatch).
-pub(super) fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> u32 {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::Tasks(TaskEvent::StatusChanged(p)))
-                    if p.task_id == *task_id && p.new_status == TaskStatus::Running
-            )
-        })
-        .count() as u32
-        + 1
+pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
+    state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized
 /// for `task_id` — the retry after a human grant derives its
 /// widened scope from here, never from in-memory state.
-fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::Scope(ScopeEvent::Granted(p))) if &p.task_id == task_id => {
-                Some(p.paths.iter().cloned())
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect()
+fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<String> {
+    state.grants.paths_for(task_id).to_vec()
 }
 
 /// Isolates one batch member in its own worktree — each task in the
@@ -86,7 +68,8 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         cancel,
         setup,
     } = *env;
-    let attempt = attempt_number(events, &task.id);
+    let state = crate::replay::derive(events);
+    let attempt = attempt_number(&state, &task.id);
     let task_worktree = ctx
         .run_dir
         .join("task-worktrees")
@@ -144,7 +127,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             scope_expansion,
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
-            already_granted_paths: &granted_paths_for(events, &task.id),
+            already_granted_paths: &granted_paths_for(&state, &task.id),
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,

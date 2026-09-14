@@ -244,7 +244,7 @@ fn an_open_attempts_elapsed_is_the_time_since_the_start_the_log_names() {
     // shows one attempt, not two.
     let events = in_progress();
     let now = at(90);
-    let started = running_since(&events, &"build".into()).expect("the attempt is open");
+    let started = running_since(&derive(&events), &"build".into()).expect("the attempt is open");
 
     let stats = compute_run_stats_at(&workflow(&["build"]), &events, now);
     assert_eq!(
@@ -336,8 +336,14 @@ fn each_loop_nodes_tasks_keep_the_node_that_registered_them() {
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
-    assert_eq!(state.task_nodes.get("t1"), Some(&"review-a".into()));
-    assert_eq!(state.task_nodes.get("t2"), Some(&"review-b".into()));
+    assert_eq!(
+        state.tasks.get("t1").and_then(|r| r.owner.as_ref()),
+        Some(&"review-a".into())
+    );
+    assert_eq!(
+        state.tasks.get("t2").and_then(|r| r.owner.as_ref()),
+        Some(&"review-b".into())
+    );
 }
 
 #[test]
@@ -355,54 +361,66 @@ fn a_task_no_event_attributes_to_a_node_has_no_owner() {
     )];
 
     let state = derive(&events);
-    assert_eq!(state.tasks.get("t1"), Some(&TaskStatus::Pending));
-    assert_eq!(state.task_nodes.get("t1"), None);
+    assert_eq!(state.tasks.status("t1"), Some(TaskStatus::Pending));
+    assert_eq!(state.tasks.get("t1").and_then(|r| r.owner.as_ref()), None);
 }
 
 // --- what a node is doing now ------------------------------------------
 
 #[test]
 fn running_since_is_the_last_start_with_no_terminal_after_it() {
-    assert_eq!(running_since(&in_progress(), &"build".into()), Some(at(0)));
+    assert_eq!(
+        running_since(&derive(&in_progress()), &"build".into()),
+        Some(at(0))
+    );
 
     let mut events = in_progress();
     events.push(finished(5, 100, "build", tokens(100, 50)));
-    assert_eq!(running_since(&events, &"build".into()), None);
+    assert_eq!(running_since(&derive(&events), &"build".into()), None);
 
     events.push(started(6, 120, "build", 2));
-    assert_eq!(running_since(&events, &"build".into()), Some(at(120)));
+    assert_eq!(
+        running_since(&derive(&events), &"build".into()),
+        Some(at(120))
+    );
 }
 
 #[test]
 fn a_node_that_never_started_is_running_since_nothing() {
-    assert_eq!(running_since(&in_progress(), &"absent".into()), None);
+    assert_eq!(
+        running_since(&derive(&in_progress()), &"absent".into()),
+        None
+    );
 }
 
 #[test]
 fn the_age_of_a_nodes_last_event_grows_with_the_instant_it_is_read_at() {
     let events = in_progress();
     assert_eq!(
-        last_event_age(&events, &"build".into(), at(90)),
+        last_event_age(&derive(&events), &"build".into(), at(90)),
         Some(Duration::from_secs(60))
     );
     assert_eq!(
-        last_event_age(&events, &"build".into(), at(630)),
+        last_event_age(&derive(&events), &"build".into(), at(630)),
         Some(Duration::from_secs(600))
     );
-    assert_eq!(last_event_age(&events, &"absent".into(), at(90)), None);
+    assert_eq!(
+        last_event_age(&derive(&events), &"absent".into(), at(90)),
+        None
+    );
 }
 
 #[test]
 fn an_event_stamped_after_the_instant_it_is_read_at_has_no_negative_age() {
     assert_eq!(
-        last_event_age(&in_progress(), &"build".into(), at(0)),
+        last_event_age(&derive(&in_progress()), &"build".into(), at(0)),
         Some(Duration::ZERO)
     );
 }
 
 #[test]
 fn the_sessions_open_on_a_node_are_the_ones_opened_since_its_last_terminal() {
-    let sessions = open_sessions(&in_progress(), &"build".into());
+    let sessions = open_sessions(&derive(&in_progress()), &"build".into());
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].session_id.as_str(), "s-1");
     assert_eq!(sessions[0].agent, Some("reviewer".into()));
@@ -411,11 +429,11 @@ fn the_sessions_open_on_a_node_are_the_ones_opened_since_its_last_terminal() {
 
     let mut events = in_progress();
     events.push(finished(5, 100, "build", tokens(100, 50)));
-    assert!(open_sessions(&events, &"build".into()).is_empty());
+    assert!(open_sessions(&derive(&events), &"build".into()).is_empty());
 
     events.push(started(6, 120, "build", 2));
     events.push(session_opened(7, 121, "build", "s-2"));
-    let reopened = open_sessions(&events, &"build".into());
+    let reopened = open_sessions(&derive(&events), &"build".into());
     assert_eq!(reopened.len(), 1);
     assert_eq!(reopened[0].session_id.as_str(), "s-2");
 }
@@ -423,14 +441,14 @@ fn the_sessions_open_on_a_node_are_the_ones_opened_since_its_last_terminal() {
 #[test]
 fn tool_calls_come_back_newest_first_and_capped_at_the_limit() {
     let events = in_progress();
-    let calls = recent_tool_calls(&events, &"build".into(), 10);
+    let calls = recent_tool_calls(&derive(&events), &"build".into(), 10);
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].tool_name.as_deref(), Some("cargo"));
     assert_eq!(calls[0].target_digest.as_deref(), Some("digest-cargo"));
     assert_eq!(calls[0].at, at(30));
     assert_eq!(calls[1].tool_name.as_deref(), Some("rg"));
 
-    let one = recent_tool_calls(&events, &"build".into(), 1);
+    let one = recent_tool_calls(&derive(&events), &"build".into(), 1);
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].tool_name.as_deref(), Some("cargo"));
 }
@@ -439,11 +457,17 @@ fn tool_calls_come_back_newest_first_and_capped_at_the_limit() {
 fn a_nodes_tool_calls_are_its_own_and_stop_at_its_last_terminal() {
     let mut events = in_progress();
     events.push(tool_use(5, 31, "other", "sed", "digest-sed"));
-    assert_eq!(recent_tool_calls(&events, &"other".into(), 10).len(), 1);
-    assert_eq!(recent_tool_calls(&events, &"build".into(), 10).len(), 2);
+    assert_eq!(
+        recent_tool_calls(&derive(&events), &"other".into(), 10).len(),
+        1
+    );
+    assert_eq!(
+        recent_tool_calls(&derive(&events), &"build".into(), 10).len(),
+        2
+    );
 
     events.push(finished(6, 100, "build", tokens(100, 50)));
-    assert!(recent_tool_calls(&events, &"build".into(), 10).is_empty());
+    assert!(recent_tool_calls(&derive(&events), &"build".into(), 10).is_empty());
 }
 
 // --- the tokens spent so far -------------------------------------------
@@ -452,7 +476,7 @@ fn a_nodes_tool_calls_are_its_own_and_stop_at_its_last_terminal() {
 fn a_live_total_adds_the_usage_a_running_node_has_reported() {
     let events = in_progress();
     // Nothing has terminated, so replay's own total is still zero.
-    assert_eq!(derive(&events).total_tokens, TokenUsage::default());
+    assert_eq!(derive(&events).total_tokens(), TokenUsage::default());
     assert_eq!(live_total_tokens(&events), tokens(100, 50));
 }
 
@@ -462,7 +486,7 @@ fn a_terminated_nodes_usage_is_not_counted_on_top_of_its_terminal() {
     events.push(finished(5, 100, "build", tokens(100, 50)));
 
     // The usage events and `tokens_used` describe the same 150 tokens.
-    assert_eq!(derive(&events).total_tokens, tokens(100, 50));
+    assert_eq!(derive(&events).total_tokens(), tokens(100, 50));
     assert_eq!(live_total_tokens(&events), tokens(100, 50));
 }
 
@@ -485,7 +509,7 @@ fn a_new_attempt_counts_only_its_own_usage_over_the_closed_one() {
         usage(4, 25, "build", 7, 0),
     ];
 
-    assert_eq!(derive(&events).total_tokens, tokens(10, 0));
+    assert_eq!(derive(&events).total_tokens(), tokens(10, 0));
     assert_eq!(live_total_tokens(&events), tokens(17, 0));
 }
 
@@ -502,7 +526,7 @@ fn an_attempt_restarted_with_no_terminal_leaves_its_usage_behind() {
         usage(3, 25, "build", 7, 0),
     ];
 
-    assert_eq!(derive(&events).total_tokens, TokenUsage::default());
+    assert_eq!(derive(&events).total_tokens(), TokenUsage::default());
     assert_eq!(live_total_tokens(&events), tokens(7, 0));
 }
 
@@ -553,7 +577,7 @@ proptest! {
         let terminal = events.len() as u64;
         events.push(finished(terminal, 100, "build", spent));
 
-        prop_assert_eq!(derive(&events).total_tokens, spent);
+        prop_assert_eq!(derive(&events).total_tokens(), spent);
         prop_assert_eq!(live_total_tokens(&events), spent);
     }
 }

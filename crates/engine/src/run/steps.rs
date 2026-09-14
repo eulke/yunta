@@ -45,7 +45,7 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
         None,
         EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
             TerminalState::Done,
-            state.total_tokens,
+            state.total_tokens(),
             tasks_done(&state),
         ))),
     )
@@ -117,7 +117,7 @@ pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunRe
         None,
         EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
             TerminalState::Failed,
-            state.total_tokens,
+            state.total_tokens(),
             tasks_done(&state),
         ))),
     )
@@ -185,7 +185,7 @@ pub(super) async fn gate_exhausted(
     // re-asked, and its escalation pair is already recorded so it is never
     // re-emitted. The option is re-validated against the re-derived menu: a
     // mismatch means ask normally.
-    let pre_seeded = escalation::pre_seeded_resolution(events, &node, &escalation);
+    let pre_seeded = escalation::pre_seeded_resolution(&derive(events), &node, &escalation);
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
         Some(choice) => Some(choice),
@@ -283,7 +283,7 @@ pub(super) async fn gate_exhausted(
             None,
             EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
                 TerminalState::Promoted,
-                state.total_tokens,
+                state.total_tokens(),
                 tasks_done(&state),
             ))),
         )
@@ -326,7 +326,7 @@ pub(super) async fn execute_batch(
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         {
-            let spent = derive(events).total_tokens.total();
+            let spent = derive(events).total_tokens().total();
             if spent >= cap {
                 let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
                     .map_err(|source| RunError::Broken {

@@ -17,6 +17,7 @@ mod evidence;
 mod failure;
 pub mod findings;
 pub mod gates;
+pub mod meta;
 pub mod node;
 pub mod run;
 pub mod scope;
@@ -25,16 +26,17 @@ pub mod tasks;
 mod wire;
 
 pub use artifacts::{payloads::*, ArtifactEvent};
-pub use children::{payloads::*, ChildEvent};
+pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::Failure;
 pub use findings::{payloads::*, FindingEvent};
-pub use gates::{payloads::*, GateEvent};
-pub use node::{payloads::*, NodeEvent};
-pub use run::{payloads::*, RunEvent};
-pub use scope::{payloads::*, ScopeEvent};
-pub use session::{payloads::*, SessionEvent};
-pub use tasks::{payloads::*, TaskEvent};
+pub use gates::{ledger::*, payloads::*, GateEvent};
+pub use meta::EventMeta;
+pub use node::{ledger::*, payloads::*, NodeEvent};
+pub use run::{ledger::*, payloads::*, RunEvent};
+pub use scope::{ledger::*, payloads::*, ScopeEvent};
+pub use session::{ledger::*, payloads::*, SessionEvent};
+pub use tasks::{ledger::*, payloads::*, TaskEvent};
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this
 // type, but it is defined at the crate root (`capabilities.rs`) since the
@@ -423,6 +425,22 @@ impl EventPayload {
             Self::Artifacts(e) => e.kind_name(),
             Self::Gates(e) => e.kind_name(),
             Self::Children(e) => e.kind_name(),
+        }
+    }
+
+    /// Whether this kind is audit: the log carries it so a reader can
+    /// see what the engine did, and no ledger moves when it arrives.
+    pub fn is_audit(&self) -> bool {
+        match self {
+            Self::Run(e) => e.is_audit(),
+            Self::Node(e) => e.is_audit(),
+            Self::Session(e) => e.is_audit(),
+            Self::Tasks(e) => e.is_audit(),
+            Self::Scope(e) => e.is_audit(),
+            Self::Findings(e) => e.is_audit(),
+            Self::Artifacts(e) => e.is_audit(),
+            Self::Gates(e) => e.is_audit(),
+            Self::Children(e) => e.is_audit(),
         }
     }
 

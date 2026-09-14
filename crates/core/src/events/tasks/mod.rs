@@ -2,7 +2,9 @@
 //! that reached a new status.
 
 pub mod kinds;
+pub mod ledger;
 pub mod payloads;
 
 pub use kinds::TaskEvent;
+pub use ledger::*;
 pub use payloads::*;

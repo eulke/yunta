@@ -324,16 +324,17 @@ pub(super) async fn recheck_approved_gates(
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {
             continue;
         }
-        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.get(&node.id) else {
+        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.state(&node.id) else {
             continue;
         };
-        let Some(approved_sha) = last_approved_sha(&events, &node.id) else {
+        let state = crate::replay::derive(&events);
+        let Some(approved_sha) = state.gates.approved_sha(&node.id).cloned() else {
             continue;
         };
-        let Some(external_ref) = last_external_ref(&events, &node.id) else {
+        let Some(external_ref) = state.gates.last_external_ref(&node.id) else {
             continue;
         };
-        let published: PublishedGate = decode_ref(&external_ref)?;
+        let published: PublishedGate = decode_ref(external_ref)?;
         let polled = forge
             .poll(&published)
             .await
@@ -352,31 +353,6 @@ pub(super) async fn recheck_approved_gates(
         }
     }
     Ok(())
-}
-
-fn last_approved_sha(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<CommitSha> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
-            sha,
-            ..
-        }))) if e.node_id.as_ref() == Some(node_id) => Some(sha.clone()),
-        _ => None,
-    })
-}
-
-fn last_external_ref(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<String> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref().map(str::to_string)
-        }
-        _ => None,
-    })
 }
 
 /// Resolves an internal gate (`external: None`): builds the escalation
@@ -412,7 +388,11 @@ pub(super) async fn resolve_internal_gate(
     // recorded so it is never re-emitted. Re-validated against the
     // re-derived menu: a mismatch means ask normally.
     let events = ctx.load_events().await?;
-    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id, &escalation);
+    let pre_seeded = super::escalation::pre_seeded_resolution(
+        &crate::replay::derive(&events),
+        &node.id,
+        &escalation,
+    );
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
         Some(choice) => choice,
@@ -519,17 +499,15 @@ pub(super) async fn resolve_internal_gate(
 
 async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
-    let attempt = events
-        .iter()
-        .filter(|e| {
-            e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Started(_))))
-        })
-        .count() as u32
-        + 1;
+    let attempts = crate::replay::derive(&events)
+        .nodes
+        .get(&node.id)
+        .map_or(0, |record| record.attempts);
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt })),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(
+            attempts + 1,
+        ))),
     )
     .await?;
     Ok(())

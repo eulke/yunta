@@ -287,55 +287,59 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
     };
 
     let at = |k: usize| derive(&round[..k]);
-    assert_eq!(at(0).nodes.get(&grill), None, "before it started");
+    assert_eq!(at(0).nodes.state(&grill), None, "before it started");
     for k in 1..=2 {
         assert!(
             matches!(
-                at(k).nodes.get(&grill),
+                at(k).nodes.state(&grill),
                 Some(yunta_engine::NodeState::Running { attempt: 1 })
             ),
             "running at {k}: {:?}",
-            at(k).nodes.get(&grill)
+            at(k).nodes.state(&grill)
         );
-        assert!(at(k).answered_unfinished.is_empty());
+        assert!(!at(k).answered_unfinished(&grill));
     }
     for k in 3..=4 {
         assert!(
             matches!(
-                at(k).nodes.get(&grill),
+                at(k).nodes.state(&grill),
                 Some(yunta_engine::NodeState::Waiting { external_ref: None })
             ),
             "waiting on its questions at {k}: {:?}",
-            at(k).nodes.get(&grill)
+            at(k).nodes.state(&grill)
         );
         assert_eq!(
-            at(k).total_tokens,
+            at(k).total_tokens(),
             asked_tokens,
             "the session that asked is counted once, at {k}"
         );
     }
     assert!(
         matches!(
-            at(5).nodes.get(&grill),
+            at(5).nodes.state(&grill),
             Some(yunta_engine::NodeState::Running { attempt: 1 })
         ),
         "answered, back where asking left it: {:?}",
-        at(5).nodes.get(&grill)
+        at(5).nodes.state(&grill)
     );
     assert!(
-        at(5).answered_unfinished.contains(&grill),
+        at(5).answered_unfinished(&grill),
         "and owed the terminal its close deferred"
     );
     assert_eq!(
-        at(6).nodes.get(&grill),
+        at(6).nodes.state(&grill),
         Some(&yunta_engine::NodeState::Finished {
             outcome: "questions answered".to_string(),
             tokens: asked_tokens,
         }),
         "finished, carrying what the session that asked spent"
     );
-    assert!(at(6).answered_unfinished.is_empty());
-    assert_eq!(at(6).total_tokens, asked_tokens, "counted once, not twice");
+    assert!(!at(6).answered_unfinished(&grill));
+    assert_eq!(
+        at(6).total_tokens(),
+        asked_tokens,
+        "counted once, not twice"
+    );
 }
 
 proptest! {
@@ -389,13 +393,13 @@ proptest! {
         let mut prev = derive(&[]);
         for k in 1..=log.len() {
             let cur = derive(&log[..k]);
-            prop_assert!(cur.total_tokens.total() >= prev.total_tokens.total());
-            prop_assert!(cur.findings.len() >= prev.findings.len());
-            for id in prev.tasks.keys() {
-                prop_assert!(cur.tasks.contains_key(id), "task {id} disappeared");
+            prop_assert!(cur.total_tokens().total() >= prev.total_tokens().total());
+            prop_assert!(cur.effective_findings().len() >= prev.effective_findings().len());
+            for id in prev.tasks.iter().map(|(id, _)| id) {
+                prop_assert!(cur.tasks.contains(id), "task {id} disappeared");
             }
-            for id in prev.nodes.keys() {
-                prop_assert!(cur.nodes.contains_key(id), "node {id} disappeared");
+            for id in prev.nodes.iter().map(|(id, _)| id) {
+                prop_assert!(cur.nodes.has_state(id), "node {id} disappeared");
             }
             prev = cur;
         }

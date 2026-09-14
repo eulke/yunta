@@ -9,11 +9,11 @@
 //! the frame answers *what* a person is being asked for and not only
 //! *which* node is asking. No surface goes back to the log for it.
 
-use yunta_core::events::{EventPayload, Failure, StoredEvent, TerminalState};
+use yunta_core::events::{Failure, StoredEvent, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 use crate::replay::{NodeState, RunState};
-use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::events::RunPhaseRaw;
 
 /// Where the run as a whole stands, derived from the log alone.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,97 +91,59 @@ pub enum WaitingOn {
 
 /// The run's phase: a log that stopped making sense says so first, then
 /// the run's own close, then what it is parked on, then movement.
-pub(super) fn phase(workflow: &Workflow, state: &RunState, events: &[StoredEvent]) -> RunPhase {
+pub(super) fn phase(workflow: &Workflow, state: &RunState, _events: &[StoredEvent]) -> RunPhase {
     if let Some(diagnostic) = &state.broken {
         return RunPhase::Broken {
             diagnostic: diagnostic.clone(),
         };
     }
-    let standing = standing(events);
-    match standing.last {
-        Some(EventPayload::Run(RunEvent::Finished(p))) => closed(&p.terminal_state, events),
+    // The run's own ledger answers where it stands; the node ledger
+    // says which node it stands on, when one does.
+    match state.run.phase() {
+        RunPhaseRaw::Unborn => RunPhase::Created,
+        RunPhaseRaw::Closed => match state.run.closed() {
+            Some((terminal, _)) => closed(terminal, state),
+            None => RunPhase::Created,
+        },
         // A node parked on a person is the more precise answer, and it
         // quotes the same pause, so naming the node costs the prose
         // nothing.
-        Some(EventPayload::Run(RunEvent::Paused(p))) => RunPhase::Waiting {
-            on: waiting_node(workflow, state, standing.pause).unwrap_or_else(|| WaitingOn::Run {
-                reason: p.reason().to_string(),
-            }),
-        },
-        Some(
-            EventPayload::Run(RunEvent::Resumed(_)) | EventPayload::Node(NodeEvent::Started(_)),
-        ) => match waiting_node(workflow, state, standing.pause) {
+        RunPhaseRaw::Paused => {
+            let reason = state.run.paused().map(|(reason, _)| reason);
+            RunPhase::Waiting {
+                on: waiting_node(workflow, state, reason).unwrap_or_else(|| WaitingOn::Run {
+                    reason: reason.unwrap_or_default().to_string(),
+                }),
+            }
+        }
+        RunPhaseRaw::Open => match waiting_node(workflow, state, None) {
             Some(on) => RunPhase::Waiting { on },
-            None => RunPhase::Running,
+            None if state.nodes.values().any(|record| record.state.is_some()) => RunPhase::Running,
+            None => RunPhase::Created,
         },
-        _ => RunPhase::Created,
     }
-}
-
-/// What one walk back from the end of the log says about where a run
-/// stands.
-#[derive(Default)]
-struct Standing<'a> {
-    /// The event that last moved the run between phases: its close, its
-    /// pause, its resume, or a node starting.
-    last: Option<&'a EventPayload>,
-    /// The reason the run's own `run_paused` recorded, while that pause
-    /// still stands; `None` once a resume or a close left it behind.
-    pause: Option<&'a str>,
-}
-
-/// Reads both of [`Standing`]'s answers in one pass, because they are
-/// read off the same tail: a pause a run left behind is exactly a pause
-/// with a resume or a close after it, and a node that started since
-/// changes which phase the run is in without settling the pause it
-/// quotes.
-fn standing(events: &[StoredEvent]) -> Standing<'_> {
-    let mut standing = Standing::default();
-    for event in events.iter().rev() {
-        let Some(payload) = event.payload() else {
-            continue;
-        };
-        let settles = match payload {
-            EventPayload::Run(RunEvent::Paused(p)) => {
-                standing.pause = Some(p.reason());
-                true
-            }
-            EventPayload::Run(RunEvent::Resumed(_)) | EventPayload::Run(RunEvent::Finished(_)) => {
-                true
-            }
-            EventPayload::Node(NodeEvent::Started(_)) => false,
-            _ => continue,
-        };
-        if standing.last.is_none() {
-            standing.last = Some(payload);
-        }
-        if settles {
-            return standing;
-        }
-    }
-    standing
 }
 
 /// How a closed run closed, with the evidence its own log carries for
 /// it: the last `node_failed`'s failure, the last `promotion_signaled`'s
 /// suggested mode.
-fn closed(terminal: &TerminalState, events: &[StoredEvent]) -> RunPhase {
+fn closed(terminal: &TerminalState, state: &RunState) -> RunPhase {
     match terminal {
         TerminalState::Done => RunPhase::Finished,
         TerminalState::Cancelled => RunPhase::Cancelled,
         TerminalState::Failed => RunPhase::Failed {
-            failure: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.failure.clone()),
-                _ => None,
-            }),
+            failure: state
+                .nodes
+                .values()
+                .filter_map(|record| match (&record.state, record.last_failed) {
+                    (Some(NodeState::Failed { failure, .. }), Some(seq)) => Some((seq, failure)),
+                    _ => None,
+                })
+                .max_by_key(|(seq, _)| *seq)
+                .map(|(_, failure)| failure.clone()),
         },
         TerminalState::Promoted => RunPhase::Promoted {
-            to: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::Run(RunEvent::PromotionSignaled(p))) => {
-                    Some(p.suggested_mode.clone())
-                }
-                _ => None,
-            }),
+            to: state.run.promotion().map(|promotion| promotion.to.clone()),
         },
     }
 }
@@ -191,7 +153,7 @@ fn closed(terminal: &TerminalState, events: &[StoredEvent]) -> RunPhase {
 fn waiting_node(workflow: &Workflow, state: &RunState, reason: Option<&str>) -> Option<WaitingOn> {
     workflow
         .iter_nodes()
-        .find_map(|node| match state.nodes.get(&node.id) {
+        .find_map(|node| match state.nodes.state(&node.id) {
             Some(NodeState::Waiting { external_ref }) => Some(WaitingOn::Node {
                 node: node.id.clone(),
                 external_ref: external_ref.clone(),

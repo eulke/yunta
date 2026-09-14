@@ -169,13 +169,13 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     // never "absent" and never running/failed.
     assert!(
         matches!(
-            state.nodes.get("approve"),
+            state.nodes.state("approve"),
             Some(NodeState::Waiting {
                 external_ref: Some(_)
             })
         ),
         "a published unresolved gate must derive Waiting with its PR ref, got {:?}",
-        state.nodes.get("approve")
+        state.nodes.state("approve")
     );
     assert!(
         forge_state.pr_number(bench.run_id.as_str()).is_some(),
@@ -191,7 +191,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -224,7 +224,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // Finished, which is exactly what keeps it open to recheck.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -237,7 +237,10 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !matches!(state.nodes.get("approve"), Some(NodeState::Finished { .. })),
+        !matches!(
+            state.nodes.state("approve"),
+            Some(NodeState::Finished { .. })
+        ),
         "a stale approval must return the gate to waiting, not stay silently Finished"
     );
 
@@ -264,7 +267,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
     let (_, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -292,7 +295,7 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     // any other failed node without `on_failure` already follows.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Failed {
             retryable: true,
             ..
@@ -325,7 +328,7 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -359,7 +362,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
     let (terminal, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -368,7 +371,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
     // resolved instead of reading the difference as drift.
     let (_, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -401,7 +404,7 @@ async fn a_closed_pr_fails_the_node_non_retryably() {
 
     let (_, state) = bench.wake(Some(&forge)).await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Failed {
             retryable: false,
             ..
@@ -417,7 +420,7 @@ async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
     let (terminal, state) = bench.wake(None).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !state.nodes.contains_key("approve"),
+        !state.nodes.has_state("approve"),
         "no forge and no answer from the console must not fabricate a resolution"
     );
 

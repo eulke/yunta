@@ -44,7 +44,7 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
 
@@ -190,7 +190,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("approve") {
+    match state.nodes.state("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
             assert_eq!(outcome, "aprobar")
         }
@@ -388,13 +388,13 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         RunTerminal::Finished,
         "the crashed gate is re-asked and resolved, not left stuck"
     );
-    match report.state.nodes.get("approve") {
+    match report.state.nodes.state("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
         other => panic!("expected the gate resolved after the resume, got {other:?}"),
     }
     assert!(
         matches!(
-            report.state.nodes.get("ship"),
+            report.state.nodes.state("ship"),
             Some(yunta_engine::NodeState::Finished { .. })
         ),
         "the node behind the gate runs once the gate resolves"
@@ -414,7 +414,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     assert_eq!(
@@ -571,10 +571,10 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
     // The corrective node never started — the cap is checked before the
     // re-route hands it work.
     assert!(matches!(
-        state.nodes.get("first"),
+        state.nodes.state("first"),
         Some(NodeState::Failed { .. })
     ));
-    assert_eq!(state.nodes.get("fix"), None);
+    assert_eq!(state.nodes.state("fix"), None);
     // Unresolved: nothing recorded (resume re-asks, same convention as
     // every other gate).
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -599,9 +599,9 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
     // on its retry — all of it past the cap, under the one authorization.
     for node in ["first", "fix"] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
 
@@ -646,7 +646,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
         RunTerminal::Paused { reason } => assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort"),
         other => panic!("abort must pause the run, got {other:?}"),
     }
-    assert_eq!(state.nodes.get("fix"), None);
+    assert_eq!(state.nodes.state("fix"), None);
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(
         events.iter().any(|e| matches!(
@@ -791,14 +791,14 @@ async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless(
         other => panic!("an exhausted iteration cap with no surface must pause, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get("implement"),
+        state.nodes.state("implement"),
         Some(NodeState::Failed { .. })
     ));
     // T003 never ran: iteration 3 was refused, so it stays registered
     // but untouched.
     assert_eq!(
-        state.tasks.get("T003"),
-        Some(&yunta_core::events::TaskStatus::Pending)
+        state.tasks.status("T003"),
+        Some(yunta_core::events::TaskStatus::Pending)
     );
 }
 
@@ -813,8 +813,8 @@ async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("T003"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T003"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     // One authorization covers the whole invocation — the script had a
     // single `continue`, and iterations 3 AND 4 both ran on it.

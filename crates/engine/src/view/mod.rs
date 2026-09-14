@@ -19,29 +19,25 @@
 mod node;
 mod phase;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{
-    run_mode, ChildRunFinishedPayload, EventPayload, FindingSeverity, StoredEvent, TaskStatus,
-    TerminalState, TokenUsage,
-};
-use yunta_core::{AdapterId, Capability, ModeName, NodeId, RunId, Workflow};
+use yunta_core::events::{run_mode, FindingSeverity, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::{ModeName, NodeId, RunId, Workflow};
 
 use crate::history::PriorEstimation;
 use crate::live::live_total_tokens_of;
 use crate::modes::mode_included_nodes;
 use crate::replay::{derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount};
-use crate::runner::ResolvedRunner;
 use crate::stats::stats_observed_at;
 
 use node::Reading;
-use yunta_core::events::{ChildEvent, NodeEvent, SessionEvent};
 
-pub use node::{NodeFrame, NodeStanding, Reroute};
+pub use node::{NodeFrame, NodeStanding};
 pub use phase::{RunPhase, WaitingOn};
+pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 
 /// Work split by where it stands, at one level: the DAG's nodes, or the
 /// ledger's tasks.
@@ -133,32 +129,6 @@ pub struct RunFrame {
 /// A child run this run gave birth to, as a link — never as numbers
 /// averaged into the parent's counters (`contrato-del-run.md` §8.5).
 ///
-/// The child's events are under its own `run_id`, and its workflow
-/// *name* is on no event at all: `child_run_created` records the link
-/// and the child's workflow hash, never its name (`run/workflow_exec.rs`
-/// states it). A caller that labels a child reads the child's own frozen
-/// manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildLink {
-    pub run_id: RunId,
-    /// The parent's `kind: workflow` node that bore it; `None` for a
-    /// link the log recorded under no node.
-    pub node: Option<NodeId>,
-    /// How the child closed, or `None` while it is still open.
-    pub terminal: Option<TerminalState>,
-}
-
-/// One `capability_degraded`: the capability the engine consulted, the
-/// adapter that does not declare it, and the policy applied instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Degradation {
-    pub capability: Capability,
-    pub adapter: AdapterId,
-    pub policy: String,
-    pub node: Option<NodeId>,
-    pub at: DateTime<Utc>,
-}
-
 /// Derives one run's frame from its log, the workflow its manifest
 /// froze, the history the caller read, and the instant it is looked at.
 ///
@@ -183,7 +153,6 @@ pub fn run_frame(
 ) -> RunFrame {
     let state = derive(events);
     let stats = stats_observed_at(&state, workflow, events, Some(now));
-    let walk = walk_log(events);
     let mode = run_mode(events);
     let reading = Reading {
         stats: stats
@@ -192,9 +161,7 @@ pub fn run_frame(
             .map(|stat| (&stat.node_id, stat))
             .collect(),
         included: mode_included_nodes(workflow, &mode),
-        walk: &walk,
         state: &state,
-        events,
         now,
     };
     let nodes: Vec<NodeFrame> = workflow
@@ -210,14 +177,18 @@ pub fn run_frame(
         elapsed: stats.wall_clock,
         flow: flow_counter(&nodes, &mode),
         tasks: task_counter(&state),
-        reroutes: walk.reroutes,
-        tokens: live_total_tokens_of(&state, events),
+        reroutes: state
+            .nodes
+            .values()
+            .map(|record| record.reroutes as usize)
+            .sum(),
+        tokens: live_total_tokens_of(&state),
         prior: prior.cloned(),
         nodes,
-        children: walk.children,
-        degraded: walk.degraded,
+        children: state.children.links().to_vec(),
+        degraded: state.degradations.all().to_vec(),
         unknown_kinds: unknown_kind_counts(&state),
-        blocking_findings: crate::dedup_findings(&state.findings)
+        blocking_findings: crate::dedup_findings(&state.effective_findings())
             .iter()
             .filter(|finding| finding.severity == FindingSeverity::Blocking)
             .count(),
@@ -259,7 +230,7 @@ fn task_counter(state: &RunState) -> Option<Counter> {
         total: state.tasks.len(),
         ..Counter::default()
     };
-    for status in state.tasks.values() {
+    for status in state.tasks.statuses() {
         match status {
             TaskStatus::Done => counter.done += 1,
             TaskStatus::Failed => counter.failed += 1,
@@ -269,82 +240,6 @@ fn task_counter(state: &RunState) -> Option<Counter> {
         }
     }
     Some(counter)
-}
-
-/// What one pass over the log collects that replay and stats do not: the
-/// runner each node resolved through, the last re-route each one took,
-/// the run's re-route count, its child links and its degradations.
-#[derive(Default)]
-struct Walk {
-    runner: HashMap<NodeId, ResolvedRunner>,
-    reroute: HashMap<NodeId, Reroute>,
-    reroutes: usize,
-    children: Vec<ChildLink>,
-    degraded: Vec<Degradation>,
-}
-
-fn walk_log(events: &[StoredEvent]) -> Walk {
-    let mut walk = Walk::default();
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
-                if let Some(node) = &event.node_id {
-                    walk.runner.insert(
-                        node.clone(),
-                        ResolvedRunner {
-                            runner: p.runner.clone(),
-                            chosen: p.chosen.clone(),
-                            discarded: p.discarded.clone(),
-                        },
-                    );
-                }
-            }
-            Some(EventPayload::Node(NodeEvent::Rerouted(p))) => {
-                walk.reroutes += 1;
-                if let Some(node) = &event.node_id {
-                    walk.reroute
-                        .insert(node.clone(), Reroute::of(p, event.timestamp));
-                }
-            }
-            Some(EventPayload::Children(ChildEvent::Created(p))) => walk.children.push(ChildLink {
-                run_id: p.child_run_id.clone(),
-                node: event.node_id.clone(),
-                terminal: None,
-            }),
-            Some(EventPayload::Children(ChildEvent::Finished(p))) => walk.close_child(p, event),
-            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p))) => {
-                walk.degraded.push(Degradation {
-                    capability: p.capability,
-                    adapter: p.adapter.clone(),
-                    policy: p.policy_applied().to_string(),
-                    node: event.node_id.clone(),
-                    at: event.timestamp,
-                })
-            }
-            _ => {}
-        }
-    }
-    walk
-}
-
-impl Walk {
-    /// Closes the link the child's birth opened, or records an already
-    /// closed one for a log that carries a child's close without it.
-    fn close_child(&mut self, payload: &ChildRunFinishedPayload, event: &StoredEvent) {
-        let terminal = Some(payload.terminal_state);
-        match self
-            .children
-            .iter_mut()
-            .find(|link| link.run_id == payload.child_run_id)
-        {
-            Some(link) => link.terminal = terminal,
-            None => self.children.push(ChildLink {
-                run_id: payload.child_run_id.clone(),
-                node: event.node_id.clone(),
-                terminal,
-            }),
-        }
-    }
 }
 
 /// The top-level node ids a run's mode schedules, as

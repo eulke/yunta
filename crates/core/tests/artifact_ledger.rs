@@ -5,11 +5,11 @@
 
 use proptest::prelude::*;
 use yunta_core::events::artifacts::ArtifactLedger;
+use yunta_core::events::ArtifactEvent;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
-    EventPayload, RunPausedPayload, StoredEvent,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload,
+    ArtifactWrittenPayload, EventBody, EventPayload, StoredEvent, SubmissionOutcome,
 };
-use yunta_core::events::{ArtifactEvent, RunEvent};
 use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId, RunId};
 
 fn hash(content: &str) -> ContentHash {
@@ -195,14 +195,22 @@ fn a_kind_and_a_producer_each_select_their_own_refs_in_order() {
 }
 
 #[test]
-fn an_event_about_something_else_leaves_the_fold_unmoved() {
+fn a_submission_leaves_the_fold_unmoved() {
+    // What the run holds is what the engine accepted: a session handing
+    // something over states nothing about that until the acceptance
+    // follows, and an event of another domain cannot reach this fold at
+    // all — the type says so.
     let mut ledger = ArtifactLedger::default();
     ledger.apply(
         None,
         1u64.into(),
-        &EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-            "gate waiting".to_string(),
-        ))),
+        &ArtifactEvent::Submitted(ArtifactSubmittedPayload {
+            name: "plan.md".to_string(),
+            artifact_kind: yunta_core::ArtifactKind::Tasks,
+            outcome: SubmissionOutcome::Accepted {
+                content_hash: yunta_core::sha256_hex(b"plan"),
+            },
+        }),
     );
     assert_eq!(ledger.every().count(), 0);
 }

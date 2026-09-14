@@ -58,8 +58,8 @@ impl FindingLedger {
     pub fn of<'a>(events: impl IntoIterator<Item = &'a StoredEvent>) -> Self {
         let mut ledger = FindingLedger::default();
         for event in events {
-            if let Some(payload) = event.payload() {
-                ledger.apply(event.node_id.as_ref(), payload);
+            if let Some(EventPayload::Findings(e)) = event.payload() {
+                ledger.apply(event.node_id.as_ref(), e);
             }
         }
         ledger
@@ -74,10 +74,10 @@ impl FindingLedger {
     /// meeting one here means the log came from somewhere else, and the
     /// honest reading of it is the state it can account for rather than
     /// a panic.
-    pub fn apply(&mut self, node: Option<&NodeId>, payload: &EventPayload) {
+    pub fn apply(&mut self, node: Option<&NodeId>, event: &FindingEvent) {
         let node = node.cloned();
-        match payload {
-            EventPayload::Findings(FindingEvent::Posted(p)) => {
+        match event {
+            FindingEvent::Posted(p) => {
                 let key = (node, p.finding.id.clone());
                 match self.slots.get(&key) {
                     Some(Slot::Withdrawn { .. }) | Some(Slot::Live(_)) => {}
@@ -87,13 +87,13 @@ impl FindingLedger {
                     }
                 }
             }
-            EventPayload::Findings(FindingEvent::Updated(p)) => {
+            FindingEvent::Updated(p) => {
                 let key = (node, p.finding.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(key, Slot::Live(p.finding.clone()));
                 }
             }
-            EventPayload::Findings(FindingEvent::Withdrawn(p)) => {
+            FindingEvent::Withdrawn(p) => {
                 let key = (node, p.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(
@@ -104,7 +104,10 @@ impl FindingLedger {
                     );
                 }
             }
-            _ => {}
+            // The engine refused an operation: what was wrong with it
+            // is in the event and nowhere else, and nothing a run holds
+            // changed.
+            FindingEvent::Refused(_) => {}
         }
     }
 

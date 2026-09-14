@@ -136,9 +136,9 @@ async fn a_node_that_asks_records_questions_asked_and_no_terminal_event() {
         "the fact names the document it asked from"
     );
     assert!(
-        matches!(state.nodes.get("grill"), Some(NodeState::Waiting { .. })),
+        matches!(state.nodes.state("grill"), Some(NodeState::Waiting { .. })),
         "got {:?}",
-        state.nodes.get("grill")
+        state.nodes.state("grill")
     );
 }
 
@@ -187,9 +187,9 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
 
     let state = derive(&events);
     assert!(
-        matches!(state.nodes.get("grill"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("grill"), Some(NodeState::Failed { .. })),
         "a node that failed is failed, whatever artifacts it holds: got {:?}",
-        state.nodes.get("grill")
+        state.nodes.state("grill")
     );
 }
 
@@ -236,7 +236,7 @@ async fn the_answer_round_finishes_the_node_without_a_second_node_started() {
         "asked, then answered, then finished: {grill:?}"
     );
     assert!(matches!(
-        state.nodes.get("grill"),
+        state.nodes.state("grill"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -379,14 +379,12 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
         + 1;
     let state = derive(&full[..cut]);
     assert!(
-        matches!(state.nodes.get("grill"), Some(NodeState::Running { .. })),
+        matches!(state.nodes.state("grill"), Some(NodeState::Running { .. })),
         "an answered node is running again, owed its terminal: got {:?}",
-        state.nodes.get("grill")
+        state.nodes.state("grill")
     );
     assert!(
-        state
-            .answered_unfinished
-            .contains(&yunta_core::NodeId::from("grill")),
+        state.answered_unfinished(&yunta_core::NodeId::from("grill")),
         "the log says which node owes a terminal for an answer it holds"
     );
 }
@@ -405,8 +403,8 @@ async fn the_finished_node_carries_what_the_asking_session_spent() {
         .run_with_interaction(ASK_THEN_BRIEF, &fixture, &interaction)
         .await;
 
-    let Some(NodeState::Finished { tokens, .. }) = state.nodes.get("grill") else {
-        panic!("got {:?}", state.nodes.get("grill"));
+    let Some(NodeState::Finished { tokens, .. }) = state.nodes.state("grill") else {
+        panic!("got {:?}", state.nodes.state("grill"));
     };
     assert_eq!(
         (tokens.input, tokens.output),
@@ -414,7 +412,7 @@ async fn the_finished_node_carries_what_the_asking_session_spent() {
         "the finished node carries what the session that asked spent"
     );
     assert_eq!(
-        (state.total_tokens.input, state.total_tokens.output),
+        (state.total_tokens().input, state.total_tokens().output),
         (30, 12),
         "counted once"
     );
@@ -448,7 +446,7 @@ sessions:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("grill"),
+        state.nodes.state("grill"),
         Some(NodeState::Finished { .. })
     ));
     let grill = kinds_of(&bench.events(), "grill");
@@ -496,7 +494,7 @@ async fn the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_t
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("brief"),
+        state.nodes.state("brief"),
         Some(NodeState::Finished { .. })
     ));
     let assembled = bench

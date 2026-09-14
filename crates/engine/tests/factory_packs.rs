@@ -217,18 +217,18 @@ sessions:
     for node in ["grill", "plan", "implement", "lint", "tests", "ship", "pr"] {
         assert!(
             matches!(
-                report.state.nodes.get(node),
+                report.state.nodes.state(node),
                 Some(yunta_engine::NodeState::Finished { .. })
             ),
             "node `{node}` did not finish: {:?}",
-            report.state.nodes.get(node)
+            report.state.nodes.state(node)
         );
     }
     // `fix-lint` is only in quick mode's node set as a re-route target —
     // lint passed on the first try, so it must never have run.
     assert!(
-        !report.state.nodes.contains_key("fix-lint"),
+        !report.state.nodes.has_state("fix-lint"),
         "fix-lint ran despite lint passing on the first try: {:?}",
-        report.state.nodes.get("fix-lint")
+        report.state.nodes.state("fix-lint")
     );
 }

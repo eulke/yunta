@@ -84,22 +84,22 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("T002"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T002"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     // Tokens from both executor sessions were attributed to the run.
-    assert_eq!(state.total_tokens.input, 180);
-    assert_eq!(state.total_tokens.output, 30);
+    assert_eq!(state.total_tokens().input, 180);
+    assert_eq!(state.total_tokens().output, 30);
 }
 
 #[tokio::test]
@@ -133,11 +133,11 @@ sessions:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(NodeState::Finished { .. })
     ));
     assert!(matches!(
-        state.nodes.get("fix-lint"),
+        state.nodes.state("fix-lint"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -176,11 +176,11 @@ sessions: []
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(NodeState::Finished { .. })
     ));
     assert_eq!(
-        state.nodes.get("fix-lint"),
+        state.nodes.state("fix-lint"),
         None,
         "fix-lint has no depends_on and lint never failed — it must never have started"
     );
@@ -216,7 +216,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.nodes.get("redo-node"),
+        state.nodes.state("redo-node"),
         None,
         "redo-node has no depends_on and the gate never mapped to it — it must never have started"
     );
@@ -278,7 +278,7 @@ nodes:
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get("build"),
+        state.nodes.state("build"),
         Some(NodeState::Failed { .. })
     ));
 }
@@ -311,7 +311,7 @@ sessions:
     let (terminal, state) = bench.run(workflow, fixture).await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("plan") {
+    match state.nodes.state("plan") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
@@ -589,8 +589,8 @@ sessions:
 
     let (terminal, state) = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(state.findings.len(), 1);
-    assert_eq!(state.findings[0].id, "f1");
+    assert_eq!(state.effective_findings().len(), 1);
+    assert_eq!(state.effective_findings()[0].id, "f1");
 }
 
 #[tokio::test]
@@ -1042,11 +1042,15 @@ nodes:
     assert_eq!(created.inputs["tasks"], frozen_value);
 
     assert_eq!(
-        yunta_engine::derive(&events).tasks,
-        std::collections::HashMap::from([(
-            "greeting".into(),
+        yunta_engine::derive(&events)
+            .tasks
+            .iter()
+            .map(|(id, record)| (id.clone(), record.status))
+            .collect::<Vec<_>>(),
+        vec![(
+            yunta_core::TaskId::from("greeting"),
             yunta_core::events::TaskStatus::Pending
-        )]),
+        )],
         "the tasks of a document the run was given are tasks of the run: no node produces it, \
          so its birth is where they are registered"
     );
@@ -1195,8 +1199,8 @@ sessions:
     let (terminal, state) = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 }
 

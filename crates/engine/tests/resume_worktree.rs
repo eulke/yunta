@@ -182,9 +182,9 @@ async fn a_worktree_carrying_the_runs_own_commits_resumes_without_a_word() {
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
     assert_eq!(resumes(&paused.bench), 1, "the run woke normally");
     assert!(
-        report.state.findings.is_empty(),
+        report.state.effective_findings().is_empty(),
         "a tree that moved forward is the expected case: {:?}",
-        report.state.findings
+        report.state.effective_findings()
     );
 }
 
@@ -207,9 +207,9 @@ async fn a_worktree_edited_by_hand_during_the_pause_resumes_because_the_content_
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
     assert_eq!(resumes(&paused.bench), 1, "the run woke normally");
     assert!(
-        report.state.findings.is_empty(),
+        report.state.effective_findings().is_empty(),
         "an edited tree is not reported as anything: {:?}",
-        report.state.findings
+        report.state.effective_findings()
     );
 }
 

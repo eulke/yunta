@@ -67,7 +67,10 @@ fn print_derived(state: &yunta_engine::RunState) {
         let mut nodes: Vec<_> = state.nodes.iter().collect();
         nodes.sort_by(|a, b| a.0.cmp(b.0));
         for (id, node) in nodes {
-            println!("{INDENT}{id}: {}", NodeDisplay::of(Some(node)).label());
+            println!(
+                "{INDENT}{id}: {}",
+                NodeDisplay::of(node.state.as_ref()).label()
+            );
         }
     }
 
@@ -75,8 +78,8 @@ fn print_derived(state: &yunta_engine::RunState) {
         println!("tasks:");
         let mut tasks: Vec<_> = state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
-        for (id, status) in tasks {
-            println!("{INDENT}{id}: {}", task_status_label(status));
+        for (id, record) in tasks {
+            println!("{INDENT}{id}: {}", task_status_label(record.status));
         }
     }
 
@@ -84,7 +87,8 @@ fn print_derived(state: &yunta_engine::RunState) {
 
     println!(
         "tokens: {} in / {} out",
-        state.total_tokens.input, state.total_tokens.output
+        state.total_tokens().input,
+        state.total_tokens().output
     );
 }
 
@@ -122,8 +126,8 @@ fn print_failures(state: &yunta_engine::RunState) {
     let mut failed: Vec<(&NodeId, &Failure)> = state
         .nodes
         .iter()
-        .filter_map(|(id, node)| match node {
-            NodeState::Failed { failure, .. } => Some((id, failure)),
+        .filter_map(|(id, record)| match &record.state {
+            Some(NodeState::Failed { failure, .. }) => Some((id, failure)),
             _ => None,
         })
         .filter(|(_, failure)| match failure {
@@ -351,19 +355,19 @@ pub(crate) fn status_json(
         nodes: state
             .nodes
             .iter()
-            .map(|(id, node)| (id.to_string(), NodeDisplay::of(Some(node)).label()))
+            .map(|(id, node)| (id.to_string(), NodeDisplay::of(node.state.as_ref()).label()))
             .collect(),
         tasks: state
             .tasks
             .iter()
-            .map(|(id, status)| (id.to_string(), task_status_label(status)))
+            .map(|(id, record)| (id.to_string(), task_status_label(record.status)))
             .collect(),
         diagnostics: node_diagnostics(events),
         decision: parked_decision(run_id, manifest, events, &frame.phase),
         waiting_on: WaitingOnJson::of(&frame.phase),
         tokens: TokensJson {
-            input: state.total_tokens.input,
-            output: state.total_tokens.output,
+            input: state.total_tokens().input,
+            output: state.total_tokens().output,
         },
     }
 }
@@ -432,7 +436,7 @@ fn node_diagnostics(
 
 /// The event schema's snake_case task-status names — user output never
 /// leaks Rust identifiers.
-pub(crate) fn task_status_label(status: &TaskStatus) -> &'static str {
+pub(crate) fn task_status_label(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Pending => "pending",
         TaskStatus::Ready => "ready",

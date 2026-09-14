@@ -270,7 +270,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -405,9 +405,9 @@ sessions:
     // the parent's derived total (what `limits.max_tokens_per_run`
     // compares against) includes it exactly once. The node's own close
     // deliberately carries none — it would double-count.
-    assert_eq!(state.total_tokens.input, 100);
-    assert_eq!(state.total_tokens.output, 20);
-    match state.nodes.get("feat") {
+    assert_eq!(state.total_tokens().input, 100);
+    assert_eq!(state.total_tokens().output, 20);
+    match state.nodes.state("feat") {
         Some(NodeState::Finished { tokens, .. }) => {
             assert_eq!(
                 tokens.input, 0,
@@ -499,7 +499,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
     assert_eq!(bench.children_created(&run_id).len(), 1);
@@ -673,9 +673,9 @@ sessions:
         "ship",
     ] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     // One child per `kind: workflow` node, each with an id of its own.
@@ -776,7 +776,7 @@ nodes:
         )
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("feat") {
+    match state.nodes.state("feat") {
         Some(NodeState::Failed { failure, .. }) => {
             let outcome = failure.to_string();
             assert!(
@@ -853,7 +853,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -962,7 +962,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("cons"),
+        state.nodes.state("cons"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -1071,7 +1071,7 @@ nodes:
         )
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("cons") {
+    match state.nodes.state("cons") {
         Some(NodeState::Failed { failure, .. }) => {
             // A source the run does not hold is a declared artifact that
             // did not close, so it reaches every surface as one entry
@@ -1150,7 +1150,7 @@ sessions:
     // clean finish is the proof the mount fed the context.
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("cons"),
+        state.nodes.state("cons"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -1273,9 +1273,9 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert!(
-        matches!(state.nodes.get("feat"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("feat"), Some(NodeState::Finished { .. })),
         "a node whose declared artifact its child produced finishes: {:?}",
-        state.nodes.get("feat")
+        state.nodes.state("feat")
     );
 
     let child_id = bench
@@ -1356,7 +1356,7 @@ nodes:
         .find(|(node, _)| node == "feat")
         .map(|(_, id)| id)
         .expect("the child is linked on the parent's log");
-    match state.nodes.get("feat") {
+    match state.nodes.state("feat") {
         Some(NodeState::Failed { failure, .. }) => {
             // The child run holding none of what this node declares is
             // exactly one declared artifact that did not close: the
@@ -1442,7 +1442,7 @@ sessions:
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -1599,7 +1599,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("do"),
+        state.nodes.state("do"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -1616,8 +1616,8 @@ nodes:
     );
     let child_state = yunta_engine::derive(&bench.storage.events_for_run(&child).unwrap());
     assert_eq!(
-        child_state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        child_state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 }
 
@@ -1675,8 +1675,8 @@ nodes:
         "a done whose commit the parent's tree does not have follows no registration"
     );
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Pending),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Pending),
         "the parent holds the task open: the work is in a tree it never took"
     );
 }
@@ -1725,8 +1725,8 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done),
         "what the child finished in this very tree is finished here"
     );
     assert_eq!(
@@ -1816,8 +1816,8 @@ nodes:
     );
     let state = yunta_engine::derive(&bench.storage.events_for_run(&sibling).unwrap());
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Pending),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Pending),
         "the sibling has the task to do, not behind it"
     );
 }

@@ -217,7 +217,7 @@ fn is_ident(b: u8) -> bool {
 /// Blanks string/char literals and comments in `line` (replacing them with
 /// spaces) so only structural braces survive; returns the blanked line and
 /// whether a block comment is still open at its end.
-fn strip_noise(line: &str, mut in_block: bool) -> (String, bool) {
+pub fn strip_noise(line: &str, mut in_block: bool) -> (String, bool) {
     let mut out = String::with_capacity(line.len());
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;

@@ -2,7 +2,9 @@
 //! and a capability the adapter did not have.
 
 pub mod kinds;
+pub mod ledger;
 pub mod payloads;
 
 pub use kinds::SessionEvent;
+pub use ledger::*;
 pub use payloads::*;

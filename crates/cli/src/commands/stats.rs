@@ -299,7 +299,7 @@ fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs
         .max()
         .unwrap_or(0);
     for node in &stats.nodes {
-        let display = NodeDisplay::of(state.nodes.get(&node.node_id));
+        let display = NodeDisplay::of(state.nodes.state(&node.node_id));
         println!("{}", node_line(node, max_tokens, &display, glyphs));
     }
 }

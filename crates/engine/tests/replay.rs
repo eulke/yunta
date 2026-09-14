@@ -59,13 +59,13 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
     let state = derive(&events);
     assert_eq!(state.broken, None);
     assert_eq!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(&NodeState::Finished {
             outcome: "criteria green".to_string(),
             tokens: tokens(10, 5),
         })
     );
-    assert_eq!(state.total_tokens, tokens(10, 5));
+    assert_eq!(state.total_tokens(), tokens(10, 5));
 }
 
 #[test]
@@ -103,14 +103,14 @@ fn a_retryable_failure_can_restart_and_then_finish() {
     let state = derive(&events);
     assert_eq!(state.broken, None);
     assert_eq!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(&NodeState::Finished {
             outcome: "criteria green".to_string(),
             tokens: tokens(3, 1),
         })
     );
     // Both the failed attempt and the finishing one count toward the total.
-    assert_eq!(state.total_tokens, tokens(8, 3));
+    assert_eq!(state.total_tokens(), tokens(8, 3));
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
     let state = derive(&events);
     assert!(state.broken.is_none());
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(yunta_engine::NodeState::Running { attempt: 2 })
     ));
 }
@@ -209,7 +209,7 @@ fn task_lifecycle_derives_its_latest_status() {
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
-    assert_eq!(state.tasks.get("graph-cmd"), Some(&TaskStatus::Done));
+    assert_eq!(state.tasks.status("graph-cmd"), Some(TaskStatus::Done));
 }
 
 #[test]
@@ -238,9 +238,9 @@ fn finding_posted_events_accumulate_in_run_state() {
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
-    assert_eq!(state.findings.len(), 2);
-    assert_eq!(state.findings[0].id, "f1");
-    assert_eq!(state.findings[1].id, "f2");
+    assert_eq!(state.effective_findings().len(), 2);
+    assert_eq!(state.effective_findings()[0].id, "f1");
+    assert_eq!(state.effective_findings()[1].id, "f2");
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn an_unknown_kind_is_counted_and_never_breaks_replay() {
     let state = derive(&events);
     assert_eq!(state.broken, None);
     assert!(matches!(
-        state.nodes.get("lint"),
+        state.nodes.state("lint"),
         Some(NodeState::Finished { .. })
     ));
     assert_eq!(
@@ -455,11 +455,20 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
 
     let (old, new) = (derive(&old), derive(&new));
     assert!(
-        matches!(old.nodes.get("ask"), Some(NodeState::Failed { .. })),
+        matches!(old.nodes.state("ask"), Some(NodeState::Failed { .. })),
         "a node that failed is failed, whatever documents the run holds for it: {:?}",
-        old.nodes.get("ask")
+        old.nodes.state("ask")
     );
-    assert_eq!(old.nodes, new.nodes);
+    // The states they derive, not the instants their events carry: the
+    // two logs are written moments apart, and what this is about is the
+    // artifacts each one implies.
+    let states = |ledger: &yunta_core::events::NodeLedger| {
+        ledger
+            .iter()
+            .map(|(id, record)| (id.clone(), record.state.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(states(&old.nodes), states(&new.nodes));
 
     let identities = |state: &yunta_engine::RunState| {
         state
@@ -480,4 +489,72 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
         ArtifactOrigin::Legacy,
         "the one thing an old log cannot state is how the run came by it"
     );
+}
+
+/// Every kind either moves state or says it does not. The pair is what
+/// makes a silent no-op impossible: a kind nothing reads would sit in
+/// the log deriving nothing, with no diagnostic anywhere — the exact
+/// failure the wildcard used to allow.
+#[test]
+fn a_kind_that_moves_no_state_says_so_by_name() {
+    let mut mismatched: Vec<String> = Vec::new();
+    for payload in yunta_testkit_core::all_kinds() {
+        let kind = payload.kind_name();
+        let event = StoredEvent {
+            run_id: yunta_core::RunId::from("run-audit"),
+            seq: 1.into(),
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            node_id: Some("only".into()),
+            body: yunta_core::events::EventBody::Known(payload.clone()),
+        };
+        // Each kind meets the log that makes it legal: a terminal needs
+        // its start, a status its registration, an update the posting it
+        // updates. Without one the derivation refuses the event, which
+        // is a broken log rather than a no-op, and counts as moving.
+        let mut state = yunta_engine::RunState::default();
+        let before = {
+            for setup in establishing() {
+                // Never the kind under test: a log that already carries
+                // it would make every repeat of it look like a no-op.
+                if setup.kind_name() == kind {
+                    continue;
+                }
+                let mut event = event.clone();
+                event.body = yunta_core::events::EventBody::Known(setup);
+                let _ = state.apply(&event);
+            }
+            state.clone()
+        };
+        let moved = match state.apply(&event) {
+            // What a kind derives, not that its node was heard from:
+            // every event of a node updates when it last said anything,
+            // which is the envelope's doing and not the kind's.
+            Ok(()) => state != before,
+            Err(_) => true,
+        };
+        if !moved != payload.is_audit() {
+            mismatched.push(format!(
+                "{kind}: moves={moved} is_audit={}",
+                payload.is_audit()
+            ));
+        }
+    }
+    assert!(
+        mismatched.is_empty(),
+        "every kind either moves a ledger or declares itself audit: {mismatched:#?}"
+    );
+}
+
+/// The log every other kind needs behind it: a node that started, a task
+/// that was registered, and a finding that was posted.
+fn establishing() -> Vec<yunta_core::events::EventPayload> {
+    yunta_testkit_core::all_kinds()
+        .into_iter()
+        .filter(|payload| {
+            matches!(
+                payload.kind_name(),
+                "node_started" | "task_registered" | "finding_posted"
+            )
+        })
+        .collect()
 }

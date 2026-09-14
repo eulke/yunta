@@ -15,7 +15,9 @@ pub mod adapter;
 mod capture;
 mod clock;
 mod ids;
+mod kinds;
 
 pub use capture::Captured;
 pub use clock::{AtClock, FixedClock, FIXED_NOW};
 pub use ids::SeqIdSource;
+pub use kinds::all_kinds;

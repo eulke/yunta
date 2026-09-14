@@ -390,8 +390,8 @@ nodes:
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Blocked)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Blocked)
     );
 }
 
@@ -418,9 +418,9 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["pre-launch", "write-docs", "load-test"] {
         assert!(
-            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
             "expected `{id}` finished, got {:?}",
-            state.nodes.get(id)
+            state.nodes.state(id)
         );
     }
     assert!(bench.worktree.join("docs.txt").exists());
@@ -455,7 +455,7 @@ nodes:
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get("load-test"),
+        state.nodes.state("load-test"),
         Some(NodeState::Failed { .. })
     ));
 }
@@ -483,7 +483,7 @@ nodes:
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("fast"),
+        state.nodes.state("fast"),
         Some(NodeState::Finished { .. })
     ));
     // The slow sibling blocks forever and is interrupted the moment `fast`
@@ -640,12 +640,12 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     for n in 1..=8 {
         let id: yunta_core::TaskId = format!("task-{n}").parse().unwrap();
         assert_eq!(
-            state_seq.tasks.get(&id),
-            Some(&yunta_core::events::TaskStatus::Done)
+            state_seq.tasks.status(&id),
+            Some(yunta_core::events::TaskStatus::Done)
         );
         assert_eq!(
-            state_par.tasks.get(&id),
-            state_seq.tasks.get(&id),
+            state_par.tasks.status(&id),
+            state_seq.tasks.status(&id),
             "task-{n} status must match between concurrency levels"
         );
     }
@@ -727,8 +727,8 @@ nodes:
     // task-a must have succeeded and stayed succeeded, unaffected by
     // task-b's fate.
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done),
         "task-a stays Done regardless of task-b's fate"
     );
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -790,8 +790,8 @@ nodes:
         other => panic!("expected the run to eventually pause on task-b, got {other:?}"),
     }
     assert_eq!(
-        state.tasks.get("task-b"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
+        state.tasks.status("task-b"),
+        Some(yunta_core::events::TaskStatus::Blocked),
         "the run pauses because task-b exhausted its retries into Blocked"
     );
 }
@@ -820,12 +820,12 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-x"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-x"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-y"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-y"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -1048,8 +1048,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         "an already-Done task must never be re-dispatched on resume"
     );
     assert_eq!(
-        report.state.tasks.get("task-q"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        report.state.tasks.status("task-q"),
+        Some(yunta_core::events::TaskStatus::Done),
         "the orphaned task must be re-run to completion"
     );
 }
@@ -1098,10 +1098,10 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert!(matches!(
-        state.nodes.get("race"),
+        state.nodes.state("race"),
         Some(NodeState::Finished { .. })
     ));
-    match state.nodes.get("slow-loop") {
+    match state.nodes.state("slow-loop") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
@@ -1144,7 +1144,7 @@ nodes:
         .run_with_config(workflow, "sessions: []\n", config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("slow-check") {
+    match state.nodes.state("slow-check") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
                 failure.to_string(),
@@ -1242,7 +1242,7 @@ nodes:
         .await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("implement") {
+    match state.nodes.state("implement") {
         Some(NodeState::Failed { failure, .. }) => {
             let said = failure.to_string();
             assert!(
@@ -1345,7 +1345,7 @@ nodes:
         !bench.worktree.join("audit-ran-again.txt").exists(),
         "a child that refuses to guess whether it finished never runs a second time",
     );
-    match report.state.nodes.get("audit") {
+    match report.state.nodes.state("audit") {
         Some(NodeState::Failed { failure, .. }) => {
             assert!(
                 failure.to_string().contains("fail_if_uncertain"),

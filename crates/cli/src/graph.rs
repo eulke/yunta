@@ -85,7 +85,7 @@ fn derive_labels(
         .map(|node| {
             let display = match &included {
                 Some(included) if !included.contains(&node.id) => NodeDisplay::skipped(),
-                _ => NodeDisplay::of(state.nodes.get(&node.id)),
+                _ => NodeDisplay::of(state.nodes.state(&node.id)),
             };
             (node.id.clone(), display.label())
         })

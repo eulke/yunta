@@ -171,7 +171,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("ask"),
+        state.nodes.state("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
 
@@ -321,11 +321,11 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     // The paused node derives `waiting`, never "absent" or failed.
     assert!(
         matches!(
-            first.state.nodes.get("ask"),
+            first.state.nodes.state("ask"),
             Some(yunta_engine::NodeState::Waiting { .. })
         ),
         "got {:?}",
-        first.state.nodes.get("ask")
+        first.state.nodes.state("ask")
     );
 
     // Second invocation: a live surface, an empty fixture — answering
@@ -358,7 +358,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
 
     assert_eq!(resumed.terminal, RunTerminal::Finished);
     assert!(matches!(
-        resumed.state.nodes.get("ask"),
+        resumed.state.nodes.state("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     let raw = String::from_utf8(

@@ -649,12 +649,12 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
 
     let state = yunta_engine::derive(&events);
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("T002"),
-        Some(&yunta_core::events::TaskStatus::Pending)
+        state.tasks.status("T002"),
+        Some(yunta_core::events::TaskStatus::Pending)
     );
 }
 
@@ -743,12 +743,12 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
 
     let state = yunta_engine::derive(&closed.storage.events_for_run(&second.run_id).unwrap());
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("T002"),
-        Some(&yunta_core::events::TaskStatus::Pending)
+        state.tasks.status("T002"),
+        Some(yunta_core::events::TaskStatus::Pending)
     );
 }
 

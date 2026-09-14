@@ -44,8 +44,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{
-    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, TaskStatus, TerminalState,
-    TokenUsage,
+    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, TerminalState, TokenUsage,
 };
 use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
@@ -199,7 +198,7 @@ impl RunStats {
 /// `RunFinished.metrics` and `RunStats` alike report, computed once here
 /// so the two call sites can never disagree.
 pub fn cptv(state: &RunState) -> Option<f64> {
-    RunFinishedPayload::closed(TerminalState::Done, state.total_tokens, tasks_done(state))
+    RunFinishedPayload::closed(TerminalState::Done, state.total_tokens(), tasks_done(state))
         .metrics
         .cptv
 }
@@ -208,11 +207,7 @@ pub fn cptv(state: &RunState) -> Option<f64> {
 /// per verified task, and the only thing a close needs to know about
 /// the tasks document.
 pub fn tasks_done(state: &RunState) -> usize {
-    state
-        .tasks
-        .values()
-        .filter(|status| matches!(status, TaskStatus::Done))
-        .count()
+    state.tasks.done()
 }
 
 /// Derives one run's stats from its workflow and event log alone,
@@ -260,7 +255,7 @@ pub(crate) fn stats_observed_at(
     let run_start = events.first().map(|e| e.timestamp);
     let walk = walk_attempts(events);
 
-    let total = state.total_tokens.total();
+    let total = state.total_tokens().total();
     let rework_total = walk.rework_tokens.total();
     let rework_rate = if total == 0 {
         None
@@ -270,9 +265,9 @@ pub(crate) fn stats_observed_at(
     // A rate needs input tokens to divide by; without them the answer is
     // undefined, distinct from `Some(0.0)` (an adapter reported and cached
     // nothing) — never a denominator invented with `.max(1)`.
-    let cache_rate = match state.total_tokens.cached {
-        Some(cached) if state.total_tokens.input > 0 => {
-            Some(cached as f64 / state.total_tokens.input as f64)
+    let cache_rate = match state.total_tokens().cached {
+        Some(cached) if state.total_tokens().input > 0 => {
+            Some(cached as f64 / state.total_tokens().input as f64)
         }
         _ => None,
     };
@@ -289,13 +284,9 @@ pub(crate) fn stats_observed_at(
         cptv: cptv(state),
         rework_rate,
         cache_rate,
-        total_tokens: state.total_tokens,
+        total_tokens: state.total_tokens(),
         tasks_total: state.tasks.len(),
-        tasks_done: state
-            .tasks
-            .values()
-            .filter(|s| matches!(s, TaskStatus::Done))
-            .count(),
+        tasks_done: state.tasks.done(),
         wall_clock: run_start
             .zip(measured_until(events, observed_at))
             .map(|(start, until)| interval(start, until)),

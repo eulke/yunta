@@ -691,7 +691,7 @@ nodes:
     let (terminal, state) = bench.run(workflow, "sessions: []\n").await;
 
     assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
-    match state.nodes.get("write") {
+    match state.nodes.state("write") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             let said = failure.to_string();
             assert!(

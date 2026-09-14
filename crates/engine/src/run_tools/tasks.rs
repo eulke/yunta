@@ -18,7 +18,8 @@ impl SessionTools {
         let mut tasks: Vec<(String, String)> = state
             .tasks
             .iter()
-            .map(|(id, status)| {
+            .map(|(id, record)| {
+                let status = record.status;
                 (
                     id.to_string(),
                     serde_json::to_value(status)

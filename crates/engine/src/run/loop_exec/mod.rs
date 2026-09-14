@@ -56,7 +56,7 @@ pub(super) async fn execute_loop(
                 .tasks
                 .tasks
                 .iter()
-                .all(|task| view.state.tasks.get(&task.id) == Some(&TaskStatus::Done));
+                .all(|task| view.state.tasks.status(&task.id) == Some(TaskStatus::Done));
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
@@ -382,11 +382,11 @@ fn select_batch<'a>(tasks: &'a TasksFile, state: &RunState, concurrency: u32) ->
     tasks
         .tasks
         .iter()
-        .filter(|task| match state.tasks.get(&task.id) {
+        .filter(|task| match state.tasks.status(&task.id) {
             Some(TaskStatus::Pending) => task
                 .depends_on
                 .iter()
-                .all(|dep| state.tasks.get(dep) == Some(&TaskStatus::Done)),
+                .all(|dep| state.tasks.status(dep) == Some(TaskStatus::Done)),
             Some(TaskStatus::Running) => true,
             _ => false,
         })
@@ -465,7 +465,7 @@ fn registered_here(held: &HeldTasks, state: &RunState) -> Result<(), RunError> {
         .document
         .tasks
         .iter()
-        .filter(|task| !state.tasks.contains_key(&task.id))
+        .filter(|task| !state.tasks.contains(&task.id))
         .map(|task| task.id.to_string())
         .collect();
     if missing.is_empty() {

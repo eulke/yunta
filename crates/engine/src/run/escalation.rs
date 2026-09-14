@@ -11,11 +11,12 @@ use yunta_core::events::{
     Escalation, EscalationError, EventDraft, EventPayload, Fact, GateOption, GateResolvedPayload,
     GateWaitingPayload, HumanChoice, StoredEvent,
 };
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Seq, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Workflow};
 
 use super::schedule::{self, ScheduleStep};
+use crate::replay::RunState;
 use crate::reserved::{offers, ReservedOption};
-use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::events::{GateEvent, RunEvent};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
 /// the resolve-gate path reads a parked run's log by.
@@ -265,40 +266,26 @@ pub async fn resolve_gate(
 /// failure. The decision also has to be a human's choice of an option
 /// `escalation`'s re-derived menu still offers; anything else (an
 /// option the menu dropped, a shape no surface produces) means ask
-/// normally, never guess.
+/// The decision a `resolve_gate` call seeded onto this node's log while
+/// the run was parked, when the escalation it answers still offers it.
+///
+/// The window is [`RunState::pre_seeded`]'s to decide — it reads the
+/// three ledgers that say whether anything consumed the decision — and
+/// this adds the one thing that is not a fact of the log: whether the
+/// menu the run would ask with now still has that option on it. A
+/// mismatch means the escalation changed under the answer, and the run
+/// asks again.
 pub(crate) fn pre_seeded_resolution(
-    events: &[StoredEvent],
+    state: &RunState,
     node: &NodeId,
     escalation: &GateWaitingPayload,
 ) -> Option<HumanChoice> {
-    let mut latest: Option<(Seq, GateResolvedPayload)> = None;
-    let mut blocker: Option<Seq> = None;
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::Gates(GateEvent::Resolved(p)))
-                if event.node_id.as_ref() == Some(node) =>
-            {
-                latest = Some((event.seq, p.clone()));
-            }
-            Some(
-                EventPayload::Node(NodeEvent::Failed(_))
-                | EventPayload::Node(NodeEvent::Rerouted(_))
-                | EventPayload::Node(NodeEvent::Finished(_)),
-            ) if event.node_id.as_ref() == Some(node) => {
-                blocker = blocker.max(Some(event.seq));
-            }
-            _ if is_run_paused(event) => blocker = blocker.max(Some(event.seq)),
-            _ => {}
+    match state.pre_seeded(node)? {
+        GateResolvedPayload::Chosen(choice) if escalation.offers(&choice.option) => {
+            Some(choice.clone())
         }
+        _ => None,
     }
-    latest
-        .filter(|(seq, _)| Some(*seq) > blocker)
-        .and_then(|(_, resolution)| match resolution {
-            GateResolvedPayload::Chosen(choice) if escalation.offers(&choice.option) => {
-                Some(choice)
-            }
-            _ => None,
-        })
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -315,7 +315,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         ));
     }
     for (node_id, expected) in &case.expect.nodes {
-        let got = StateWord::of(report.state.nodes.get(node_id.as_str())).word();
+        let got = StateWord::of(report.state.nodes.state(node_id.as_str())).word();
         if got != expected {
             problems.push(format!("node {node_id}: expected {expected}, got {got}"));
         }
@@ -324,7 +324,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         let got = report
             .state
             .tasks
-            .get(task_id.as_str())
+            .status(task_id.as_str())
             .map(task_status_label)
             .unwrap_or("never registered");
         if got != expected {

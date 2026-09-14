@@ -148,7 +148,7 @@ sessions:
         other => panic!("a missing skill must fail the node, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get("work"),
+        state.nodes.state("work"),
         Some(NodeState::Failed { .. })
     ));
     assert!(adapter.skills_seen().is_empty(), "no session was spawned");
@@ -517,9 +517,9 @@ sessions:
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["review@reviewer", "review@reviewer-alt"] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     // The templated artifact names rendered per expanded node, each

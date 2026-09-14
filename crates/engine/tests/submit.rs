@@ -374,7 +374,7 @@ sessions:
     let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
-    match state.nodes.get("plan") {
+    match state.nodes.state("plan") {
         Some(NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
             assert!(
@@ -811,7 +811,7 @@ sessions:
     let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
     assert!(
-        matches!(state.nodes.get("plan"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("plan"), Some(NodeState::Failed { .. })),
         "the node owes the document it declares: {state:?}"
     );
 

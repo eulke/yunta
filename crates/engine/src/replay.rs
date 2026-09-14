@@ -25,81 +25,300 @@
 use std::collections::HashMap;
 
 use yunta_core::events::artifacts::ArtifactLedger;
-use yunta_core::events::{ChildEvent, FindingEvent, GateEvent, NodeEvent, TaskEvent};
-use yunta_core::events::{EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::findings::FindingLedger;
+use yunta_core::events::tasks::ledger::UnknownTask;
+use yunta_core::events::{
+    ChildLedger, DegradationLedger, EventMeta, EventPayload, Finding, GateEvent, GateLedger,
+    GateResolvedPayload, GrantLedger, NodeEvent, NodeLedger, RunLedger, StoredEvent, TaskLedger,
+    TokenUsage,
+};
 use yunta_core::{NodeId, Seq, TaskId};
 
-/// One node's derived lifecycle state. An enum, not booleans:
-/// there is no combination of flags to get wrong.
-#[derive(Debug, Clone, PartialEq)]
-pub enum NodeState {
-    Running {
-        attempt: u32,
-    },
-    Finished {
-        outcome: String,
-        tokens: TokenUsage,
-    },
-    Failed {
-        /// Why the node failed, as the log recorded it. The prose a
-        /// reader sees is produced from this (it is `Display`), so no
-        /// surface can disagree with the facts behind it.
-        failure: Failure,
-        tokens: TokenUsage,
-        /// Whether the caller that owned the budget expected another
-        /// attempt at this node.
-        retryable: bool,
-    },
-    /// Waiting on a human — a published, unresolved gate
-    /// (`gate_waiting` with no `gate_resolved` after it), or a node that
-    /// asked (`questions_asked` with no `questions_answered` after it).
-    /// `external_ref` is the forge's handle (a PR URL) for external
-    /// gates, `None` for everything else.
-    Waiting {
-        external_ref: Option<String>,
-    },
-}
+/// Re-exported where it has always been read from: the node states this
+/// module derives are `yunta_core::events`' to define now, and every
+/// caller keeps naming them here.
+pub use yunta_core::events::NodeState;
 
+/// Every fold of a run's log, in one value.
+///
+/// One ledger per domain, each the single answer to what its own kinds
+/// mean. A surface that counts attempts, lists findings, asks what a
+/// task is doing or where a gate stands reads the ledger rather than
+/// walking the log with a rule of its own.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RunState {
-    pub nodes: HashMap<NodeId, NodeState>,
-    pub tasks: HashMap<TaskId, TaskStatus>,
-    /// The node each task belongs to: the one whose events registered it
-    /// or moved its status. Two `loop` nodes running at once each
-    /// register their own tasks, and this is what tells the two sets
-    /// apart — without it a task is a bare id with no node to show it
-    /// under. A task no event attributes to a node has no entry here at
-    /// all.
-    pub task_nodes: HashMap<TaskId, NodeId>,
-    pub total_tokens: TokenUsage,
-    /// Every finding that stands: the last state of each id nobody
-    /// withdrew, in the order each was first posted. Never deduplicated
-    /// here — two nodes that find the same thing each keep their own
-    /// posting ("without losing authorship"); [`dedup_findings`] is the
-    /// query-side view for counting and display.
-    pub findings: Vec<Finding>,
-    /// Every artifact the run holds, folded from its acceptances: what
-    /// each one is, the hash of its bytes and how the run came by it.
-    /// The one fold — a surface that lists, resolves or counts artifacts
-    /// reads it here rather than walking the log again.
+    pub run: RunLedger,
+    pub nodes: NodeLedger,
+    pub degradations: DegradationLedger,
+    pub tasks: TaskLedger,
+    pub grants: GrantLedger,
+    pub findings: FindingLedger,
     pub artifacts: ArtifactLedger,
-    /// Every node whose questions were answered and whose close still
-    /// owes it a terminal: `questions_answered` with no `node_started`,
-    /// `node_finished` or `node_failed` after it.
-    ///
-    /// The node is `Running` again — its close already ran, when it
-    /// asked — so nothing tells it apart from a node a crash orphaned
-    /// except this. The scheduler pays the terminal from the log rather
-    /// than restarting a session that already did its work.
-    pub answered_unfinished: std::collections::BTreeSet<NodeId>,
-    /// `Some(diagnostic)` once the log has proven insufficient to derive
-    /// further state — the point where a `yunta resume`/`status` would
-    /// report the run as `broken`.
-    pub broken: Option<String>,
+    pub gates: GateLedger,
+    pub children: ChildLedger,
     /// Every event under a `kind` this binary does not know, by position
     /// and kind name, in log order: the run is interpreted up to what
     /// this binary understands, and what it skipped is named.
     pub unknown_kinds: Vec<(Seq, String)>,
+    /// `Some(diagnostic)` once the log has proven insufficient to derive
+    /// further state — the point where a `yunta resume`/`status` would
+    /// report the run as `broken`.
+    pub broken: Option<String>,
+    /// What a node was before the fact that opened its wait, so the fact
+    /// that closes it restores exactly that: the internal gate pair
+    /// leaves a `Failed` node `Failed`, and a node that asked comes back
+    /// `Running`.
+    pre_gate: HashMap<NodeId, Option<NodeState>>,
+}
+
+impl RunState {
+    /// What the whole run has spent: every node's closed attempts, what
+    /// is in flight, and every child run's own total.
+    pub fn total_tokens(&self) -> TokenUsage {
+        self.nodes
+            .iter()
+            .map(|(_, record)| record.tokens_closed)
+            .sum::<TokenUsage>()
+            + self.children.tokens()
+    }
+
+    /// Every finding that stands, in the order each was first posted.
+    /// Never deduplicated here — two nodes that find the same thing each
+    /// keep their own posting; [`dedup_findings`] is the query-side view
+    /// for counting and display.
+    pub fn effective_findings(&self) -> Vec<Finding> {
+        self.findings
+            .effective()
+            .into_iter()
+            .map(|posted| posted.finding)
+            .collect()
+    }
+
+    /// Whether `node`'s questions were answered and its close still owes
+    /// it a terminal.
+    ///
+    /// The node is `Running` again — its close already ran, when it
+    /// asked — so nothing tells it apart from a node a crash orphaned
+    /// except this.
+    pub fn answered_unfinished(&self, node: &NodeId) -> bool {
+        let answered = self.gates.answered(node);
+        let owed = self.nodes.get(node).is_some_and(|record| {
+            let answered_at = self
+                .gates
+                .get(node)
+                .and_then(|gate| gate.rounds.last())
+                .and_then(|round| round.answered_at);
+            match (answered_at, record.last_terminal) {
+                (Some(answered), Some(terminal)) => terminal < answered,
+                (Some(_), None) => true,
+                _ => false,
+            }
+        });
+        answered && owed
+    }
+
+    /// Whether nothing has been derived from this state's log beyond
+    /// the fact that a node was heard from — a node record carrying a
+    /// timestamp and no derivation behind it.
+    ///
+    /// What a kind of event states about the run, told apart from the
+    /// envelope every event carries: `a_kind_that_moves_no_state_says_so_by_name`
+    /// pairs this with each kind's own `is_audit`.
+    pub fn derives_nothing(&self) -> bool {
+        let heard_from_only = self.nodes.iter().all(|(_, record)| {
+            *record
+                == yunta_core::events::NodeRecord {
+                    last_event_at: record.last_event_at,
+                    ..Default::default()
+                }
+        });
+        let rest = RunState {
+            nodes: NodeLedger::default(),
+            ..self.clone()
+        };
+        heard_from_only && rest == RunState::default()
+    }
+
+    /// A resolution recorded while the run was parked and nothing has
+    /// consumed: what a `resolve_gate` call seeded onto the log for this
+    /// wake to act on.
+    ///
+    /// Three ledgers answer this together, which is why it lives here.
+    /// The gate ledger holds the resolution and whether an escalation
+    /// stands after it; the node ledger holds the terminals and
+    /// re-routes that mean the run already acted on it; the run ledger
+    /// holds the pause that ends the window it was seeded into. A
+    /// decision is pre-seeded only while none of those came after it.
+    pub fn pre_seeded(&self, node: &NodeId) -> Option<&GateResolvedPayload> {
+        let record = self.gates.get(node)?;
+        let (resolution, at) = record.resolved.last()?;
+        let consumed = self.nodes.get(node).into_iter().flat_map(|node| {
+            [
+                node.last_terminal,
+                node.last_reroute.as_ref().map(|r| r.seq),
+            ]
+        });
+        let blocker = consumed.flatten().chain(self.run.last_paused_at()).max();
+        let standing = record.waiting.as_ref().map(|(_, seq)| *seq);
+        (Some(*at) > blocker && Some(*at) > standing).then_some(resolution)
+    }
+
+    /// Folds one event into every ledger its domain reaches.
+    ///
+    /// The dispatch names every domain: a kind this binary knows and no
+    /// ledger reads would be a kind that silently derives nothing, which
+    /// is the failure this shape exists to make impossible.
+    pub fn apply(&mut self, event: &StoredEvent) -> Result<(), ReplayError> {
+        let Some(payload) = event.payload() else {
+            // A kind this binary does not know: counted, named, never a
+            // reason to stop deriving what it does know.
+            self.unknown_kinds
+                .push((event.seq, event.body.kind_name().to_string()));
+            return Ok(());
+        };
+        let meta = EventMeta::of(event);
+        match payload {
+            EventPayload::Run(e) => self.run.apply(e, &meta),
+            EventPayload::Node(e) => {
+                self.node_lifecycle(e, event)?;
+                self.nodes.apply(e, &meta);
+            }
+            EventPayload::Session(e) => {
+                self.nodes.apply_session(e, &meta);
+                self.degradations.apply(e, &meta);
+            }
+            EventPayload::Tasks(e) => {
+                self.tasks.apply(e, &meta).map_err(|UnknownTask(task)| {
+                    ReplayError::StatusWithoutTask {
+                        seq: event.seq,
+                        task,
+                    }
+                })?;
+            }
+            EventPayload::Scope(e) => self.grants.apply(e, &meta),
+            EventPayload::Findings(e) => self.findings.apply(event.node_id.as_ref(), e),
+            EventPayload::Artifacts(e) => {
+                self.artifacts.apply(event.node_id.as_ref(), event.seq, e);
+            }
+            EventPayload::Gates(e) => {
+                self.gate_lifecycle(e, event)?;
+                self.gates.apply(e, &meta);
+            }
+            EventPayload::Children(e) => self.children.apply(e, &meta),
+        }
+        Ok(())
+    }
+
+    /// The part of a node's lifecycle that is a rule about the log
+    /// rather than a fold of it: a terminal with no start behind it is a
+    /// log that stopped making sense.
+    fn node_lifecycle(
+        &mut self,
+        event: &NodeEvent,
+        stored: &StoredEvent,
+    ) -> Result<(), ReplayError> {
+        let running = |state: Option<&NodeState>| matches!(state, Some(NodeState::Running { .. }));
+        match event {
+            NodeEvent::Finished(_) => {
+                let node = require_node_id(stored)?;
+                if !running(self.nodes.state(&node)) {
+                    return Err(ReplayError::FinishedWithoutStart {
+                        seq: stored.seq,
+                        node,
+                    });
+                }
+            }
+            NodeEvent::Failed(_) => {
+                let node = require_node_id(stored)?;
+                if !running(self.nodes.state(&node)) {
+                    return Err(ReplayError::FailedWithoutStart {
+                        seq: stored.seq,
+                        node,
+                    });
+                }
+            }
+            NodeEvent::Started(_) => {
+                require_node_id(stored)?;
+            }
+            // Audit around the node, and the runner it resolved to:
+            // neither is a transition, so neither can be out of order.
+            NodeEvent::Rerouted(_)
+            | NodeEvent::RunnerResolved(_)
+            | NodeEvent::HookExecuted(_)
+            | NodeEvent::ContextAssembled(_)
+            | NodeEvent::CriteriaChecked(_)
+            | NodeEvent::ScopeChecked(_)
+            | NodeEvent::BaselineCaptured(_) => {}
+        }
+        Ok(())
+    }
+
+    /// What a gate does to the node it parks. A gate and a round of
+    /// questions both suspend a node and restore it, and which state it
+    /// comes back to is the node ledger's to hold — so the transition
+    /// lives here, where both ledgers are in reach.
+    fn gate_lifecycle(
+        &mut self,
+        event: &GateEvent,
+        stored: &StoredEvent,
+    ) -> Result<(), ReplayError> {
+        // No node = a run-level escalation (the token budget check): it
+        // gates the whole invocation, not any node's state.
+        let Some(node) = stored.node_id.clone() else {
+            return Ok(());
+        };
+        match event {
+            GateEvent::Waiting(p) => {
+                self.pre_gate
+                    .insert(node.clone(), self.nodes.state(&node).cloned());
+                self.nodes.set_state(
+                    &node,
+                    Some(NodeState::Waiting {
+                        external_ref: p.external_ref().map(str::to_string),
+                    }),
+                );
+            }
+            GateEvent::Resolved(_) => {
+                // Only restores while still `Waiting`: an external
+                // gate's poll resolution emits `node_started` *before*
+                // `gate_resolved`, so by then the node is already
+                // `Running` and the outcome events own its state.
+                if matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
+                    let prior = self.pre_gate.remove(&node).flatten();
+                    self.nodes.set_state(&node, prior);
+                }
+            }
+            GateEvent::QuestionsAsked(p) => {
+                if !matches!(self.nodes.state(&node), Some(NodeState::Running { .. })) {
+                    return Err(ReplayError::AskedWithoutStart {
+                        seq: stored.seq,
+                        node,
+                    });
+                }
+                // The attempt's accounting closes here: the session that
+                // asked is done, and no reader counts it again while the
+                // node waits.
+                self.nodes.add_closed_tokens(&node, p.tokens_used);
+                self.pre_gate
+                    .insert(node.clone(), self.nodes.state(&node).cloned());
+                self.nodes
+                    .set_state(&node, Some(NodeState::Waiting { external_ref: None }));
+            }
+            GateEvent::QuestionsAnswered(_) => {
+                if !matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
+                    return Err(ReplayError::AnsweredWithoutAsk {
+                        seq: stored.seq,
+                        node,
+                    });
+                }
+                // The answer reopens the node exactly where asking left
+                // it: `Running`, owed the terminal its close deferred.
+                let prior = self.pre_gate.remove(&node).flatten();
+                self.nodes.set_state(&node, prior);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A run's log read once and its [`RunState`] derived once — the pair
@@ -117,24 +336,6 @@ impl RunView {
         let state = derive(&events);
         Self { events, state }
     }
-}
-
-/// Bookkeeping `derive` needs across events without exposing it on
-/// [`RunState`]: what a `Waiting` node was before the fact that opened
-/// its wait (so the fact that closes it can restore that state — the
-/// internal waiting+resolved pair leaves a `Failed` node `Failed`, and a
-/// node that asked comes back `Running`).
-#[derive(Default)]
-struct Aux {
-    pre_gate: HashMap<NodeId, Option<NodeState>>,
-    /// What the session that asked spent, held from `questions_asked`
-    /// until the terminal that closes the node carries it: the attempt's
-    /// accounting closes when it asks, and the node's total is still the
-    /// whole attempt.
-    asked_tokens: HashMap<NodeId, TokenUsage>,
-    /// Folds the run's finding events, so `RunState.findings` is what
-    /// stands rather than what was ever posted.
-    findings: yunta_core::events::findings::FindingLedger,
 }
 
 /// How many events a log carries under one `kind` this binary does not
@@ -167,256 +368,13 @@ pub fn unknown_kind_counts(state: &RunState) -> Vec<UnknownKindCount> {
 /// this.
 pub fn derive(events: &[StoredEvent]) -> RunState {
     let mut state = RunState::default();
-    let mut aux = Aux::default();
-
     for event in events {
-        if let Err(error) = apply(&mut state, &mut aux, event) {
+        if let Err(error) = state.apply(event) {
             state.broken = Some(error.to_string());
             break;
         }
     }
-
     state
-}
-
-fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(), ReplayError> {
-    let Some(payload) = event.payload() else {
-        // A kind this binary does not know: counted, named, never a
-        // reason to stop deriving what it does know.
-        state
-            .unknown_kinds
-            .push((event.seq, event.body.kind_name().to_string()));
-        return Ok(());
-    };
-    // Which kinds state an artifact is `ArtifactLedger`'s to know, and
-    // its fold is total — so every event goes through it and this
-    // derivation never names an artifact event at all. Whether a node
-    // waits is a fact of its own (`questions_asked`), never something
-    // deduced from the documents the run happens to hold.
-    state
-        .artifacts
-        .apply(event.node_id.as_ref(), event.seq, payload);
-
-    match payload {
-        EventPayload::Node(NodeEvent::Started(p)) => {
-            let node_id = require_node_id(event)?;
-            // Any prior state is a legal starting point: a `Failed` node
-            // re-runs after its re-route resolves, a `Finished`
-            // corrective node re-runs on the next re-route to it, and a
-            // `Running` node restarts when resume finds it orphaned
-            // (`restart_node`). The log records what happened; the
-            // attempt number carries the history.
-            // A fresh attempt owes nothing for an earlier round's
-            // answer: whatever it produces closes it.
-            state.answered_unfinished.remove(&node_id);
-            state
-                .nodes
-                .insert(node_id, NodeState::Running { attempt: p.attempt });
-            Ok(())
-        }
-        EventPayload::Node(NodeEvent::Finished(p)) => {
-            let node_id = require_node_id(event)?;
-            match state.nodes.get(&node_id) {
-                Some(NodeState::Running { .. }) => {
-                    state.total_tokens += p.tokens_used;
-                    // A node that asked already paid for the session
-                    // that asked, at `questions_asked`; what it carries
-                    // is that plus whatever this terminal reports.
-                    let asked = aux.asked_tokens.remove(&node_id).unwrap_or_default();
-                    state.answered_unfinished.remove(&node_id);
-                    state.nodes.insert(
-                        node_id,
-                        NodeState::Finished {
-                            outcome: p.outcome.clone(),
-                            tokens: asked + p.tokens_used,
-                        },
-                    );
-                    Ok(())
-                }
-                _ => Err(ReplayError::FinishedWithoutStart {
-                    seq: event.seq,
-                    node: node_id,
-                }),
-            }
-        }
-        EventPayload::Node(NodeEvent::Failed(p)) => {
-            let node_id = require_node_id(event)?;
-            match state.nodes.get(&node_id) {
-                Some(NodeState::Running { .. }) => {
-                    state.total_tokens += p.tokens_used;
-                    // A failure is a failure, whatever documents the run
-                    // holds for this node: a node waits because it
-                    // recorded that it asked, never because a questions
-                    // artifact exists.
-                    let asked = aux.asked_tokens.remove(&node_id).unwrap_or_default();
-                    state.answered_unfinished.remove(&node_id);
-                    state.nodes.insert(
-                        node_id,
-                        NodeState::Failed {
-                            failure: p.failure.clone(),
-                            tokens: asked + p.tokens_used,
-                            retryable: p.retryable,
-                        },
-                    );
-                    Ok(())
-                }
-                _ => Err(ReplayError::FailedWithoutStart {
-                    seq: event.seq,
-                    node: node_id,
-                }),
-            }
-        }
-        EventPayload::Gates(GateEvent::Waiting(p)) => {
-            // No node = a run-level escalation (the token budget check):
-            // it gates the whole invocation, not any node's
-            // state, so derivation records nothing for it.
-            if event.node_id.is_none() {
-                return Ok(());
-            }
-            let node_id = require_node_id(event)?;
-            // A published (or console-rendered-and-resolved-next)
-            // gate: the node is waiting on a human from this point until
-            // `gate_resolved`. What it was before is remembered so the
-            // synchronous internal pair restores it exactly.
-            aux.pre_gate
-                .insert(node_id.clone(), state.nodes.get(&node_id).cloned());
-            state.nodes.insert(
-                node_id,
-                NodeState::Waiting {
-                    external_ref: p.external_ref().map(str::to_string),
-                },
-            );
-            Ok(())
-        }
-        EventPayload::Gates(GateEvent::Resolved(_)) => {
-            // Run-level resolution (see `GateWaiting` above): audited in
-            // the log, invisible to node state.
-            if event.node_id.is_none() {
-                return Ok(());
-            }
-            let node_id = require_node_id(event)?;
-            // Only restores while still `Waiting`: an external gate's
-            // poll resolution emits `node_started` *before*
-            // `gate_resolved`, so by the time this arrives the node is
-            // already `Running` and the outcome events own its state.
-            if matches!(state.nodes.get(&node_id), Some(NodeState::Waiting { .. })) {
-                match aux.pre_gate.remove(&node_id).flatten() {
-                    Some(prior) => {
-                        state.nodes.insert(node_id, prior);
-                    }
-                    None => {
-                        state.nodes.remove(&node_id);
-                    }
-                }
-            }
-            Ok(())
-        }
-        EventPayload::Gates(GateEvent::QuestionsAsked(p)) => {
-            let node_id = require_node_id(event)?;
-            match state.nodes.get(&node_id) {
-                Some(NodeState::Running { .. }) => {
-                    // The attempt's accounting closes here: the session
-                    // that asked is done, and no reader counts it again
-                    // while the node waits.
-                    state.total_tokens += p.tokens_used;
-                    aux.asked_tokens.insert(node_id.clone(), p.tokens_used);
-                    aux.pre_gate
-                        .insert(node_id.clone(), state.nodes.get(&node_id).cloned());
-                    state
-                        .nodes
-                        .insert(node_id, NodeState::Waiting { external_ref: None });
-                    Ok(())
-                }
-                _ => Err(ReplayError::AskedWithoutStart {
-                    seq: event.seq,
-                    node: node_id,
-                }),
-            }
-        }
-        EventPayload::Gates(GateEvent::QuestionsAnswered(_)) => {
-            let node_id = require_node_id(event)?;
-            match state.nodes.get(&node_id) {
-                Some(NodeState::Waiting { .. }) => {
-                    // The answer reopens the node exactly where asking
-                    // left it: `Running`, owed the terminal its close
-                    // deferred. The same shape as the internal
-                    // gate pair, and the reason a crash here costs a
-                    // `node_finished` rather than a whole session.
-                    match aux.pre_gate.remove(&node_id).flatten() {
-                        Some(prior) => {
-                            state.nodes.insert(node_id.clone(), prior);
-                        }
-                        None => {
-                            state.nodes.remove(&node_id);
-                        }
-                    }
-                    state.answered_unfinished.insert(node_id);
-                    Ok(())
-                }
-                _ => Err(ReplayError::AnsweredWithoutAsk {
-                    seq: event.seq,
-                    node: node_id,
-                }),
-            }
-        }
-        EventPayload::Tasks(TaskEvent::Registered(p)) => {
-            attribute_task(state, &p.task_id, event);
-            state
-                .tasks
-                .entry(p.task_id.clone())
-                .or_insert(TaskStatus::Pending);
-            Ok(())
-        }
-        EventPayload::Tasks(TaskEvent::StatusChanged(p)) => {
-            if !state.tasks.contains_key(&p.task_id) {
-                return Err(ReplayError::StatusWithoutTask {
-                    seq: event.seq,
-                    task: p.task_id.clone(),
-                });
-            }
-            attribute_task(state, &p.task_id, event);
-            state.tasks.insert(p.task_id.clone(), p.new_status);
-            Ok(())
-        }
-        // The three finding events fold together or not at all: what a
-        // run holds is the last state of every id nobody withdrew, and
-        // `FindingLedger` is the one place that says so.
-        EventPayload::Findings(FindingEvent::Posted(_))
-        | EventPayload::Findings(FindingEvent::Updated(_))
-        | EventPayload::Findings(FindingEvent::Withdrawn(_)) => {
-            aux.findings.apply(event.node_id.as_ref(), payload);
-            state.findings = aux
-                .findings
-                .effective()
-                .into_iter()
-                .map(|posted| posted.finding)
-                .collect();
-            Ok(())
-        }
-        EventPayload::Children(ChildEvent::Finished(p)) => {
-            // The child's whole spend aggregates into the
-            // parent's total right here — once per chain member, at its
-            // close; the parent node's own `node_finished` deliberately
-            // carries none of it (see the payload's doc).
-            state.total_tokens += p.tokens;
-            Ok(())
-        }
-        // Every other kind is run-scoped bookkeeping that does not
-        // change node/task/budget state (artifact_accepted — already
-        // folded above, runner_resolved, baseline_captured,
-        // agent_session_opened, agent_message,
-        // context_assembled, criteria_checked, scope_checked, scope
-        // expansion, hook_executed, node_rerouted, promotion_signaled,
-        // capability_degraded, run_paused/resumed/finished, loop_iteration
-        // beyond what tasks already cover). child_run_created/finished
-        // deliberately included: the parent node's own
-        // started/finished/failed events carry its derived state (child
-        // tokens aggregate through node_finished.tokens_used), while the
-        // link pair stays pure audit — `workflow_exec` reads it directly
-        // off the log to find an open child, no derived field needed
-        // (its tokens are handled in the arm above).
-        _ => Ok(()),
-    }
 }
 
 /// Query-side view of `RunState.findings`: findings across reviewers are
@@ -447,20 +405,6 @@ fn normalized_title(title: &str) -> String {
         .to_lowercase()
 }
 
-/// Records the node `event` attributes a task to, keeping the first one
-/// the log names: a task belongs to the node that registered it, and a
-/// later status change never re-homes it. An event with no node
-/// attributes nothing — the task simply has no owner to show.
-fn attribute_task(state: &mut RunState, task_id: &TaskId, event: &StoredEvent) {
-    let Some(node_id) = &event.node_id else {
-        return;
-    };
-    state
-        .task_nodes
-        .entry(task_id.clone())
-        .or_insert_with(|| node_id.clone());
-}
-
 fn require_node_id(event: &StoredEvent) -> Result<NodeId, ReplayError> {
     event
         .node_id
@@ -474,7 +418,7 @@ fn require_node_id(event: &StoredEvent) -> Result<NodeId, ReplayError> {
 /// The point at which the log stops making sense — what
 /// [`RunState::broken`] reports.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-enum ReplayError {
+pub enum ReplayError {
     #[error("seq {seq}: `{kind}` is missing node_id")]
     MissingNodeId { seq: Seq, kind: String },
     #[error("seq {seq}: node `{node}` got node_finished without a matching node_started")]

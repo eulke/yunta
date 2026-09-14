@@ -281,15 +281,14 @@ async fn a_run_whose_log_predates_the_object_store_resumes_and_says_what_it_coul
         .expect("an artifact from before the store cannot be checked against one");
 
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
-    let finding = report
-        .state
-        .findings
+    let standing = report.state.effective_findings();
+    let finding = standing
         .iter()
         .find(|finding| finding.detail.contains("artifact_written"))
         .unwrap_or_else(|| {
             panic!(
                 "the resume says what it could not verify: {:?}",
-                report.state.findings
+                report.state.effective_findings()
             )
         });
     assert!(

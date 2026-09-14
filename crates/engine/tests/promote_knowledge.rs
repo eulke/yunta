@@ -159,7 +159,7 @@ sessions:
         report.state
     );
     assert!(matches!(
-        report.state.nodes.get("publish"),
+        report.state.nodes.state("publish"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -247,9 +247,9 @@ sessions:
         report.terminal
     );
     assert!(
-        !report.state.nodes.contains_key("publish"),
+        !report.state.nodes.has_state("publish"),
         "publish ran despite the gate never being resolved: {:?}",
-        report.state.nodes.get("publish")
+        report.state.nodes.state("publish")
     );
 
     let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();

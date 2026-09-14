@@ -263,7 +263,7 @@ impl RunCtx<'_> {
             .iter_nodes()
             .filter(|node| {
                 !matches!(
-                    state.nodes.get(&node.id),
+                    state.nodes.state(&node.id),
                     Some(crate::replay::NodeState::Finished { .. })
                 )
             })
@@ -271,7 +271,7 @@ impl RunCtx<'_> {
         Ok(yunta_core::port::Budget {
             max_tokens: Some(budget::session_token_budget(
                 cap,
-                state.total_tokens.total(),
+                state.total_tokens().total(),
                 non_terminal,
             )),
             timeout,

@@ -22,12 +22,11 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{EventPayload, ResumePolicy, StoredEvent};
-use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Seq, Workflow};
+use yunta_core::events::{ResumePolicy, StoredEvent};
+use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState, RunState};
-use yunta_core::events::{GateEvent, NodeEvent};
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -158,7 +157,7 @@ pub(crate) fn resume_policies<'a>(
     nodes
         .into_iter()
         .filter(|node| {
-            !is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
+            !is_gate(node) && matches!(state.nodes.state(&node.id), Some(NodeState::Running { .. }))
         })
         .map(|node| ResumePolicy {
             node: node.id.clone(),
@@ -177,30 +176,6 @@ fn is_external_gate(node: &Node) -> bool {
             ..
         }
     )
-}
-
-/// The `external_ref` (forge handle) from this node's last `gate_waiting`
-/// — `None` only if it was never published, which callers only reach
-/// this for after confirming otherwise.
-fn last_external_ref(events: &[StoredEvent], node_id: &NodeId) -> Option<String> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref().map(str::to_string)
-        }
-        _ => None,
-    })
-}
-
-/// Per-node bookkeeping that plain final state can't answer: how many
-/// times it started, when it last failed/finished, and its re-routes.
-#[derive(Debug, Default, Clone)]
-struct NodeHistory {
-    starts: u32,
-    last_failed_seq: Option<Seq>,
-    last_finished_seq: Option<Seq>,
-    reroutes: u32,
-    /// seq and destination of the last `node_rerouted` this node emitted.
-    last_reroute: Option<(Seq, NodeId)>,
 }
 
 pub fn next_step(
@@ -233,7 +208,7 @@ pub fn next_step(
     let deps_satisfied = |node: &Node| {
         deps_of(&node.id)
             .iter()
-            .all(|dep| matches!(state.nodes.get(dep), Some(NodeState::Finished { .. })))
+            .all(|dep| matches!(state.nodes.state(dep), Some(NodeState::Finished { .. })))
     };
 
     // A node named only as an `on_failure.goto` or gate `on:`
@@ -281,30 +256,6 @@ pub fn next_step(
     // sequential one either way.
     let capacity = max_parallel_nodes.max(1) as usize;
 
-    let mut history: std::collections::HashMap<NodeId, NodeHistory> = Default::default();
-    for event in events {
-        let Some(node_id) = &event.node_id else {
-            continue;
-        };
-        let entry = history.entry(node_id.clone()).or_default();
-        match event.payload() {
-            Some(EventPayload::Node(NodeEvent::Started(_))) => entry.starts += 1,
-            Some(EventPayload::Node(NodeEvent::Failed(_))) => {
-                entry.last_failed_seq = Some(event.seq)
-            }
-            Some(EventPayload::Node(NodeEvent::Finished(_))) => {
-                entry.last_finished_seq = Some(event.seq)
-            }
-            Some(EventPayload::Node(NodeEvent::Rerouted(p))) => {
-                entry.reroutes += 1;
-                entry.last_reroute = Some((event.seq, p.to_node.clone()));
-            }
-            _ => {}
-        }
-    }
-    let history = history; // read-only from here
-    let hist = |id: &NodeId| history.get(id).cloned().unwrap_or_default();
-
     // 0. A `Running` gate node is never a crash orphan (`on_interrupt`
     //    is about session-crash uncertainty, which a gate has none of —
     //    it isn't a session). It reaches `Running` two ways, both
@@ -317,9 +268,12 @@ pub fn next_step(
     //    this last case a crashed internal gate would fall through every
     //    section below and the run would pause forever, never re-asked.
     if let Some(node) = nodes.iter().copied().find(|node| {
-        is_gate(node) && matches!(state.nodes.get(&node.id), Some(NodeState::Running { .. }))
+        is_gate(node) && matches!(state.nodes.state(&node.id), Some(NodeState::Running { .. }))
     }) {
-        return match (last_external_ref(events, &node.id), is_external_gate(node)) {
+        return match (
+            state.gates.last_external_ref(&node.id).map(str::to_string),
+            is_external_gate(node),
+        ) {
             (Some(external_ref), _) => ScheduleStep::PollGate {
                 node: node.id.clone(),
                 external_ref,
@@ -340,7 +294,7 @@ pub fn next_step(
     //     window between a paired waiting/resolved emission) restarts
     //     like any orphan would.
     for node in nodes.iter().copied() {
-        let Some(NodeState::Waiting { external_ref }) = state.nodes.get(&node.id) else {
+        let Some(NodeState::Waiting { external_ref }) = state.nodes.state(&node.id) else {
             continue;
         };
         if is_gate(node) {
@@ -366,7 +320,10 @@ pub fn next_step(
                 node: node.id.clone(),
             };
         }
-        return ScheduleStep::Execute(vec![(node.id.clone(), hist(&node.id).starts + 1)]);
+        return ScheduleStep::Execute(vec![(
+            node.id.clone(),
+            state.nodes.get(&node.id).map_or(0, |r| r.attempts) + 1,
+        )]);
     }
 
     // 0c. A node whose questions were answered is `Running` again and
@@ -377,7 +334,7 @@ pub fn next_step(
     if let Some(node) = nodes
         .iter()
         .copied()
-        .find(|node| state.answered_unfinished.contains(&node.id))
+        .find(|node| state.answered_unfinished(&node.id))
     {
         return ScheduleStep::FinishAnswered {
             node: node.id.clone(),
@@ -417,7 +374,12 @@ pub fn next_step(
         }
         let orphans: Vec<(NodeId, u32)> = orphaned
             .iter()
-            .map(|policy| (policy.node.clone(), hist(&policy.node).starts + 1))
+            .map(|policy| {
+                (
+                    policy.node.clone(),
+                    state.nodes.get(&policy.node).map_or(0, |r| r.attempts) + 1,
+                )
+            })
             .collect();
         return ScheduleStep::Execute(orphans);
     }
@@ -428,17 +390,17 @@ pub fn next_step(
     //    again on the next (the reroute/restart it emits changes the log,
     //    so the next call sees a different answer for it).
     for node in nodes.iter().copied() {
-        let Some(NodeState::Failed { failure, .. }) = state.nodes.get(&node.id) else {
+        let Some(NodeState::Failed { failure, .. }) = state.nodes.state(&node.id) else {
             continue;
         };
-        let h = hist(&node.id);
-        let failed_seq = h.last_failed_seq;
+        let h = state.nodes.get(&node.id).cloned().unwrap_or_default();
+        let failed_seq = h.last_failed;
 
         let rerouted_for_this_failure = h
             .last_reroute
             .as_ref()
-            .filter(|(seq, _)| Some(*seq) > failed_seq)
-            .cloned();
+            .filter(|reroute| Some(reroute.seq) > failed_seq)
+            .map(|reroute| (reroute.seq, reroute.to.clone()));
 
         match rerouted_for_this_failure {
             None => {
@@ -473,13 +435,12 @@ pub fn next_step(
                 }
             }
             Some((reroute_seq, to)) => {
-                let corrective = hist(&to);
+                let corrective = state.nodes.get(&to).cloned().unwrap_or_default();
                 let corrective_finished_since = corrective
-                    .last_finished_seq
+                    .last_finished
                     .is_some_and(|seq| seq > reroute_seq);
-                let corrective_failed_since = corrective
-                    .last_failed_seq
-                    .is_some_and(|seq| seq > reroute_seq);
+                let corrective_failed_since =
+                    corrective.last_failed.is_some_and(|seq| seq > reroute_seq);
 
                 if corrective_finished_since {
                     // Destination completed — the failed node
@@ -492,7 +453,7 @@ pub fn next_step(
                                 node: node.id.clone(),
                             }
                         } else {
-                            match last_external_ref(events, &node.id) {
+                            match state.gates.last_external_ref(&node.id).map(str::to_string) {
                                 Some(external_ref) => ScheduleStep::PollGate {
                                     node: node.id.clone(),
                                     external_ref,
@@ -503,7 +464,7 @@ pub fn next_step(
                             }
                         };
                     }
-                    return ScheduleStep::Execute(vec![(node.id.clone(), h.starts + 1)]);
+                    return ScheduleStep::Execute(vec![(node.id.clone(), h.attempts + 1)]);
                 }
                 if corrective_failed_since {
                     // The corrective node failed on its own; it is a
@@ -512,7 +473,7 @@ pub fn next_step(
                     continue;
                 }
                 // Re-route emitted, corrective node not run yet.
-                return ScheduleStep::Execute(vec![(to.clone(), corrective.starts + 1)]);
+                return ScheduleStep::Execute(vec![(to.clone(), corrective.attempts + 1)]);
             }
         }
     }
@@ -522,7 +483,7 @@ pub fn next_step(
     //    resolution is a forge round-trip, one at a time, same as
     //    section 0/1's own gate handling.
     for node in nodes.iter().copied() {
-        if !is_gate(node) || state.nodes.contains_key(&node.id) {
+        if !is_gate(node) || state.nodes.has_state(&node.id) {
             continue;
         }
         if is_reroute_only_target(&node.id) || !deps_satisfied(node) {
@@ -547,7 +508,7 @@ pub fn next_step(
         if batch.len() >= capacity {
             break;
         }
-        if state.nodes.contains_key(&node.id) || is_gate(node) {
+        if state.nodes.has_state(&node.id) || is_gate(node) {
             continue; // finished, failed-and-handled-above, or a gate (handled above)
         }
         if is_reroute_only_target(&node.id) {
@@ -572,8 +533,10 @@ pub fn next_step(
     //    either — counting it here would make an ordinary green run
     //    un-finishable.
     let all_finished = nodes.iter().all(|node| {
-        matches!(state.nodes.get(&node.id), Some(NodeState::Finished { .. }))
-            || (is_reroute_only_target(&node.id) && !state.nodes.contains_key(&node.id))
+        matches!(
+            state.nodes.state(&node.id),
+            Some(NodeState::Finished { .. })
+        ) || (is_reroute_only_target(&node.id) && !state.nodes.has_state(&node.id))
     });
     if all_finished {
         return ScheduleStep::Finish;
@@ -586,7 +549,7 @@ pub fn next_step(
     if default_on_failure == DefaultOnFailure::Continue {
         if let Some(reason) = nodes
             .iter()
-            .find_map(|node| match state.nodes.get(&node.id) {
+            .find_map(|node| match state.nodes.state(&node.id) {
                 Some(NodeState::Failed { failure, .. }) => {
                     Some(format!("node `{}` failed: {failure}", node.id))
                 }

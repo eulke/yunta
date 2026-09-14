@@ -3,6 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
+use yunta_core::events::OrphanedSession;
 use yunta_core::port::SessionRequest;
 use yunta_core::{Node, PromptSource};
 
@@ -14,7 +15,7 @@ use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_prof
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
-use yunta_core::events::{NodeEvent, SessionEvent};
+use yunta_core::events::SessionEvent;
 
 /// The node's prompt text: frozen file content from the manifest when the
 /// workflow declared `{file: ...}`, the inline string otherwise — never a
@@ -88,8 +89,12 @@ async fn resume_target(
             ),
         ))
     };
-    match orphaned_session(&ctx.load_events().await?, &node.id) {
-        OrphanedSession::Open(session_id) => {
+    match crate::replay::derive(&ctx.load_events().await?)
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.orphaned_session.clone())
+    {
+        Some(OrphanedSession::Open(session_id)) => {
             if adapter
                 .capabilities()
                 .declares(yunta_core::Capability::ResumeSession)
@@ -105,7 +110,7 @@ async fn resume_target(
             )
             .await?;
         }
-        OrphanedSession::NoneRecorded => {
+        Some(OrphanedSession::NoneRecorded) => {
             ctx.emit(
                 Some(&node.id),
                 degraded(
@@ -115,7 +120,7 @@ async fn resume_target(
             )
             .await?;
         }
-        OrphanedSession::NotAnOrphan => {}
+        None => {}
     }
     Ok(None)
 }
@@ -280,68 +285,5 @@ pub(super) async fn execute_prompt(
             fail_with_tokens(ctx, node, reason, false, tokens).await
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
-    }
-}
-
-/// What resume finds in the log for `node`: the id of a session
-/// cut mid-flight (this dispatch is an orphan restart — a prior
-/// `node_started` with no terminal event before the current one, and an
-/// `agent_session_opened` inside that window), an orphan restart with no
-/// session on record (crash before it opened), or nothing to resume at
-/// all (a first attempt, or a retry after a *verdict* — a failed
-/// session ended with an answer, only an interrupted one is continued).
-enum OrphanedSession {
-    Open(yunta_core::SessionId),
-    NoneRecorded,
-    NotAnOrphan,
-}
-
-fn orphaned_session(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> OrphanedSession {
-    let mine = |event: &&yunta_core::events::StoredEvent| event.node_id.as_ref() == Some(node_id);
-    let starts: Vec<usize> = events
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| {
-            e.node_id.as_ref() == Some(node_id)
-                && matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Started(_))))
-        })
-        .map(|(i, _)| i)
-        .collect();
-    // The caller's own `node_started` for this attempt is already on the
-    // log — the *previous* start is the one that may have been cut.
-    let (Some(&current), Some(&previous)) = (
-        starts.last(),
-        starts.len().checked_sub(2).and_then(|i| starts.get(i)),
-    ) else {
-        return OrphanedSession::NotAnOrphan;
-    };
-    let Some(window) = events.get(previous..current) else {
-        return OrphanedSession::NotAnOrphan;
-    };
-    let had_verdict = window.iter().filter(mine).any(|e| {
-        matches!(
-            e.payload(),
-            Some(
-                EventPayload::Node(NodeEvent::Finished(_))
-                    | EventPayload::Node(NodeEvent::Failed(_))
-            )
-        )
-    });
-    if had_verdict {
-        return OrphanedSession::NotAnOrphan;
-    }
-    match window
-        .iter()
-        .filter(mine)
-        .rev()
-        .find_map(|e| match e.payload() {
-            Some(EventPayload::Session(SessionEvent::Opened(p))) => Some(p.session_id.clone()),
-            _ => None,
-        }) {
-        Some(session_id) => OrphanedSession::Open(session_id),
-        None => OrphanedSession::NoneRecorded,
     }
 }

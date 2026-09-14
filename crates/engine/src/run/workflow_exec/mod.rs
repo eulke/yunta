@@ -130,23 +130,8 @@ pub(super) async fn execute_workflow(
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
     let events = ctx.load_events().await?;
-    let created: Vec<RunId> = events
-        .iter()
-        .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match e.payload() {
-            Some(EventPayload::Children(ChildEvent::Created(p))) => Some(p.child_run_id.clone()),
-            _ => None,
-        })
-        .collect();
-    let finished: Vec<RunId> = events
-        .iter()
-        .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match e.payload() {
-            Some(EventPayload::Children(ChildEvent::Finished(p))) => Some(p.child_run_id.clone()),
-            _ => None,
-        })
-        .collect();
-    if let Some(open_child) = created.iter().rev().find(|child| !finished.contains(child)) {
+    let state = crate::replay::derive(&events);
+    if let Some(open_child) = state.children.open_under(&node.id).map(|link| &link.run_id) {
         if !ctx
             .storage
             .events_for_run(open_child.clone())
@@ -269,7 +254,7 @@ pub(super) async fn execute_workflow(
     if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(limits) = child_config.limits.as_mut() {
             if let Some(cap) = limits.max_tokens_per_run {
-                let spent = derive(&events).total_tokens.total();
+                let spent = derive(&events).total_tokens().total();
                 limits.max_tokens_per_run = Some(cap.saturating_sub(spent));
             }
         }
@@ -557,7 +542,7 @@ async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Done,
-                        report.state.total_tokens,
+                        report.state.total_tokens(),
                     ))),
                 )
                 .await?;
@@ -592,7 +577,7 @@ async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Promoted,
-                        report.state.total_tokens,
+                        report.state.total_tokens(),
                     ))),
                 )
                 .await?;
@@ -655,7 +640,7 @@ async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Failed,
-                        report.state.total_tokens,
+                        report.state.total_tokens(),
                     ))),
                 )
                 .await?;

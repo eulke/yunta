@@ -65,8 +65,8 @@ impl ArtifactLedger {
     pub fn of<'a>(events: impl IntoIterator<Item = &'a StoredEvent>) -> Self {
         let mut ledger = ArtifactLedger::default();
         for event in events {
-            if let Some(payload) = event.payload() {
-                ledger.apply(event.node_id.as_ref(), event.seq, payload);
+            if let Some(EventPayload::Artifacts(e)) = event.payload() {
+                ledger.apply(event.node_id.as_ref(), event.seq, e);
             }
         }
         ledger
@@ -84,20 +84,22 @@ impl ArtifactLedger {
         &mut self,
         node: Option<&NodeId>,
         seq: Seq,
-        payload: &EventPayload,
+        event: &ArtifactEvent,
     ) -> Option<&ArtifactRef> {
-        let (artifact, content_hash, origin) = match payload {
-            EventPayload::Artifacts(ArtifactEvent::Accepted(accepted)) => (
+        let (artifact, content_hash, origin) = match event {
+            ArtifactEvent::Accepted(accepted) => (
                 accepted.artifact.clone(),
                 accepted.content_hash.clone(),
                 accepted.origin.clone(),
             ),
-            EventPayload::Artifacts(ArtifactEvent::Written(written)) => (
+            ArtifactEvent::Written(written) => (
                 legacy_identity(written),
                 written.content_hash.clone(),
                 ArtifactOrigin::Legacy,
             ),
-            _ => return None,
+            // A submission is the handover; what the run holds is the
+            // acceptance that follows it.
+            ArtifactEvent::Submitted(_) => return None,
         };
         let held = (node.cloned(), artifact.clone());
         if !self.current.contains_key(&held) {

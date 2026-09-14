@@ -181,7 +181,10 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     // in the node state this message carries.
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     assert!(
-        matches!(state.nodes.get("review"), Some(NodeState::Finished { .. })),
+        matches!(
+            state.nodes.state("review"),
+            Some(NodeState::Finished { .. })
+        ),
         "state: {state:?}"
     );
     // Each post is a finding_posted authored by the session's own node,
@@ -269,7 +272,7 @@ sessions:
 "#;
     let (terminal, state, _bench) = Bench::run(workflow, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("rev-a") {
+    match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
             let outcome = failure.to_string();
             assert!(outcome.contains("blackboard"), "got: {outcome}");
@@ -354,7 +357,7 @@ sessions:
 "#;
     let (terminal, state, _bench) = Bench::run(BLACKBOARD_WORKFLOW, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("rev-a") {
+    match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
             let outcome = failure.to_string();
             assert!(

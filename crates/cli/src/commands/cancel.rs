@@ -69,7 +69,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         let has_live_node = state
             .nodes
             .values()
-            .any(|n| matches!(n, NodeState::Running { .. }));
+            .any(|record| matches!(record.state, Some(NodeState::Running { .. })));
         if !has_live_node {
             println!("run {run_id}: no node in progress — nothing to cancel");
             return Ok(Outcome::Success);

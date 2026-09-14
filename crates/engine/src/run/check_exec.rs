@@ -277,8 +277,8 @@ async fn execute_findings_gate(
     max_severity: FindingSeverity,
 ) -> Result<NodeEnd, RunError> {
     let state = ctx.run_view().await?.state;
-    let offending: Vec<&str> = state
-        .findings
+    let effective = state.effective_findings();
+    let offending: Vec<&str> = effective
         .iter()
         .filter(|finding| severity_rank(finding.severity) <= severity_rank(max_severity))
         .map(|finding| finding.id.as_str())

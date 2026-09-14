@@ -341,7 +341,7 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
         if capturing_node.as_ref() == Some(&node.id) {
             continue;
         }
-        match state.nodes.get(&node.id) {
+        match state.nodes.state(&node.id) {
             Some(NodeState::Finished { .. }) => compared += 1,
             Some(NodeState::Failed { .. }) => {
                 compared += 1;

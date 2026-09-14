@@ -159,15 +159,15 @@ async fn quick_mode_skips_the_excluded_node_and_still_finishes() {
     let (terminal, state) = bench.run("run-quick", "quick").await.unwrap();
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("start"),
+        state.nodes.state("start"),
         Some(NodeState::Finished { .. })
     ));
     assert!(matches!(
-        state.nodes.get("ship"),
+        state.nodes.state("ship"),
         Some(NodeState::Finished { .. })
     ));
     assert!(
-        !state.nodes.contains_key("extra"),
+        !state.nodes.has_state("extra"),
         "a node excluded from the run's mode must never be scheduled at all"
     );
 }
@@ -179,9 +179,9 @@ async fn full_mode_runs_every_node() {
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(
-            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
             "node `{id}` should have finished under `full`, got {:?}",
-            state.nodes.get(id)
+            state.nodes.state(id)
         );
     }
 }
@@ -196,7 +196,7 @@ async fn the_default_sentinel_ignores_modes_and_runs_everything() {
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(matches!(
-            state.nodes.get(id),
+            state.nodes.state(id),
             Some(NodeState::Finished { .. })
         ));
     }
@@ -310,9 +310,9 @@ async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() 
         "expected the unanswered gate to pause the run, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("start"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("start"), Some(NodeState::Finished { .. })),
         "`start` must finish before the gate that transitively depends on it is asked; got {:?}",
-        state.nodes.get("start")
+        state.nodes.state("start")
     );
 }
 
@@ -359,16 +359,16 @@ async fn on_failure_abort_ends_the_run() {
         "abort closes the run as failed, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("boom"), Some(NodeState::Failed { .. })),
         "the causing node is failed: {:?}",
-        state.nodes.get("boom")
+        state.nodes.state("boom")
     );
     assert_eq!(
-        state.nodes.get("tail"),
+        state.nodes.state("tail"),
         None,
         "abort starts nothing after the failure, even a ready node"
     );
-    assert_eq!(state.nodes.get("after"), None, "the dependent never ran");
+    assert_eq!(state.nodes.state("after"), None, "the dependent never ran");
 }
 
 #[tokio::test]
@@ -392,23 +392,23 @@ async fn on_failure_continue_skips_dependents() {
         "continue still closes the run as failed, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("boom"), Some(NodeState::Failed { .. })),
         "the causing node is failed: {:?}",
-        state.nodes.get("boom")
+        state.nodes.state("boom")
     );
     assert_eq!(
-        state.nodes.get("after"),
+        state.nodes.state("after"),
         None,
         "a dependent of the failed node is skipped, never run"
     );
     assert!(
-        matches!(state.nodes.get("side"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("side"), Some(NodeState::Finished { .. })),
         "an independent node runs: {:?}",
-        state.nodes.get("side")
+        state.nodes.state("side")
     );
     assert!(
-        matches!(state.nodes.get("tail"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("tail"), Some(NodeState::Finished { .. })),
         "a dependent of an independent node runs: {:?}",
-        state.nodes.get("tail")
+        state.nodes.state("tail")
     );
 }

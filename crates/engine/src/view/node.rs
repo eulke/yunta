@@ -7,17 +7,15 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{
-    ArtifactId, NodeReroutedPayload, RerouteOrigin, StoredEvent, TaskStatus, TokenUsage,
-};
+use yunta_core::events::{ArtifactId, TaskStatus, TokenUsage};
 use yunta_core::{Node, NodeId, TaskId};
 
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
 use crate::replay::{NodeState, RunState};
-use crate::runner::ResolvedRunner;
 use crate::stats::NodeStat;
+use yunta_core::events::{Reroute, ResolvedRunner};
 
-use super::{Included, Walk};
+use super::Included;
 
 /// One declared node as it stands.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,47 +90,17 @@ pub enum NodeStanding {
     Reached(NodeState),
 }
 
-/// A re-route as `node_rerouted` recorded it, on the node it left.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reroute {
-    pub to: NodeId,
-    pub cause: String,
-    /// The retry count and the cap it counts against — both `None` for a
-    /// gate's routing choice, which is a decision, not a retry.
-    pub attempt: Option<u32>,
-    pub max: Option<u32>,
-    pub origin: RerouteOrigin,
-    pub at: DateTime<Utc>,
-}
-
-impl Reroute {
-    pub(super) fn of(payload: &NodeReroutedPayload, at: DateTime<Utc>) -> Self {
-        Reroute {
-            to: payload.to_node.clone(),
-            cause: payload.cause.clone(),
-            attempt: payload.attempt,
-            max: payload.max_reroutes,
-            origin: payload.origin,
-            at,
-        }
-    }
-}
-
 /// The derivations every node frame is read from, and the instant they
 /// are read at.
 ///
-/// The run-wide ones — replay's state, the per-node stats, the log walk,
-/// the ids the mode includes — are derived once for the whole frame
-/// instead of once per node. The log itself is kept beside them because
-/// the live readings ([`last_event_age`], [`open_sessions`],
-/// [`recent_tool_calls`]) answer a question about one node and read it
-/// per node.
+/// The run-wide ones — replay's state, the per-node stats, the ids the
+/// mode includes — are derived once for the whole frame instead of once
+/// per node. What a node is doing right now is read off the same state:
+/// the node ledger already folds it.
 pub(super) struct Reading<'a> {
     pub(super) stats: HashMap<&'a NodeId, &'a NodeStat>,
     pub(super) included: Included,
-    pub(super) walk: &'a Walk,
     pub(super) state: &'a RunState,
-    pub(super) events: &'a [StoredEvent],
     pub(super) now: DateTime<Utc>,
 }
 
@@ -146,10 +114,14 @@ impl Reading<'_> {
             kind: node.kind.kind_name(),
             group: group.map(|group| group.id.clone()),
             state: self.standing(node, group),
-            runner: self.walk.runner.get(&node.id).cloned(),
+            runner: self
+                .state
+                .nodes
+                .get(&node.id)
+                .and_then(|r| r.runner.clone()),
             attempt: stat.map(|stat| stat.attempts),
             elapsed: stat.map(|stat| stat.active_so_far()),
-            last_event_age: last_event_age(self.events, &node.id, self.now),
+            last_event_age: last_event_age(self.state, &node.id, self.now),
             tokens: stat.map(|stat| stat.tokens).unwrap_or_default(),
             artifacts: self
                 .state
@@ -158,11 +130,15 @@ impl Reading<'_> {
                 .map(|artifact| artifact.artifact.clone())
                 .collect(),
             running_tasks: self.running_tasks(&node.id),
-            sessions: open_sessions(self.events, &node.id),
+            sessions: open_sessions(self.state, &node.id),
             // No cap here: the frame carries the attempt's calls and the
             // surface trims them to what it can draw.
-            activity: recent_tool_calls(self.events, &node.id, usize::MAX),
-            reroute: self.walk.reroute.get(&node.id).cloned(),
+            activity: recent_tool_calls(self.state, &node.id, usize::MAX),
+            reroute: self
+                .state
+                .nodes
+                .get(&node.id)
+                .and_then(|r| r.last_reroute.clone()),
         }
     }
 
@@ -181,7 +157,7 @@ impl Reading<'_> {
         {
             return NodeStanding::Skipped;
         }
-        match self.state.nodes.get(&node.id) {
+        match self.state.nodes.state(&node.id) {
             Some(derived) => NodeStanding::Reached(derived.clone()),
             None => NodeStanding::ToGo,
         }
@@ -194,9 +170,8 @@ impl Reading<'_> {
             .state
             .tasks
             .iter()
-            .filter(|(task, status)| {
-                matches!(status, TaskStatus::Running)
-                    && self.state.task_nodes.get(*task) == Some(node)
+            .filter(|(_, record)| {
+                matches!(record.status, TaskStatus::Running) && record.owner.as_ref() == Some(node)
             })
             .map(|(task, _)| task.clone())
             .collect();
