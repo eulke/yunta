@@ -812,7 +812,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 2-02 | constructores M03 en cada dominio; todos los emisores los usan; `QuestionsAsked::new` con `NonEmpty`; `finish_node` absorbe los tres `node_finished` de `gate_exec` (M26) | 2-01 | cerrado(79193d3) |
 | 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados; `members_of` en el host del blackboard (M24 I-09); `GateLedger::rounds`, `pending_questions`, `answered_unfinished` (M26) | 2-01 | cerrado(1267f9a) |
 | 2-04 | `derive` por dominio, `apply` exhaustivo, `Audit` por nombre; `phase.rs` por `RunLedger` | 2-03 | cerrado(1267f9a) |
-| 3-01 | `PauseReason` (con `Questions` y `AnswersRefused`, M26), `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | pendiente |
+| 3-01 | `PauseReason` (con `Questions` y `AnswersRefused`, M26), `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | cerrado (ebe09c2) |
 | 3-02 | `decide` en seis (con `answered_step`, M26); `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | pendiente |
 | 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman; el brief de tarea lleva `notes` (M24 I-03) | 2-02 | pendiente |
 | 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | pendiente |
