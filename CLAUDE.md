@@ -57,7 +57,7 @@ quien implementa, y no admite interpretación:
 - **Nada fuera del ítem.** Un PR cierra ítems del tablero (§10) y actualiza su
   estado en el mismo commit. Sin mecanismos, tipos, archivos, dependencias ni
   refactors que el plan no nombre.
-- **Las decisiones P1–P9 bloquean.** Un ítem `bloqueado(Pn)` no se empieza
+- **Las decisiones P1–P10 bloquean.** Un ítem `bloqueado(Pn)` no se empieza
   hasta que el ADR de Pn existe. Nadie toma una P por defecto.
 - **Lo marcado "se conserva" no se toca.** Se generaliza; nunca se reimplementa.
 - **Rojo primero, gate completo después.** El test del ítem falla por su razón

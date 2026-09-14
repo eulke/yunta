@@ -138,6 +138,8 @@ valores propuestos). Ejemplos con `Glyphs::Ascii`.
 | `node_failed` | `Node::Reached{Failed}` | `NodeState`, `Failure` | sí | `x lint — failed — exit 1 · 2s` |
 | `node_rerouted` | `Node::Rerouted` | `Reroute` | sí | `lint — rerouted to `fix`: criteria still red (1/2)` |
 | `hook_executed` | `Node::HookRan` | `HookPhase` | no | `build — hook before exit 0` |
+| `questions_asked` | `Gates::Asked` | `NonEmpty<QuestionId>` | sí | `? grill — waiting — asked 2 questions: q1, q2` |
+| `questions_answered` | `Gates::Answered` | `Channel`, `Responder` | sí | `+ grill — answered by eulke via tty` |
 | `context_assembled` | `Node::ContextAssembled` | — | no | `implement — context assembled` |
 | `criteria_checked` | `Node::CriteriaChecked` | `Phase` | no | `work — T001 integration: 3 criteria` |
 | `scope_checked` | `Node::ScopeChecked` | — | no | `work — 2 paths out of scope` |

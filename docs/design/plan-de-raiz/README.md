@@ -8,16 +8,17 @@ que acá se nombran. Lo que este documento no dice, no se inventa: se levanta
 
 Fuente: ocho auditorías independientes sobre `80abe93` —eventos, engine,
 artifacts, CLI, adapters, core, tests, documentación— con 198 defectos citados
-por archivo y línea, reducidos a doce vicios y veinticuatro mecanismos.
+por archivo y línea, reducidos a doce vicios y veintiséis mecanismos.
 
 ## Qué hay en este directorio
 
 | archivo | qué es | quién lo lee |
 |---|---|---|
 | [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
-| [`mecanismos.md`](mecanismos.md) | los 24 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
+| [`mecanismos.md`](mecanismos.md) | los 26 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
 | [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
 | [`cerco.md`](cerco.md) | M25 completo: vocabulario, tipos, juez, codec, `yunta fence`, engine, adapters builtin, la muestra del mercado, archivos, tests, ADR D172 | quien implementa 3-08 |
+| [`preguntas.md`](preguntas.md) | M26 completo: la regla en el tipo, el par `questions_asked`/`questions_answered`, el cierre y la ronda, las superficies, el corte del pack, archivos, tests, W-11, ADR D173 | quien implementa W-11 o un ítem que M26 nombra |
 | [`artefactos/yunta-de-raiz.html`](artefactos/yunta-de-raiz.html), [`artefactos/cronica-del-run.html`](artefactos/cronica-del-run.html) | las dos propuestas tal como fueron aprobadas, con sus diagramas; el README y `mecanismos.md` son su forma normativa | quien quiera la versión legible |
 | [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
 | [`auditoria/09-mercado-de-clis.md`](auditoria/09-mercado-de-clis.md) | los ocho CLIs relevados para el cerco (Gemini, Copilot, Cursor, OpenCode, Aider, Goose, Amp, Kimi), textuales, con URLs y lo no verificado marcado | quien implementa 3-08 o un adapter nuevo |
@@ -47,7 +48,7 @@ plan. No admiten interpretación.
    No se agregan mecanismos, tipos, archivos, dependencias ni flags que el plan
    no nombre. No se aprovecha "ya que estoy". Un refactor adyacente que el
    ítem no exige es drift.
-4. **Las decisiones P1–P8 son bloqueantes.** Un ítem marcado como dependiente
+4. **Las decisiones P1–P10 son bloqueantes.** Un ítem marcado como dependiente
    de una decisión no registrada en `adrs.md` no se empieza. Un agente no toma
    una decisión P por defecto, ni "provisoriamente".
 5. **Lo marcado "se conserva" no se toca.** `RunLog`, el observer, `RunFrame`,
@@ -70,9 +71,10 @@ plan. No admiten interpretación.
 8. **El texto queda en presente.** Ningún rustdoc, ayuda, mensaje ni comentario
    del diff nombra este plan, una fase, un ítem, lo que había antes ni lo que
    vendrá. Este archivo es el único lugar del repo que planifica.
-9. **El tablero se actualiza en el mismo PR.** Un ítem cerrado cambia su estado
-   en §10 en el mismo commit que lo cierra, con el hash del commit. Un ítem
-   levantado cambia a `levantado` y apunta a §11.
+9. **El tablero se actualiza en el mismo PR.** Un ítem cerrado va en su
+   commit y el tablero lo sigue en otro commit del mismo PR, citando el hash
+   verdadero del que lo cierra —un commit no puede llevar su propio hash. Un
+   ítem levantado cambia a `levantado` y apunta a §11 en el mismo commit.
 10. **Prohibiciones que el ratchet mide** (§7, M22) y que un PR no puede subir:
     `_ =>` en un `apply` de ledger; un `format!` que construya `reason`,
     `summary`, `cause` o `policy_applied`; un `SessionRequest { … }` literal
@@ -156,20 +158,20 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
 
 ---
 
-## 2. Los doce vicios y los veinticinco mecanismos
+## 2. Los doce vicios y los veintiséis mecanismos
 
 | vicio | síntoma principal | mecanismos |
 |---|---|---|
 | V1 un hecho se construye en muchos lugares | `GateWaiting` ×7, `capability_degraded` ×8, `SessionRequest` ×2 divergentes, lo escribible ×4 | M03 M08 M25 |
 | V2 una pregunta se responde en muchos lugares | `last_external_ref` ×2, attempt ×6, dedup ×2, run dir ×6, `RunPhase`→palabras ×5 | M04 M15 M16 |
-| V3 el catch-all silencioso | `replay::apply` `_ => Ok(())`, `phase.rs` `_ => Created` | M05 |
+| V3 el catch-all silencioso | `replay::apply` `_ => Ok(())`, `phase.rs` `_ => Created`, `Waiting` derivado de cualquier `node_failed` | M05 M26 |
 | V4 la declaración dispersa | un kind = 9+2 lugares | M02 |
 | V5 prosa congelada en el log, texto en la capa equivocada | `run_paused.reason`, `{:?}` al usuario ×9, MCP re-bordea ×17 | M06 M17 |
-| V6 la disciplina que el tipo no impone | globs `String`, `Legacy` fresco, nombre de artifact que escapa, versión no leída | M12 M13 M14 |
+| V6 la disciplina que el tipo no impone | globs `String`, `Legacy` fresco, nombre de artifact que escapa, versión no leída, un nodo que pregunta y debe otra cosa | M12 M13 M14 M26 |
 | V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos | M09 M24 M25 |
 | V8 la cáscara que no gobierna | git sin grupo, 15 `std::fs` en async, 3 `SystemClock`, `target_digest` crudo | M10 M11 |
 | V9 el puerto del lado equivocado | el engine importa su interfaz desde `yunta-adapters` | M01 |
-| V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra | M18 M19 M20 |
+| V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra, la ronda de preguntas cierra sin `close_node` | M18 M19 M20 M26 |
 | V11 la documentación sin atar | `docs/design/` invisible a `docs_sync`; la config de referencia no parsea | M23 |
 | V12 el ratchet que mide el síntoma | `copied_test_helpers 0` falso; propiedad de resume tautológica | M21 M22 |
 
@@ -374,6 +376,19 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   una escritura que llega al diff bajo `Exact` es `engine_finding`.
   `edit_constraints`, `Glob`, `blocked:<path>` se borran. Especificación
   completa y la muestra de ocho CLIs del mercado: `cerco.md`.
+- **M26 · Un nodo que pregunta, pregunta.** `Node::asks`; un nodo que declara
+  `questions` no declara otro artifact, es `kind: prompt` y no vive en un
+  `parallel` (`check` lo rechaza nombrando el corte); el hecho de preguntar es
+  el kind `questions_asked` (`questions_hash`, `questions`, `tokens_used`),
+  par de `questions_answered`, y el nodo espera entre los dos como un gate
+  interno, sin segundo `node_started`; `close_node` lo registra y devuelve
+  `NodeEnd::Asked`; `finish_node` es el único emisor de `node_finished`;
+  `engine::answers::record` la única puerta de una respuesta, para la consola
+  y para la tool MCP `answer_questions`; `FinishAnswered` termina un nodo
+  respondido sin sesión; `node_failed` es siempre `Failed`; la consola
+  pregunta en el lugar sólo con `interactive: true`; `PauseReason::{Questions,
+  AnswersRefused}`; un `questions` vacío deja respuestas vacías `Derived`.
+  Especificación completa: `preguntas.md`.
 
 ---
 
@@ -476,7 +491,7 @@ Test de frontera: `crates/engine/tests/no_adapter_crate_in_engine.rs`.
 | `scope` | scope_expansion_requested/granted/denied | `GrantLedger` (existe) |
 | `findings` | finding_posted/updated/withdrawn/refused | `FindingLedger` (existe) |
 | `artifacts` | artifact_accepted artifact_submitted artifact_written | `ArtifactLedger` (existe) |
-| `gates` | gate_waiting gate_resolved questions_answered | `GateLedger` |
+| `gates` | gate_waiting gate_resolved questions_asked questions_answered (`questions_asked` nace en W-11) | `GateLedger` |
 | `children` | child_run_created child_run_finished loop_iteration | `ChildLedger` |
 
 Lo que un módulo de dominio es dueño de, y lo que se deriva:
@@ -530,6 +545,7 @@ Constructores por dominio, con el invariante que fijan: `mecanismos.md#m03`.
 | `FenceLevel` | `Capabilities.edit_hooks: bool` | un sandbox y un hook dichos con la misma palabra |
 | `Fence { allowed: Vec<ScopeGlob>, roots }` | `edit_constraints: Option<Vec<String>>` + `artifact_dir` como permiso | un glob inválido en una sesión; dos fuentes para lo escribible |
 | `Coverage` en `agent_session_opened` | nada (la sesión no decía qué cercó) | una cobertura declarada y no construida |
+| `questions_asked` (kind) + `Node::asks` + cuatro reglas de `check` | `node_failed { Message "asked N…" }` leído como espera; `produces: [questions, brief.md]` | una espera deducida de un fallo; un nodo que pregunta y debe otra cosa; `interactive` sin preguntas |
 
 ### Sesiones y capacidades
 
@@ -566,29 +582,33 @@ artifact_dir)` (M25, `cerco.md` §5).
 
 ---
 
-## 4. Los bugs de comportamiento
+## 4. Prerequisitos: los bugs de comportamiento
 
-Trece defectos que cambian lo que un run hace hoy. Ocho tienen un fix propio
-que es un subconjunto estricto de su mecanismo —código que la fase igual
-escribiría, en el mismo lugar— y se hacen **antes de la fase 0**, cada uno un
-ítem del tablero (W-01…W-08) con su test en rojo primero. Cinco van por fase o
-por decisión.
+Defectos que cambian lo que un run hace hoy. Los que tienen un fix propio que
+es un subconjunto estricto de su mecanismo —código que la fase igual
+escribiría, en el mismo lugar— son los **prerequisitos** del plan: fase W, cada
+uno un ítem del tablero (W-01…W-11) con su test en rojo primero, antes de la
+fase 0, para que un usuario de hoy corra. No son un plan aparte: cada fila
+nombra el mecanismo del que es la primera parte, y el mecanismo la cuenta como
+ya hecha. Los que no tienen fix propio van por fase o por decisión, y la fila
+lo dice.
 
 | # | bug | hoy | mecanismo | fix | test |
 |---|---|---|---|---|---|
-| W-01 | sesiones de `loop` en el modelo default | `task_cycle/attempt.rs:266-267` pasa `model: None, agent: None, artifact_dir: None`; `runner_resolved` registra otro modelo | M08 | `SessionSetup` gana `chosen: RunnerCandidate` y `artifact_dir: Option<PathBuf>`; `attempt.rs` copia `chosen.model`, `chosen.agent` y `artifact_dir` de ahí; `prepare_loop` llama `open_run_tools` (y con eso rige `TypedArtifactNeedsRunTools`) | `crates/engine/tests/run_concurrency.rs::a_task_session_runs_on_the_model_and_agent_the_runner_resolved`; `::a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools` |
+| W-01 | sesiones de `loop` en el modelo default | `task_cycle/attempt.rs:266-267` pasa `model: None, agent: None, artifact_dir: None`; `runner_resolved` registra otro modelo | M08 | `SessionSetup` gana `chosen: RunnerCandidate` y `artifact_dir: Option<PathBuf>`; `attempt.rs` copia `chosen.model`, `chosen.agent` y `artifact_dir` de ahí; `run_tools_allowed(ctx, node, adapter, id) -> Result<bool, RunToolsSetupError>` en `runner_resolve.rs` responde si el nodo puede montar las tools (y con eso rige `TypedArtifactNeedsRunTools`); `open_run_tools` y `prepare_loop` la consumen, y sólo `open_run_tools` abre un listener | `crates/engine/tests/run_concurrency.rs::a_task_session_runs_on_the_model_and_agent_the_runner_resolved`; `::a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools` |
 | W-02 | nombre de artifact que escapa del run dir | `check/declarations.rs:133` valida el template sin renderizar; `node_exec.rs:348` renderiza `{{inputs.*}}`; `store.rs:147` une el nombre a un `PathBuf` | M12 | `core::workflow::ArtifactName::parse(&str) -> Result<Self, Problem>` (segmentos relativos, sin `..`, sin absoluto, no reservado por `ReservedIdentity`); `render_artifact_names` lo aplica **después** de renderizar y falla el nodo con `Failure::message` | `crates/engine/tests/artifacts.rs::a_rendered_artifact_name_that_leaves_the_run_dir_fails_the_node`; `crates/core/tests/artifacts.rs::an_artifact_name_with_a_parent_segment_is_refused` |
-| W-03 | `target_digest` persiste comandos crudos | `claude_code/parse.rs:131-138`, `codex/parse.rs:109-138` guardan `command`/`url`/`file_path` literal | M11 | ambos parsers producen siempre `sha256_hex(input)[..12]`; nada literal | `crates/adapters/tests/claude_code.rs::a_tool_use_never_persists_the_command_it_ran`; ídem en `codex.rs` |
-| W-04 | blackboard muestra findings retirados | `run_tools/blackboard.rs:26-52,64-86` pliegan `finding_posted` a mano | M04 | `consolidate_blackboard` y `get_blackboard` leen `FindingLedger::of(events).effective()` filtrado por grupo; `findings::inherited_findings` llama `replay::dedup_findings` (una regla) | `crates/engine/tests/blackboard.rs::a_withdrawn_finding_leaves_the_blackboard`; `::an_updated_finding_shows_its_last_content`; `crates/engine/tests/promotion.rs::inherited_findings_dedup_the_way_the_frame_counts_them` |
-| W-05 | git sin process group ni cancelación | `git.rs:116,132,145,157,167` usan `Command::new("git")` directo | M10 | `git.rs` construye `GovernedCommand` y llama `spawn_governed` con el registro y el `CancellationToken` del run; los dos `std::process::Command` pasan a async | `crates/engine/tests/process.rs::a_cancelled_run_kills_the_git_it_spawned` (git envuelto por un stub en `PATH` inyectado que espera un marcador) |
+| W-03 | `target_digest` persiste comandos crudos | `claude_code/parse.rs:131-138`, `codex/parse.rs:109-138` guardan `command`/`url`/`file_path` literal | M11 | ambos parsers producen siempre `ContentHash::abbreviated()` del input; nada literal. Es el paso intermedio: M11 guarda el `ContentHash` entero y la abreviatura queda en el borde que lo muestra | `crates/adapters/tests/claude_code.rs::a_tool_use_never_persists_the_command_it_ran`; ídem en `codex.rs` |
+| W-04 | blackboard muestra findings retirados | `run_tools/blackboard.rs:26-52,64-86` pliegan `finding_posted` a mano | M04 | `consolidate_blackboard` y `get_blackboard` leen `FindingLedger::of(events).effective()` filtrado por grupo; `findings::inherited_findings` llama `replay::dedup_findings` —una regla, la que colapsa espacios y mayúsculas— | `crates/engine/tests/blackboard.rs::a_withdrawn_finding_leaves_the_blackboard`; `::an_updated_finding_shows_its_last_content`; `crates/engine/tests/promotion.rs::inherited_findings_dedup_the_way_the_frame_counts_them` |
+| W-05 | git sin process group ni cancelación | `git.rs:116,132,145,157,167` usan `Command::new("git")` directo | M10 | las tres funciones que un run llama (`output_bytes`, `output`, `success`) construyen `GovernedCommand` y llaman `spawn_governed` con el registro y el `CancellationToken` del run; la pareja sincrónica (`output_blocking`, `success_blocking`) corre fuera de todo run y pasa a async con `build_manifest` en 3-05 | `crates/engine/tests/process.rs::a_cancelled_run_kills_the_git_it_spawned` (git envuelto por un stub en `PATH` inyectado que espera un marcador) |
 | W-06 | `parallel_exec` ignora `on_interrupt` | `parallel_exec.rs:39-47` reinicia siempre | M07 | `execute_parallel` llama `schedule::resume_policies` y honra `fail_if_uncertain`/`resume_session` | `crates/engine/tests/run_concurrency.rs::a_parallel_child_with_fail_if_uncertain_fails_instead_of_restarting` |
 | W-07 | mock pierde el handle del player | `mock/mod.rs:234` `tokio::spawn` descartado; `MockSession` sin `Drop` | M10 | `MockSession { player: JoinHandle<()> }` + `impl Drop` que aborta | `crates/adapters/tests/mock.rs::a_dropped_session_stops_its_player` |
 | W-08 | tests heredan `/etc/yunta/config.yaml` | `testkit/src/bin.rs:11-19` y `terminal.rs:81-88` no fijan `YUNTA_ORG_CONFIG` | M20 | `run_yunta` y `Terminal::open` fijan `YUNTA_ORG_CONFIG` a un archivo vacío bajo `home`, `USER=yunta-test`, `TERM` y quitan `NO_COLOR` — el núcleo de `hermetic()` | `crates/cli/tests/run_flow.rs::a_run_under_test_reads_no_org_config_from_the_host` |
+| W-11 | un nodo con preguntas contestadas cierra debiendo lo que declaró además; el pack de referencia no corre de punta a punta | `replay.rs:242` deriva `Waiting` de cualquier `node_failed` tras un artifact `questions`; `questions_exec.rs:106-165` cierra sin `close_node` con `node_started` y `node_finished` propios; `packs/fragua`, el fixture canónico y `referencia-schema.md` declaran `[questions, brief.md]` con un prompt que espera un turno que D86 no da | M26 | `preguntas.md` §9: `Node::asks` y las cuatro reglas de `check`; el kind `questions_asked` por F1; `Waiting` sólo desde `questions_asked` y `node_failed` siempre `Failed`; `close_node` registra `questions_asked`, `finish_node` único emisor, la ronda sin ciclo de nodo, `FinishAnswered`; la consola lee `interactive`; el corte `grill`/`brief` en pack, fixture y referencia; D173 | `crates/engine/tests/run_questions_close.rs::a_node_failed_after_a_questions_artifact_derives_failed_not_waiting`; `crates/engine/tests/check.rs::a_node_that_asks_questions_declares_nothing_else` |
 | — | tres capacidades nunca consultadas | AD-D2 D3 D4 | M09 · fase 3 | un quinto gate inline sería V7; depende de P3 | — |
 | — | findings bloqueantes salen con 0 | CLI-D16 | M16 · fase 5 | depende de P5 | — |
 | — | propiedad de resume tautológica | TE-D12 | M21 · fase 6 | ahora: renombrar a `derive_is_deterministic_from_any_prefix` y borrar el `_crashed_at_k`; la real es M21 | W-09 |
 | — | `loop` sin gate de artifact tipado | EN-D3 | M08 | cae con W-01 | — |
-| — | config de referencia no parsea | CO-14 | M23 · fase 0 | W-10 | — |
+| — | config de referencia no parsea | CO-14 | M23 · fase 0 | W-10: los números planos en `referencia-schema.md`; el recorrido recursivo de `docs_sync` es de 7-01, con `the_reference_config_parses_and_its_workflows_check` | — |
 
 ---
 
@@ -666,7 +686,9 @@ lo `FailAtCheck`.
 Registradas el 2026-09-13, con la recomendación como decisión, por
 aprobación explícita del dueño del repo: D165 (P1), D166 (P2), D167 (P3),
 D168 (P4), D169 (P5), D164 (P6, dentro de la crónica), D170 (P7), D171 (P8),
-D172 (P9, el cerco, con la muestra de ocho CLIs del mercado).
+D172 (P9, el cerco, con la muestra de ocho CLIs del mercado), D173 (P10, un
+nodo que pregunta, pregunta; registrada el 2026-09-14 con el panel de tres
+diseños que la respalda).
 Viven en `docs/design/adr/` y las indexa `adrs.md`. Un ítem que quiera
 apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 
@@ -681,6 +703,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | P7 | umbrales sin ADR: `WAIT_DEADLINE`, stagger 60 ms, `QUEUE_DEPTH`, `REDRAW_CEILING_HZ`, `MIN_SAMPLES_FOR_ESTIMATION` | un ADR "umbrales de superficie y arnés"; el ratchet rechaza `const` numérico nuevo sin referencia a ADR | M22, fase 6 |
 | P8 | los ocho fixes de §4 antes de la fase 0 | sí, cada uno como subconjunto estricto de su mecanismo | D171 · W-01…W-08 |
 | P9 | ¿Cómo se cerca lo que una sesión escribe, y escala a cualquier adapter futuro? | un juez en core, un nivel por adapter, una cobertura por sesión, un rechazo como kind; el post-check sigue siendo la garantía | D172 · M25, 3-08 |
+| P10 | ¿Un nodo con preguntas debe una segunda sesión con las respuestas, o declarar `questions` excluye declarar otra cosa? | excluye: un nodo que pregunta, pregunta; el hecho es `questions_asked`, par de `questions_answered`; `interactive` es si la consola pregunta en el lugar | D173 · M26, W-11 |
 
 ---
 
@@ -688,7 +711,7 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 
 | fase | ítems | desbloquea | depende de |
 |---|---|---|---|
-| W | W-01…W-10: los ocho fixes, el rename de la propiedad, la config de referencia | un usuario de hoy | P8 |
+| W | W-01…W-11: los prerequisitos de §4 —los ocho fixes, el rename de la propiedad, la config de referencia, el nodo que pregunta | un usuario de hoy | P8, P10 |
 | 0 | P1–P8 registrados como ADR por archivo; corpus des-corrompido; `docs_sync` recursivo; ratchets nuevos sembrados | que la documentación pueda perder | — |
 | 1 | M01 | tabla de política en core; arnés único | P1 |
 | 2 | M02 M03 M04 M05 | todo lo que deriva | P2, fase 1 |
@@ -697,9 +720,11 @@ apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
 | 5 | M15 M16 M17 M18 M19 | la misma palabra en cada superficie | P5, P6, fase 2 |
 | 6 | M20 M21 M22 | que el ratchet signifique lo que dice | P7, fase 2 |
 | 7 | M23 M24 | el primer tag | acompaña 2–6 |
+| M26 | W-11 ahora; el resto reparte en 2-01…2-04, 3-01, 3-02, 3-05, 4-02, 4-03, 5-05, 5-06, 6-04 | que un nodo que pregunta corra de punta a punta en toda superficie | P10 |
 
 Orden estricto W → 0 → 1 → 2 → 3; 4, 5 y 6 dependen de 2 y pueden ir en
-paralelo entre sí; 7 acompaña. El primer tag se publica después de la 7.
+paralelo entre sí; 7 acompaña. M26 no es una fase: su prerequisito es W-11 y
+cada parte restante entra en el ítem de su mecanismo. El primer tag se publica después de la 7.
 
 ---
 
@@ -765,16 +790,17 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 
 | ítem | qué | depende de | estado |
 |---|---|---|---|
-| W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `prepare_loop` por `open_run_tools` | P8 | cerrado(a45e19a) |
+| W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `run_tools_allowed` consumida por `open_run_tools` y `prepare_loop` | P8 | cerrado(a45e19a) |
 | W-02 | `ArtifactName::parse` después de renderizar | P8 | cerrado(aa437f7) |
-| W-03 | `target_digest` siempre hash | P8 | cerrado(56ad092) |
-| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | cerrado(6bf7baa) |
-| W-05 | `git.rs` por `spawn_governed` | P8 | levantado(§11 L-03) |
+| W-03 | `target_digest` siempre `ContentHash::abbreviated()` | P8 | cerrado(56ad092) |
+| W-04 | blackboard por `FindingLedger`; una regla de dedup, la que colapsa espacios y mayúsculas | P8 | cerrado(6bf7baa) |
+| W-05 | `git.rs`: las tres funciones async por `spawn_governed` | P8 | pendiente |
 | W-06 | `parallel_exec` por `resume_policies` | P8 | cerrado(1dd753b) |
 | W-07 | `MockSession` con handle y `Drop` | P8 | cerrado(48b93e3) |
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | cerrado(99f148a) |
 | W-09 | renombrar la propiedad tautológica a lo que prueba | — | cerrado(afaf173) |
-| W-10 | `referencia-schema.md` parsea; `docs_sync` recorre `docs/design/` | — | levantado(§11 L-04) |
+| W-10 | `referencia-schema.md` parsea (números planos, CO-14) | — | pendiente |
+| W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, la consola lee `interactive`, el corte `grill`/`brief` | P10 | pendiente |
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | cerrado(ebd4d16) |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002) | — | pendiente |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
@@ -782,36 +808,40 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | pendiente |
 | 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
 | 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | pendiente |
-| 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico | P2, 1-01 | pendiente |
-| 2-02 | constructores M03 en cada dominio; todos los emisores los usan | 2-01 | pendiente |
-| 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados | 2-01 | pendiente |
+| 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico (37 kinds con `questions_asked`) | P2, 1-01 | pendiente |
+| 2-02 | constructores M03 en cada dominio; todos los emisores los usan; `QuestionsAsked::new` con `NonEmpty`; `finish_node` absorbe los tres `node_finished` de `gate_exec` (M26) | 2-01 | pendiente |
+| 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados; `members_of` en el host del blackboard (M24 I-09); `GateLedger::rounds`, `pending_questions`, `answered_unfinished` (M26) | 2-01 | pendiente |
 | 2-04 | `derive` por dominio, `apply` exhaustivo, `Audit` por nombre; `phase.rs` por `RunLedger` | 2-03 | pendiente |
-| 3-01 | `PauseReason`, `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | pendiente |
-| 3-02 | `decide` en cinco; `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | pendiente |
-| 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman | 2-02 | pendiente |
+| 3-01 | `PauseReason` (con `Questions` y `AnswersRefused`, M26), `Policy`, `RerouteCause`; `Capability::as_str`; `RunError::Git(#[source])` | 2-02 | pendiente |
+| 3-02 | `decide` en seis (con `answered_step`, M26); `GateStep::Waiting`; `RunFinished::closed` único; `current_escalation` sin doble derive | 2-03 | pendiente |
+| 3-03 | `SessionPlan` + `open_session`; `attempt.rs` y `prompt_exec` lo llaman; el brief de tarea lleva `notes` (M24 I-03) | 2-02 | pendiente |
 | 3-04 | `POLICY` + `require()`; `check(…, &Adapters)`; twin test | 1-01, 3-03 | pendiente |
-| 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding` | 2-02 | pendiente |
+| 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding`; `build_manifest` async y la pareja sincrónica de `git.rs` por `spawn_governed`; `cancel` compara el arranque del pid con `started_at` (M24 I-06) | 2-02 | pendiente |
 | 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | pendiente |
-| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (`cerco.md` §6) | 1-01 | pendiente |
+| 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (`cerco.md` §6); cada adapter lee `adapter_settings` (M24 I-10) | 1-01 | pendiente |
 | 3-08 | el cerco (`cerco.md`): `core::fence`, `FenceLevel`, `Coverage`, `FenceHook`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | pendiente |
-| 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime` | 2-01 | pendiente |
-| 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers`, `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | pendiente |
+| 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime`; `pack add` rechaza un rango que excluye la versión (M24 I-04) | 2-01 | pendiente |
+| 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers` (con `declarable`, `AnswersFile::against`, el montaje `kind: answers` y sus dos reglas de `check`, M26), `RecordedOrigin`, `Location`, `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01 | pendiente |
 | 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | pendiente |
 | 4-04 | `PersistedDoc<T>` en manifest, lock, engine.json, lock de aislamiento, receipt | 4-01 | pendiente |
 | 5-01 | `Context::open_run`; `collect_history` único | 4-04 | pendiente |
-| 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::` | 5-01 | pendiente |
+| 5-02 | `RunWord`; `Outcome` de `RunWord`; `RunDocument`; receipt versionado; `width::`; `stats` publica entregas y findings (M24 I-05) | 5-01 | pendiente |
 | 5-03 | `CliError` en MCP/promote/test; `ask::Console` en init/new; `Diagnostics` en `Console::open` | 5-01 | pendiente |
-| 5-04 | `test`/`promote` por `runnable`+`drive`; `mcp::resolve_gate` único; `graph` por `ctx.storage()`; `Env` una vez | 5-01 | pendiente |
-| 5-05 | crónica: `view/chronicle.rs`, `surface/chronicle.rs`, `Lines::moment`, `Region::record`, borrados, `Layout::advice`, tests | 2-01, P6 | pendiente |
+| 5-04 | `test`/`promote` por `runnable`+`drive`; `mcp::resolve_gate` único; `graph` por `ctx.storage()`; `Env` una vez; un script sin reclamar falla el caso y `expect: promoted` (M24 I-11, I-13) | 5-01 | pendiente |
+| 5-05 | crónica: `view/chronicle.rs`, `surface/chronicle.rs`, `Lines::moment`, `Region::record`, borrados, `Layout::advice`, tests; los hijos bajo su grupo (M24 I-08); `Gates::{Asked, Answered}` y el modificador de `NodeDisplay` (M26) | 2-01, P6 | pendiente |
+| 5-06 | `answer_questions` por MCP: la segunda superficie de `engine::answers::record`, como `resolve_gate` (M26, M24 I-01) | 5-04, W-11 | pendiente |
 | 6-01 | `Log` builder; 10 `fn event()` borrados; `SourceLog` con clock | 1-03 | pendiente |
 | 6-02 | un `Bench` con las cinco capacidades; 46 `execute_run` y 8 sombra migrados; `common/mod.rs` a literales | 6-01 | pendiente |
-| 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async` | 6-01 | pendiente |
-| 6-04 | cuatro propiedades sobre generador completo | 2-01 | pendiente |
+| 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async`; los armados a mano por `Checkout` (M24 I-12) | 6-01 | pendiente |
+| 6-04 | cuatro propiedades sobre generador completo; `an_ask_answered_after_any_crash_point_derives_one_finished_node` (M26) | 2-01 | pendiente |
 | 6-05 | ratchet: 11 contadores nuevos sobre `src`+`tests`; `[workspace.lints]`; CI `workflow_call`, macOS, glob de packs, timeouts, `--release`; CONTRIBUTING | — | pendiente |
-| 7-01 | `docs_sync` ata los conjuntos cerrados (§2 M23) | 2-01, 3-04 | pendiente |
+| 7-01 | `docs_sync` recorre `docs/design/` y ata los conjuntos cerrados (§2 M23); `the_reference_config_parses_and_its_workflows_check` | 2-01, 3-04 | pendiente |
 | 7-02 | ADR por archivo, índice generado, recíprocos | 0-01 | pendiente |
 | 7-03 | correcciones de §9 | 7-01 | pendiente |
 | 7-04 | glosario; deuda: `yunta replay/diff` (rfc-0003 §2) y la verificación en vivo (status.md) entran como A-16/A-17 con ids estables; `spec-tasks.md` | 7-03 | pendiente |
+| 7-05 | baseline eager en `create_run` (M24, D167) con su test | 3-05 | pendiente |
+| 7-06 | orden de criterios aprendido del log desde `TaskLedger` (M24, D167) con su test | 2-03 | pendiente |
+| 7-07 | el inventario de M24: lo que se registra gana su `A-NN` y su nota Revisada (I-02); lo que se construye cierra en el ítem de su mecanismo | 7-04 | pendiente |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
 observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados
@@ -824,334 +854,24 @@ correcciones de docs (`8582c01`, `80abe93`).
 ## 11. Levantamientos
 
 Un agente que se detiene por la regla 2 de §0 escribe acá, con fecha, ítem,
-evidencia (archivo:línea), alternativas y recomendación. El humano responde en
-el mismo lugar y, si corresponde, registra un ADR.
+evidencia (archivo:línea), alternativas y recomendación, y espera. El humano
+responde en el mismo lugar. Lo decidido se escribe donde rige —la fila de §4 o
+§10, el mecanismo de `mecanismos.md`, la regla de §0, el ADR— y la entrada
+queda reducida a una fila de esta tabla: qué se levantó, qué se decidió y dónde
+vive ahora. Un levantamiento no es un plan aparte: abierto, bloquea su ítem;
+resuelto, ya está en el plan. La evidencia y las alternativas completas de cada
+uno están en el commit que lo escribió.
 
-### L-01 · 2026-09-14 · W-01 · `prepare_loop` no puede llamar `open_run_tools` tal cual
-
-**Evidencia.** `open_run_tools` (`engine/src/run/runner_resolve.rs`) hace dos
-cosas en una: decide si el nodo puede correr sin run tools —y refusa cuando
-declara un artifact interpretado o está en un grupo `blackboard`— y **abre el
-listener de esa sesión**. Para un nodo `prompt` eso es correcto: la sesión es
-una. Para un `loop` no: cada intento abre el suyo
-(`engine/src/task_cycle/attempt.rs:205-240`, "A fresh listener + credential per
-attempt"), y `run_tools/mod.rs:1-6` fija el invariante: "one loopback HTTP
-listener **per node session**, never per run".
-
-Implementado al pie de la letra, el ítem quedó con dos defectos: un listener
-por nodo `loop` que ninguna sesión usaba (abierto y cerrado en el acto), y un
-fallo transitorio de bind en `prepare_loop` dejaba `setup.run_tools = None`
-para **todos** los intentos del nodo, contra la política por intento que
-`attempt.rs` documenta.
-
-**Alternativas.**
-
-1. Llamar `open_run_tools` solo por su refusal y seguir derivando el acceso de
-   la capacidad. Cumple la letra; conserva el listener-sonda inútil.
-2. Partir la decisión del bind: una función que responde si el nodo puede
-   mountar las tools, consumida por `open_run_tools` y por `prepare_loop`.
-   Cumple la intención del ítem (que rija `TypedArtifactNeedsRunTools`) sin
-   efecto de lado; introduce un nombre que el plan no fija.
-3. Detenerse sin implementar W-01.
-
-**Lo que hice, y por qué.** La 2, con la función `run_tools_allowed` en
-`runner_resolve.rs`: la 1 deja en el código un recurso que se abre para nada, y
-la 3 dejaba en `main` la regresión que el propio ítem introdujo. El nombre
-`run_tools_allowed` es lo único que el plan no fija; el resto del ítem quedó
-como está escrito.
-
-**Pendiente de decisión.** Si el nombre o el corte no son los que el plan
-quiere, se revisan en un ADR y el ítem se ajusta.
-
-### L-03 · 2026-09-14 · W-05 · gobernar los dos `git` sincrónicos vuelve `build_manifest` async
-
-**Evidencia.** La fila de W-05 pide que "`git.rs` construye `GovernedCommand` y
-llama `spawn_governed`" y que "los dos `std::process::Command` pasan a async".
-Esos dos son `git::output_blocking` y `git::success_blocking`
-(`engine/src/git.rs:157,167`). `output_blocking` lo llama `manifest.rs:305`
-(`git_line`), que llama `pack_provenance` (`manifest.rs:139`), que llama
-`build_manifest` (`manifest.rs:73`), **sincrónica y pública**: 102 llamadas en
-33 archivos (94 en `engine`, 4 en `cli`, 3 en `testkit`, 1 en `core`).
-Volverla async arrastra a todos, casi todos tests, y a `yunta_testkit::Bench`.
-`spawn_governed` es async (`engine/src/process.rs:198`), así que no hay forma
-de gobernar desde una función sincrónica.
-
-Los otros dos llamadores de la pareja sincrónica son `cli/commands/init.rs:89,97`
-y `cli/commands/test.rs:418`, fuera de todo run: no hay registro ni token de
-cancelación que pasarles.
-
-Esto es "un alcance mayor del previsto" (§0.2): el ítem se describe como "un
-subconjunto estricto de su mecanismo —código que la fase igual escribiría, en
-el mismo lugar—" (§4), y esto es una migración async de la API pública del
-engine.
-
-**Alternativas.**
-
-1. Volver `build_manifest` async y migrar las 102 llamadas. Cumple la letra;
-   es un ítem propio, no un subconjunto de M10.
-2. Gobernar sólo las tres funciones async (`output_bytes`, `output`,
-   `success`) — las que un run llama mientras puede ser cancelado — y dejar la
-   pareja sincrónica como está, porque corre al construir el manifest y en
-   comandos del CLI, donde no hay run que cancelar. Cierra el bug que la fila
-   describe y hace pasar el test que nombra; contradice la cláusula "los dos
-   `std::process::Command` pasan a async".
-3. Dar grupo de proceso a la pareja sincrónica sin gobernarla
-   (`process_group(0)` sin registro ni cancelación). Mitad de camino, y el
-   plan no lo dice.
-
-**Recomendación.** La 2, y que la cláusula del plan diga "las tres funciones
-que un run llama"; la migración async de `build_manifest` entra como ítem
-propio de la fase que implementa M10 entero, con su propio tablero.
-
-**Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El ítem
-queda `levantado(§11)` hasta que el humano decida.
-
-### L-04 · 2026-09-14 · W-10 · el recorrido recursivo choca con el ejemplo de composición
-
-**Evidencia.** Con `every_yaml_example_in_the_docs_is_one_the_binary_accepts`
-recorriendo `docs/design/` aparecen dos fallas. La primera es CO-14 y §9 la
-nombra: `referencia-schema.md:85,89,90` escribe `2_000_000`, `50_000_000` y
-`32_000`, y el parser pide `u64` (`limits.max_tokens_per_run: invalid type:
-string "2_000_000"`). Se corrige escribiendo los números planos.
-
-La segunda no está prevista: el bloque `name: release-cycle`
-(`referencia-schema.md:229`) es una composición cuyos nodos declaran
-`use: design-review`, `use: build-feature` y `use: qa-review`, y `yunta check`
-la rechaza con "cannot be resolved — no workflow `design-review`". De los tres
-nombres, sólo `build-feature` está declarado en el corpus
-(`referencia-schema.md:103`); los otros dos son ilustrativos y no existen en
-ningún documento.
-
-El plan da a ese archivo un test propio en M23,
-`the_reference_config_parses_and_its_workflows_check` ("`referencia-schema.md`
-bloques", `mecanismos.md#m23`), que es donde vive el proyecto alrededor del
-cual esos bloques se verifican. W-10 pide el recorrido recursivo antes, y el
-recorrido genérico arrastra esos bloques a un proyecto que no los sostiene.
-
-**Alternativas.**
-
-1. Sembrar en el proyecto del test los workflows que los propios documentos
-   declaran, y stubs para los que no. Los stubs hacen pasar el ejemplo contra
-   hijos falsos: el test diría que la composición verifica cuando lo que
-   verificó es otra cosa.
-2. Declarar `design-review` y `qa-review` en `referencia-schema.md`. Es un
-   cambio de documento que §9 no enumera, y agranda un documento de
-   referencia con dos workflows que sólo existen para el test.
-3. Que el recorrido recursivo trate un workflow cuyos `use:` no resuelven
-   como "parsea" en vez de "verifica". Es una regla nueva de clasificación
-   que el plan no da.
-4. Mover el recorrido recursivo al ítem de M23 que ya tiene el test propio de
-   `referencia-schema.md`, y dejar en W-10 sólo la corrección de los números.
-
-**Recomendación.** La 4: la corrección de CO-14 es independiente y se cierra
-sola; el recorrido recursivo entra con `the_reference_config_parses_and_its_workflows_check`,
-que es el test que el plan ya le asigna a ese archivo.
-
-**Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El
-ítem queda `levantado(§11)`; la corrección de los números no se commiteó.
-
-### L-05 · 2026-09-14 · W-03 · truncar en el productor deja a M11 sin su `ContentHash`
-
-**Evidencia.** La fila de W-03 pide que ambos parsers produzcan
-`sha256_hex(input)[..12]`. M11 fija el tipo del campo:
-`pub struct ToolTarget { pub display: Option<String>, pub digest: ContentHash }`
-(`mecanismos.md#m11`). Un `ContentHash` es el hash entero
-(`core/src/hash.rs`), y truncar en el productor es irreversible: cuando M11
-llegue, esos eventos no pueden dar el hash que el tipo declara.
-
-Además W-03 deja sin identificación a un ítem que sólo se distinguía por el
-campo hasheado: una llamada MCP de codex viajaba como `server:tool`, que no es
-contenido de nadie, y ahora viaja como digest bajo el nombre genérico
-`mcp_tool_call`. M11 lo resuelve con `display`, que W-03 no tiene.
-
-**Lo que hice.** El valor sale de `ContentHash::abbreviated()`, que es el
-único lugar del workspace donde vive "doce dígitos" y ya existía para esto
-(`core/src/hash.rs`); el digest queda `sha256:` más doce dígitos en vez de
-doce dígitos pelados. Es la misma abreviatura que la fila pide, con el
-algoritmo adelante y sin una tercera copia del umbral.
-
-**Alternativas para la contradicción de fondo.** (a) que W-03 guarde el
-`ContentHash` entero y la abreviatura sea cosa del borde que lo muestra —
-entonces la fila dice `[..12]` de más; (b) que M11 acepte un digest abreviado
-y `ToolTarget.digest` no sea `ContentHash`; (c) dejar los dos y que M11
-reinterprete lo viejo, que el log no permite.
-
-**Recomendación.** La (a): el log guarda el hash entero, y doce dígitos son
-cómo se lee, no cómo se guarda. Es lo que `ContentHash::abbreviated()` ya
-dice de sí mismo ("Prose, not an identifier — what compares, and what a log
-records, is the whole value").
-
-### L-06 · 2026-09-14 · W-04 · cuál de las dos reglas de dedup sobrevive
-
-**Evidencia.** La fila de W-04 dice que `findings::inherited_findings` llame a
-`replay::dedup_findings`, "una regla", y no dice cuál de las dos redacciones
-queda. No eran la misma: `dedup_findings` normalizaba con
-`title.trim().to_lowercase()` y `inherited_findings` con
-`split_whitespace().join(" ").to_lowercase()`, que además colapsa los espacios
-internos. Con la primera, "Scope  expansion DENIED" y "scope expansion denied"
-son dos findings; con la segunda, uno.
-
-Hacer que `inherited_findings` llamara a `dedup_findings` tal cual habría
-debilitado la herencia, y un test del propio módulo depende del caso de los
-dos espacios (`engine/src/findings.rs`, `a_withdrawal_frees_the_dedup_key_…`).
-
-**Lo que hice.** `dedup_findings` adoptó la normalización más fuerte y
-`inherited_findings` la consume: una regla, y ninguna lectura se debilita.
-Pero `dedup_findings` es con lo que el frame del run cuenta findings
-(`engine/src/view/mod.rs`), así que un run cuyos reviewers escriben el mismo
-título con espacios distintos ahora cuenta uno donde antes contaba dos.
-
-**Alternativas.** (a) la más fuerte para las dos lecturas, que es lo que está;
-(b) la más débil para las dos, que debilita la herencia y rompe un test;
-(c) dos reglas declaradas como dos, que es lo que la fila vino a cerrar.
-
-**Recomendación.** La (a), y que la fila lo diga: "una regla, la que colapsa
-espacios y mayúsculas". Queda pendiente además una tercera lectura del mismo
-conteo que el ítem no unificó: `provenance.yaml` cuenta los findings vigentes
-sin deduplicar (`engine/src/run/distill.rs`), mientras el frame los cuenta
-deduplicados — dos números para la misma pregunta en dos superficies.
-
-### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
-
-**Evidencia.** §0.9 pide que el ítem cambie su estado a `cerrado(hash)` "en el
-mismo commit que lo cierra, con el hash del commit". Un commit no puede
-contener su propio hash: cualquier edición del tablero lo cambia.
-
-**Alternativas.** (a) dos commits en el mismo PR —el del ítem y el del tablero
-con su hash—; (b) `cerrado` sin hash en el mismo commit, y el hash se lee del
-historial; (c) el hash del commit anterior, que no es el que cierra.
-
-**Lo que hice.** La (a): cada ítem cerrado va en su commit y el tablero lo
-sigue en otro, citando el hash verdadero. Es la única forma en que el hash
-escrito es el del commit que cierra.
-
-**Pendiente de decisión.** Reescribir §0.9 con la forma elegida.
-
-### L-07 · 2026-09-14 · §4 · un nodo con preguntas contestadas cierra debiendo sus artifacts
-
-**Evidencia.** El pack de referencia no corre de punta a punta. En `fragua`,
-`grill` declara `artifacts: produces: [questions, brief.md]` y su prompt dice
-"Once answered, write the brief"
-(`packs/fragua/.yunta/workflows/build-feature.yaml`). El run muere un nodo
-después, citando un artifact que otro nodo debía:
-
-```
-run 01M2EPK3DAQE9X4QJ1GV5F76Y8: paused — node `plan` failed: context
-`artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by
-node `grill`) was never produced — this run's log holds no such artifact
-```
-
-El engine sí lo había visto. El log de `grill`, en orden:
-
-| seq | evento |
-|---|---|
-| 7 | `artifact_accepted { Interpreted { kind: Questions } }` |
-| 9 | `node_failed { Artifacts [ File { path: ".../grill/brief.md", Missing } ] }` |
-| 10 | `node_started { attempt: 2 }` |
-| 12 | `questions_answered` |
-| 13 | `node_finished { outcome: "questions answered" }` |
-
-Dos mecanismos convierten ese `node_failed` verdadero en un `finished` falso:
-
-1. `engine/src/replay.rs:242` deriva `Waiting` de **cualquier** `node_failed`
-   mientras el nodo tenga preguntas sin contestar. Su propio comentario declara
-   la intención —"a node that failed *because its questions are unanswered*"—
-   pero la condición escrita es sólo que el log tenga un artifact `questions`
-   aceptado (`replay.rs:185-196`). El fallo por `brief.md` faltante desaparece
-   del estado derivado.
-2. `engine/src/run/questions_exec.rs:106-167` cierra el nodo por su cuenta:
-   emite `node_started`, acepta las respuestas y emite `node_finished` sin pasar
-   por `node_close::close_node`. No corren los hooks `after`, no se audita el
-   `scope`, no se llama `close_artifacts` y no se registra artifact alguno. El
-   nodo termina debiendo todo lo que declaró menos `questions`.
-
-Reproducción, que da ese terminal palabra por palabra: un workflow con `grill`
-(`produces: [questions, brief.md]`) y `plan`
-(`context: [{ artifact: { node: grill, name: brief.md } }]`), y un fixture cuya
-sesión de `grill` sólo hace `yunta_submit_questions`. Respondiendo con
-`ScriptedAnswers`, `state.nodes["grill"]` queda
-`Finished { outcome: "questions answered" }`.
-
-**Qué no lo arregla.** Ningún ítem de §4 ni mecanismo M01–M25 toca esto. El
-plan nombra `questions_exec.rs` sólo por líneas —el constructor de
-`NodeStarted` (M03), el `attempt` desde `NodeLedger` (M04), el span (M13), los
-ids tipados (M15)— y ninguna de esas filas cambia qué verifica la ronda de
-preguntas ni qué deriva el replay de un `node_failed`. Es un defecto de
-comportamiento del mismo género que W-01…W-10, sin fila propia.
-
-**El tercer problema, que es de diseño.** Corregidos (1) y (2), el run pararía
-en `grill` diciendo que falta `brief.md`: correcto, y todavía inútil. Al agente
-se le pidió escribir el brief *una vez contestadas* las preguntas, y nadie le da
-nunca las respuestas ni un turno para escribirlo. O un nodo con preguntas debe
-una segunda sesión, o un nodo no puede declarar preguntas y además un artifact
-que sólo puede escribir después de que las contesten.
-
-**Alternativas.**
-
-1. **Cerrar la ronda por `close_node`.** `execute_ask` deja de emitir
-   `node_finished` y cierra como todos los demás kinds; la derivación de
-   `Waiting` exige que el `node_failed` sea el de preguntas pendientes —un
-   `Failure` tipado, no la presencia del artifact. Arregla (1) y (2) y deja el
-   (3) a la vista: `fragua` falla en `grill` con su propio diagnóstico en vez de
-   en `plan` con uno prestado. Exige además corregir el workflow del pack.
-2. **Lo anterior más una segunda sesión.** Contestadas las preguntas, el nodo
-   vuelve a despachar con las respuestas en su contexto y cierra por
-   `close_node` con lo que esa sesión produjo. Es lo que el prompt de `fragua`
-   supone, y hace que un nodo interactivo signifique "preguntá, después
-   trabajá". Cuesta un mecanismo que el plan no nombra: qué contexto lleva esa
-   segunda sesión, qué `attempt` es, qué pasa si vuelve a preguntar.
-3. **Prohibirlo al parsear.** Un nodo que declara `questions` no declara ningún
-   otro artifact, y `yunta check` lo rechaza nombrando los dos. Es la lectura
-   "parsear es validar", no toca el engine, y obliga a partir `grill` en dos
-   nodos. Invalida workflows que hoy parsean.
-4. **Dejarlo.** No: es el único camino por el que el pack de referencia llega a
-   `implement`, y hoy no llega.
-
-**Recomendación.** La 1 como ítem W del tablero: es un bug de comportamiento
-con fix acotado, test en rojo primero y el mismo género que los otros ocho. El
-(3) del diagnóstico va aparte, como decisión P10 con su ADR: si un nodo con
-preguntas debe una segunda sesión (alternativa 2) o si declarar preguntas
-excluye declarar otra cosa (alternativa 3). Lo primero devuelve el diagnóstico
-verdadero; lo segundo decide qué significa `interactive: true`, y eso no lo fija
-ningún documento del repo.
-
-### L-08 · 2026-09-14 · §0.15 · D26 llama "append-only" al blackboard que W-04 dejó plegado
-
-**Evidencia.** El Contrato afirmaba dos cosas que el código no hace desde W-04
-(`cerrado(6bf7baa)`): §6.4 decía que el blackboard "es append-only" y §5.9 que
-el join "consolida todos los posteos del grupo". Hoy
-`engine/src/run_tools/blackboard.rs` publica el pliegue vigente:
-`consolidate_blackboard` (:29) y `get_blackboard` (:70) leen
-`FindingLedger::of(events).effective()`, o sea el contenido de la última
-versión de cada hallazgo que su autor sostiene, sin los retirados. El propio
-§6.4 se contradecía tres líneas antes, describiendo `yunta_withdraw_finding`
-como "queda fuera de todo conteo, archivo y vista". Las dos cláusulas del
-Contrato quedaron corregidas en este commit.
-
-`docs/design/adrs.md:32` (D26) repite la palabra: "blackboard append-only
-mediado por el engine vía MCP por-run". Un ADR no se reescribe: registra la
-decisión como se tomó, y el repo la revisa con el marcador
-`*(Revisada por DN: …)*`. Ninguna decisión registrada revisa ésta. `grep` sobre
-`adrs.md` y `adr/` no devuelve ADR alguno que fije el pliegue vigente del
-blackboard; la fila de W-04 en §4 tampoco cita uno, y §9 no enumera D26 entre
-las correcciones a `adrs.md`.
-
-**La ambigüedad.** "Append-only" tiene dos lecturas y D26 no dice cuál. Como
-propiedad del **canal** sigue siendo verdad: cada posteo, actualización y retiro
-es un append al log, nada se muta. Como propiedad de la **vista** es falsa desde
-W-04. El Contrato usaba la segunda; D26 no se pronuncia.
-
-**Alternativas.** (a) D26 gana `*(Revisada por Dn: la lectura del blackboard es
-el pliegue vigente, no el historial)*` con un ADR nuevo que registre lo que W-04
-implementó; (b) D26 se lee como propiedad del canal y no se toca, porque el log
-sigue siendo append-only y la decisión nunca habló de la vista; (c) se corrige
-la palabra dentro de D26, que es reescribir una decisión registrada.
-
-**Recomendación.** La (b), y que la distinción quede dicha donde se lee: el
-Contrato ya la dice en presente después de este commit. La (a) sólo si el pliegue
-vigente merece decisión propia, que es defendible porque cambia qué recibe un
-nodo consolidador. La (c) no: §0.8 permite el pasado en un ADR justamente para
-que el registro no se reescriba.
+| id | ítem | qué se levantó | decisión | dónde vive ahora |
+|---|---|---|---|---|
+| L-01 | W-01 | `open_run_tools` decide y además abre el listener; llamarla desde `prepare_loop` abría uno por nodo `loop` y un bind fallido dejaba sin tools a todos los intentos | partir la decisión del bind: `run_tools_allowed(ctx, node, adapter, id) -> Result<bool, RunToolsSetupError>` en `runner_resolve.rs`, consumida por `open_run_tools` y `prepare_loop` | filas W-01 (§4, §10); M08 |
+| L-02 | §0.9 | un commit no puede llevar su propio hash | el ítem va en su commit y el tablero lo sigue en otro del mismo PR, con el hash verdadero | §0.9 |
+| L-03 | W-05 | gobernar `output_blocking`/`success_blocking` vuelve `build_manifest` async: 102 llamadas en 33 archivos, un alcance mayor que "subconjunto estricto" | W-05 gobierna las tres funciones async que un run llama; la pareja sincrónica y `build_manifest` async son de 3-05 | filas W-05 y 3-05 (§4, §10); M10 |
+| L-04 | W-10 | el recorrido recursivo de `docs_sync` arrastra la composición `release-cycle` de `referencia-schema.md`, cuyos `use:` no existen en ningún documento | W-10 corrige sólo los números de CO-14; el recorrido recursivo entra en 7-01 con `the_reference_config_parses_and_its_workflows_check`, que sostiene esos bloques | filas W-10 y 7-01 (§4, §10); M23 |
+| L-05 | W-03 | `sha256_hex(input)[..12]` trunca en el productor y M11 fija `digest: ContentHash` entero | el log guarda el hash entero y doce dígitos son cómo se lee: W-03 escribe `ContentHash::abbreviated()` como paso intermedio y M11 lo reemplaza | fila W-03 (§4, §10); M11 |
+| L-06 | W-04 | dos normalizaciones de dedup, y la fila no decía cuál sobrevive | la que colapsa espacios y mayúsculas, en `dedup_findings`, para las dos lecturas; `provenance.yaml` pasa a contar desde el mismo pliegue | fila W-04 (§4, §10); M04 |
+| L-07 | §4 | el nodo con preguntas contestadas cierra debiendo `brief.md`: la derivación borra el `node_failed` que nombra el faltante, la ronda de respuestas cierra sin `close_node`, y el prompt de `grill` supone un turno después de las respuestas que D86 no da | un nodo que pregunta, pregunta: M26, con W-11 como el subconjunto que hace correr el pack de referencia hoy, y D173 que revisa D86 | M26 (`mecanismos.md#m26`); filas W-11 y las de M26 (§4, §10); P10 (§6) |
+| L-08 | §0.15 | D26 llama "append-only" al blackboard que W-04 dejó plegado; ningún ADR revisa esa palabra | como propiedad del canal sigue siendo verdad y un ADR no se reescribe: D26 queda, el Contrato dice el pliegue en presente | Contrato §5.9 y §6.4 |
 
 ---
 
@@ -1181,6 +901,7 @@ CO core, TE tests, DO docs.
 | EV-D17 | `schema_version` constante | M02 | 2 |
 | EV-D18 | tres "36" a mano | M02 M23 | 2 |
 | EV-D19 | `payloads.rs` 989 líneas | M02 | 2 |
+| EV-D20 | el log registra la respuesta y no la pregunta: `questions_answered` sin par | M26 · W-11 | W |
 | EN-D1 | git sin process group/registro/cancel | M10 · W-05 | W |
 | EN-D2 | `parallel_exec` ignora `on_interrupt` | M07 · W-06 | W |
 | EN-D3 | loop sin gate `TypedArtifactNeedsRunTools` | M08 · W-01 | W |
@@ -1207,6 +928,9 @@ CO core, TE tests, DO docs.
 | EN-D24 | `clippy.toml` apunta a lints inexistentes; deny ×5 | M22 | 6 |
 | EN-D25 | literales `distilled`/`manifest.yaml` | M13 | 4 |
 | EN-D26 | `GitError` stringificado | M06 | 3 |
+| EN-D27 | `replay` deriva `Waiting` de cualquier `node_failed` tras un artifact `questions` | M26 · W-11 | W |
+| EN-D28 | la ronda de preguntas cierra fuera de `close_node`, con `node_started` y `node_finished` propios | M26 · W-11 | W |
+| EN-D29 | un hijo de `parallel` que pregunta nunca es preguntado: `next_step` recorre sólo `workflow.nodes` | M26 · W-11 | W |
 | AR-D1 | blackboard repliega (confirmación) | M04 · W-04 | W |
 | AR-D2 | loop en modelo default, sin agente | M08 · W-01 | W |
 | AR-D3 | `SessionRequest` ×2 campo a campo | M08 | 3 |
@@ -1225,6 +949,7 @@ CO core, TE tests, DO docs.
 | AR-D16 | `location: String` | M12 | 4 |
 | AR-D17 | `content_hash` con dos significados | M12 | 4 |
 | AR-D18 | `{{runner.role}}` | M12 | 4 |
+| AR-D19 | un nodo que no preguntó nada no deja respuestas; el nodo siguiente falla al montarlas | M26 · W-11 | W |
 | CLI-D1 | sin puerta `open_run` | M15 | 5 |
 | CLI-D2 | `collect_history` saltea `Project::run_dir` | M15 | 5 |
 | CLI-D3 | `collect_history` ×2 | M15 | 5 |
@@ -1295,6 +1020,7 @@ CO core, TE tests, DO docs.
 | CO-18 | `ArtifactRefId` untagged | M12 | 4 |
 | CO-19 | `ScopeExpansionPermissions` sin export; `Answer` sin deny | M12 | 4 |
 | CO-20 | HOME/TERM ×2 | M10 | 5 |
+| CO-21 | `interactive: true` se acepta y ninguna superficie lo lee | M26 · W-11 | W |
 | TE-D1 | `copied_test_helpers 0` falso | M22 | 6 |
 | TE-D2 | 46 `execute_run` a mano | M20 | 6 |
 | TE-D3 | `stored` sin usuarios; 10 builders | M20 | 6 |
@@ -1350,3 +1076,4 @@ CO core, TE tests, DO docs.
 | DO-D42 | 21 marcadores de tiempo/plan | M23 | 0–7 |
 | DO-D43 | términos sin glosario | M23 | 7 |
 | DO-D44 | `docs/design` invisible a `docs_sync` | M23 · W-10 | W |
+| DO-D45 | pack, fixture canónico y `referencia-schema.md` declaran `[questions, brief.md]` con un prompt que espera un turno que D86 no da | M26 · W-11 | W |

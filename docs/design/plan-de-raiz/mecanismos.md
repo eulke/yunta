@@ -1,4 +1,4 @@
-# Los veinticuatro mecanismos, uno por uno
+# Los veintiséis mecanismos, uno por uno
 
 Para cada mecanismo: qué vicio vuelve irrepresentable, las firmas exactas, los
 archivos que toca (nuevo · modifica · borra), los tests que lo sostienen y los
@@ -153,6 +153,7 @@ impl TaskStatusChangedPayload { pub fn to(task: TaskId, status: TaskStatus, caus
 pub struct Escalation(GateWaitingPayload);   // o GateWaitingPayload::new — el nombre público es `Escalation::new`
 impl Escalation { pub fn new(summary: impl Into<String>, evidence: Evidence, options: NonEmpty<GateOption>) -> Result<Self, EscalationError>; }
 pub enum EscalationError { SummaryRepeatsEvidence }
+impl QuestionsAskedPayload { pub fn new(questions_hash: ContentHash, questions: NonEmpty<QuestionId>, tokens_used: TokenUsage) -> Self; }   // M26
 impl QuestionsAnsweredPayload { pub fn via(hash: ContentHash, channel: Channel, responder: Option<Responder>) -> Self; }
 // children/payloads.rs
 impl ChildRunFinishedPayload { pub fn new(run: RunId, terminal: TerminalState, tokens: TokenUsage) -> Self; }
@@ -164,7 +165,7 @@ impl ArtifactAcceptedPayload { pub fn new(artifact: ArtifactId, hash: ContentHas
 `NonEmpty<T>` es un newtype en `core/src/nonempty.rs` con `NonEmpty::new(Vec<T>) -> Option<Self>` y `From<(T, Vec<T>)>`.
 
 **Archivos.**
-- modifica: cada `<dominio>/payloads.rs`; los emisores listados en auditoría 01 §2 pasan por el constructor: `run/escalation.rs:41,82`, `run/budget.rs:72,102`, `run/gate_exec.rs:117,544`, `loop_exec/escalate.rs:191` (Escalation); `task_cycle/attempt.rs:225`, `task_cycle/session.rs:116`, `loop_exec/mod.rs:272`, `runner_resolve.rs:259`, `prompt_exec.rs:82,158,181` (Degradation — en M08/M09 estos sitios se reducen a `open_session`); `node_exec.rs:75`, `questions_exec.rs:118`, `gate_exec.rs:514` (NodeStarted); `node_close.rs:184`, `questions_exec.rs:160`, `gate_exec.rs:188,490,570` (NodeFinished); `steps.rs:146,212`, `gate_exec.rs:475`, `schedule.rs:435,442` (NodeRerouted con `RerouteCause`); `escalate.rs:93,274`, `gate_exec.rs:228`, `node_artifacts.rs:317` (por `engine_finding`); `steps.rs:43-54,116-127,276-287` (RunFinished::closed); `workflow_exec/mod.rs:554,589,649` (ChildRunFinished::new); `tasks/mod.rs:168`, `integrate.rs:108,151`, `escalate.rs:123`, `dispatch.rs:120` (TaskStatusChanged::to/done — `dispatch.rs:104-121` deja de escanear el log: el `caused_by` lo da `TaskLedger`).
+- modifica: cada `<dominio>/payloads.rs`; los emisores listados en auditoría 01 §2 pasan por el constructor: `run/escalation.rs:41,82`, `run/budget.rs:72,102`, `run/gate_exec.rs:117,544`, `loop_exec/escalate.rs:191` (Escalation); `task_cycle/attempt.rs:225`, `task_cycle/session.rs:116`, `loop_exec/mod.rs:272`, `runner_resolve.rs:259`, `prompt_exec.rs:82,158,181` (Degradation — en M08/M09 estos sitios se reducen a `open_session`); `node_exec.rs:75`, `questions_exec.rs:118`, `gate_exec.rs:514` (NodeStarted); `node_close.rs:184`, `gate_exec.rs:188,490,570` (NodeFinished: los tres pasan por `node_close::finish_node`, único emisor desde W-11 — `questions_exec.rs` ya no lo emite, M26); `steps.rs:146,212`, `gate_exec.rs:475`, `schedule.rs:435,442` (NodeRerouted con `RerouteCause`); `escalate.rs:93,274`, `gate_exec.rs:228`, `node_artifacts.rs:317` (por `engine_finding`); `steps.rs:43-54,116-127,276-287` (RunFinished::closed); `workflow_exec/mod.rs:554,589,649` (ChildRunFinished::new); `tasks/mod.rs:168`, `integrate.rs:108,151`, `escalate.rs:123`, `dispatch.rs:120` (TaskStatusChanged::to/done — `dispatch.rs:104-121` deja de escanear el log: el `caused_by` lo da `TaskLedger`).
 - borra: `exec.rs:34-39` `run_paused()` helper (reemplazado por `RunPausedPayload::new`).
 
 **Tests.** `an_escalation_with_no_options_cannot_be_built`, `an_escalation_whose_summary_repeats_a_fact_is_refused` (core/tests/events.rs); `a_done_task_carries_its_commit_and_nothing_else_does` (core/tests/events.rs); `every_engine_authored_finding_goes_through_engine_finding` (engine/tests/degradation.rs — recorre el log de un run que dispara los 4 sitios y asserta el esquema de id de `engine_finding`); `gate_exec` tests existentes sin cambio de aserción.
@@ -188,8 +189,8 @@ pub struct NodeRecord { attempts: u32, state: NodeState, open_since: Option<(Seq
 pub struct SessionLedger { /* sesiones por (node, attempt) */ }
 pub struct DegradationLedger { pub all: Vec<Degradation> }
 pub struct TaskLedger { per_task: BTreeMap<TaskId, TaskRecord> }   // status, owner node, registered_seq, identity (criteria+scope hash), attempt, commit
-pub struct GateLedger { per_node: BTreeMap<NodeId, GateRecord> }   // waiting: Option<(Escalation, Seq)>, resolved: Vec<(GateResolvedPayload, Seq)>, external_ref: Option<String>, approved_sha: Option<CommitSha>
-impl GateLedger { pub fn last_external_ref(&self, node: &NodeId) -> Option<&str>; pub fn pre_seeded(&self, node: &NodeId) -> Option<&GateResolvedPayload>; }
+pub struct GateLedger { per_node: BTreeMap<NodeId, GateRecord> }   // waiting: Option<(Escalation, Seq)>, resolved: Vec<(GateResolvedPayload, Seq)>, external_ref: Option<String>, approved_sha: Option<CommitSha>, rounds: Vec<QuestionRound> (M26)
+impl GateLedger { pub fn last_external_ref(&self, node: &NodeId) -> Option<&str>; pub fn pre_seeded(&self, node: &NodeId) -> Option<&GateResolvedPayload>; pub fn pending_questions(&self, node: &NodeId) -> Option<&QuestionsAskedPayload>; pub fn answered_unfinished(&self, node: &NodeId) -> bool; }   // M26: la ronda vive acá; `NodeRecord.tokens_closed` suma `questions_asked.tokens_used`
 pub struct ChildLedger { pub links: Vec<ChildLink> }
 impl ChildLedger { pub fn open_under(&self, node: &NodeId) -> Option<&ChildLink>; }
 // cada ledger: pub fn apply(&mut self, event: &XEvent, envelope: &EventMeta) — exhaustivo (M05)
@@ -202,7 +203,9 @@ pub struct RunState { pub run: RunLedger, pub nodes: NodeLedger, pub sessions: S
 
 **Archivos.**
 - nuevo: `ledger.rs` en `run`, `node`, `session`, `tasks`, `gates`, `children`; `core/src/events/meta.rs` (`EventMeta`).
-- modifica: `engine/src/replay.rs` (`derive` = despacho + `effective` al final; `RunState` con los ledgers; `dedup_findings` única regla); `engine/src/findings.rs::inherited_findings` (llama `dedup_findings`); `engine/src/run_tools/blackboard.rs:26-52,64-86` (por `FindingLedger`); `engine/src/run/schedule.rs` (borra `NodeHistory` 196-303, `last_external_ref` 187-194; lee `state.nodes`, `state.gates`); `engine/src/run/gate_exec.rs` (borra `last_external_ref` 365-375, `last_approved_sha` 352-362, el conteo de attempt 502-518; lee `state.gates`/`state.nodes`); `engine/src/run/questions_exec.rs:106-120` (attempt de `state.nodes`); `engine/src/run/parallel_exec.rs:39-47` (ver M07); `engine/src/live.rs` (`running_since`, `last_event_age`, `open_sessions`, `recent_tool_calls`, `in_flight_tokens`, `since_last_terminal` → lecturas de `NodeLedger`; el módulo queda como fachada o desaparece); `engine/src/stats.rs::walk_attempts` (lee `NodeLedger`); `engine/src/view/mod.rs::walk_log` (borrado: `runner`, `reroute`, `reroutes`, `children`, `degraded` vienen de `RunState`); `engine/src/view/phase.rs` (lee `RunLedger`); `engine/src/receipt/mod.rs` (7 walks → lecturas de `RunState`); `engine/src/verification_effectiveness.rs` (un `derive` por log histórico, 5 pases → lecturas); `engine/src/tasks/{mod,crossing}.rs::{prior_registrations,standing_of}` (`TaskLedger`); `engine/src/run/loop_exec/dispatch.rs:19-46,104-121` (`TaskLedger`, `GrantLedger`); `engine/src/run/loop_exec/mod.rs:413` (`GrantLedger`); `engine/src/run/prompt_exec.rs:294-338::orphaned_session` (`SessionLedger`); `engine/src/run/workflow_exec/mod.rs:129-155` (`ChildLedger::open_under`); `engine/src/run/escalation.rs:259-290::pre_seeded_resolution` (`GateLedger::pre_seeded`); `engine/src/artifacts/mod.rs::RunArtifacts::of` con sus 4 callers (`gate_exec.rs:72`, `questions_exec.rs:32`, `distill.rs:159`, `promote.rs:145` leen `state.artifacts`); `engine/src/run/node_close.rs:190` (`progress.md` desde `RunState`, sin segundo replay).
+- modifica: `engine/src/replay.rs` (`derive` = despacho + `effective` al final; `RunState` con los ledgers; `dedup_findings` única regla); `engine/src/findings.rs::inherited_findings` (llama `dedup_findings`); `engine/src/run_tools/blackboard.rs:26-52,64-86` (por `FindingLedger`); `engine/src/run/schedule.rs` (borra `NodeHistory` 196-303, `last_external_ref` 187-194; lee `state.nodes`, `state.gates`); `engine/src/run/gate_exec.rs` (borra `last_external_ref` 365-375, `last_approved_sha` 352-362, el conteo de attempt 502-518; lee `state.gates`/`state.nodes`); `engine/src/run/questions_exec.rs` (la ronda no cuenta intentos: lee `state.gates.pending_questions`, M26); `engine/src/run/parallel_exec.rs:39-47` (ver M07); `engine/src/live.rs` (`running_since`, `last_event_age`, `open_sessions`, `recent_tool_calls`, `in_flight_tokens`, `since_last_terminal` → lecturas de `NodeLedger`; el módulo queda como fachada o desaparece); `engine/src/stats.rs::walk_attempts` (lee `NodeLedger`); `engine/src/view/mod.rs::walk_log` (borrado: `runner`, `reroute`, `reroutes`, `children`, `degraded` vienen de `RunState`); `engine/src/view/phase.rs` (lee `RunLedger`); `engine/src/receipt/mod.rs` (7 walks → lecturas de `RunState`); `engine/src/verification_effectiveness.rs` (un `derive` por log histórico, 5 pases → lecturas); `engine/src/tasks/{mod,crossing}.rs::{prior_registrations,standing_of}` (`TaskLedger`); `engine/src/run/loop_exec/dispatch.rs:19-46,104-121` (`TaskLedger`, `GrantLedger`); `engine/src/run/loop_exec/mod.rs:413` (`GrantLedger`); `engine/src/run/prompt_exec.rs:294-338::orphaned_session` (`SessionLedger`); `engine/src/run/workflow_exec/mod.rs:129-155` (`ChildLedger::open_under`); `engine/src/run/escalation.rs:259-290::pre_seeded_resolution` (`GateLedger::pre_seeded`); `engine/src/artifacts/mod.rs::RunArtifacts::of` con sus 4 callers (`gate_exec.rs:72`, `questions_exec.rs:32`, `distill.rs:159`, `promote.rs:145` leen `state.artifacts`); `engine/src/run/node_close.rs:190` (`progress.md` desde `RunState`, sin segundo replay); `engine/src/run/distill.rs` (`provenance.yaml` cuenta los findings desde `RunState::effective_findings`, deduplicados por la misma regla que el frame — hoy cuenta los vigentes sin deduplicar).
+
+**Prerequisito cerrado.** W-04 (blackboard por `FindingLedger::effective`; una regla de dedup, la que colapsa espacios y mayúsculas, en `dedup_findings`).
 
 **Tests.** Por ledger, en `core/tests/<dominio>_ledger.rs`: determinismo, monotonía de prefijo, y un test de comportamiento por lectura (`a_node_that_reroutes_and_finishes_reports_its_second_attempt`, `the_last_external_ref_is_the_one_the_latest_gate_published`, …). `crates/engine/tests/properties.rs::derive_is_deterministic` sin cambio. `the_frame_agrees_with_the_chronicle` (M19) ata `NodeLedger` a la crónica. `crates/engine/tests/blackboard.rs::a_withdrawn_finding_leaves_the_blackboard` (W-04).
 
@@ -243,7 +246,7 @@ comparando).
 
 ```rust
 // core/src/events/run/payloads.rs
-pub enum PauseReason { Escalation(Escalation), Cancelled, BudgetExhausted { spent: u64, cap: u64 }, ExternalGate { url: String }, UncertainOrphans(Vec<NodeId>), NodeFailed { node: NodeId, failure: Failure }, Blocked { node: NodeId, on: Vec<NodeId> } }
+pub enum PauseReason { Escalation(Escalation), Cancelled, BudgetExhausted { spent: u64, cap: u64 }, ExternalGate { url: String }, UncertainOrphans(Vec<NodeId>), NodeFailed { node: NodeId, failure: Failure }, Blocked { node: NodeId, on: Vec<NodeId> }, Questions { node: NodeId, pending: NonEmpty<QuestionId> }, AnswersRefused { node: NodeId, report: Report } }   // las dos últimas: M26
 impl Display for PauseReason;   // la única prosa; sentence() de Escalation la produce
 // core/src/capabilities.rs: Capability::as_str() ya existe — se usa en cli/src/surface/lines.rs:151 y toda superficie
 // engine/src/run/mod.rs
@@ -255,7 +258,7 @@ enum ClaudeLine { System(SystemLine), Assistant(AssistantLine), Result(ResultLin
 // tokens: Option<u64>; ausente => None, nunca 0
 // adapters/src/codex/parse.rs: ídem con el schema que su doc comment (:5-37) transcribe
 // core/src/port: AgentError { kind: AgentErrorKind, #[source] cause: Option<Box<dyn Error + Send + Sync>> }
-// core/src/questions/mod.rs: validate_answers(file, answers) -> Vec<Diagnostic>
+// core/src/questions/answers.rs: AnswersFile::against(&QuestionsFile, Vec<Answer>) -> Result<Self, Report>   // reemplaza validate_answers (M12, M26): la puerta ve las preguntas; `cli/src/ask/form.rs:135,157` la consume pregunta por pregunta
 // core/src/config/permissions.rs: permission_layer_conflicts(...) -> Vec<Diagnostic>
 ```
 
@@ -289,7 +292,8 @@ codex.rs); `an_unknown_stream_line_is_tolerated_and_named`
 ```rust
 // engine/src/run/schedule.rs
 pub fn decide(workflow: &Workflow, state: &RunState, policy: &Policy) -> Decision;   // antes next_step(events)
-fn gate_step(…) -> Option<Decision>; fn waiting_step(…) -> Option<Decision>; fn orphan_step(…) -> Option<Decision>; fn failure_step(…) -> Option<Decision>; fn ready_batch(…) -> Decision;
+fn gate_step(…) -> Option<Decision>; fn waiting_step(…) -> Option<Decision>; fn answered_step(…) -> Option<Decision>; fn orphan_step(…) -> Option<Decision>; fn failure_step(…) -> Option<Decision>; fn ready_batch(…) -> Decision;
+// waiting_step decide AskQuestions por Node::asks; answered_step decide FinishAnswered por GateLedger::answered_unfinished, antes de orphan_step (M26)
 pub fn resume_policies(state: &RunState, workflow: &Workflow) -> Vec<(NodeId, OnInterrupt)>;   // ya existe; parallel_exec la llama
 // engine/src/run/gate_exec.rs
 pub enum GateStep { Resolved(Resolution), Waiting(PauseReason) }   // el gate nunca escribe run_paused
@@ -307,6 +311,8 @@ segundo `derive`); `steps.rs:38-54,114-127,222-293` (`finish`);
 `gate_exec.rs:387-470,414,440` (`GateStep::Waiting`); `steps.rs:432-463`
 (borra la compensación); `parallel_exec.rs:39-47`; `escalation.rs:116-177`
 (borra `current_mode_name` 158-163; usa `run_mode()`).
+
+**Prerequisito cerrado.** W-06 (`parallel_exec` por `resume_policies`).
 
 **Tests.** `every_decision_is_a_function_of_state_alone`
 (engine/tests/schedule.rs: mismo `RunState` → misma `Decision`, sin log);
@@ -349,8 +355,13 @@ Registra cada `Degradation` por `ctx.log().record` antes de devolver.
 (ídem; `SessionSetup` gana `chosen: RunnerCandidate` y `artifact_dir` — W-01
 lo hace primero); `loop_exec/mod.rs:231-315` (`prepare_loop` deja de gatear:
 lo hace `open_session` por tarea); `runner_resolve.rs:99-137,167-239`
-(`open_run_tools` queda como función llamada solo por `open_session`);
+(`open_run_tools` queda como función llamada solo por `open_session`;
+`run_tools_allowed`, que W-01 introdujo como la decisión sin el bind, es lo
+que `open_session` consulta antes de abrir el listener);
 borra los gates inline de `prompt_exec.rs:142-194` y `loop_exec/mod.rs:252-315`.
+
+**Prerequisito cerrado.** W-01 (`SessionSetup` con `chosen` y `artifact_dir`;
+`run_tools_allowed`).
 
 **Tests.** `a_prompt_session_and_a_task_session_are_opened_by_the_same_door`
 (engine/tests/run_sessions.rs: dos runs, mismo runner, los `SessionRequest`
@@ -435,7 +446,12 @@ pub struct ProcessSecrets;   // impl en cli/main; RunEnv.secrets: Arc<dyn Secret
 impl ContentHash { pub fn short(&self) -> &str /* 12 */ }
 ```
 
-**Archivos.** `git.rs:116,132,145,157,167`; `node_close.rs:255`;
+**Archivos.** `git.rs:116,132,145` (W-05: las tres funciones async que un
+run llama); `git.rs:157,167` y `manifest.rs:73,139,305` (3-05: `build_manifest`
+async —102 llamadas en 33 archivos, casi todas tests y `Bench`— y la pareja
+sincrónica por `spawn_governed`; `cli/commands/init.rs:89,97` y
+`cli/commands/test.rs:418` corren fuera de todo run y reciben un `Shell` sin
+token de cancelación); `node_close.rs:255`;
 `distill.rs:151,173,178,228,251`; `context_resolve/sources.rs:40,237`;
 `context_resolve/knowledge.rs:171`; `workflow_exec/mod.rs:174`;
 `lock.rs:158,178,185`; `worktree/mod.rs:159,230,210,379,424`;
@@ -450,6 +466,8 @@ handle); `adapters/src/claude_code/mod.rs:72-78,272-296`,
 `cli/src/identity.rs:16`, `cli/src/render/glyphs.rs:53-57`,
 `cli/src/surface/mod.rs:110-111`, `cli/src/commands/doctor.rs:21`
 (reciben `&Env`).
+
+**Prerequisitos.** W-05 (pendiente), W-07 (cerrado).
 
 **Tests.** W-05, W-07; `no_engine_module_reads_the_process_clock_or_env`
 (engine/tests/purity.rs: grep-test sobre `crates/engine/src` por
@@ -468,7 +486,7 @@ blanca `process.rs`); `every_gate_and_questions_node_carries_a_node_span`
 
 ```rust
 // core/src/events/session/payloads.rs
-pub struct ToolTarget { pub display: Option<String>, pub digest: ContentHash }
+pub struct ToolTarget { pub display: Option<String>, pub digest: ContentHash }   // el hash entero; `abbreviated()` es cómo se muestra, nunca cómo se guarda — reemplaza el digest abreviado que W-03 escribe como paso intermedio
 impl ToolTarget { pub fn of_path(path: &Path) -> Self /* display = path relativo */; pub fn opaque(input: &[u8]) -> Self /* display = None */; }
 // engine/src/run_log.rs
 impl RunLog<'_> { async fn record(…) { let draft = self.secrets.redact(draft); … } }   // redacta todo valor que SecretSource conozca en campos String del payload
@@ -481,6 +499,8 @@ impl RunLog<'_> { async fn record(…) { let draft = self.secrets.redact(draft);
 `of_path` para `file_path`/`pattern`); `run_log.rs`; `listener.rs:109-125`;
 `process_registry.rs:88-94`; `Cargo.toml` de engine (dep `subtle`,
 defendida en el PR).
+
+**Prerequisito cerrado.** W-03 (`target_digest` por `ContentHash::abbreviated()`).
 
 **Tests.** W-03; `a_secret_the_config_names_never_reaches_the_log`
 (engine/tests/degradation.rs: un `Note` que contiene el valor de un secreto
@@ -507,10 +527,13 @@ pub struct ArtifactName(String);
 impl ArtifactName { pub fn parse(s: &str) -> Result<Self, Problem>; }   // relativo, sin `..`, sin absoluto, no en ReservedIdentity
 pub enum ReservedIdentity { Kind(ArtifactKind) /* "<kind>.yaml" */, Answers /* "questions.answers.yaml" → desaparece con Answers como kind */ }
 pub enum ArtifactKind { Tasks, Findings, Questions, Answers }
-// core/src/questions/answers.rs: impl Document for AnswersFile; RULES = las reglas que hoy aplica
-// `validate_answers` (toda pregunta `required` tiene respuesta; un `choice` responde uno de sus `values`;
-// un id responde una pregunta que existe; un `boolean` es true/false), publicadas con `code` y `demand`
-// como las de tasks/findings/questions; `validate_answers` desaparece en favor de `shape::accept`.
+impl ArtifactKind { pub fn declarable(self) -> bool; }   // false sólo para Answers: lo escribe el engine (M26)
+// core/src/questions/answers.rs: impl Document for AnswersFile (RULES intra-documento: id único) y
+// AnswersFile::against(&QuestionsFile, Vec<Answer>) -> Result<Self, Report>: toda pregunta `required` tiene respuesta;
+// un `choice` responde uno de sus `values`; un id responde una pregunta que existe; un `boolean` es true/false —
+// publicadas con `code` y `demand` como las de tasks/findings/questions. `shape::accept` no ve las preguntas, así que
+// `validate_answers` desaparece en favor de `against` (M26). El nodo siguiente monta `{ artifact: { node, kind: answers } }`;
+// check: AnswersFromNodeThatNeverAsks { node, source }, AnswersDeclaredAsProduced { node } (preguntas.md §2).
 // core/src/template.rs
 pub enum TemplateVar { Input(InputName), RunDir, Worktree, Staging, RunnerName, NodeId, … }   // BTreeMap<TemplateVar, String>
 // core/src/ids.rs (string_id!)
@@ -542,6 +565,8 @@ variante); `core/src/questions/mod.rs:56,64` (deny); `core/src/config/mod.rs:30-
 (exporta `ScopeExpansionPermissions`); `core/src/workflow/artifacts.rs:194`
 (alias según P4).
 
+**Prerequisito cerrado.** W-02 (`ArtifactName::parse` después de renderizar; `ReservedIdentity`).
+
 **Tests.** W-02; `an_invalid_glob_is_refused_at_parse` (core/tests/workflow.rs);
 `a_pack_schema_range_that_does_not_parse_is_refused` (core/tests/pack.rs);
 `answers_read_through_the_same_door_as_every_document` (core/tests/shape.rs);
@@ -566,7 +591,7 @@ pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report>;   // parse + 
 pub fn counted(n: usize, noun: &str) -> String;
 // engine/src/artifacts/mod.rs
 pub enum Answerer { Log, Staging }
-pub fn answerer(node_kind: &NodeKind, artifact: ArtifactKind) -> Answerer;   // único; close, record y verdict lo llaman
+pub fn answerer(node_kind: &NodeKind, artifact: ArtifactKind) -> Answerer;   // único; close, record y verdict lo llaman; answerer(_, Answers) = Log (M26)
 // engine/src/run_tools/catalog.rs
 pub enum RunTool { CheckArtifact, TaskStatus, GetBlackboard, RequestScopeExpansion, PostFinding, UpdateFinding, WithdrawFinding, Submit(ArtifactKind) }
 impl RunTool { pub const fn name(self) -> &'static str; pub fn describe(self) -> &'static str; pub fn schema(self) -> Schema; pub fn parse(name: &str) -> Option<Self>; }
@@ -775,6 +800,8 @@ grupos idénticos (§2C), los 12 `static IDS`; `run_tools.rs:547`;
 `mcp_context.rs:261`; `check_keys_cmd.rs:19`; `docs_sync.rs:123-152`;
 `factory_packs.rs:54`; `wait.rs` (`sleep(1ms)`).
 
+**Prerequisito cerrado.** W-08 (`hermetic()` en `run_yunta` y `Terminal::open`).
+
 **Tests.** Los existentes, migrados; el ratchet de M22 es el test.
 
 **Cierra.** TE-D2, TE-D3, TE-D4 (parte), TE-D5, TE-D7, TE-D8, TE-D9, TE-D11.
@@ -782,6 +809,9 @@ grupos idénticos (§2C), los 12 `static IDS`; `run_tools.rs:547`;
 ---
 
 ## M21 · Cuatro propiedades
+
+**Prerequisito cerrado.** W-09 (la propiedad tautológica renombrada a lo que
+prueba, `derive_is_deterministic_from_any_prefix`, sin el `_crashed_at_k`).
 
 **Archivos.** `crates/engine/tests/properties.rs`: generador `payload()` sobre
 los 36 kinds vía los constructores de ejemplo de cada dominio (la misma
@@ -850,7 +880,7 @@ cancel-in-progress: true }`; `timeout-minutes: 30` por job; step `cargo test
 
 | test | compara |
 |---|---|
-| `every_yaml_example_in_the_docs_is_one_the_binary_accepts` | existente; ahora recorre `docs/design/` |
+| `every_yaml_example_in_the_docs_is_one_the_binary_accepts` | existente; recorre `docs/design/` desde 7-01, junto con el test de abajo que sostiene los bloques de `referencia-schema.md` cuyos `use:` (`design-review`, `qa-review`) sólo existen en ese documento |
 | `the_contract_event_table_names_exactly_the_kinds_the_binary_writes` | filas de la tabla §3 de `contrato-del-run.md` (kinds entre backticks) ≡ `EventPayload::KINDS` como conjunto; cuenta de filas y de kinds ≡ las que el §0 de spec-events declara |
 | `every_event_spec_section_lists_the_fields_its_payload_has` | por kind: tabla `campo \| tipo \| obligatorio` de spec-events §5.x ≡ campos del struct (nombre y `Option`) vía `schemars` sobre el schema generado |
 | `the_adapter_spec_lists_every_capability_and_its_degradation` | lista §2 y tabla §5 de spec-adapter ≡ `Capability::ALL` |
@@ -858,7 +888,7 @@ cancel-in-progress: true }`; `timeout-minutes: 30` por job; step `cargo test
 | `the_tasks_spec_states_every_rule_the_engine_publishes` | ítems §3 de spec-tasks ≡ `TasksFile::RULES` (por `code`) |
 | `the_contract_names_every_control_plane_tool` | §6.4 ≡ `tool_definitions()`; per-run ≡ `RunTool::ALL` |
 | `the_contract_closed_sets_match_the_types` | §7.1 ≡ `CheckBuiltin`, §9 ≡ `ContextSpec`, §2.3 ≡ `InputSpec` |
-| `the_reference_config_parses_and_its_workflows_check` | `referencia-schema.md` bloques |
+| `the_reference_config_parses_and_its_workflows_check` | `referencia-schema.md` bloques: la config parsea, y cada workflow verifica en un proyecto que declara los tres que la composición `release-cycle` usa |
 
 **`cargo xtask adr --check`**: lee `docs/design/adr/D*.md`, exige
 front-matter `number,title,status,revises,revised_by`, numeración sin
@@ -872,20 +902,56 @@ corre una vez y se borra en el mismo PR) que deshace `\{\{`→`{{`,
 fences ` ```javascript ` sobre YAML/árboles → ` ```yaml `/` ```text `, y
 cierra el fence de `contrato:19`. Se revisa a mano el diff.
 
+**Prerequisito.** W-10 (pendiente): los números planos de `referencia-schema.md` (CO-14).
+
 **Cierra.** EV-D16, AR-D12, AR-D13, AR-D14, CLI-D18, CLI-D19, AD-D22, AD-D23, AD-D24 (con P3), CO-13, CO-14, CO-15, CO-16, TE-D20, TE-D21, TE-D22, DO-D3, DO-D6, DO-D9–D44.
 
 ---
 
 ## M24 · Build-or-register
 
-Para cada uno de los cinco (P3): si se construye, el ítem entra al tablero
-con su test; si se registra, entra a `deuda-consciente.md` como `A-13…`
-con "por qué es deuda / qué lo resolvería", y el ADR que lo describía gana
-`(Revisada por Dnnn: …)`. En ambos casos el comentario que hoy explica el
-atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
+**Vicio V7.** Un comportamiento prometido por un documento, un tipo o un
+campo y no construido; o construido y no conectado a la superficie que lo
+consume. Las dos mitades del mismo vicio: la promesa sin mecanismo, y el
+mecanismo sin consumidor.
+
+**Regla.** Lo prometido y no construido se construye, o se retira con entrada
+`A-NN` en `deuda-consciente.md` ("por qué es deuda / qué lo resolvería") y
+nota `(Revisada por Dnnn: …)` en el ADR que lo describía. Lo construido y no
+conectado se conecta, o se retira igual. Nunca un comentario que explique el
+atajo, y nunca borrar lo inconcluso (§0.15). En ambos casos el comentario que
+hoy explica el atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
 `session.rs:3-10`, `context.rs` sobre extensibilidad).
 
-**Cierra.** DO-D1, DO-D2, DO-D4, DO-D5, DO-D7, DO-D8, TE-D25, CLI-D16 (P5).
+**Los cinco de P3 (D167).** Se construyen el baseline eager en `create_run`
+(D18, §7.2 del Contrato) y el orden de criterios aprendido del log desde
+`TaskLedger` (D62): ítems 7-05 y 7-06, cada uno con su test. Se registraron
+los hooks de edición (A-13, que M25 cierra), las preguntas por PR (A-14) y
+las fuentes de contexto por executor (A-15).
+
+**El inventario.** Lo que el barrido de §0.15 clasificó como inconcluso, con
+evidencia en el commit que lo clasificó. Cada fila se cierra construyendo lo
+que "falta" nombra, en el ítem de su mecanismo, o retirándolo con su `A-NN`
+y su nota Revisada en 7-07. La columna "decisión" es la recomendación; quien
+decide la confirma dejando la fila, o la cambia.
+
+| # | qué | dónde | promete | falta | decisión | ítem |
+|---|---|---|---|---|---|---|
+| I-01 | `Channel::Mcp` | `core/src/events/payloads.rs:107` | Contrato §4.1, §6.4; `engine/src/human_interaction.rs:20-23`: preguntas respondibles por tool MCP | la tool MCP que implementa `HumanInteraction::ask` con `Channel::Mcp` | construir: la segunda superficie de la misma puerta, `answer_questions` (`preguntas.md` §5) | 5-06 |
+| I-02 | `Task.manual_review` + `Task.justification` | `core/src/tasks/mod.rs:67,69` | D14; Contrato §5; `tasks/shape.yaml:31-34`: un nodo de auditoría juzga la completitud | el nodo de auditoría; hoy la tarea cierra mecánicamente y la justificación sólo la lee la regla de coherencia | registrar: A-18 (el juicio por rúbrica es un diseño propio y D14 lo describe como tal); los campos quedan y el shape dice qué los lee hoy | 7-07 |
+| I-03 | `Task.notes` | `core/src/tasks/mod.rs:65` | `tasks/shape.yaml:22-23`, spec-tasks: "contexto para un runner sin historial" | llegar al brief de la sesión de tarea (`task_cycle/attempt.rs:245-247`) | construir: `SessionPlan.prompt` lleva `notes` debajo del título de la tarea | 3-03 |
+| I-04 | `PackManifest.yunta_schema` | `core/src/pack.rs:57` | el pack declara qué schema exige | quién lo compara con `YUNTA_SCHEMA`: `pack add`/`pack update` antes de vendorear | construir: `SchemaRange` (M12) y el rechazo en `pack add` nombrando el rango y la versión | 4-01 |
+| I-05 | `RunStats::{artifact_submissions, submissions_by_node, findings, findings_by_node, findings_effective}`, `Submissions`, `FindingActivity` | `engine/src/stats.rs:110-125,155-172,470-535` | un pase propio los calcula | la superficie: `RunStatsJson` y el texto de `yunta stats` | construir: `stats.rs` renderiza los dos conteos (M16) | 5-02 |
+| I-06 | `EngineProcessFile.started_at` | `engine/src/process_registry.rs:29` | el instante en que el engine tomó el run | `cancel.rs` compara el arranque del pid contra `started_at` con la regla de `lock::holder_state` antes de señalar | construir: con `DateTime<Utc>` (M12) y la comparación en la cáscara (M10) | 3-05 |
+| I-07 | `interactive:` del nodo hasta `HumanInteraction::ask(…, interactive)` | `engine/src/human_interaction.rs:57-64`; `cli/src/human_interaction.rs:106` | D86: dato de presentación | una superficie que lo lea | construir: la consola pregunta en el lugar sólo con `interactive: true` y `check` rechaza `interactive` sin `questions` (`preguntas.md` §2, §5) | W-11 |
+| I-08 | `NodeFrame.group: Option<NodeId>` | `engine/src/view/node.rs:29-33` | el frame sabe a qué grupo pertenece un nodo | agrupar en `cli/src/surface/view.rs::node_rows` y en `status` | construir: la crónica y el frame sangran los hijos bajo su grupo (M19) | 5-05 |
+| I-09 | la mitad-valor de `RunToolsHost.blackboard_members: HashMap<NodeId, Vec<NodeId>>` | `engine/src/run_tools/host.rs:30,59-71` | el host sabe los miembros de cada grupo | que `consolidate_blackboard` se los pida (`members_of(&NodeId) -> &[NodeId]`) y `node_exec.rs:136-137` deje de recalcularlos | construir: un lugar para los miembros (M04) | 2-03 |
+| I-10 | `SessionRequest.adapter_settings` | `adapters/src/session.rs:66` | spec-adapter §4: el adapter recibe su config | que cada adapter lo lea en `spawn`/`resume` | construir: `open_session` lo arma (M08) y cada adapter consume el suyo por `typed_settings` (M09, 3-07) | 3-07 |
+| I-11 | `MockAdapter::unconsumed(&self) -> Vec<usize>` | `adapters/src/mock/mod.rs:97` | un fixture dice qué sesiones pasan | que `yunta test` y el `Bench` fallen el caso con scripts sin reclamar | construir: un script sin reclamar falla el caso siempre —un fixture que describe sesiones que no ocurrieron miente— (M18) | 5-04 |
+| I-12 | `Checkout::new()` y `_root: Option<TempDir>` | `testkit/src/checkout.rs:22,31-36,87-91` | un checkout dueño de su árbol | migrar los armados a mano (`docs_sync.rs:103`, `factory_packs_cmd.rs:45`) | construir: con `hermetic()` (M20) | 6-03 |
+| I-13 | `FinalState::Promoted` | `cli/src/commands/test.rs:111-115,310` | un caso de `yunta test` puede terminar promovido | cómo un caso alcanza una promoción | construir: el caso declara `expect: promoted` y siembra la resolución del gate en el log del sandbox, que `steps.rs:186` ya lee (M18) | 5-04 |
+
+**Cierra.** DO-D1, DO-D2, DO-D4, DO-D5, DO-D7, DO-D8, TE-D25, CLI-D16 (P5); I-01…I-13.
 
 ---
 
@@ -900,3 +966,23 @@ muestra de ocho CLIs del mercado con las cinco reglas de escalado, archivos,
 tests y ADR D172.
 
 **Cierra.** AD-D2, AD-D7, AD-D20, AD-D24, DO-D2, A-13.
+
+---
+
+## M26 · Un nodo que pregunta, pregunta
+
+Especificación completa en [`preguntas.md`](preguntas.md): vocabulario, la
+regla en el tipo (`Node::asks` y las cuatro reglas de `check`), el hecho del
+log (`questions_asked` par de `questions_answered`, `GateLedger::rounds`, la
+derivación y la contabilidad de tokens), el cierre y la ronda (`close_node`
+registra `questions_asked` y devuelve `NodeEnd::Asked`; `finish_node` único
+emisor de `node_finished`; `engine::answers::record` única puerta de una
+respuesta; `FinishAnswered` en el scheduler), las superficies (la consola lee
+`interactive`; `answer_questions` por MCP; crónica y estado), el corte
+`grill`/`brief` en el pack y los ejemplos, archivos, tests, W-11 y ADR D173.
+
+**Prerequisito.** W-11 (pendiente): lo que hace correr el pack de referencia
+de punta a punta hoy (`preguntas.md` §9).
+
+**Cierra.** EN-D27, EN-D28, EN-D29, EV-D20, AR-D19, CO-21, DO-D45; M24 I-01
+(5-06), I-07.
