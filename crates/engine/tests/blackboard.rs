@@ -400,3 +400,82 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
         .collect();
     assert_eq!(ids, ["one", "three", "two"]);
 }
+
+/// The events of one group: `a` posts `f1` and `f2`, then takes `f1`
+/// back and rewrites `f2`.
+fn group_log() -> Vec<yunta_core::events::StoredEvent> {
+    use yunta_core::events::{
+        Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
+        FindingWithdrawnPayload, StoredEvent,
+    };
+    let finding = |id: &str, title: &str| Finding {
+        id: id.into(),
+        severity: FindingSeverity::Minor,
+        title: title.to_string(),
+        location: format!("src/{id}.rs"),
+        detail: "detail".to_string(),
+        proposed_criterion: None,
+    };
+    let event = |seq: u64, payload: EventPayload| StoredEvent {
+        run_id: RunId::from("run-x"),
+        seq: seq.into(),
+        timestamp: chrono::DateTime::UNIX_EPOCH,
+        node_id: Some("a".into()),
+        body: EventBody::Known(payload),
+    };
+    vec![
+        event(
+            1,
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("f1", "taken back"),
+            }),
+        ),
+        event(
+            2,
+            EventPayload::FindingPosted(FindingPostedPayload {
+                finding: finding("f2", "first wording"),
+            }),
+        ),
+        event(
+            3,
+            EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                id: "f1".into(),
+                reason: "it was the harness, not the code".to_string(),
+            }),
+        ),
+        event(
+            4,
+            EventPayload::FindingUpdated(FindingUpdatedPayload {
+                finding: finding("f2", "last wording"),
+            }),
+        ),
+    ]
+}
+
+fn consolidated_titles(events: &[yunta_core::events::StoredEvent]) -> Vec<String> {
+    let rendered = yunta_engine::consolidate_blackboard(events, &["a".into()]);
+    let entries: Vec<serde_json::Value> = serde_norway::from_str(&rendered).unwrap();
+    entries
+        .iter()
+        .map(|entry| entry["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_withdrawn_finding_leaves_the_blackboard() {
+    let titles = consolidated_titles(&group_log());
+    assert!(
+        !titles.iter().any(|title| title == "taken back"),
+        "a finding its author withdrew is not what the group leaves behind, got {titles:?}",
+    );
+}
+
+#[test]
+fn an_updated_finding_shows_its_last_content() {
+    let titles = consolidated_titles(&group_log());
+    assert_eq!(
+        titles,
+        ["last wording"],
+        "the group leaves the content of the latest posting",
+    );
+}

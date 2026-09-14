@@ -747,3 +747,49 @@ fn done_at(
         })
         .flatten()
 }
+
+#[test]
+fn inherited_findings_dedup_the_way_the_frame_counts_them() {
+    use yunta_core::events::{EventBody, FindingPostedPayload, StoredEvent};
+    let event = |seq: u64, node: &str, finding: yunta_core::events::Finding| StoredEvent {
+        run_id: RunId::from("run-x"),
+        seq: seq.into(),
+        timestamp: chrono::DateTime::UNIX_EPOCH,
+        node_id: Some(node.into()),
+        body: EventBody::Known(EventPayload::FindingPosted(FindingPostedPayload {
+            finding,
+        })),
+    };
+    // Two reviewers complaining about the same place, spelled apart by
+    // case and by the space between two words.
+    let events = vec![
+        event(
+            1,
+            "review-a",
+            finding("f1", "Scope  expansion DENIED", "tasks/T001"),
+        ),
+        event(
+            2,
+            "review-b",
+            finding("f2", "scope expansion denied", "tasks/T001"),
+        ),
+        event(
+            3,
+            "review-b",
+            finding("f3", "a second complaint", "src/lib.rs"),
+        ),
+    ];
+
+    let standing: Vec<yunta_core::events::Finding> =
+        yunta_core::events::findings::effective(&events)
+            .into_iter()
+            .map(|posted| posted.finding)
+            .collect();
+
+    assert_eq!(
+        yunta_engine::inherited_findings(&events),
+        yunta_engine::dedup_findings(&standing),
+        "a successor inherits the set the run's own frame counts",
+    );
+    assert_eq!(yunta_engine::inherited_findings(&events).len(), 2);
+}

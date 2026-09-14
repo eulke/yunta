@@ -381,15 +381,22 @@ pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();
     for finding in findings {
-        let key = (
-            finding.location.clone(),
-            finding.title.trim().to_lowercase(),
-        );
+        let key = (finding.location.clone(), normalized_title(&finding.title));
         if seen.insert(key) {
             deduped.push(finding.clone());
         }
     }
     deduped
+}
+
+/// Case- and whitespace-insensitive: "Scope  expansion DENIED" and
+/// "scope expansion denied" are the same complaint about the same place.
+fn normalized_title(title: &str) -> String {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Records the node `event` attributes a task to, keeping the first one

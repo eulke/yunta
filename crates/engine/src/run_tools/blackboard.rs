@@ -10,7 +10,8 @@
 //! byte-identical output.
 
 use serde_json::{json, Value};
-use yunta_core::events::{EventPayload, Finding, StoredEvent};
+use yunta_core::events::findings::FindingLedger;
+use yunta_core::events::{Finding, StoredEvent};
 use yunta_core::NodeId;
 
 use super::session::{RunToolError, SessionTools};
@@ -24,17 +25,14 @@ use super::session::{RunToolError, SessionTools};
 /// (`context: [{node-output: {node: <group_id>}}]`) — never between
 /// siblings hot.
 pub fn consolidate_blackboard(events: &[StoredEvent], members: &[NodeId]) -> String {
-    let mut entries: Vec<(String, Finding)> = events
-        .iter()
-        .filter_map(|event| {
-            let node = event.node_id.as_ref()?;
-            if !members.contains(node) {
-                return None;
-            }
-            match event.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some((node.to_string(), p.finding.clone())),
-                _ => None,
-            }
+    let mut entries: Vec<(String, Finding)> = FindingLedger::of(events)
+        .effective()
+        .into_iter()
+        .filter_map(|posted| {
+            let node = posted.node?;
+            members
+                .contains(&node)
+                .then(|| (node.to_string(), posted.finding))
         })
         .collect();
     entries.sort_by(|a, b| (&a.0, &a.1.id, &a.1.title).cmp(&(&b.0, &b.1.id, &b.1.title)));
@@ -67,16 +65,7 @@ impl SessionTools {
         // reading a sibling hot would make the outcome depend on
         // arrival order, not content. Siblings' posts arrive through
         // the group's post-join consolidation, never through here.
-        let own: Vec<Finding> = self
-            .events()
-            .await?
-            .into_iter()
-            .filter(|event| event.node_id.as_ref() == Some(&self.node))
-            .filter_map(|event| match event.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some(p.finding.clone()),
-                _ => None,
-            })
-            .collect();
+        let own: Vec<Finding> = FindingLedger::of(&self.events().await?).effective_of(&self.node);
         serde_json::to_string_pretty(&json!({
             "note": "your own posts only — siblings' posts become readable after the \
                      group's join, through its consolidated output",

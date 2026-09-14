@@ -5,8 +5,6 @@
 //! is the reading that only a log can answer: which findings a
 //! successor starts from.
 
-use std::collections::HashSet;
-
 use yunta_core::events::findings::effective;
 use yunta_core::events::{Finding, StoredEvent};
 
@@ -19,28 +17,11 @@ use yunta_core::events::{Finding, StoredEvent};
 /// promotion close accepts exactly this as the run's own findings
 /// artifact.
 pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut inherited = Vec::new();
-    for posted in effective(events) {
-        let key = (
-            posted.finding.location.clone(),
-            normalized_title(&posted.finding.title),
-        );
-        if seen.insert(key) {
-            inherited.push(posted.finding);
-        }
-    }
-    inherited
-}
-
-/// Case- and whitespace-insensitive: "Scope  expansion DENIED" and
-/// "scope expansion denied" are the same complaint about the same place.
-fn normalized_title(title: &str) -> String {
-    title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    let standing: Vec<Finding> = effective(events)
+        .into_iter()
+        .map(|posted| posted.finding)
+        .collect();
+    crate::replay::dedup_findings(&standing)
 }
 
 #[cfg(test)]
