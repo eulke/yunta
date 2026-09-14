@@ -384,6 +384,23 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
         .map(|finding| finding["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["own-post"]);
+
+    // Taken back, it leaves the board its author reads, the same way it
+    // leaves the group's consolidation.
+    let (is_error, text) = call(
+        &client,
+        "yunta_withdraw_finding",
+        json!({ "id": "own-post", "reason": "it was the harness, not the code" }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    let (is_error, text) = call(&client, "yunta_get_blackboard", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let board: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        board["findings"].as_array().unwrap().is_empty(),
+        "a withdrawn post is not what its author still stands by: {text}",
+    );
     client.cancel().await.unwrap();
 }
 

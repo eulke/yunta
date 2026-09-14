@@ -406,7 +406,7 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
 fn group_log() -> Vec<yunta_core::events::StoredEvent> {
     use yunta_core::events::{
         Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
-        FindingWithdrawnPayload, StoredEvent,
+        FindingWithdrawnPayload,
     };
     let finding = |id: &str, title: &str| Finding {
         id: id.into(),
@@ -416,13 +416,9 @@ fn group_log() -> Vec<yunta_core::events::StoredEvent> {
         detail: "detail".to_string(),
         proposed_criterion: None,
     };
-    let event = |seq: u64, payload: EventPayload| StoredEvent {
-        run_id: RunId::from("run-x"),
-        seq: seq.into(),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        node_id: Some("a".into()),
-        body: EventBody::Known(payload),
-    };
+    let run = RunId::from("run-x");
+    let event =
+        |seq: u64, payload: EventPayload| yunta_testkit::stored_for(&run, seq, "a", payload);
     vec![
         event(
             1,

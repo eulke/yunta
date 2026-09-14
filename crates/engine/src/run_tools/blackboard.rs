@@ -16,11 +16,12 @@ use yunta_core::NodeId;
 
 use super::session::{RunToolError, SessionTools};
 
-/// Post-join consolidation, pure over the log: every
-/// `finding_posted` authored by a member of the group, sorted by
-/// `(node, finding id, title)` — **never by arrival order**, which is
-/// exactly what makes two runs whose posts raced differently produce
-/// byte-identical output. Written as the group's own node-output at
+/// Post-join consolidation, pure over the log: every finding a member
+/// of the group still stands by — the content of its latest posting,
+/// and nothing its author took back — sorted by `(node, finding id,
+/// title)` and **never by arrival order**, which is exactly what makes
+/// two runs whose posts raced differently produce byte-identical
+/// output. Written as the group's own node-output at
 /// its close, consumable by a node after the `parallel`
 /// (`context: [{node-output: {node: <group_id>}}]`) — never between
 /// siblings hot.
@@ -61,10 +62,11 @@ impl SessionTools {
         if !self.in_blackboard_group() {
             return Err(RunToolError::NotInBlackboardGroup);
         }
-        // While the group runs, only this node's OWN posts —
-        // reading a sibling hot would make the outcome depend on
-        // arrival order, not content. Siblings' posts arrive through
-        // the group's post-join consolidation, never through here.
+        // While the group runs, only this node's OWN posts, and only
+        // the ones it still stands by — reading a sibling hot would
+        // make the outcome depend on arrival order, not content.
+        // Siblings' posts arrive through the group's post-join
+        // consolidation, never through here.
         let own: Vec<Finding> = FindingLedger::of(&self.events().await?).effective_of(&self.node);
         serde_json::to_string_pretty(&json!({
             "note": "your own posts only — siblings' posts become readable after the \

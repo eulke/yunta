@@ -981,6 +981,36 @@ cómo se lee, no cómo se guarda. Es lo que `ContentHash::abbreviated()` ya
 dice de sí mismo ("Prose, not an identifier — what compares, and what a log
 records, is the whole value").
 
+### L-06 · 2026-09-14 · W-04 · cuál de las dos reglas de dedup sobrevive
+
+**Evidencia.** La fila de W-04 dice que `findings::inherited_findings` llame a
+`replay::dedup_findings`, "una regla", y no dice cuál de las dos redacciones
+queda. No eran la misma: `dedup_findings` normalizaba con
+`title.trim().to_lowercase()` y `inherited_findings` con
+`split_whitespace().join(" ").to_lowercase()`, que además colapsa los espacios
+internos. Con la primera, "Scope  expansion DENIED" y "scope expansion denied"
+son dos findings; con la segunda, uno.
+
+Hacer que `inherited_findings` llamara a `dedup_findings` tal cual habría
+debilitado la herencia, y un test del propio módulo depende del caso de los
+dos espacios (`engine/src/findings.rs`, `a_withdrawal_frees_the_dedup_key_…`).
+
+**Lo que hice.** `dedup_findings` adoptó la normalización más fuerte y
+`inherited_findings` la consume: una regla, y ninguna lectura se debilita.
+Pero `dedup_findings` es con lo que el frame del run cuenta findings
+(`engine/src/view/mod.rs`), así que un run cuyos reviewers escriben el mismo
+título con espacios distintos ahora cuenta uno donde antes contaba dos.
+
+**Alternativas.** (a) la más fuerte para las dos lecturas, que es lo que está;
+(b) la más débil para las dos, que debilita la herencia y rompe un test;
+(c) dos reglas declaradas como dos, que es lo que la fila vino a cerrar.
+
+**Recomendación.** La (a), y que la fila lo diga: "una regla, la que colapsa
+espacios y mayúsculas". Queda pendiente además una tercera lectura del mismo
+conteo que el ítem no unificó: `provenance.yaml` cuenta los findings vigentes
+sin deduplicar (`engine/src/run/distill.rs`), mientras el frame los cuenta
+deduplicados — dos números para la misma pregunta en dos superficies.
+
 ### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
 
 **Evidencia.** §0.9 pide que el ítem cambie su estado a `cerrado(hash)` "en el

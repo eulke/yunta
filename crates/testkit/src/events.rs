@@ -69,6 +69,15 @@ pub fn stored(run: &RunId, seq: u64, payload: EventPayload) -> StoredEvent {
     }
 }
 
+/// The same, attributed to the node that wrote it: what a reading keyed
+/// by node answers from.
+pub fn stored_for(run: &RunId, seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
+    StoredEvent {
+        node_id: Some(node.into()),
+        ..stored(run, seq, payload)
+    }
+}
+
 /// Another run's log, written by hand: what a run that hands something
 /// over already said about it.
 ///

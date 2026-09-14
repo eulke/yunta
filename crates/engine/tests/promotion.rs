@@ -750,15 +750,15 @@ fn done_at(
 
 #[test]
 fn inherited_findings_dedup_the_way_the_frame_counts_them() {
-    use yunta_core::events::{EventBody, FindingPostedPayload, StoredEvent};
-    let event = |seq: u64, node: &str, finding: yunta_core::events::Finding| StoredEvent {
-        run_id: RunId::from("run-x"),
-        seq: seq.into(),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::FindingPosted(FindingPostedPayload {
-            finding,
-        })),
+    use yunta_core::events::FindingPostedPayload;
+    let run = RunId::from("run-x");
+    let event = |seq: u64, node: &str, finding: yunta_core::events::Finding| {
+        yunta_testkit::stored_for(
+            &run,
+            seq,
+            node,
+            EventPayload::FindingPosted(FindingPostedPayload { finding }),
+        )
     };
     // Two reviewers complaining about the same place, spelled apart by
     // case and by the space between two words.
