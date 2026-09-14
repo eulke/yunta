@@ -245,7 +245,7 @@ sessions:
     let codes: Vec<&str> = report
         .diagnostics
         .iter()
-        .map(|d| d.problem.code())
+        .map(|d| d.problem.code().as_str())
         .collect();
     assert!(
         codes.contains(&"unknown-dependency") && codes.contains(&"dependency-cycle"),
@@ -758,7 +758,10 @@ sessions:
             _ => None,
         })
         .expect("the refusal is on the log");
-    assert_eq!(report.diagnostics[0].problem.code(), "empty-reason");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-reason"
+    );
 
     // The finding it named still stands.
     let bytes = bench.artifact("findings").expect("the engine wrote it");

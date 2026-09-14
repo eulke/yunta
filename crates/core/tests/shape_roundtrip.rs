@@ -222,7 +222,7 @@ fn accept_reports_the_rules_of_a_document_that_parsed() {
         report
             .diagnostics
             .iter()
-            .any(|d| d.problem.code() == "unknown-dependency"),
+            .any(|d| d.problem.code().as_str() == "unknown-dependency"),
         "the report names the rule: {report:?}"
     );
 }

@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::{ArtifactCode, FileCode};
+
 /// The stable name of a rule that only holds across a whole document.
 ///
 /// Exhaustive, so a rule cannot be minted by typing a new string, and
@@ -165,10 +167,78 @@ impl Problem {
 
     /// The stable name of this kind of problem: what a receipt counts
     /// and a log is grepped by, unaffected by any rewording.
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> DiagnosticCode {
         match self {
-            Problem::Parse { .. } => "parse",
-            Problem::Rule { code, .. } => code.as_str(),
+            Problem::Parse { .. } => DiagnosticCode::Parse(ParseCode::Parse),
+            Problem::Rule { code, .. } => DiagnosticCode::Rule(*code),
+        }
+    }
+}
+
+/// The stable name of anything this system reports as wrong: what a
+/// receipt counts, what `status --json` publishes, and what a log is
+/// grepped by, unaffected by any rewording.
+///
+/// Closed, so a code cannot be minted by typing a string. The four arms
+/// are the four ways something can be wrong: a rule a readable document
+/// broke, a document that did not read at all, a file the close could
+/// not take, and an artifact nobody handed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiagnosticCode {
+    Rule(RuleCode),
+    Parse(ParseCode),
+    File(FileCode),
+    Artifact(ArtifactCode),
+}
+
+impl DiagnosticCode {
+    /// Every code this system can report, which is what the published
+    /// vocabulary is checked against.
+    pub fn all() -> Vec<DiagnosticCode> {
+        RuleCode::ALL
+            .iter()
+            .map(|code| DiagnosticCode::Rule(*code))
+            .chain([DiagnosticCode::Parse(ParseCode::Parse)])
+            .chain(FileCode::ALL.map(DiagnosticCode::File))
+            .chain(ArtifactCode::ALL.map(DiagnosticCode::Artifact))
+            .collect()
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticCode::Rule(code) => code.as_str(),
+            DiagnosticCode::Parse(code) => code.as_str(),
+            DiagnosticCode::File(code) => code.as_str(),
+            DiagnosticCode::Artifact(code) => code.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for DiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One published name, one wire form: every surface carries the flat
+/// string, never the shape the union has in Rust.
+impl Serialize for DiagnosticCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// The one way a document fails before any rule can be asked of it: its
+/// bytes are not the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ParseCode {
+    Parse,
+}
+
+impl ParseCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ParseCode::Parse => "parse",
         }
     }
 }

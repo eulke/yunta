@@ -22,8 +22,8 @@ mod artifact;
 mod problem;
 mod subject;
 
-pub use artifact::{ArtifactFailure, FileProblem};
-pub use problem::{Problem, Rule, RuleCode};
+pub use artifact::{ArtifactCode, ArtifactFailure, FileCode, FileProblem};
+pub use problem::{DiagnosticCode, ParseCode, Problem, Rule, RuleCode};
 pub use subject::{Named, Subject};
 
 use crate::ArtifactKind;
@@ -72,7 +72,7 @@ impl Diagnostic {
 
     /// The stable name of this kind of problem: what a receipt counts
     /// and a log is grepped by, unaffected by any rewording.
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> DiagnosticCode {
         self.problem.code()
     }
 }

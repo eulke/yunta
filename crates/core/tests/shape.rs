@@ -68,7 +68,7 @@ fn a_tasks_document_that_breaks_two_rules_reports_both_in_one_read() {
     let codes: Vec<&str> = report
         .diagnostics
         .iter()
-        .map(|d| d.problem.code())
+        .map(|d| d.problem.code().as_str())
         .collect();
     assert!(
         codes.contains(&"unknown-dependency") && codes.contains(&"overlapping-scope"),
@@ -150,7 +150,11 @@ fn a_location_that_does_not_read_is_a_parse_problem_at_its_path() {
         let report = read::<FindingsFile>(yaml.as_bytes(), FINDINGS)
             .expect_err("a location that does not read");
         assert_eq!(report.diagnostics.len(), 1, "{report}");
-        assert_eq!(report.diagnostics[0].problem.code(), "parse", "{report}");
+        assert_eq!(
+            report.diagnostics[0].problem.code().as_str(),
+            "parse",
+            "{report}"
+        );
         let text = report.to_string();
         assert!(text.contains("findings[0].location"), "at its key: {text}");
         assert!(text.contains(reason), "with the reason: {text}");
@@ -187,7 +191,7 @@ fn bytes_that_are_not_yaml_at_all_still_fail_with_a_diagnostic() {
     let report = read::<TasksFile>(b"```yaml\ntasks: []\n```\n", PLAN)
         .expect_err("a fenced document is not YAML");
     assert_eq!(report.diagnostics.len(), 1, "{report}");
-    assert_eq!(report.diagnostics[0].problem.code(), "parse");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
 }
 
 #[test]

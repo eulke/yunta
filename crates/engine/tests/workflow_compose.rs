@@ -1081,7 +1081,12 @@ nodes:
             // with its own code — never a sentence to be taken apart.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
             assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
-            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert_eq!(
+                entries[0]
+                    .code()
+                    .map(yunta_core::diagnostic::DiagnosticCode::as_str),
+                Some("artifact-unheld")
+            );
             assert!(
                 matches!(
                     entries[0],
@@ -1367,7 +1372,12 @@ nodes:
             // missing from.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
             assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
-            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert_eq!(
+                entries[0]
+                    .code()
+                    .map(yunta_core::diagnostic::DiagnosticCode::as_str),
+                Some("artifact-unheld")
+            );
             assert!(
                 matches!(
                     entries[0],

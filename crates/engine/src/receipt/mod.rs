@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode};
 use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage};
 use yunta_core::ContentHash;
 use yunta_core::{
@@ -143,7 +143,7 @@ pub struct DiagnosticCount {
     /// the artifact itself — a file that was never written, and an
     /// artifact another run owes, have no content to have a kind.
     pub kind: Option<ArtifactKind>,
-    pub code: String,
+    pub code: DiagnosticCode,
     pub occurrences: usize,
 }
 
@@ -173,7 +173,7 @@ impl std::fmt::Display for DiagnosticCount {
 /// was going to hand over, and `artifact-unheld` the same whatever run
 /// was asked. A document whose content failed is not one problem but
 /// every problem it has, each under the kind it was read against.
-fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str)> {
+fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, DiagnosticCode)> {
     match failure {
         // Exhaustive rather than keyed off `report()`, so a fifth way an
         // artifact can fail reaches this decision as a compile error
@@ -197,7 +197,7 @@ fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
-    let mut counts: HashMap<(Option<ArtifactKind>, &'static str), usize> = HashMap::new();
+    let mut counts: HashMap<(Option<ArtifactKind>, DiagnosticCode), usize> = HashMap::new();
     let failed = events.iter().filter_map(|event| match event.payload() {
         Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(&p.failure),
         _ => None,
@@ -214,14 +214,14 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
         .into_iter()
         .map(|((kind, code), occurrences)| DiagnosticCount {
             kind,
-            code: code.to_string(),
+            code,
             occurrences,
         })
         .collect();
     counts.sort_by(|a, b| {
         b.occurrences
             .cmp(&a.occurrences)
-            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.code.as_str().cmp(b.code.as_str()))
             .then_with(|| {
                 a.kind
                     .map(ArtifactKind::as_str)

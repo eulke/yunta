@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
 use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
 use yunta_core::events::{
     ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
@@ -530,12 +531,12 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     receipt.diagnostics = vec![
         DiagnosticCount {
             kind: Some(ArtifactKind::Tasks),
-            code: "parse".to_string(),
+            code: DiagnosticCode::Parse(ParseCode::Parse),
             occurrences: 2,
         },
         DiagnosticCount {
             kind: Some(ArtifactKind::Tasks),
-            code: "no-criteria".to_string(),
+            code: DiagnosticCode::Rule(RuleCode::NoCriteria),
             occurrences: 1,
         },
     ];
@@ -635,7 +636,7 @@ nodes:
         receipt.diagnostics,
         vec![DiagnosticCount {
             kind: None,
-            code: "artifact-unheld".to_string(),
+            code: DiagnosticCode::Artifact(ArtifactCode::Unheld),
             occurrences: 1,
         }],
         "an artifact no run holds is counted by its own code, under no kind"
@@ -674,7 +675,7 @@ nodes:
         receipt.diagnostics,
         vec![DiagnosticCount {
             kind: None,
-            code: "artifact-undelivered".to_string(),
+            code: DiagnosticCode::Artifact(ArtifactCode::Undelivered),
             occurrences: 1,
         }],
         "a document nobody handed over is counted by its own code, under no kind"
@@ -694,17 +695,17 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     receipt.diagnostics = vec![
         DiagnosticCount {
             kind: Some(ArtifactKind::Tasks),
-            code: "duplicate-id".to_string(),
+            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 3,
         },
         DiagnosticCount {
             kind: Some(ArtifactKind::Findings),
-            code: "duplicate-id".to_string(),
+            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 1,
         },
         DiagnosticCount {
             kind: None,
-            code: "artifact-missing".to_string(),
+            code: DiagnosticCode::File(FileCode::Missing),
             occurrences: 1,
         },
     ];
@@ -732,7 +733,7 @@ fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
         kind: Some(ArtifactKind::Tasks),
-        code: "parse".to_string(),
+        code: DiagnosticCode::Parse(ParseCode::Parse),
         occurrences: 3,
     }];
     let rendered = render_receipt_json(&receipt).expect("the receipt renders");

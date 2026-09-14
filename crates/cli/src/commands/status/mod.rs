@@ -263,7 +263,7 @@ pub(crate) struct ArtifactProblems {
     /// because that is not one problem: each of the document's own
     /// carries its code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<&'static str>,
+    code: Option<yunta_core::diagnostic::DiagnosticCode>,
     /// As a reader would type it to open the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,

@@ -176,6 +176,15 @@ read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
 artifact with `retryable: false`: there is no second session to instruct, so
 nothing about the failure asks for one.
 
+The rules a document can break, which is that closed set: `duplicate-id`,
+`empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
+`unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
+`manual-review-without-justification`, `empty-text`, `empty-detail`,
+`unknown-id`, `withdrawn-id`, `empty-reason` and `missing-values`. Together with
+`parse` and the six an artifact fails under, they are every stable code this
+system reports: a receipt counts by one, `status --json` publishes one, and a log
+is grepped by one.
+
 A log whose `node_failed` events carry `outcome:` on its own — every log written
 before `artifacts:` existed — reads back as exactly that one-sentence failure:
 no migration, nothing inferred. That tolerance is the rule for everything the

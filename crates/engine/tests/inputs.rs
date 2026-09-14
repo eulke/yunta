@@ -380,7 +380,7 @@ tasks:
         report
             .diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.code())
+            .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["duplicate-id", "unknown-dependency"],
         "every rule the document breaks, so one correction fixes them all"

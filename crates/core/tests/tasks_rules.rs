@@ -19,7 +19,7 @@ fn check(tasks: &TasksFile) -> Vec<Diagnostic> {
 /// is what a receipt counts and a log is searched by, so it is the part
 /// that has to stay put while the wording is free to improve.
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
-    diagnostics.iter().map(Diagnostic::code).collect()
+    diagnostics.iter().map(|d| d.code().as_str()).collect()
 }
 
 /// Every violation as a reader sees it, joined — what the assertions

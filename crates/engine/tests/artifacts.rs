@@ -32,6 +32,7 @@ fn codes(failures: &[ArtifactFailure]) -> Vec<&str> {
             None => failure.code().into_iter().collect::<Vec<_>>(),
             Some(report) => report.diagnostics.iter().map(|d| d.code()).collect(),
         })
+        .map(|code| code.as_str())
         .collect()
 }
 

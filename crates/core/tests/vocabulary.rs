@@ -6,6 +6,7 @@
 //! deliberate cost, and these tests are what it buys: a list that cannot
 //! drift from the parser without failing here, before the merge.
 
+use yunta_core::diagnostic::DiagnosticCode;
 use yunta_core::events::FindingSeverity;
 use yunta_core::shape::Document;
 use yunta_core::template::TemplateVar;
@@ -44,6 +45,23 @@ fn a_kind_that_does_not_exist_names_the_ones_that_do() {
     assert!(text.contains("`plan`"), "{text}");
     for kind in ArtifactKind::ALL {
         assert!(text.contains(kind.as_str()), "{text}");
+    }
+}
+
+#[test]
+fn every_diagnostic_code_is_published() {
+    // A code is a promise to whoever greps a log or counts a receipt, so
+    // it is published where the compatibility contract is — and this is
+    // what stops a new one being minted without saying so.
+    let contract = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/compatibility.md"),
+    )
+    .expect("the compatibility contract is in the repository");
+    for code in DiagnosticCode::all() {
+        assert!(
+            contract.contains(&format!("`{code}`")),
+            "`{code}` is a code this system reports and the contract does not publish"
+        );
     }
 }
 
