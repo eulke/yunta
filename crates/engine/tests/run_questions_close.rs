@@ -37,7 +37,7 @@ nodes:
     depends_on: [grill]
     context:
       - artifact: { node: grill, kind: questions }
-      - artifact: { node: grill, name: questions.answers.yaml }
+      - artifact: { node: grill, kind: answers }
     prompt: "Write the brief from the questions and their answers."
     artifacts:
       produces: [brief.md]
@@ -459,7 +459,7 @@ sessions:
     );
     let answers: yunta_core::AnswersFile = serde_norway::from_slice(
         &bench
-            .projection(Some("grill"), "questions.answers.yaml")
+            .projection(Some("grill"), "answers.yaml")
             .expect("the answers the next node mounts"),
     )
     .unwrap();
@@ -469,8 +469,8 @@ sessions:
         .into_iter()
         .find(|held| {
             held.artifact
-                == yunta_core::events::ArtifactId::Opaque {
-                    name: "questions.answers.yaml".to_string(),
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Answers,
                 }
         })
         .expect("the run holds them")

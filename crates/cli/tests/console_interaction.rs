@@ -62,7 +62,7 @@ fn home(root: &Path) -> std::path::PathBuf {
 /// questions are a document of that same node.
 fn answers(root: &Path) -> Option<String> {
     let run = run_dir(root)?;
-    std::fs::read_to_string(run.join("artifacts/ask/questions.answers.yaml")).ok()
+    std::fs::read_to_string(run.join("artifacts/ask/answers.yaml")).ok()
 }
 
 /// The directory the run started under `root` keeps its own state in,
@@ -491,7 +491,7 @@ fn an_answer_its_own_rules_refuse_is_asked_again() {
     // An empty line answers nothing, which this question does not allow.
     terminal.keys("\r");
     terminal.wait_for(
-        "required question `summary` has no answer",
+        "is `required` and nothing answers it",
         "the refusal a person reads is the engine's own",
     );
     terminal.keys("the auth middleware\r");

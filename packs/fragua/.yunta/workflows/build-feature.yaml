@@ -35,7 +35,7 @@ nodes:
     depends_on: [grill]
     context:
       - artifact: { node: grill, kind: questions }
-      - artifact: { node: grill, name: questions.answers.yaml }
+      - artifact: { node: grill, kind: answers }
     prompt: |
       Write the brief for "{{inputs.idea}}" from the questions and their
       answers.

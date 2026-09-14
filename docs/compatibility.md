@@ -180,7 +180,8 @@ The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
 `unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
 `manual-review-without-justification`, `empty-text`, `empty-detail`,
-`unknown-id`, `withdrawn-id`, `empty-reason` and `missing-values`. Together with
+`unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`, `missing-answer`
+and `mismatched-answer`. Together with
 `parse` and the six an artifact fails under, they are every stable code this
 system reports: a receipt counts by one, `status --json` publishes one, and a log
 is grepped by one.

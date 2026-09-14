@@ -254,7 +254,7 @@ fn a_questions_round() -> Vec<StoredEvent> {
             Some("grill"),
             EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
                 ArtifactId::Opaque {
-                    name: "questions.answers.yaml".to_string(),
+                    name: "answers.yaml".to_string(),
                 },
                 answers.clone(),
                 RecordedOrigin::Answered,

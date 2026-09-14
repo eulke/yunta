@@ -330,7 +330,13 @@ async fn record_content(
                 .await?;
             }
         }
-        ArtifactContent::Findings(_) | ArtifactContent::Questions(_) | ArtifactContent::Opaque => {}
+        // The answers are recorded where they arrive — `answers::record`
+        // writes the acceptance and the `questions_answered` together —
+        // so a close that meets them again has nothing to add.
+        ArtifactContent::Findings(_)
+        | ArtifactContent::Questions(_)
+        | ArtifactContent::Answers(_)
+        | ArtifactContent::Opaque => {}
     }
     Ok(())
 }

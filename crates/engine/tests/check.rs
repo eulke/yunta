@@ -624,8 +624,81 @@ fn the_refusal_spells_the_split_and_how_to_read_the_answers() {
         "the refusal says where it goes: {refusal}"
     );
     assert!(
-        refusal.contains("name: questions.answers.yaml"),
+        refusal.contains("kind: answers"),
         "the refusal spells how the next node reads the answers: {refusal}"
+    );
+}
+
+#[test]
+fn a_node_cannot_owe_the_answers_the_engine_writes() {
+    // The answers arrive when a person replies, so a node that declared
+    // them would end owing a document nobody can hand it.
+    let mut node = bash("a", "true", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![yunta_core::ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Answers,
+        )],
+    });
+    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
+    let refusal = errors
+        .iter()
+        .find_map(|e| match e {
+            CheckError::AnswersDeclaredAsProduced { node } if node.as_str() == "a" => {
+                Some(e.to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("`answers` is not a node's to produce, got {errors:?}"));
+    assert!(
+        refusal.contains("kind: answers"),
+        "the refusal spells how the answers are read instead: {refusal}"
+    );
+}
+
+#[test]
+fn answers_are_read_from_the_node_that_asks() {
+    // A node that never produced a `questions` document has no answers,
+    // so a source that reads them resolves to nothing — said here rather
+    // than at run time.
+    let asking = r#"
+name: answers-source
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    prompt: "ask"
+    artifacts: { produces: [questions] }
+  - id: build
+    kind: bash
+    depends_on: [grill]
+    run: "true"
+  - id: use
+    kind: bash
+    depends_on: [build]
+    run: "true"
+    context:
+      - artifact: { node: build, kind: answers }
+"#;
+    let wf: Workflow = serde_norway::from_str(asking).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::AnswersFromNodeThatNeverAsks { node, .. } if node.as_str() == "build"
+        )),
+        "`build` asks nothing, so it leaves no answers: {errors:?}"
+    );
+
+    // The same source aimed at the node that does ask is fine.
+    let wf: Workflow = serde_norway::from_str(
+        &asking.replace("node: build, kind: answers", "node: grill, kind: answers"),
+    )
+    .unwrap();
+    assert!(
+        !check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::AnswersFromNodeThatNeverAsks { .. })),
+        "`grill` asks, so its answers are there to read"
     );
 }
 
@@ -1982,7 +2055,7 @@ fn an_artifact_name_the_run_could_not_take_is_refused() {
         "/tmp/escape.md",
         "notes/../../escape.md",
         "tasks.yaml",
-        "questions.answers.yaml",
+        "answers.yaml",
     ] {
         let mut node = bash("a", "true", &[]);
         node.artifacts = Some(yunta_core::Artifacts {

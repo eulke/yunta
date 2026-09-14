@@ -3,11 +3,12 @@
 //! should have had available to whoever writes one.
 
 use yunta_core::shape::{read, Document};
-use yunta_core::{FindingsFile, QuestionsFile, TasksFile};
+use yunta_core::{Answer, AnswersFile, FindingsFile, QuestionsFile, TasksFile};
 
 const PLAN: &str = "artifacts/plan.yaml";
 const FINDINGS: &str = "artifacts/findings.yaml";
 const QUESTIONS: &str = "artifacts/questions.yaml";
+const ANSWERS: &str = "artifacts/answers.yaml";
 
 // --- the example is the shape, and it stays true -----------------------
 //
@@ -114,6 +115,93 @@ fn a_key_the_type_does_not_declare_is_named() {
     .expect_err("a key nobody declared");
     let text = report.to_string();
     assert!(text.contains("description"), "the key itself: {text}");
+}
+
+#[test]
+fn answers_read_through_the_same_door_as_every_document() {
+    // The engine writes the answers, and reads them back the way it
+    // reads what an agent wrote: one door, one report. A document whose
+    // shape is wrong says so at the value, and a rule it breaks says so
+    // at the entry that broke it.
+    read::<AnswersFile>(<AnswersFile as Document>::EXAMPLE.as_bytes(), ANSWERS)
+        .expect("the published shape parses");
+
+    let report = read::<AnswersFile>(
+        b"answers:\n  - id: theme\n    value: dark\n  - id: theme\n    value: light\n",
+        ANSWERS,
+    )
+    .expect_err("one id answers one question");
+    let text = report.to_string();
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "duplicate-id"
+    );
+    assert!(text.contains("theme"), "{text}");
+
+    let report = read::<AnswersFile>(b"answers:\n  - id: theme\n", ANSWERS)
+        .expect_err("an answer carries a value");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
+    assert!(report.to_string().contains("answers[0]"), "{report}");
+}
+
+#[test]
+fn a_reply_is_judged_against_the_questions_it_answers() {
+    // `read` sees one document; the questions are another, so what a
+    // reply owes them is asked where both are in hand. Every violation
+    // together, never the first.
+    let questions: QuestionsFile = read(
+        br#"
+questions:
+  - id: theme
+    text: Which theme?
+    answer_type: choice
+    values: [dark, light]
+    required: true
+  - id: ship
+    text: Ship it?
+    answer_type: boolean
+    required: true
+"#,
+        QUESTIONS,
+    )
+    .expect("the questions read");
+
+    let report = AnswersFile::against(
+        &questions,
+        vec![
+            Answer {
+                id: "theme".into(),
+                value: "purple".to_string(),
+            },
+            Answer {
+                id: "ghost".into(),
+                value: "x".to_string(),
+            },
+        ],
+    )
+    .expect_err("three ways at once");
+    let text = report.to_string();
+    assert!(text.contains("purple"), "the value off the list: {text}");
+    assert!(text.contains("ghost"), "the question nobody asked: {text}");
+    assert!(
+        text.contains("ship"),
+        "the required question unanswered: {text}"
+    );
+
+    AnswersFile::against(
+        &questions,
+        vec![
+            Answer {
+                id: "theme".into(),
+                value: "dark".to_string(),
+            },
+            Answer {
+                id: "ship".into(),
+                value: "true".to_string(),
+            },
+        ],
+    )
+    .expect("a reply that answers its questions");
 }
 
 #[test]

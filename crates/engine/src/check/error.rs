@@ -250,12 +250,32 @@ pub enum CheckError {
          alone and move {} to a node that follows it with `context: [{{ artifact: {{ node: \
          {node}, {} }} }}]`",
         ArtifactSpec::listed(.others), ArtifactSpec::listed(.others),
-        yunta_core::ReservedIdentity::Answers.reference()
+        yunta_core::ReservedIdentity::Kind(yunta_core::ArtifactKind::Answers).reference()
     )]
     QuestionsAlongsideOtherArtifacts {
         node: NodeId,
         others: Vec<ArtifactSpec>,
     },
+
+    /// The engine writes the answers to a `questions` document, so a
+    /// node that declared them would owe a document nobody can hand it.
+    #[error(
+        "node `{node}` produces `answers` — the engine writes the answers to a `questions` \
+         document itself when a person replies; a node produces one of {} or a file name, and \
+         the node that follows the one that asked reads the answers with `context: \
+         [{{ artifact: {{ node: {node}, kind: answers }} }}]`",
+        yunta_core::ArtifactKind::declarable_listed()
+    )]
+    AnswersDeclaredAsProduced { node: NodeId },
+
+    /// Answers exist because a node asked, so a node that asks nothing
+    /// has none to read.
+    #[error(
+        "{site} reads `kind: answers` from node `{node}`, and `{node}` asks nothing — only a \
+         node that produces `questions` leaves answers; read them from the node that asks, or \
+         drop the source"
+    )]
+    AnswersFromNodeThatNeverAsks { node: NodeId, site: String },
 
     /// Only a `prompt` node holds the session that hands questions over
     /// and the close that waits on them.

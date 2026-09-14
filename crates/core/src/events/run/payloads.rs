@@ -105,10 +105,11 @@ pub enum PauseReason {
         node: NodeId,
         pending: crate::NonEmpty<QuestionId>,
     },
-    /// A surface answered and the questions refused the reply.
+    /// A surface answered and the questions refused the reply, with
+    /// every way it failed to answer them.
     AnswersRefused {
         node: NodeId,
-        violations: Vec<String>,
+        report: crate::diagnostic::Report,
     },
 }
 
@@ -169,11 +170,9 @@ impl std::fmt::Display for PauseReason {
                 pending.len(),
                 listed(pending.as_slice().iter().map(QuestionId::as_str))
             ),
-            PauseReason::AnswersRefused { node, violations } => write!(
-                f,
-                "node `{node}`'s answers were refused: {}",
-                violations.join("; ")
-            ),
+            PauseReason::AnswersRefused { node, report } => {
+                write!(f, "node `{node}`'s answers were refused: {report}")
+            }
         }
     }
 }

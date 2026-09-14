@@ -113,10 +113,10 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         // engine is the verdict-giver, so nothing is half-recorded: the
         // run parks citing the exact violations, and the next round asks
         // again from the same document.
-        Err(error @ AnswersError::Refused { .. }) => Ok(AskOutcome::Pause {
+        Err(AnswersError::Refused(report)) => Ok(AskOutcome::Pause {
             reason: PauseReason::AnswersRefused {
                 node: node.id.clone(),
-                violations: error.violations().to_vec(),
+                report,
             },
         }),
         Err(other) => Err(RunError::Broken {

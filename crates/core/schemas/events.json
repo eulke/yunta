@@ -294,7 +294,8 @@
       "enum": [
         "tasks",
         "findings",
-        "questions"
+        "questions",
+        "answers"
       ]
     },
     "ArtifactOrigin": {
@@ -2379,6 +2380,16 @@
           "description": "`answer_type` is `choice` and `values` is empty.",
           "type": "string",
           "const": "missing-values"
+        },
+        {
+          "description": "A `required` question has no answer.",
+          "type": "string",
+          "const": "missing-answer"
+        },
+        {
+          "description": "An answer's value is not what its question's `answer_type` allows.",
+          "type": "string",
+          "const": "mismatched-answer"
         }
       ]
     },

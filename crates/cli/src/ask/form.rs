@@ -124,7 +124,7 @@ fn shown(value: bool) -> Choice<Option<String>> {
 
 /// What the engine's own rules say about this one answer.
 ///
-/// The question is put to `validate_answers` on its own, so the
+/// The question is put to [`AnswersFile::against`](yunta_core::AnswersFile::against) on its own, so the
 /// sentence a person reads while answering is the very verdict the
 /// round is judged by when it is submitted, never a second opinion
 /// written here that the engine might not share.
@@ -132,7 +132,14 @@ fn violations(question: &Question, answer: Option<&Answer>) -> Vec<String> {
     let alone = QuestionsFile {
         questions: vec![question.clone()],
     };
-    yunta_core::validate_answers(&alone, answer.map(std::slice::from_ref).unwrap_or_default())
+    match yunta_core::AnswersFile::against(&alone, answer.cloned().into_iter().collect()) {
+        Ok(_) => Vec::new(),
+        Err(report) => report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.to_string())
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -152,16 +159,11 @@ mod tests {
     #[test]
     fn a_required_question_left_unanswered_is_the_engines_own_refusal() {
         let broken = violations(&question(AnswerType::Text, true), None);
-        assert_eq!(
-            broken,
-            yunta_core::validate_answers(
-                &QuestionsFile {
-                    questions: vec![question(AnswerType::Text, true)]
-                },
-                &[]
-            )
-        );
         assert!(!broken.is_empty(), "the round is not complete without it");
+        assert!(
+            broken[0].contains("required"),
+            "the engine's own words: {broken:?}"
+        );
     }
 
     #[test]

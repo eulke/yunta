@@ -123,6 +123,7 @@ pub fn check(
     check_asking_nodes(workflow, &mut errors);
     check_input_documents(workflow, &mut errors);
     check_reserved_artifact_names(workflow, &mut errors);
+    check_answer_sources(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);

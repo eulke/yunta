@@ -141,12 +141,15 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 A node declares what it produces as a list of bare strings —
 `produces: [tasks, notes.md]`.
-`tasks`, `findings` and `questions` name the three documents the engine reads,
-validates and turns into events. Every other string is the name of a file the
-engine only carries: it records that the file exists and what it hashes to, and
-its structure is whatever the session decided. Those three names are therefore
-not available as file names, and `yunta check` says so when a reference spells
-one as a `name:`.
+`tasks`, `findings` and `questions` name the documents a node produces and the
+engine reads, validates and turns into events. `answers` names a fourth the
+engine writes itself, when a person replies to a `questions` document; a node
+cannot declare it, and a node that follows the one that asked reads it with
+`context: [{ artifact: { node: <the node that asked>, kind: answers } }]`. Every
+other string is the name of a file the engine only carries: it records that the
+file exists and what it hashes to, and its structure is whatever the session
+decided. Those four names are therefore not available as file names, and
+`yunta check` says so when a reference spells one as a `name:`.
 
 A node produces at most one document of each kind, so the kind is the whole
 identity: `(node, kind)` is what the run answers by, and declaring the same kind

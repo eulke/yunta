@@ -96,6 +96,10 @@ rule_codes! {
     EmptyReason => "empty-reason",
     /// `answer_type` is `choice` and `values` is empty.
     MissingValues => "missing-values",
+    /// A `required` question has no answer.
+    MissingAnswer => "missing-answer",
+    /// An answer's value is not what its question's `answer_type` allows.
+    MismatchedAnswer => "mismatched-answer",
 }
 
 impl std::fmt::Display for RuleCode {

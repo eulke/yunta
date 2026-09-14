@@ -2,6 +2,7 @@
 
 use super::*;
 use yunta_core::events::ArtifactId;
+use yunta_core::ArtifactRefId;
 
 /// Config `defaults:` values that only `check` can catch before a run:
 /// a `max_parallel_nodes` of zero (which would schedule nothing), and a
@@ -110,6 +111,11 @@ pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<
         for spec in &artifacts.produces {
             match spec {
                 yunta_core::ArtifactSpec::Interpreted(kind) => {
+                    if !kind.declarable() {
+                        errors.push(CheckError::AnswersDeclaredAsProduced {
+                            node: node.id.clone(),
+                        });
+                    }
                     if !kinds.insert(*kind) {
                         errors.push(CheckError::DuplicateArtifactKind {
                             node: node.id.clone(),
@@ -164,6 +170,54 @@ pub(crate) fn check_input_documents(workflow: &Workflow, errors: &mut Vec<CheckE
                     node: node.id.clone(),
                     kind,
                 });
+            }
+        }
+    }
+}
+
+/// A `kind: answers` reference reaches the answers of a node that asks.
+///
+/// The engine writes the answers when a person replies to a `questions`
+/// document, so a node that never asks has none — a reference to its
+/// answers resolves to nothing at run time, and says so here instead,
+/// where the workflow is all it takes to know.
+pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let asks = |named: &yunta_core::NodeId| {
+        workflow
+            .iter_nodes()
+            .any(|node| node.id == *named && node.asks())
+    };
+    let mut answers_of = |site: String, named: Option<&yunta_core::NodeId>, id: &ArtifactRefId| {
+        let ArtifactRefId::Kind { kind } = id else {
+            return;
+        };
+        if *kind != yunta_core::ArtifactKind::Answers {
+            return;
+        }
+        if let Some(named) = named.filter(|named| !asks(named)) {
+            errors.push(CheckError::AnswersFromNodeThatNeverAsks {
+                node: named.clone(),
+                site,
+            });
+        }
+    };
+    for node in workflow.iter_nodes() {
+        for source in &node.context {
+            if let yunta_core::ContextSpec::Artifact { artifact } = source {
+                answers_of(
+                    format!("the `artifact:` context source of node `{}`", node.id),
+                    artifact.node.as_ref(),
+                    &artifact.id,
+                );
+            }
+        }
+        if let yunta_core::NodeKind::Workflow { mounts, .. } = &node.kind {
+            for mount in mounts {
+                answers_of(
+                    format!("a `mounts:` entry of node `{}`", node.id),
+                    Some(&mount.artifact.node),
+                    &mount.artifact.id,
+                );
             }
         }
     }

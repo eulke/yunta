@@ -44,17 +44,6 @@ pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;
 
-/// The artifact a node's answers are: an opaque one, named after the
-/// questions it answers, so the two sit side by side in the node's view.
-///
-/// Opaque because the engine carries it rather than reading it: a node
-/// holds one questions document, and its answers are the file beside it.
-pub(crate) fn answers_artifact() -> ArtifactId {
-    ArtifactId::Opaque {
-        name: yunta_core::ReservedIdentity::Answers.file_name(),
-    }
-}
-
 /// Why an artifact the run acquired did not become a fact of the run.
 #[derive(Debug, thiserror::Error)]
 pub enum AcceptError {

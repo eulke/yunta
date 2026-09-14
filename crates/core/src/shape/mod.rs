@@ -60,6 +60,7 @@ mod sealed {
     impl Sealed for crate::TasksFile {}
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
+    impl Sealed for crate::AnswersFile {}
 }
 
 /// Reads `bytes` into `T`, or reports every problem the document has.
@@ -153,6 +154,7 @@ pub fn contract(kind: ArtifactKind) -> String {
         ArtifactKind::Tasks => rendered::<TasksFile>(),
         ArtifactKind::Findings => rendered::<FindingsFile>(),
         ArtifactKind::Questions => rendered::<QuestionsFile>(),
+        ArtifactKind::Answers => rendered::<crate::AnswersFile>(),
     }
 }
 
@@ -162,6 +164,7 @@ pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
         ArtifactKind::Tasks => TasksFile::RULES,
         ArtifactKind::Findings => FindingsFile::RULES,
         ArtifactKind::Questions => QuestionsFile::RULES,
+        ArtifactKind::Answers => crate::AnswersFile::RULES,
     }
 }
 

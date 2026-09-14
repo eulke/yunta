@@ -65,6 +65,7 @@ pub enum ArtifactContent {
     Tasks(TasksFile),
     Findings(Vec<Finding>),
     Questions(Vec<Question>),
+    Answers(Vec<yunta_core::Answer>),
 }
 
 impl ArtifactContent {
@@ -77,6 +78,7 @@ impl ArtifactContent {
             ArtifactContent::Tasks(_) => Some(ArtifactKind::Tasks),
             ArtifactContent::Findings(_) => Some(ArtifactKind::Findings),
             ArtifactContent::Questions(_) => Some(ArtifactKind::Questions),
+            ArtifactContent::Answers(_) => Some(ArtifactKind::Answers),
         }
     }
 }
@@ -282,6 +284,10 @@ pub(super) fn interpret(
         Some(ArtifactKind::Questions) => {
             let file = read::<QuestionsFile>(bytes, path)?;
             ArtifactContent::Questions(file.questions)
+        }
+        Some(ArtifactKind::Answers) => {
+            let file = read::<yunta_core::AnswersFile>(bytes, path)?;
+            ArtifactContent::Answers(file.answers)
         }
     })
 }

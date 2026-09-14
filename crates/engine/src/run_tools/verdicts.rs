@@ -73,6 +73,11 @@ pub(super) fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
             questions.len(),
             names(questions.iter().map(|q| q.id.to_string()))
         ),
+        ArtifactContent::Answers(answers) => format!(
+            "{} question(s) answered: {}",
+            answers.len(),
+            names(answers.iter().map(|answer| answer.id.to_string()))
+        ),
     }
 }
 

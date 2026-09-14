@@ -109,6 +109,14 @@ pub(crate) fn submit(
             (ArtifactContent::Questions(file.questions), yaml)
         }
         ArtifactKind::Findings => return Err(SubmitError::Accumulated),
+        // The engine writes the answers when a person replies, so no
+        // session hands one over — `submit_tool` gives this kind no tool
+        // to arrive through, and `declarable` keeps a node from owing one.
+        ArtifactKind::Answers => {
+            return Err(SubmitError::NotInterpreted {
+                name: kind.to_string(),
+            })
+        }
     };
 
     rendered_document(artifact, path, yaml, content, max_bytes)
@@ -249,6 +257,13 @@ pub(crate) fn canonical(artifact: &VerifiedArtifact) -> Result<Vec<u8>, SubmitEr
         ArtifactContent::Questions(questions) => render(
             &QuestionsFile {
                 questions: questions.clone(),
+            },
+            &path,
+        )?
+        .into_bytes(),
+        ArtifactContent::Answers(answers) => render(
+            &yunta_core::AnswersFile {
+                answers: answers.clone(),
             },
             &path,
         )?

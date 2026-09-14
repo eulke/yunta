@@ -200,7 +200,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // the given values, consumable by a later node via `artifact:`.
     let raw = String::from_utf8(
         bench
-            .projection(Some("ask"), "questions.answers.yaml")
+            .projection(Some("ask"), "answers.yaml")
             .expect("the answers artifact has a view"),
     )
     .unwrap();
@@ -213,8 +213,8 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
         .into_iter()
         .find(|held| {
             held.artifact
-                == yunta_core::events::ArtifactId::Opaque {
-                    name: "questions.answers.yaml".to_string(),
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Answers,
                 }
         })
         .expect("the answers are an artifact the run holds");
@@ -247,9 +247,13 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                *reason,
-                "node `ask`'s answers were refused: required question `q1` has no answer"
+            assert!(
+                reason.starts_with("node `ask`'s answers were refused:"),
+                "the pause says whose answers and that they were refused: {reason}"
+            );
+            assert!(
+                reason.contains("`q1`") && reason.contains("nothing answers it"),
+                "and which question went unanswered, in the engine's own words: {reason}"
             );
         }
         other => panic!("an incomplete reply must pause, got {other:?}"),
@@ -371,12 +375,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         resumed.state.nodes.state("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
-    let raw = String::from_utf8(
-        bench
-            .projection(Some("ask"), "questions.answers.yaml")
-            .unwrap(),
-    )
-    .unwrap();
+    let raw = String::from_utf8(bench.projection(Some("ask"), "answers.yaml").unwrap()).unwrap();
     let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "production")]);
 }

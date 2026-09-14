@@ -123,7 +123,8 @@
       "enum": [
         "tasks",
         "findings",
-        "questions"
+        "questions",
+        "answers"
       ]
     },
     "ArtifactSpec": {

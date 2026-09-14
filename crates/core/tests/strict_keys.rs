@@ -108,8 +108,8 @@ fn an_artifact_and_a_prompt_file_refuse_unknown_keys() {
     assert_eq!(
         text,
         "`nodes[0]`: nodes: node `a`: `artifacts.produces[0]`: an artifact is a file name, or \
-         one of `tasks`, `findings`, `questions` for a document the engine reads, not a \
-         mapping at line 3 column 3"
+         one of `tasks`, `findings`, `questions`, `answers` for a document the engine reads, \
+         not a mapping at line 3 column 3"
     );
 }
 

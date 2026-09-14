@@ -418,7 +418,24 @@ mod pause_reason_tests {
             },
             PauseReason::AnswersRefused {
                 node: NodeId::from("scope"),
-                violations: vec!["`q2` has no answer".to_string()],
+                report: yunta_core::diagnostic::Report::new(
+                    yunta_core::diagnostic::DocumentRef::new(
+                        yunta_core::ArtifactKind::Answers,
+                        "answers.yaml",
+                    ),
+                    vec![yunta_core::diagnostic::Diagnostic::new(
+                        yunta_core::diagnostic::Subject::Question(
+                            yunta_core::diagnostic::Named::new(
+                                yunta_core::QuestionId::from("q2"),
+                                0,
+                            ),
+                        ),
+                        yunta_core::diagnostic::Problem::rule(
+                            yunta_core::diagnostic::RuleCode::MissingAnswer,
+                            "this question is `required` and nothing answers it",
+                        ),
+                    )],
+                ),
             },
         ];
         for reason in &all {

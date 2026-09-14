@@ -11,10 +11,15 @@
 
 use std::path::Path;
 
-use yunta_core::events::{Channel, EventPayload, QuestionsAnsweredPayload, RecordedOrigin};
-use yunta_core::{Answer, AnswersFile, ContentHash, NodeId, QuestionsFile, Responder};
+use yunta_core::diagnostic::Report;
+use yunta_core::events::{
+    ArtifactId, Channel, EventPayload, QuestionsAnsweredPayload, RecordedOrigin,
+};
+use yunta_core::{
+    Answer, AnswersFile, ArtifactKind, ContentHash, NodeId, QuestionsFile, Responder,
+};
 
-use crate::artifacts::{accept, answers_artifact, AcceptError};
+use crate::artifacts::{accept, AcceptError};
 use crate::run_log::RunLog;
 use yunta_core::events::GateEvent;
 
@@ -35,26 +40,15 @@ pub struct Recorded {
 /// Why a reply did not become a fact of the run.
 #[derive(Debug, thiserror::Error)]
 pub enum AnswersError {
-    /// The reply does not satisfy the questions it answers, each
-    /// violation named. Nothing was written: a surface corrects and
+    /// The reply does not answer the questions it claims to, every way
+    /// it fails named. Nothing was written: a surface corrects and
     /// replies again.
-    #[error("{}", .violations.join("; "))]
-    Refused { violations: Vec<String> },
+    #[error("{0}")]
+    Refused(Report),
     #[error("the answers could not be written")]
     Write(#[source] AcceptError),
     #[error("the answers could not be rendered")]
     Render(#[source] yunta_core::yaml::YamlError),
-}
-
-impl AnswersError {
-    /// The violations a refusal names, for a surface that lists them
-    /// rather than printing the whole sentence.
-    pub fn violations(&self) -> &[String] {
-        match self {
-            AnswersError::Refused { violations } => violations,
-            _ => &[],
-        }
-    }
 }
 
 /// Records one reply to `node`'s questions: the answers as an artifact
@@ -72,13 +66,7 @@ pub async fn record(
     questions: &QuestionsFile,
     reply: Reply,
 ) -> Result<Recorded, AnswersError> {
-    let violations = yunta_core::validate_answers(questions, &reply.answers);
-    if !violations.is_empty() {
-        return Err(AnswersError::Refused { violations });
-    }
-    let file = AnswersFile {
-        answers: reply.answers,
-    };
+    let file = AnswersFile::against(questions, reply.answers).map_err(AnswersError::Refused)?;
     let accepted = write(log, run_dir, node, &file, RecordedOrigin::Answered).await?;
     log.record(
         Some(node),
@@ -91,7 +79,10 @@ pub async fn record(
     .await
     .map_err(|source| {
         AnswersError::Write(AcceptError::Log {
-            name: answers_artifact().view_name(),
+            name: ArtifactId::Interpreted {
+                kind: ArtifactKind::Answers,
+            }
+            .view_name(),
             source,
         })
     })?;
@@ -122,9 +113,18 @@ async fn write(
     let bytes = yunta_core::yaml::to_string(file)
         .map_err(AnswersError::Render)?
         .into_bytes();
-    let accepted = accept(log, run_dir, Some(node), answers_artifact(), &bytes, origin)
-        .await
-        .map_err(AnswersError::Write)?;
+    let accepted = accept(
+        log,
+        run_dir,
+        Some(node),
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Answers,
+        },
+        &bytes,
+        origin,
+    )
+    .await
+    .map_err(AnswersError::Write)?;
     Ok(Recorded {
         answers_hash: accepted.content_hash,
     })

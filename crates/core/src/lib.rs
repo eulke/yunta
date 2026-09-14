@@ -88,7 +88,7 @@ pub use pack::{
     PackRequires, RequiredRunner,
 };
 pub use policy::ScopeExpansionMode;
-pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};

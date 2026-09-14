@@ -137,7 +137,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [grill]
     context:
       - artifact: { node: grill, kind: questions }
-      - artifact: { node: grill, name: questions.answers.yaml }
+      - artifact: { node: grill, kind: answers }
     prompt: |
       Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
       respuestas.

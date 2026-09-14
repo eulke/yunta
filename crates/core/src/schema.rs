@@ -40,6 +40,11 @@ pub fn questions() -> Schema {
     titled(schema_for!(crate::QuestionsFile), "yunta questions")
 }
 
+/// An answers artifact, as a `kind: answers` artifact carries it.
+pub fn answers() -> Schema {
+    titled(schema_for!(crate::AnswersFile), "yunta answers")
+}
+
 /// A withdrawal, as `yunta_withdraw_finding` receives it.
 pub fn withdrawal() -> Schema {
     titled(schema_for!(crate::Withdrawal), "yunta finding withdrawal")
@@ -53,8 +58,8 @@ pub fn events() -> Schema {
 
 /// Every root schema with the file name it is kept under. A kind the
 /// engine parses and validates is a kind whose schema it publishes, so
-/// the three interpreted artifact kinds are all here.
-pub fn all() -> [(&'static str, Schema); 8] {
+/// every interpreted artifact kind is here.
+pub fn all() -> [(&'static str, Schema); 9] {
     [
         ("workflow", workflow()),
         ("config", config()),
@@ -62,6 +67,7 @@ pub fn all() -> [(&'static str, Schema); 8] {
         ("tasks", tasks()),
         ("findings", findings()),
         ("questions", questions()),
+        ("answers", answers()),
         ("withdrawal", withdrawal()),
         ("events", events()),
     ]
@@ -84,5 +90,6 @@ pub fn json(kind: crate::ArtifactKind) -> &'static str {
         crate::ArtifactKind::Tasks => include_str!("../schemas/tasks.json"),
         crate::ArtifactKind::Findings => include_str!("../schemas/findings.json"),
         crate::ArtifactKind::Questions => include_str!("../schemas/questions.json"),
+        crate::ArtifactKind::Answers => include_str!("../schemas/answers.json"),
     }
 }
