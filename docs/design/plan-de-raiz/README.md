@@ -749,7 +749,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-01 | `SessionSetup` con `chosen` y `artifact_dir`; `prepare_loop` por `open_run_tools` | P8 | cerrado(a45e19a) |
 | W-02 | `ArtifactName::parse` después de renderizar | P8 | cerrado(aa437f7) |
 | W-03 | `target_digest` siempre hash | P8 | cerrado(56ad092) |
-| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | pendiente |
+| W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | cerrado(6bf7baa) |
 | W-05 | `git.rs` por `spawn_governed` | P8 | pendiente |
 | W-06 | `parallel_exec` por `resume_policies` | P8 | pendiente |
 | W-07 | `MockSession` con handle y `Drop` | P8 | pendiente |
