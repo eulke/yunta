@@ -187,6 +187,22 @@ fn case_runs(case_text: &str, origin: &str) {
     );
 }
 
+/// The reference schema is the one document whose job is to show every
+/// key with a real value, so every value in it has to be one the parser
+/// takes — a limit written the way a person reads it is a limit nobody
+/// can copy.
+#[test]
+fn the_reference_schema_config_parses() {
+    let file = repo_root().join("docs/design/referencia-schema.md");
+    let blocks = yaml_blocks(&file);
+    let config = blocks
+        .iter()
+        .find(|block| has_top_level_key(&block.text, "limits"))
+        .expect("the reference schema shows the config with its limits");
+    let _: yunta_core::ConfigLayer = yunta_core::yaml::parse(&config.text)
+        .unwrap_or_else(|e| panic!("{}: not a config layer: {e}", config.origin));
+}
+
 #[test]
 fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
     let root = repo_root();

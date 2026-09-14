@@ -82,12 +82,12 @@ permissions:                        # techo; las capas inferiores solo estrechan
     default: true
 
 limits:
-  max_tokens_per_run: 2_000_000
+  max_tokens_per_run: 2000000
   max_loop_iterations: 12
   max_concurrent_runs: 3
   max_workflow_depth: 4
-  max_artifact_bytes: 50_000_000    # guardia contra accidentes (§4)
-  inline_context_bytes: 32_000      # sobre este umbral, el contexto se monta por referencia (§9.1)
+  max_artifact_bytes: 50000000    # guardia contra accidentes (§4)
+  inline_context_bytes: 32000      # sobre este umbral, el contexto se monta por referencia (§9.1)
 
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
