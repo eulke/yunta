@@ -157,6 +157,18 @@ fn all_kinds() -> Vec<EventPayload> {
             by: "eulke".into(),
             sha: "deadbeef".into(),
         }),
+        EventPayload::QuestionsAsked(
+            QuestionsAskedPayload::new(
+                yunta_core::sha256_hex(b"sha256:222"),
+                vec!["q1".into()],
+                TokenUsage {
+                    input: 30,
+                    output: 12,
+                    cached: None,
+                },
+            )
+            .expect("one question is a question"),
+        ),
         EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: yunta_core::sha256_hex(b"sha256:333"),
             channel: Channel::Tty,
@@ -305,6 +317,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::NodeRerouted(_)
         | EventPayload::GateWaiting(_)
         | EventPayload::GateResolved(_)
+        | EventPayload::QuestionsAsked(_)
         | EventPayload::QuestionsAnswered(_)
         | EventPayload::LoopIteration(_)
         | EventPayload::FindingPosted(_)
@@ -324,12 +337,24 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
 }
 
 #[test]
-fn there_are_exactly_36_kinds_with_distinct_names() {
+fn there_are_exactly_37_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 36);
+    assert_eq!(kinds.len(), 37);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 36, "expected 36 distinct kind names");
+    assert_eq!(names.len(), 37, "expected 37 distinct kind names");
+}
+
+/// A node that asked nothing did not ask: the fact refuses to exist, so
+/// no log can hold a wait nobody can end.
+#[test]
+fn a_questions_asked_with_no_questions_cannot_be_built() {
+    assert!(QuestionsAskedPayload::new(
+        yunta_core::sha256_hex(b"empty"),
+        Vec::new(),
+        TokenUsage::default(),
+    )
+    .is_none());
 }
 
 #[test]
@@ -372,6 +397,7 @@ fn kind_names_match_the_spec_exactly() {
         "node_rerouted",
         "gate_waiting",
         "gate_resolved",
+        "questions_asked",
         "questions_answered",
         "loop_iteration",
         "finding_posted",

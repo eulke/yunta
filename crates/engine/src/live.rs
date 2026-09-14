@@ -190,8 +190,10 @@ pub(crate) fn live_total_tokens_of(state: &RunState, events: &[StoredEvent]) -> 
 /// opens a node's accounting again from zero, so this is what the
 /// attempt now running has reported, never a sum across attempts.
 ///
-/// A closed attempt is paid for by its terminal's `tokens_used`, which
-/// is why the count drops here the moment one arrives. An attempt closed
+/// A closed attempt is paid for by its terminal's `tokens_used` — or,
+/// for a node that asked, by the `questions_asked` that closed its
+/// accounting — which is why the count drops here the moment one
+/// arrives. An attempt closed
 /// by nothing — the orphan a resume restarts, whose `node_started`
 /// follows another with no terminal between them — leaves its reports
 /// behind with it: no terminal ever claimed them, so no total carries
@@ -206,7 +208,15 @@ fn in_flight_tokens(events: &[StoredEvent]) -> TokenUsage {
             Some(EventPayload::NodeStarted(_)) => {
                 open.insert(node_id, TokenUsage::default());
             }
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)) => {
+            // A node that asked is no longer in flight: its session
+            // closed and `questions_asked` carries what it spent, which
+            // the derived total already holds. Counting it here too
+            // would double it for as long as the node waits.
+            Some(
+                EventPayload::NodeFinished(_)
+                | EventPayload::NodeFailed(_)
+                | EventPayload::QuestionsAsked(_),
+            ) => {
                 open.remove(node_id);
             }
             Some(EventPayload::AgentMessage(p)) if p.message_type == AgentMessageType::Usage => {

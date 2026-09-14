@@ -29,7 +29,6 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -62,7 +61,6 @@ fn gate_node(id: &str) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }

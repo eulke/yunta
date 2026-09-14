@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
 use yunta_core::{
-    ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind, OnFailure,
-    PromptSource, RunnerCandidate, Workflow,
+    ArtifactSpec, ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind,
+    OnFailure, PromptSource, RunnerCandidate, Workflow,
 };
 use yunta_engine::{check, check_warnings, CheckError, CheckWarning, SchemaRangeError};
 
@@ -44,7 +44,6 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -69,7 +68,6 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -102,7 +100,6 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -135,7 +132,6 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -580,6 +576,89 @@ fn a_mode_excluding_a_gate_option_target_is_reported() {
             mode: "quick".into(),
             node: "approve".into(),
             goto: "plan".into(),
+        }]
+    );
+}
+
+/// A node that asks ends when it asks: whatever depended on the answers
+/// belongs to a node that follows it and mounts them as context.
+#[test]
+fn a_node_that_asks_questions_declares_nothing_else() {
+    let mut node = prompt("grill", "planner", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![
+            ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Questions),
+            ArtifactSpec::Opaque("brief.md".to_string()),
+        ],
+    });
+    let errors = check(&workflow(vec![node]), &config_with_runner("planner", 1));
+    assert_eq!(
+        errors,
+        vec![CheckError::QuestionsAlongsideOtherArtifacts {
+            node: "grill".into(),
+            others: vec![ArtifactSpec::Opaque("brief.md".to_string())],
+        }]
+    );
+}
+
+#[test]
+fn the_refusal_spells_the_split_and_how_to_read_the_answers() {
+    let refusal = CheckError::QuestionsAlongsideOtherArtifacts {
+        node: "grill".into(),
+        others: vec![ArtifactSpec::Opaque("brief.md".to_string())],
+    }
+    .to_string();
+    assert!(
+        refusal.contains("`brief.md`"),
+        "the refusal names what has to move: {refusal}"
+    );
+    assert!(
+        refusal.contains("a node that follows it"),
+        "the refusal says where it goes: {refusal}"
+    );
+    assert!(
+        refusal.contains("name: questions.answers.yaml"),
+        "the refusal spells how the next node reads the answers: {refusal}"
+    );
+}
+
+/// Only a `prompt` node holds the session that hands questions over and
+/// the close that waits on them.
+#[test]
+fn only_a_prompt_node_asks() {
+    let mut node = bash("ask", "echo hi", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Questions,
+        )],
+    });
+    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
+    assert_eq!(
+        errors,
+        vec![CheckError::QuestionsOnKind {
+            node: "ask".into(),
+            kind: "bash",
+        }]
+    );
+}
+
+/// The scheduler asks one top-level node at a time, so a group's child
+/// would wait forever.
+#[test]
+fn a_node_that_asks_is_refused_inside_a_parallel_group() {
+    let mut child = prompt("grill", "planner", &[]);
+    child.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Questions,
+        )],
+    });
+    let wf = workflow(vec![parallel("group", JoinPolicy::All, vec![child])]);
+    let errors = check(&wf, &config_with_runner("planner", 1));
+    assert_eq!(
+        errors,
+        vec![CheckError::QuestionsInsideParallel {
+            node: "grill".into(),
+            group: "group".into(),
         }]
     );
 }

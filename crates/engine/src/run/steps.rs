@@ -5,7 +5,7 @@
 use yunta_core::events::{
     EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
     PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, RunMetrics, StoredEvent,
-    TerminalState,
+    TerminalState, TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
@@ -14,8 +14,8 @@ use crate::reserved::ReservedOption;
 use crate::stats::cptv;
 
 use super::{
-    budget, escalation, find_node, gate_exec, node_exec, pause, questions_exec, schedule, RunCtx,
-    RunError, RunReport, RunTerminal,
+    budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
+    schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
 
 /// A corrupt log is exactly the one you most want exported — each event
@@ -446,6 +446,22 @@ pub(super) async fn ask_questions(
         questions_exec::AskOutcome::Answered => Ok(None),
         questions_exec::AskOutcome::Pause { reason } => Ok(Some(pause(ctx, reason).await?)),
     }
+}
+
+/// Pays a node the terminal its close deferred: its questions were
+/// answered, and the `node_finished` is all that is left.
+///
+/// No session opens and no attempt starts. The node closed when it
+/// asked — its hooks ran, its diff was audited, its artifacts were
+/// verified — so a resume that lands here after a crash costs an append,
+/// not a session.
+pub(super) async fn finish_answered(
+    ctx: &RunCtx<'_>,
+    node_id: NodeId,
+) -> Result<Option<RunReport>, RunError> {
+    let node = find_node(&ctx.manifest.workflow, &node_id)?;
+    node_close::finish_node(ctx, node, "questions answered", TokenUsage::default()).await?;
+    Ok(None)
 }
 
 /// A published/polled gate that is still waiting has already recorded its

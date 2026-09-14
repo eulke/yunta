@@ -415,9 +415,9 @@ fn an_unknown_kind_is_counted_and_never_breaks_replay() {
 #[test]
 fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     // The same run twice: one log naming the file it wrote, one naming
-    // the artifact it accepted. A `questions` artifact, because its
-    // identity is what leaves the node waiting — the strongest thing an
-    // old log has to keep deriving.
+    // the artifact it accepted. A `questions` artifact, because a node
+    // that hands one over is the case where the two spellings most have
+    // to agree about what the run holds.
     let hash = yunta_core::sha256_hex(b"questions");
     let run = |artifact: EventPayload| {
         vec![
@@ -431,7 +431,7 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
                 3,
                 Some("ask"),
                 EventPayload::NodeFailed(NodeFailedPayload::new(
-                    Failure::message("node `ask` asked 1 question(s) awaiting an answer: q1"),
+                    Failure::message("scope violated: 1 file(s) outside the declared globs"),
                     false,
                     tokens(0, 0),
                 )),
@@ -452,10 +452,10 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     }));
 
     let (old, new) = (derive(&old), derive(&new));
-    assert_eq!(
-        old.nodes.get("ask"),
-        Some(&NodeState::Waiting { external_ref: None }),
-        "the old log still leaves the node waiting on its questions"
+    assert!(
+        matches!(old.nodes.get("ask"), Some(NodeState::Failed { .. })),
+        "a node that failed is failed, whatever documents the run holds for it: {:?}",
+        old.nodes.get("ask")
     );
     assert_eq!(old.nodes, new.nodes);
 

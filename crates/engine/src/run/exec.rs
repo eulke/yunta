@@ -185,6 +185,11 @@ pub(crate) async fn execute_run_at_depth(
                     return Ok(report);
                 }
             }
+            ScheduleStep::FinishAnswered { node } => {
+                if let Some(report) = steps::finish_answered(&ctx, node).await? {
+                    return Ok(report);
+                }
+            }
         }
     }
 }

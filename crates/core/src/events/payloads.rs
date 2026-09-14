@@ -11,8 +11,8 @@ use crate::config::RunnerCandidate;
 use crate::events::{Evidence, Failure};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{
-    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, OptionId, Responder, RunId,
-    RunnerName, Seq, SessionId, TaskId,
+    AdapterId, AgentName, FindingId, ModeName, ModelName, NodeId, OptionId, QuestionId, Responder,
+    RunId, RunnerName, Seq, SessionId, TaskId,
 };
 use crate::policy::ScopeExpansionMode;
 use crate::workflow::OnInterrupt;
@@ -664,6 +664,49 @@ impl From<GateResolvedPayload> for GateResolvedWire {
             GateResolvedPayload::Closed => GateResolvedWire::default(),
             GateResolvedPayload::Unrecognized(UnrecognizedResolution(wire)) => wire,
         }
+    }
+}
+
+/// A node handed its questions over and closed on them: what it asked
+/// from, which ids await an answer, and what the session that asked
+/// spent.
+///
+/// The pair of [`QuestionsAnsweredPayload`]. Between the two the node
+/// waits, and the `node_finished` its close deferred lands after the
+/// answer — so a node that asked is never mistaken for one that failed,
+/// and a log that holds a questions document is never mistaken for a
+/// node that is waiting on it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct QuestionsAskedPayload {
+    /// The questions document the node handed over: what the answers
+    /// answer, and what the round re-reads before putting them to
+    /// anyone.
+    pub questions_hash: ContentHash,
+    /// The ids awaiting an answer. Never empty: a node with nothing to
+    /// ask finishes in the same close instead of waiting.
+    pub questions: Vec<QuestionId>,
+    /// What the session that asked spent. The attempt's accounting
+    /// closes here, so the `node_finished` after the answer carries
+    /// none and no surface counts the session twice while it waits.
+    pub tokens_used: TokenUsage,
+}
+
+impl QuestionsAskedPayload {
+    /// The fact, with the questions that make it one.
+    ///
+    /// `None` for an empty list: a node that asked nothing did not ask,
+    /// and the caller finishes it instead of recording a wait nobody
+    /// can end.
+    pub fn new(
+        questions_hash: ContentHash,
+        questions: Vec<QuestionId>,
+        tokens_used: TokenUsage,
+    ) -> Option<Self> {
+        (!questions.is_empty()).then_some(Self {
+            questions_hash,
+            questions,
+            tokens_used,
+        })
     }
 }
 

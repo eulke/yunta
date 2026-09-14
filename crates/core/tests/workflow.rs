@@ -956,7 +956,7 @@ nodes:
     );
 }
 
-// --- Reference-schema fields (interactive, yunta_schema, skills,
+// --- Reference-schema fields (yunta_schema, skills,
 // on_finish) ------------------------------------------------------------------
 
 #[test]
@@ -969,7 +969,6 @@ nodes:
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true
     prompt: "Ask the questions."
   - id: implement
     kind: loop
@@ -984,7 +983,6 @@ on_finish:
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
     assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
-    assert!(wf.nodes[0].interactive);
     assert_eq!(
         wf.on_finish,
         vec![

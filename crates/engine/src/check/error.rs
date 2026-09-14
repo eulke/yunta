@@ -246,6 +246,40 @@ pub enum CheckError {
     #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
+    /// A node that asks ends when it asks: its answers are the next
+    /// node's context, so nothing it declares beside `questions` could
+    /// be written after them.
+    #[error(
+        "node `{node}` produces `questions` alongside {} — a node that asks ends when it asks, \
+         and its answers reach the next node as context; keep `{node}` producing `questions` \
+         alone and move {} to a node that follows it with `context: [{{ artifact: {{ node: \
+         {node}, {} }} }}]`",
+        ArtifactSpec::listed(.others), ArtifactSpec::listed(.others),
+        yunta_core::ReservedIdentity::Answers.reference()
+    )]
+    QuestionsAlongsideOtherArtifacts {
+        node: NodeId,
+        others: Vec<ArtifactSpec>,
+    },
+
+    /// Only a `prompt` node holds the session that hands questions over
+    /// and the close that waits on them.
+    #[error(
+        "node `{node}` is `kind: {kind}` and produces `questions` — only a `prompt` node asks; \
+         put the questions in a `prompt` node and read its answers from here"
+    )]
+    QuestionsOnKind { node: NodeId, kind: &'static str },
+
+    /// The scheduler puts questions to a person one top-level node at a
+    /// time, so a group's child is never asked — its wait would never
+    /// end and the node after the group would mount answers that never
+    /// arrive.
+    #[error(
+        "node `{node}` produces `questions` inside parallel group `{group}` — a person answers \
+         one node at a time; ask before or after the group"
+    )]
+    QuestionsInsideParallel { node: NodeId, group: NodeId },
+
     /// `on:` may only map options the gate itself declares —
     /// mapping an undeclared one is a choice no human can ever make.
     #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
@@ -431,41 +465,4 @@ pub enum CheckError {
         declared: &'static str,
         effective: &'static str,
     },
-}
-
-/// A non-blocking finding — the run can still start (`check`
-/// warns, it doesn't refuse, when a collision can't be verified for lack
-/// of declared scope). Kept separate from `CheckError` rather than adding
-/// a severity field to it: every existing caller of `check()` keeps
-/// treating its `Vec<CheckError>` as "must be empty to proceed" without
-/// learning to filter by severity.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum CheckWarning {
-    #[error(
-        "parallel group `{group}`: two or more children can write and don't declare scope as \
-         disjoint — the engine can't verify they won't collide; declare `scope` on each \
-         to make the check real"
-    )]
-    UndeclaredParallelScope { group: NodeId },
-
-    /// The fan-out analogue of `UndeclaredParallelScope` — one
-    /// warning per connected component of mutually-independent,
-    /// write-capable, scope-less top-level nodes (per pair would drown
-    /// the signal in noise).
-    #[error(
-        "nodes {nodes} have no dependency paths between them and can all write without \
-         declared scope — with `max_parallel_nodes` > 1 the engine can't verify they won't \
-         collide; declare `scope` on each or chain them with `depends_on`"
-    )]
-    UndeclaredFanOutScope { nodes: String },
-
-    /// A literal `git push` aimed at the base branch with no
-    /// gate anywhere before it in the DAG — warning, not error: a team
-    /// may genuinely want it, but nobody should discover an ungated
-    /// push to `main` from the push itself.
-    #[error(
-        "node `{node}` pushes to the base branch (`{branch}`) with no gate anywhere before it \
-         in the DAG — put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
-    )]
-    PushToBaseWithoutGate { node: NodeId, branch: String },
 }

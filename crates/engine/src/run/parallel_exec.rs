@@ -123,6 +123,22 @@ pub(super) async fn execute_parallel(
                         child_paused.get_or_insert(reason);
                     }
                     NodeEnd::Finished => {}
+                    // `check` refuses a child that produces
+                    // `questions`, because the scheduler puts questions
+                    // to a person one top-level node at a time and a
+                    // group's child never reaches that step. Reaching
+                    // here means a workflow got past `check` that
+                    // should not have.
+                    NodeEnd::Asked => {
+                        return Err(RunError::Broken {
+                            diagnostic: format!(
+                                "child `{}` of parallel group `{}` handed questions over — a \
+                                 node inside a group is never asked; `check` refuses this \
+                                 workflow",
+                                child.id, node.id
+                            ),
+                        })
+                    }
                 }
             }
             if interrupted {
@@ -205,6 +221,22 @@ pub(super) async fn execute_parallel(
                     // win the group. Recorded for the no-winner ending.
                     NodeEnd::ChildPaused { reason } => {
                         child_paused.get_or_insert(reason);
+                    }
+                    // `check` refuses a child that produces `questions`
+                    // (see the `join: all` arm): a node inside a group
+                    // is never asked.
+                    NodeEnd::Asked => {
+                        while let Some((_, result)) = running.next().await {
+                            result?;
+                        }
+                        return Err(RunError::Broken {
+                            diagnostic: format!(
+                                "child `{child_id}` of parallel group `{}` handed questions \
+                                 over — a node inside a group is never asked; `check` refuses \
+                                 this workflow",
+                                node.id
+                            ),
+                        });
                     }
                 }
             }

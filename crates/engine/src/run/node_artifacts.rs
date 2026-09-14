@@ -9,7 +9,7 @@
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, Failure, TokenUsage};
-use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
+use yunta_core::{ArtifactSpec, ContentHash, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
     accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
@@ -328,23 +328,25 @@ async fn record_content(
 
 /// Every question this node's artifacts ask, by id.
 ///
-/// A `kind: questions` artifact's own session has already closed by the
-/// time it is read (the same "artifact read only at node close" ordering
-/// `tasks` and `findings` rely on), so nothing renders
-/// mid-session. Questions left here close the node waiting-shaped — a
-/// `node_failed` that replay derives as `Waiting` from the typed
-/// `kind: questions` on the artifact event — and the asking happens in
-/// ONE place, the scheduler's own `AskQuestions` step
-/// (`questions_exec`), which serves the first invocation and every
+/// The questions a node handed over, with the document they came from —
+/// `None` when the node declared none at all.
+///
+/// A `kind: questions` artifact is read at the node's close (the same
+/// "artifact read only at node close" ordering `tasks` and `findings`
+/// rely on), so this is what the close knows: a node that asked
+/// something records that it asked and waits; a node that handed over an
+/// empty document asked nothing and finishes in the same close. The
+/// asking happens in ONE place afterwards, the scheduler's own
+/// `AskQuestions` step, which serves the first invocation and every
 /// resume through the identical path.
-pub(super) fn pending_questions(verified: &[VerifiedArtifact]) -> Vec<String> {
+pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<(ContentHash, Vec<QuestionId>)> {
     verified
         .iter()
-        .filter_map(|artifact| match &artifact.content {
-            ArtifactContent::Questions(questions) => Some(questions),
+        .find_map(|artifact| match &artifact.content {
+            ArtifactContent::Questions(questions) => Some((
+                artifact.content_hash.clone(),
+                questions.iter().map(|q| q.id.clone()).collect(),
+            )),
             _ => None,
         })
-        .flatten()
-        .map(|question| question.id.to_string())
-        .collect()
 }

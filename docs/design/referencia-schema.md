@@ -111,8 +111,8 @@ inputs:
 
 modes:                              # nombres y cantidad libres del autor (§10.1);
                                     # el orden declara la escalera de promoción
-  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
+  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
   full:     { include: all }
 
 node_defaults:
@@ -125,20 +125,32 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true               # §4.1 — dato de presentación: cómo se muestran las preguntas
     prompt: |
       Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses. Con las respuestas, escribí el brief.
+      necesarias como artifact; no converses.
     artifacts:
-      produces: [questions, brief.md]
+      produces: [questions]         # §4.1 — un nodo que pregunta no declara nada más
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, name: questions.answers.yaml }
+    prompt: |
+      Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
+      respuestas.
+    artifacts:
+      produces: [brief.md]
 
   - id: plan
     kind: prompt
     runner: planner
     permissions: read-only
-    depends_on: [grill]
+    depends_on: [brief]
     context:
-      - artifact: { node: grill, name: brief.md }
+      - artifact: { node: brief, name: brief.md }
       - knowledge: {}
       - files: ["docs/architecture.md"]
       - command: "git log --oneline -20"

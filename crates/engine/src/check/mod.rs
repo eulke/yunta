@@ -33,9 +33,11 @@ mod packs;
 mod refs;
 mod runners;
 mod scopes;
+mod warning;
 
-pub use error::{CheckError, CheckWarning, SchemaRangeError};
+pub use error::{CheckError, SchemaRangeError};
 pub use refs::check_workflow_refs;
+pub use warning::CheckWarning;
 
 // One home for what every family reads: the workspace types, the
 // shared helpers (the glob heuristic the tasks document's own scope rule uses,
@@ -53,7 +55,8 @@ pub(crate) use runners::*;
 pub(crate) use scopes::*;
 pub(crate) use std::collections::{HashMap, HashSet};
 pub(crate) use yunta_core::{
-    might_overlap, ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind, RunnerName, Workflow,
+    might_overlap, ArtifactSpec, ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind,
+    RunnerName, Workflow,
 };
 
 /// The pseudo-node a finding about `node_defaults:` is attributed to.
@@ -108,6 +111,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
     check_artifact_declarations(workflow, &mut errors);
+    check_asking_nodes(workflow, &mut errors);
     check_input_documents(workflow, &mut errors);
     check_reserved_artifact_names(workflow, &mut errors);
 
@@ -205,6 +209,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     }
 
     check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
+    check_no_questions_in_parallel(&workflow.nodes, None, &mut errors);
 
     if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
         let path = cycle

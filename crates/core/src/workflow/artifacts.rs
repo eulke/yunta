@@ -74,6 +74,17 @@ impl ArtifactSpec {
             ArtifactSpec::Opaque(_) => None,
         }
     }
+
+    /// Several declarations as a sentence lists them, so a diagnostic
+    /// that names more than one artifact reads the way
+    /// [`ArtifactKind::listed`] reads.
+    pub fn listed(specs: &[ArtifactSpec]) -> String {
+        specs
+            .iter()
+            .map(|spec| format!("`{spec}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 /// How an artifact names itself where a declaration is read back to a
@@ -353,6 +364,18 @@ impl ReservedIdentity {
                 ),
             }
             .view_name(),
+        }
+    }
+
+    /// How a `context:` or `mounts:` entry names this identity —
+    /// `kind: tasks` for a document the engine reads, `name: x.yaml`
+    /// for one it writes under a name. The one spelling: a diagnostic
+    /// that tells an author how to reference what the engine wrote
+    /// reads it from here rather than writing the name out.
+    pub fn reference(&self) -> String {
+        match self {
+            ReservedIdentity::Kind(kind) => format!("kind: {kind}"),
+            ReservedIdentity::Answers => format!("name: {}", self.file_name()),
         }
     }
 

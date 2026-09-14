@@ -112,13 +112,22 @@ pub enum ScheduleStep {
     ResolveInternalGate {
         node: NodeId,
     },
-    /// A non-gate node the log derives as waiting-on-questions: its
-    /// `kind: questions` artifact has no `questions_answered` yet. The
-    /// imperative shell re-reads the questions from the artifact and
-    /// puts them to `HumanInteraction` (`questions_exec`) — the ONE ask
-    /// site for first run and resume alike. One at a time, same
-    /// reasoning as the gate steps.
+    /// A non-gate node the log derives as waiting on the questions it
+    /// asked: a `questions_asked` with no `questions_answered` after
+    /// it. The imperative shell re-reads the questions from the
+    /// artifact and puts them to `HumanInteraction` (`questions_exec`)
+    /// — the ONE ask site for first run and resume alike. One at a
+    /// time, same reasoning as the gate steps.
     AskQuestions {
+        node: NodeId,
+    },
+    /// A node whose questions were answered and whose close still owes
+    /// it a terminal. The answer reopened it exactly where asking left
+    /// it, so what is left is the `node_finished` the close deferred —
+    /// no session, no new attempt. The ask round, a resume after a
+    /// crash between the answer and the terminal, and an answer a
+    /// control-plane client pre-seeded all land here.
+    FinishAnswered {
         node: NodeId,
     },
     Finish,
@@ -167,18 +176,6 @@ fn is_external_gate(node: &Node) -> bool {
             ..
         }
     )
-}
-
-/// Whether `node` declares a `kind: questions` artifact — what routes a
-/// `Waiting` non-gate node to `AskQuestions` instead of an
-/// orphan-style restart.
-fn declares_questions(node: &Node) -> bool {
-    node.artifacts.as_ref().is_some_and(|artifacts| {
-        artifacts
-            .produces
-            .iter()
-            .any(|spec| spec.kind() == Some(yunta_core::ArtifactKind::Questions))
-    })
 }
 
 /// The `external_ref` (forge handle) from this node's last `gate_waiting`
@@ -359,12 +356,27 @@ pub fn next_step(
                 },
             };
         }
-        if declares_questions(node) {
+        if node.asks() {
             return ScheduleStep::AskQuestions {
                 node: node.id.clone(),
             };
         }
         return ScheduleStep::Execute(vec![(node.id.clone(), hist(&node.id).starts + 1)]);
+    }
+
+    // 0c. A node whose questions were answered is `Running` again and
+    //     owes the terminal its close deferred. It is not an orphan: its
+    //     work is done and on the log, and restarting it would spend a
+    //     session to redo what the answer completed. Decided before the
+    //     orphan section for exactly that reason.
+    if let Some(node) = nodes
+        .iter()
+        .copied()
+        .find(|node| state.answered_unfinished.contains(&node.id))
+    {
+        return ScheduleStep::FinishAnswered {
+            node: node.id.clone(),
+        };
     }
 
     // 1. Every orphaned `running` node (crash/Ctrl-C with no terminal

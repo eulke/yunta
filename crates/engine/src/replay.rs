@@ -9,10 +9,12 @@
 //! (`task_registered`/`task_status_changed`) — plus the
 //! running token total `limits.max_tokens_per_run` is compared
 //! against. `waiting` is derived too: a published gate without its
-//! resolution (the state that outlives an invocation), and a node whose
-//! `kind: questions` artifact has no `questions_answered` yet.
-//! The internal waiting+resolved pair, emitted together, round-trips
-//! back to the node's prior state by construction.
+//! resolution (the state that outlives an invocation), and a node that
+//! recorded `questions_asked` with no `questions_answered` yet. Both are
+//! the same shape — a fact that opens the wait and a fact that closes
+//! it — and both round-trip back to the node's prior state by
+//! construction, so a node that asked comes back `Running`, owed the
+//! terminal its close deferred.
 //!
 //! A log that is insufficient or inconsistent — e.g. `node_finished` for a
 //! node that was never `node_started` — marks the result `broken` with a
@@ -23,9 +25,7 @@
 use std::collections::HashMap;
 
 use yunta_core::events::artifacts::ArtifactLedger;
-use yunta_core::events::{
-    ArtifactId, EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage,
-};
+use yunta_core::events::{EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, Seq, TaskId};
 
 /// One node's derived lifecycle state. An enum, not booleans:
@@ -50,10 +50,10 @@ pub enum NodeState {
         retryable: bool,
     },
     /// Waiting on a human — a published, unresolved gate
-    /// (`gate_waiting` with no `gate_resolved` after it), or a node
-    /// whose `kind: questions` artifact has no `questions_answered`
-    /// after it. `external_ref` is the forge's handle (a PR URL) for
-    /// external gates, `None` for everything else.
+    /// (`gate_waiting` with no `gate_resolved` after it), or a node that
+    /// asked (`questions_asked` with no `questions_answered` after it).
+    /// `external_ref` is the forge's handle (a PR URL) for external
+    /// gates, `None` for everything else.
     Waiting {
         external_ref: Option<String>,
     },
@@ -82,6 +82,15 @@ pub struct RunState {
     /// The one fold — a surface that lists, resolves or counts artifacts
     /// reads it here rather than walking the log again.
     pub artifacts: ArtifactLedger,
+    /// Every node whose questions were answered and whose close still
+    /// owes it a terminal: `questions_answered` with no `node_started`,
+    /// `node_finished` or `node_failed` after it.
+    ///
+    /// The node is `Running` again — its close already ran, when it
+    /// asked — so nothing tells it apart from a node a crash orphaned
+    /// except this. The scheduler pays the terminal from the log rather
+    /// than restarting a session that already did its work.
+    pub answered_unfinished: std::collections::BTreeSet<NodeId>,
     /// `Some(diagnostic)` once the log has proven insufficient to derive
     /// further state — the point where a `yunta resume`/`status` would
     /// report the run as `broken`.
@@ -110,16 +119,18 @@ impl RunView {
 }
 
 /// Bookkeeping `derive` needs across events without exposing it on
-/// [`RunState`]: what a `Waiting` node was before its gate
-/// opened (so `gate_resolved` can restore it — the internal
-/// waiting+resolved pair leaves a `Failed` node `Failed`), and which
-/// nodes have a `questions` artifact still unanswered (so their
-/// `node_failed` derives `Waiting` — nodes whose pending questions await
-/// an answer).
+/// [`RunState`]: what a `Waiting` node was before the fact that opened
+/// its wait (so the fact that closes it can restore that state — the
+/// internal waiting+resolved pair leaves a `Failed` node `Failed`, and a
+/// node that asked comes back `Running`).
 #[derive(Default)]
 struct Aux {
     pre_gate: HashMap<NodeId, Option<NodeState>>,
-    pending_questions: std::collections::HashSet<NodeId>,
+    /// What the session that asked spent, held from `questions_asked`
+    /// until the terminal that closes the node carries it: the attempt's
+    /// accounting closes when it asks, and the node's total is still the
+    /// whole attempt.
+    asked_tokens: HashMap<NodeId, TokenUsage>,
     /// Folds the run's finding events, so `RunState.findings` is what
     /// stands rather than what was ever posted.
     findings: yunta_core::events::findings::FindingLedger,
@@ -178,22 +189,12 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
     };
     // Which kinds state an artifact is `ArtifactLedger`'s to know, and
     // its fold is total — so every event goes through it and this
-    // derivation never names an artifact event at all. A node holding
-    // questions nobody has answered closes waiting: the identity the
-    // acceptance states is the signal, never the diagnostic the close
-    // writes.
-    let asks_questions = state
+    // derivation never names an artifact event at all. Whether a node
+    // waits is a fact of its own (`questions_asked`), never something
+    // deduced from the documents the run happens to hold.
+    state
         .artifacts
-        .apply(event.node_id.as_ref(), event.seq, payload)
-        .is_some_and(|held| {
-            held.artifact
-                == ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Questions,
-                }
-        });
-    if asks_questions {
-        aux.pending_questions.insert(require_node_id(event)?);
-    }
+        .apply(event.node_id.as_ref(), event.seq, payload);
 
     match payload {
         EventPayload::NodeStarted(p) => {
@@ -204,6 +205,9 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             // `Running` node restarts when resume finds it orphaned
             // (`restart_node`). The log records what happened; the
             // attempt number carries the history.
+            // A fresh attempt owes nothing for an earlier round's
+            // answer: whatever it produces closes it.
+            state.answered_unfinished.remove(&node_id);
             state
                 .nodes
                 .insert(node_id, NodeState::Running { attempt: p.attempt });
@@ -214,11 +218,16 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
                     state.total_tokens += p.tokens_used;
+                    // A node that asked already paid for the session
+                    // that asked, at `questions_asked`; what it carries
+                    // is that plus whatever this terminal reports.
+                    let asked = aux.asked_tokens.remove(&node_id).unwrap_or_default();
+                    state.answered_unfinished.remove(&node_id);
                     state.nodes.insert(
                         node_id,
                         NodeState::Finished {
                             outcome: p.outcome.clone(),
-                            tokens: p.tokens_used,
+                            tokens: asked + p.tokens_used,
                         },
                     );
                     Ok(())
@@ -234,21 +243,20 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
                     state.total_tokens += p.tokens_used;
-                    // A node that failed *because its
-                    // questions are unanswered* is `waiting`, not
-                    // `failed` — the questions artifact preceding it
-                    // (with no `questions_answered` since) is the typed
-                    // signal, never the diagnostic string.
-                    let next = if aux.pending_questions.contains(&node_id) {
-                        NodeState::Waiting { external_ref: None }
-                    } else {
+                    // A failure is a failure, whatever documents the run
+                    // holds for this node: a node waits because it
+                    // recorded that it asked, never because a questions
+                    // artifact exists.
+                    let asked = aux.asked_tokens.remove(&node_id).unwrap_or_default();
+                    state.answered_unfinished.remove(&node_id);
+                    state.nodes.insert(
+                        node_id,
                         NodeState::Failed {
                             failure: p.failure.clone(),
-                            tokens: p.tokens_used,
+                            tokens: asked + p.tokens_used,
                             retryable: p.retryable,
-                        }
-                    };
-                    state.nodes.insert(node_id, next);
+                        },
+                    );
                     Ok(())
                 }
                 _ => Err(ReplayError::FailedWithoutStart {
@@ -302,14 +310,53 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             }
             Ok(())
         }
+        EventPayload::QuestionsAsked(p) => {
+            let node_id = require_node_id(event)?;
+            match state.nodes.get(&node_id) {
+                Some(NodeState::Running { .. }) => {
+                    // The attempt's accounting closes here: the session
+                    // that asked is done, and no reader counts it again
+                    // while the node waits.
+                    state.total_tokens += p.tokens_used;
+                    aux.asked_tokens.insert(node_id.clone(), p.tokens_used);
+                    aux.pre_gate
+                        .insert(node_id.clone(), state.nodes.get(&node_id).cloned());
+                    state
+                        .nodes
+                        .insert(node_id, NodeState::Waiting { external_ref: None });
+                    Ok(())
+                }
+                _ => Err(ReplayError::AskedWithoutStart {
+                    seq: event.seq,
+                    node: node_id,
+                }),
+            }
+        }
         EventPayload::QuestionsAnswered(_) => {
             let node_id = require_node_id(event)?;
-            aux.pending_questions.remove(&node_id);
-            // If the node was already derived `Waiting` on those
-            // questions (a resume answering them), the answer alone
-            // doesn't finish it — the caller emits `node_started` +
-            // `node_finished` around it, which own the state transition.
-            Ok(())
+            match state.nodes.get(&node_id) {
+                Some(NodeState::Waiting { .. }) => {
+                    // The answer reopens the node exactly where asking
+                    // left it: `Running`, owed the terminal its close
+                    // deferred. The same shape as the internal
+                    // gate pair, and the reason a crash here costs a
+                    // `node_finished` rather than a whole session.
+                    match aux.pre_gate.remove(&node_id).flatten() {
+                        Some(prior) => {
+                            state.nodes.insert(node_id.clone(), prior);
+                        }
+                        None => {
+                            state.nodes.remove(&node_id);
+                        }
+                    }
+                    state.answered_unfinished.insert(node_id);
+                    Ok(())
+                }
+                _ => Err(ReplayError::AnsweredWithoutAsk {
+                    seq: event.seq,
+                    node: node_id,
+                }),
+            }
         }
         EventPayload::TaskRegistered(p) => {
             attribute_task(state, &p.task_id, event);
@@ -433,6 +480,10 @@ enum ReplayError {
     FinishedWithoutStart { seq: Seq, node: NodeId },
     #[error("seq {seq}: node `{node}` got node_failed without a matching node_started")]
     FailedWithoutStart { seq: Seq, node: NodeId },
+    #[error("seq {seq}: node `{node}` got questions_asked without a matching node_started")]
+    AskedWithoutStart { seq: Seq, node: NodeId },
+    #[error("seq {seq}: node `{node}` got questions_answered without a matching questions_asked")]
+    AnsweredWithoutAsk { seq: Seq, node: NodeId },
     #[error("seq {seq}: task `{task}` got task_status_changed without a prior task_registered")]
     StatusWithoutTask { seq: Seq, task: TaskId },
 }

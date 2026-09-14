@@ -279,7 +279,7 @@ impl schemars::JsonSchema for StoredEvent {
     }
 }
 
-/// All 36 event kinds, internally tagged by `kind`.
+/// All 37 event kinds, internally tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
@@ -304,6 +304,7 @@ pub enum EventPayload {
     NodeRerouted(NodeReroutedPayload),
     GateWaiting(GateWaitingPayload),
     GateResolved(GateResolvedPayload),
+    QuestionsAsked(QuestionsAskedPayload),
     QuestionsAnswered(QuestionsAnsweredPayload),
     LoopIteration(LoopIterationPayload),
     FindingPosted(FindingPostedPayload),
@@ -358,6 +359,7 @@ impl EventPayload {
         "node_rerouted",
         "gate_waiting",
         "gate_resolved",
+        "questions_asked",
         "questions_answered",
         "loop_iteration",
         "finding_posted",
@@ -400,6 +402,7 @@ impl EventPayload {
             Self::NodeRerouted(_) => "node_rerouted",
             Self::GateWaiting(_) => "gate_waiting",
             Self::GateResolved(_) => "gate_resolved",
+            Self::QuestionsAsked(_) => "questions_asked",
             Self::QuestionsAnswered(_) => "questions_answered",
             Self::LoopIteration(_) => "loop_iteration",
             Self::FindingPosted(_) => "finding_posted",

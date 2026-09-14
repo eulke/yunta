@@ -1,17 +1,20 @@
 # One script per session the workflow spawns, selected by prompt: the
-# planner's two sessions and the executor's one task. A mode that never
+# planner's three sessions and the executor's one task. A mode that never
 # reaches a session leaves its script unused.
 #
-# The planner hands both of its interpreted artifacts over through run
-# tools, so the fixture declares that capability; only `brief.md`, an
-# opaque artifact, is a file a session writes itself.
+# The planner hands its interpreted artifacts over through run tools, so
+# the fixture declares that capability; only `brief.md`, an opaque
+# artifact, is a file a session writes itself. `grill` asks nothing, so
+# nobody has to answer for the case to run to its end.
 capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "ambiguities"
     steps:
       - { type: run_tool, tool: yunta_submit_questions, arguments: { document: { questions: [] } } }
+    outcome: { type: completed, summary: "nothing to ask" }
+  - match_prompt_contains: "Write the brief"
     effects:
-      - { path: "{{staging}}/grill/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
+      - { path: "{{staging}}/brief/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
     outcome: { type: completed, summary: "brief written" }
   - match_prompt_contains: "tasks document"
     steps:

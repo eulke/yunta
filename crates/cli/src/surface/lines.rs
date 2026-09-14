@@ -153,6 +153,17 @@ fn detail(payload: &EventPayload) -> Option<String> {
         )),
         EventPayload::RunPaused(p) => Some(p.reason.clone()),
         EventPayload::RunFinished(p) => Some(view::closed_as(p.terminal_state).to_string()),
+        // A node that asked: what it asked, so a reader knows what the
+        // run is waiting on without opening the document.
+        EventPayload::QuestionsAsked(p) => Some(format!(
+            "asked {} question(s): {}",
+            p.questions.len(),
+            p.questions
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
         EventPayload::BaselineCaptured(_)
         | EventPayload::AgentSessionOpened(_)
         | EventPayload::ContextAssembled(_)

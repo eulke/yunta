@@ -100,10 +100,8 @@ impl HumanInteraction for ConsoleInteraction {
     }
 
     /// Question by question, each answered the way its own
-    /// `answer_type` is answered. `interactive` goes unread: it asks a
-    /// surface that can hold a conversation to hold one, and this
-    /// surface reads a `kind: questions` artifact and nothing else.
-    async fn ask(&self, questions: &QuestionsFile, _interactive: bool) -> Option<QuestionsReply> {
+    /// `answer_type` is answered.
+    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
         let questions = questions.clone();
         self.prompted(move |console| answer(console, &questions))
             .await

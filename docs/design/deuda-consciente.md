@@ -83,9 +83,11 @@ en claude-code, el sandbox en codex, el juez en el mock; este ítem se cierra
 con 3-08.
 
 **A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
-un `kind: questions` se responde por consola o por la tool MCP. Lo resolvería
-una forja que publique las preguntas y lea las respuestas, con su evento y su
-`Channel::Pr` (D167).
+un `kind: questions` se responde por consola. Lo resolvería una forja que
+publique las preguntas y lea las respuestas, con su `Channel::Pr` (D167). El
+par `questions_asked`/`questions_answered` (D173) es la forma que esa forja
+publica y lee, como `gate_waiting`/`gate_resolved`; la tool MCP que responde
+por el otro canal es el ítem 5-06.
 
 **A-15 · Fuentes de contexto provistas por executors.** `ContextSpec` es una
 enum cerrada de ocho fuentes. Lo resolvería un extension point con contrato

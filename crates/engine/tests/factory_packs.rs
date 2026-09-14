@@ -133,17 +133,17 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     .unwrap();
 
     // One scripted session per node the "quick" mode actually spawns,
-    // in the order the DAG reaches them: grill, plan, one implement
-    // task, then lint/tests/ship/pr run for real against the sandbox
-    // crate above (no mock involved — cargo and git are the real
-    // things being exercised, exactly as they would be in production).
-    // The two interpreted documents go over the run tools, so the
-    // sessions name them by the name the node declares; `brief.md` is
-    // the session's own file, and lands in `grill`'s own directory —
-    // the absolute path that session is granted, the same way a real
-    // agent reads it from its rendered prompt, since a session's cwd is
-    // the worktree.
-    let grill_staging = yunta_engine::run_dir::staging(&run_dir, &"grill".into());
+    // in the order the DAG reaches them: grill, brief, plan, one
+    // implement task, then lint/tests/ship/pr run for real against the
+    // sandbox crate above (no mock involved — cargo and git are the
+    // real things being exercised, exactly as they would be in
+    // production). The two interpreted documents go over the run tools;
+    // `brief.md` is a session's own file, and lands in `brief`'s own
+    // directory — the absolute path that session is granted, the same
+    // way a real agent reads it from its rendered prompt, since a
+    // session's cwd is the worktree. `grill` asks nothing, so the case
+    // runs to its end with nobody to answer.
+    let brief_staging = yunta_engine::run_dir::staging(&run_dir, &"brief".into());
     let fixture = format!(
         r##"
 capabilities: {{ run_tools: true }}
@@ -154,9 +154,10 @@ sessions:
         arguments:
           document:
             questions: []
-    effects:
-      - {{ path: {brief:?}, content: "# Brief\n\nAdd dark mode.\n" }}
     outcome: {{ type: completed, summary: "grilled" }}
+  - effects:
+      - {{ path: {brief:?}, content: "# Brief\n\nAdd dark mode.\n" }}
+    outcome: {{ type: completed, summary: "brief written" }}
   - steps:
       - type: run_tool
         tool: yunta_submit_tasks
@@ -179,7 +180,7 @@ sessions:
           }}
     outcome: {{ type: completed, summary: "did T001" }}
 "##,
-        brief = grill_staging.join("brief.md"),
+        brief = brief_staging.join("brief.md"),
     );
     let adapter = MockAdapter::from_yaml(&fixture).unwrap();
     let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();

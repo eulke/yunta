@@ -167,6 +167,34 @@ pub(crate) fn check_gate(
 /// A `parallel` group's children share a worktree
 /// and join semantics a forge round-trip has no defined relationship to
 /// — refused outright rather than guessing one.
+/// A node that asks, inside a `parallel` group, would never be asked:
+/// the scheduler puts questions to a person one top-level node at a
+/// time, so the child's wait has nothing to end it and whatever follows
+/// the group mounts answers that never arrive. Refused outright rather
+/// than left to hang.
+pub(crate) fn check_no_questions_in_parallel(
+    nodes: &[Node],
+    parent_group: Option<&Node>,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        if let Some(group) = parent_group {
+            if node.asks() {
+                errors.push(CheckError::QuestionsInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_no_questions_in_parallel(children, Some(node), errors);
+        }
+    }
+}
+
 pub(crate) fn check_no_gate_in_parallel(
     nodes: &[Node],
     parent_group: Option<&Node>,

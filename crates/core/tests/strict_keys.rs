@@ -29,7 +29,7 @@ fn a_node_refuses_an_unknown_key_and_names_every_one_at_once() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `plan`: unknown key(s) `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `prompt` at line 3 column 3"
+        "`nodes[0]`: nodes: node `plan`: unknown key(s) `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `prompt` at line 3 column 3"
     );
 }
 
@@ -39,7 +39,7 @@ fn a_node_key_that_belongs_to_another_kind_is_refused() {
         err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: bash\n    run: x\n    prompt: p\n");
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: unknown key(s) `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `run` at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: unknown key(s) `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `run` at line 3 column 3"
     );
 }
 
@@ -50,7 +50,22 @@ fn role_and_fresh_context_are_refused_with_the_key_that_replaces_them() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: unknown key(s) `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: unknown key(s) `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 3"
+    );
+}
+
+/// `interactive` said how a node's questions were presented; a node that
+/// declares `questions` says everything there is to say, and whichever
+/// surface is watching decides the rest.
+#[test]
+fn interactive_is_refused_with_the_reason_it_no_longer_exists() {
+    let text = err::<Workflow>(
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n    interactive: true\n",
+    );
+    assert!(
+        text.contains("unknown key(s) `interactive`")
+            && text.contains("a node that declares `questions` asks them"),
+        "{text}"
     );
 }
 

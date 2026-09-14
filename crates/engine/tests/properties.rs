@@ -111,6 +111,21 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             })
         }),
         "[a-z ]{0,10}".prop_map(|reason| EventPayload::RunPaused(RunPausedPayload { reason })),
+        ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::QuestionsAsked(
+            yunta_core::events::QuestionsAskedPayload::new(
+                yunta_core::sha256_hex(content.as_bytes()),
+                vec!["q1".into()],
+                tokens_used,
+            )
+            .expect("one question is a question")
+        )),
+        "[a-z]{1,4}".prop_map(|content| EventPayload::QuestionsAnswered(
+            yunta_core::events::QuestionsAnsweredPayload {
+                answers_hash: yunta_core::sha256_hex(content.as_bytes()),
+                channel: yunta_core::events::Channel::Tty,
+                responder: None,
+            }
+        )),
     ]
 }
 
@@ -172,6 +187,146 @@ fn event(index: usize, node: Option<&'static str>, payload: EventPayload) -> Sto
 fn accepted_artifacts() -> impl Strategy<Value = Vec<(Option<&'static str>, ArtifactId, String)>> {
     let node = prop_oneof![Just(None), Just(Some("a")), Just(Some("b"))];
     prop::collection::vec((node, artifact_id(), "[a-z]{1,8}"), 0..12)
+}
+
+/// One node's whole ask round: it starts, hands its questions over,
+/// waits, is answered, and takes the terminal its close deferred.
+fn a_questions_round() -> Vec<StoredEvent> {
+    let questions = yunta_core::sha256_hex(b"questions");
+    let answers = yunta_core::sha256_hex(b"answers");
+    vec![
+        event(
+            0,
+            Some("grill"),
+            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+        ),
+        event(
+            1,
+            Some("grill"),
+            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                artifact: ArtifactId::Interpreted {
+                    kind: ArtifactKind::Questions,
+                },
+                content_hash: questions.clone(),
+                origin: ArtifactOrigin::Submitted,
+            }),
+        ),
+        event(
+            2,
+            Some("grill"),
+            EventPayload::QuestionsAsked(
+                yunta_core::events::QuestionsAskedPayload::new(
+                    questions,
+                    vec!["q1".into()],
+                    yunta_core::events::TokenUsage {
+                        input: 30,
+                        output: 12,
+                        cached: None,
+                    },
+                )
+                .expect("one question is a question"),
+            ),
+        ),
+        event(
+            3,
+            Some("grill"),
+            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                artifact: ArtifactId::Opaque {
+                    name: "questions.answers.yaml".to_string(),
+                },
+                content_hash: answers.clone(),
+                origin: ArtifactOrigin::Answered,
+            }),
+        ),
+        event(
+            4,
+            Some("grill"),
+            EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
+                answers_hash: answers,
+                channel: yunta_core::events::Channel::Tty,
+                responder: None,
+            }),
+        ),
+        event(
+            5,
+            Some("grill"),
+            EventPayload::NodeFinished(NodeFinishedPayload {
+                outcome: "questions answered".to_string(),
+                tokens_used: yunta_core::events::TokenUsage::default(),
+            }),
+        ),
+    ]
+}
+
+/// What every cut of a round derives, and therefore what a resume does
+/// from there: the node's state at each length of the log.
+///
+/// The table is the point. A crash after the node asked leaves it
+/// waiting, so a resume asks again from the document it already holds; a
+/// crash after the answer leaves it running and owed a terminal, so a
+/// resume pays that terminal from the log. At no cut does the node come
+/// back as something to re-run, which is what makes an interrupted round
+/// cost an append rather than a session.
+#[test]
+fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
+    let round = a_questions_round();
+    let grill = yunta_core::NodeId::from("grill");
+    let asked_tokens = yunta_core::events::TokenUsage {
+        input: 30,
+        output: 12,
+        cached: None,
+    };
+
+    let at = |k: usize| derive(&round[..k]);
+    assert_eq!(at(0).nodes.get(&grill), None, "before it started");
+    for k in 1..=2 {
+        assert!(
+            matches!(
+                at(k).nodes.get(&grill),
+                Some(yunta_engine::NodeState::Running { attempt: 1 })
+            ),
+            "running at {k}: {:?}",
+            at(k).nodes.get(&grill)
+        );
+        assert!(at(k).answered_unfinished.is_empty());
+    }
+    for k in 3..=4 {
+        assert!(
+            matches!(
+                at(k).nodes.get(&grill),
+                Some(yunta_engine::NodeState::Waiting { external_ref: None })
+            ),
+            "waiting on its questions at {k}: {:?}",
+            at(k).nodes.get(&grill)
+        );
+        assert_eq!(
+            at(k).total_tokens,
+            asked_tokens,
+            "the session that asked is counted once, at {k}"
+        );
+    }
+    assert!(
+        matches!(
+            at(5).nodes.get(&grill),
+            Some(yunta_engine::NodeState::Running { attempt: 1 })
+        ),
+        "answered, back where asking left it: {:?}",
+        at(5).nodes.get(&grill)
+    );
+    assert!(
+        at(5).answered_unfinished.contains(&grill),
+        "and owed the terminal its close deferred"
+    );
+    assert_eq!(
+        at(6).nodes.get(&grill),
+        Some(&yunta_engine::NodeState::Finished {
+            outcome: "questions answered".to_string(),
+            tokens: asked_tokens,
+        }),
+        "finished, carrying what the session that asked spent"
+    );
+    assert!(at(6).answered_unfinished.is_empty());
+    assert_eq!(at(6).total_tokens, asked_tokens, "counted once, not twice");
 }
 
 proptest! {

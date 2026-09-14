@@ -220,6 +220,8 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     );
 }
 
+/// A surface that answered and a surface that could not are two
+/// different facts, and the pause says which.
 #[tokio::test]
 async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let bench = Bench::new();
@@ -233,7 +235,10 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "node `ask` asked 1 question(s) awaiting an answer: required question `q1` has no answer");
+            assert_eq!(
+                *reason,
+                "node `ask`'s answers were refused: required question `q1` has no answer"
+            );
         }
         other => panic!("an incomplete reply must pause, got {other:?}"),
     }

@@ -103,18 +103,32 @@ pub struct Node {
     /// degrades with `capability_degraded`, never a fatal error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
-    /// `interactive: true` — presentation datum for
-    /// this node's questions: the surface renders them as a live
-    /// conversation when it can. With no surface, nothing changes.
-    /// Absent means `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub interactive: bool,
     /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A
     /// mode narrows deliberation, never verification.
     #[serde(default)]
     pub invariant: bool,
+}
+
+impl Node {
+    /// Whether this node hands a `questions` document over and waits on
+    /// its answers.
+    ///
+    /// The one copy of the predicate: the scheduler asks it to know
+    /// whom to put questions to, the ask round asks it to know whose
+    /// document to re-read, and `check` asks it to refuse a node that
+    /// declares questions alongside anything else. A node that asks
+    /// ends when it asks — what depends on the answers belongs to the
+    /// node after it.
+    pub fn asks(&self) -> bool {
+        self.artifacts.iter().any(|artifacts| {
+            artifacts
+                .produces
+                .iter()
+                .any(|spec| spec.kind() == Some(crate::ArtifactKind::Questions))
+        })
+    }
 }
 
 /// The keys every node accepts at its own level; `kind` and the keys
@@ -135,7 +149,6 @@ const NODE_KEYS: &[&str] = &[
     "network",
     "context",
     "skills",
-    "interactive",
     "invariant",
 ];
 
@@ -143,6 +156,11 @@ const NODE_KEYS: &[&str] = &[
 /// that expresses the intent.
 const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
     ("role", "a node names its runner with `runner:`"),
+    (
+        "interactive",
+        "a node that declares `questions` asks them, and whichever surface is \
+         watching puts them to a person",
+    ),
     (
         "fresh_context",
         "every session starts fresh; `on_interrupt: resume_session` reuses one only when a \
@@ -184,8 +202,6 @@ struct NodeFields {
     context: Vec<ContextSpec>,
     #[serde(default)]
     skills: Vec<String>,
-    #[serde(default)]
-    interactive: bool,
     #[serde(default)]
     invariant: bool,
 }
@@ -284,7 +300,6 @@ impl<'de> Deserialize<'de> for Node {
             network: fields.network,
             context: fields.context,
             skills: fields.skills,
-            interactive: fields.interactive,
             invariant: fields.invariant,
         })
     }
@@ -307,11 +322,6 @@ impl NodePermissions {
             NodePermissions::Full => "full",
         }
     }
-}
-
-/// `skip_serializing_if` for a flag whose absence means `false`.
-fn is_false(flag: &bool) -> bool {
-    !*flag
 }
 
 /// A node's crash-recovery policy — the full triple of options.
@@ -466,7 +476,6 @@ permissions: edit
 network: true
 context: [{ command: x }]
 skills: [s]
-interactive: true
 invariant: true
 "#,
         )

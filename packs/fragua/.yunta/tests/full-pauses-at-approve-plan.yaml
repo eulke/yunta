@@ -9,6 +9,7 @@ expect:
   final_state: paused
   nodes:
     grill: finished
+    brief: finished
     plan: finished
     implement: never ran
   tasks:

@@ -39,6 +39,12 @@ pub(super) enum NodeEnd {
     ChildPaused {
         reason: String,
     },
+    /// The node closed in full — hooks, scope, artifacts — and handed
+    /// questions over: `questions_asked` is on the log and no terminal
+    /// event is, on purpose. The next scheduler pass sees the node
+    /// waiting and puts its questions to whatever surface is there; the
+    /// `node_finished` this close deferred lands after the answer.
+    Asked,
 }
 
 /// The shared "my token fired" epilogue — which cancellation was

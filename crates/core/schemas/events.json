@@ -996,7 +996,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 36 event kinds, internally tagged by `kind`.",
+      "description": "All 37 event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1267,6 +1267,19 @@
             }
           },
           "$ref": "#/$defs/GateResolvedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "questions_asked"
+            }
+          },
+          "$ref": "#/$defs/QuestionsAskedPayload",
           "required": [
             "kind"
           ]
@@ -2148,6 +2161,32 @@
       "required": [
         "answers_hash",
         "channel"
+      ]
+    },
+    "QuestionsAskedPayload": {
+      "description": "A node handed its questions over and closed on them: what it asked\nfrom, which ids await an answer, and what the session that asked\nspent.\n\nThe pair of [`QuestionsAnsweredPayload`]. Between the two the node\nwaits, and the `node_finished` its close deferred lands after the\nanswer — so a node that asked is never mistaken for one that failed,\nand a log that holds a questions document is never mistaken for a\nnode that is waiting on it.",
+      "type": "object",
+      "properties": {
+        "questions": {
+          "description": "The ids awaiting an answer. Never empty: a node with nothing to\nask finishes in the same close instead of waiting.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionId"
+          }
+        },
+        "questions_hash": {
+          "description": "The questions document the node handed over: what the answers\nanswer, and what the round re-reads before putting them to\nanyone.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "tokens_used": {
+          "description": "What the session that asked spent. The attempt's accounting\ncloses here, so the `node_finished` after the answer carries\nnone and no surface counts the session twice while it waits.",
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "required": [
+        "questions_hash",
+        "questions",
+        "tokens_used"
       ]
     },
     "Report": {

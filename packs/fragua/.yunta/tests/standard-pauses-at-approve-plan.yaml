@@ -1,4 +1,4 @@
-# standard mode: grill and plan produce their artifacts, the tasks
+# standard mode: grill asks, brief and plan produce their artifacts, the tasks
 # document registers, and the run pauses at `approve-plan` — its first human
 # decision — before any task runs. A gate with nobody to answer it
 # leaves the run paused with the gate named in the pause reason.
@@ -11,6 +11,7 @@ expect:
   final_state: paused
   nodes:
     grill: finished
+    brief: finished
     plan: finished
     implement: never ran
   tasks:

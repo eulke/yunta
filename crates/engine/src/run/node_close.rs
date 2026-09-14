@@ -11,7 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
+    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
+    QuestionsAskedPayload, TokenUsage,
 };
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
@@ -19,9 +20,7 @@ use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
-use super::node_artifacts::{
-    acquire_from_child, derive_findings, pending_questions, record_artifacts,
-};
+use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
 
@@ -162,27 +161,54 @@ pub(super) async fn close_node(
     };
 
     record_artifacts(ctx, node, verified, standing).await?;
-    let pending = pending_questions(verified);
-    if !pending.is_empty() {
-        return fail_with_tokens(
-            ctx,
-            node,
-            format!(
-                "node `{}` asked {} question(s) awaiting an answer: {}",
-                node.id,
-                pending.len(),
-                pending.join(", ")
-            ),
-            false,
-            tokens,
-        )
-        .await;
+    // A node that asked has done its work: what is left is an answer,
+    // and that is a person's to give. It closed here like every other
+    // node — hooks, scope, artifacts — and the fact it records instead
+    // of a terminal is what makes the wait a wait rather than a failure
+    // read as one.
+    match asked(verified) {
+        Some((questions_hash, questions)) => {
+            match QuestionsAskedPayload::new(questions_hash, questions, tokens) {
+                Some(payload) => {
+                    ctx.emit(Some(&node.id), EventPayload::QuestionsAsked(payload))
+                        .await?;
+                    write_progress(ctx).await?;
+                    Ok(NodeEnd::Asked)
+                }
+                // A questions document with no questions asked nothing.
+                // Its answers still exist, empty and the engine's own,
+                // so the node after it mounts what it declared to mount.
+                None => {
+                    crate::answers::record_nothing_asked(&ctx.log(), ctx.run_dir, &node.id)
+                        .await
+                        .map_err(|source| RunError::Broken {
+                            diagnostic: source.to_string(),
+                        })?;
+                    finish_node(ctx, node, close.outcome, tokens).await
+                }
+            }
+        }
+        None => finish_node(ctx, node, close.outcome, tokens).await,
     }
+}
 
+/// The one place `node_finished` is written.
+///
+/// Every way a node reaches its end passes through here — the close that
+/// verified what it declared, and the round that recorded the answer a
+/// node was waiting on — so a node has exactly one terminal however it
+/// got there, and `progress.md` is regenerated in one place rather than
+/// at each site that could finish something.
+pub(super) async fn finish_node(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    outcome: impl Into<String>,
+    tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::NodeFinished(NodeFinishedPayload {
-            outcome: close.outcome,
+            outcome: outcome.into(),
             tokens_used: tokens,
         }),
     )

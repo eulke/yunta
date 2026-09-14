@@ -114,6 +114,40 @@ pub(crate) fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, S
 /// artifact is written to a path, and a name that is absolute or climbs
 /// with `..` would land outside the run — templates in a name
 /// (`report-{{runner.role}}.md`) are checked as written.
+/// A node that asks, asks: it declares `questions` and nothing else,
+/// and it is the one kind that holds a session to ask from and a close
+/// to wait in.
+///
+/// Both refusals name the way out, because the way out is a workflow
+/// shape and not a flag: what depended on the answers moves to a node
+/// that follows this one and mounts them as context.
+pub(crate) fn check_asking_nodes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        if !node.asks() {
+            continue;
+        }
+        if !matches!(node.kind, NodeKind::Prompt { .. }) {
+            errors.push(CheckError::QuestionsOnKind {
+                node: node.id.clone(),
+                kind: node.kind.kind_name(),
+            });
+        }
+        let others: Vec<ArtifactSpec> = node
+            .artifacts
+            .iter()
+            .flat_map(|artifacts| artifacts.produces.iter())
+            .filter(|spec| spec.kind() != Some(yunta_core::ArtifactKind::Questions))
+            .cloned()
+            .collect();
+        if !others.is_empty() {
+            errors.push(CheckError::QuestionsAlongsideOtherArtifacts {
+                node: node.id.clone(),
+                others,
+            });
+        }
+    }
+}
+
 pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         let Some(artifacts) = &node.artifacts else {

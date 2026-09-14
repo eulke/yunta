@@ -462,6 +462,14 @@ fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
             Some(EventPayload::NodeFailed(p)) => {
                 walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
             }
+            // A node that asked closed its attempt there: the session is
+            // over and what it spent is on this event. The
+            // `node_finished` that lands after the answer closes
+            // nothing more — its own `close_attempt` finds no open
+            // attempt and adds the zero it carries.
+            Some(EventPayload::QuestionsAsked(p)) => {
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+            }
             Some(EventPayload::RunnerResolved(p)) => {
                 if let Some(node_id) = &event.node_id {
                     walk.runner.insert(node_id.clone(), p.runner.clone());

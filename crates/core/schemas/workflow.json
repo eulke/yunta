@@ -819,10 +819,6 @@
         "id": {
           "$ref": "#/$defs/NodeId"
         },
-        "interactive": {
-          "description": "`interactive: true` — presentation datum for\nthis node's questions: the surface renders them as a live\nconversation when it can. With no surface, nothing changes.\nAbsent means `false`.",
-          "type": "boolean"
-        },
         "invariant": {
           "description": "`invariant: true` — this node's verification/scope/\nbaseline/hygiene role is non-negotiable: every declared mode must\ninclude it, checked independent of any mode's name or count. A\nmode narrows deliberation, never verification.",
           "type": "boolean",

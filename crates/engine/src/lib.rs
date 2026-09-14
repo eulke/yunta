@@ -34,6 +34,7 @@ compile_error!(
      same guarantees exists and its cancellation tests pass there."
 );
 
+mod answers;
 mod artifacts;
 mod catalog;
 mod check;
@@ -75,6 +76,7 @@ mod verification_effectiveness;
 mod view;
 mod worktree;
 
+pub use answers::{AnswersError, Recorded as AnswersRecorded, Reply as AnswersReply};
 pub use artifacts::store::{ObjectError, ObjectStore};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity,

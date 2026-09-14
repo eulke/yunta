@@ -12,10 +12,10 @@ su parser.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 30 filas y **36 `kind` distintos**
-(25 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
-contenido normativo; este documento especifica esos 36 kinds tal como la tabla los
-enumera.
+La tabla de eventos del Contrato del Run tiene 30 filas y **37 `kind` distintos**
+(24 filas de 1 kind, 4 filas de 2 kinds, 1 fila de 3 kinds y 1 fila de 2 kinds para
+el par de preguntas). La tabla es el contenido normativo; este documento especifica
+esos 37 kinds tal como la tabla los enumera.
 
 ## 1. Envelope común
 
@@ -325,8 +325,26 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `free_text` | `Option<string>` | no | siempre disponible como canal |
 
-### 5.19 `questions_answered` — engine
-**Fuente:** node_id, hash del artifact de respuestas, canal (tty\|mcp\|pr), respondiente si se conoce
+### 5.19 `questions_asked` / `questions_answered` — engine
+**Fuente:** node_id; hash e ids del documento `questions` y tokens de la sesión que
+preguntó / hash del artifact de respuestas, canal (tty\|mcp), respondiente si se
+conoce
+
+Un nodo que declara `questions` cierra entero —hooks, scope, artifacts— y registra
+`questions_asked` en vez de un terminal; entre ese hecho y `questions_answered` el
+nodo espera, y el `node_finished` que el cierre difirió llega después de la
+respuesta. Un `questions_asked` sin preguntas es irrepresentable: un nodo que no
+preguntó nada termina en el mismo cierre.
+
+`questions_asked`:
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `questions_hash` | string | sí | hash del documento `questions` que el nodo entregó |
+| `questions` | `[string]` | sí | los ids que esperan respuesta; nunca vacío |
+| `tokens_used` | `TokenUsage` | sí | lo que gastó la sesión que preguntó; la contabilidad del intento cierra acá |
+
+`questions_answered`:
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
