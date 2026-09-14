@@ -41,6 +41,7 @@ pub mod port;
 pub mod process;
 mod questions;
 pub mod schema;
+mod schema_range;
 mod secret;
 pub mod shape;
 mod tasks;
@@ -66,13 +67,14 @@ pub use diagnostic::{
 };
 pub use error::{describe, AdapterError, Result};
 pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry, Withdrawal};
-pub use glob::{might_overlap, scope_glob, scope_globset};
+pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
 pub use hash::{sha256_hex, CommitSha, ContentHash};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
-    is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InvalidId,
-    ModeName, ModelName, NodeId, OptionId, PackName, PackRef, Pid, Publisher, QuestionId,
-    Responder, RunId, RunnerName, Seq, SessionId, TaskId,
+    is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InputName,
+    InvalidId, McpServerName, ModeName, ModelName, NodeId, OptionId, PackName, PackRef, Pid,
+    Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SkillName, TaskId,
+    WorkflowName,
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
@@ -83,6 +85,7 @@ pub use pack::{
 };
 pub use policy::ScopeExpansionMode;
 pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};
 pub use workflow::{

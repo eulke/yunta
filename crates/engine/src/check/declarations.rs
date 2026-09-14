@@ -44,65 +44,18 @@ pub(crate) fn check_resume_session(workflow: &Workflow, errors: &mut Vec<CheckEr
     }
 }
 
-/// `yunta_schema` is a space-separated list of comparators
-/// over the schema major (`>=1 <2`, `=1`, `<3`…), all of which must
-/// hold for [`yunta_core::YUNTA_SCHEMA`]. Deliberately a ~20-line
-/// parser instead of a semver dependency: the schema version is one
-/// integer, and the small static binary is a product feature.
+/// The range held for this binary's own schema major, or the workflow
+/// declares a requirement this binary does not meet.
 pub(crate) fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let Some(range) = &workflow.yunta_schema else {
         return;
     };
-    match yunta_schema_satisfied(range, yunta_core::YUNTA_SCHEMA) {
-        Ok(true) => {}
-        Ok(false) => errors.push(CheckError::YuntaSchemaOutside {
+    if !range.holds_for(yunta_core::YUNTA_SCHEMA) {
+        errors.push(CheckError::YuntaSchemaOutside {
             range: range.clone(),
             binary: yunta_core::YUNTA_SCHEMA,
-        }),
-        Err(source) => errors.push(CheckError::YuntaSchemaUnreadable {
-            range: range.clone(),
-            binary: yunta_core::YUNTA_SCHEMA,
-            source,
-        }),
+        });
     }
-}
-
-/// `Ok(bool)` = every comparator evaluated against `binary`; `Err` = the
-/// range doesn't parse. Empty ranges don't parse either — a declared
-/// requirement that constrains nothing is a typo, not a wildcard.
-pub(crate) fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, SchemaRangeError> {
-    let mut any = false;
-    for comparator in range.split_whitespace() {
-        let (op, number) = comparator
-            .find(|c: char| c.is_ascii_digit())
-            .map(|i| comparator.split_at(i))
-            .ok_or_else(|| SchemaRangeError::NoVersion {
-                comparator: comparator.to_string(),
-            })?;
-        let number: u32 = number.parse().map_err(|_| SchemaRangeError::NotAVersion {
-            text: number.to_string(),
-        })?;
-        let holds = match op {
-            ">=" => binary >= number,
-            "<=" => binary <= number,
-            ">" => binary > number,
-            "<" => binary < number,
-            "=" | "==" | "" => binary == number,
-            other => {
-                return Err(SchemaRangeError::UnknownOperator {
-                    op: other.to_string(),
-                })
-            }
-        };
-        any = true;
-        if !holds {
-            return Ok(false);
-        }
-    }
-    if !any {
-        return Err(SchemaRangeError::Empty);
-    }
-    Ok(true)
 }
 
 /// What a node may declare it produces: one document of each kind at

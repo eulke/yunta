@@ -30,7 +30,7 @@ const SPOKE: Duration = Duration::from_secs(3);
 pub fn run_frame(run_id: &RunId) -> RunFrame {
     RunFrame {
         run_id: run_id.clone(),
-        workflow: "paced".to_string(),
+        workflow: "paced".into(),
         mode: ModeName::default(),
         phase: RunPhase::Running,
         elapsed: Some(Duration::from_secs(30)),

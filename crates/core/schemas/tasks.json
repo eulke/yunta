@@ -45,6 +45,11 @@
         "guard"
       ]
     },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
     "Task": {
       "description": "One task. `id`'s pattern isn't enforced by this type — the\nspec treats that as a registration-time rule, not a parse-time\none, so an ill-formed id still parses and gets a proper diagnostic\nnaming the task, field and expectation instead of a raw serde error.",
       "type": "object",
@@ -82,7 +87,7 @@
         "scope": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "title": {

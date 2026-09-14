@@ -6,6 +6,7 @@
 //! so it stays testable without going through a CLI process.
 
 use std::path::{Path, PathBuf};
+use yunta_core::CommitSha;
 
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
@@ -31,6 +32,12 @@ pub enum PackError {
     InvalidManifest { path: PathBuf, detail: String },
     #[error("`{path}` isn't valid UTF-8, can't be hashed as pack content")]
     NonUtf8Path { path: PathBuf },
+    #[error("`git rev-parse HEAD` answered `{line}`, which is not a commit")]
+    NotACommit {
+        line: String,
+        #[source]
+        source: yunta_core::InvalidId,
+    },
     #[error(
         "`{path}` is a symlink — a pack ships regular files only, so vendoring never follows a \
          link out of the pack or copies what one points at"
@@ -103,8 +110,10 @@ pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<()
 /// The commit `dest` (an already-cloned working tree) currently has
 /// checked out — what `add`/`update` records as the lock entry's
 /// `commit`, independent of whether `ref` itself later moves.
-pub async fn head_commit(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "HEAD"]).await
+pub async fn head_commit(dest: &Path) -> Result<CommitSha, PackError> {
+    let line = run_git(dest, &["rev-parse", "HEAD"]).await?;
+    line.parse()
+        .map_err(|source| PackError::NotACommit { line, source })
 }
 
 /// The branch `dest` landed on when no explicit ref was requested — the

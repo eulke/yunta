@@ -41,7 +41,7 @@ static IDS: SeqIdSource = SeqIdSource::new("minted");
 fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
     Receipt {
         run_id: RunId::from("run-2026-08-21-0001"),
-        workflow: "release-cycle".to_string(),
+        workflow: "release-cycle".into(),
         mode: "default".into(),
         terminal_state: TerminalState::Done,
         criteria: CriteriaSummary {

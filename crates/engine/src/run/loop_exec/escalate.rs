@@ -107,7 +107,7 @@ pub(super) async fn resolve_escalations(
                         ))?,
                         severity: FindingSeverity::Minor,
                         title: format!("scope expansion denied for task `{}`", pending.task_id),
-                        location: pending.outcome.request.paths.join(", "),
+                        location: yunta_core::listed_globs(&pending.outcome.request.paths),
                         detail: format!(
                             "{reason} — agent's stated reason: {}",
                             pending.outcome.request.reason
@@ -202,14 +202,14 @@ fn expansion_escalation(
             pending.task_id, request.reason
         ),
         vec![
-            Fact::labelled("paths", request.paths.join(", ")),
+            Fact::labelled("paths", yunta_core::listed_globs(&request.paths)),
             Fact::bare(precheck),
             Fact::labelled("mode", mode_name),
             Fact::bare(cap),
         ]
         .into(),
         NonEmpty::from((
-            offers::grant(&request.paths.join(", ")),
+            offers::grant(&yunta_core::listed_globs(&request.paths)),
             vec![offers::deny()],
         )),
     )
@@ -293,7 +293,7 @@ pub(super) async fn emit_scope_expansion_events(
                         // carries.
                         severity: FindingSeverity::Minor,
                         title: format!("scope expansion denied for task `{task_id}`"),
-                        location: outcome.request.paths.join(", "),
+                        location: yunta_core::listed_globs(&outcome.request.paths),
                         detail: format!(
                             "{reason} — agent's stated reason: {}",
                             outcome.request.reason

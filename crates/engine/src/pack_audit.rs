@@ -72,7 +72,7 @@ pub struct NodeAudit {
     pub agent: Option<AgentName>,
     /// MCP server names reached by this node's own `context: - mcp:`
     /// entries.
-    pub mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<yunta_core::McpServerName>,
     /// `kind: executor`'s own name — code, not declarative content;
     /// flagged separately from everything else in the inventory.
     pub executor: Option<ExecutorName>,

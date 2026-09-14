@@ -87,7 +87,7 @@ impl Bench {
         run_id: &RunId,
         parent_yaml: &str,
         config_yaml: &str,
-        inputs: &HashMap<String, String>,
+        inputs: &HashMap<yunta_core::InputName, String>,
         fixture_yaml: &str,
         human_interaction: &dyn yunta_engine::HumanInteraction,
     ) -> (RunTerminal, yunta_engine::RunState) {
@@ -101,7 +101,7 @@ impl Bench {
         run_id: &RunId,
         parent_yaml: &str,
         config_yaml: &str,
-        inputs: &HashMap<String, String>,
+        inputs: &HashMap<yunta_core::InputName, String>,
     ) -> Manifest {
         let workflow: Workflow = serde_norway::from_str(parent_yaml).unwrap();
         let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
@@ -258,7 +258,7 @@ nodes:
     inputs: { idea: "{{inputs.thing}}" }
 "#;
     let run_id = RunId::from("run-parent-1");
-    let inputs = HashMap::from([("thing".to_string(), "hola".to_string())]);
+    let inputs = HashMap::from([("thing".into(), "hola".to_string())]);
     let (terminal, state) = bench
         .run(
             &run_id,
@@ -649,9 +649,9 @@ sessions:
 "#;
     let run_id = RunId::from("run-release");
     let inputs = HashMap::from([
-        ("rfc".to_string(), "rfc.md".to_string()),
-        ("feat_a".to_string(), "feature a".to_string()),
-        ("feat_b".to_string(), "feature b".to_string()),
+        ("rfc".into(), "rfc.md".to_string()),
+        ("feat_a".into(), "feature a".to_string()),
+        ("feat_b".into(), "feature b".to_string()),
     ]);
     let (terminal, state) = bench
         .run(

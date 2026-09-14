@@ -15,7 +15,7 @@ async fn a_modified_tracked_file_inside_scope_is_not_a_violation() {
 
     let result = scope_check(
         dir.path(),
-        &["tracked.txt".to_string()],
+        &["tracked.txt".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -33,7 +33,7 @@ async fn a_new_untracked_file_outside_scope_is_a_violation() {
 
     let result = scope_check(
         dir.path(),
-        &["tracked.txt".to_string()],
+        &["tracked.txt".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -54,7 +54,7 @@ async fn a_recursive_glob_covers_nested_paths() {
 
     let result = scope_check(
         dir.path(),
-        &["src/**".to_string()],
+        &["src/**".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -70,7 +70,7 @@ async fn no_changes_means_no_diff_and_no_violations() {
 
     let result = scope_check(
         dir.path(),
-        &["tracked.txt".to_string()],
+        &["tracked.txt".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -81,28 +81,13 @@ async fn no_changes_means_no_diff_and_no_violations() {
 }
 
 #[tokio::test]
-async fn an_invalid_glob_is_a_typed_error() {
-    let dir = tempfile::tempdir().unwrap();
-    setup_repo(dir.path());
-
-    let result = scope_check(
-        dir.path(),
-        &["[".to_string()],
-        &[],
-        yunta_engine::process::Supervision::none(),
-    )
-    .await;
-    assert!(matches!(result, Err(ScopeCheckError::InvalidGlob { .. })));
-}
-
-#[tokio::test]
 async fn a_non_git_directory_surfaces_a_typed_git_failure() {
     let dir = tempfile::tempdir().unwrap();
     // deliberately no `git init`
 
     let result = scope_check(
         dir.path(),
-        &["**".to_string()],
+        &["**".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -121,7 +106,7 @@ async fn a_path_an_adapter_staged_is_never_charged_to_scope() {
     // any other.
     let result = scope_check(
         dir.path(),
-        &["src/**".to_string()],
+        &["src/**".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -137,7 +122,7 @@ async fn a_path_an_adapter_staged_is_never_charged_to_scope() {
     let staged = vec![std::path::PathBuf::from(".claude/skills/review")];
     let result = scope_check(
         dir.path(),
-        &["src/**".to_string()],
+        &["src/**".into()],
         &staged,
         yunta_engine::process::Supervision::none(),
     )
@@ -164,7 +149,7 @@ async fn star_does_not_cross_directories() {
 
     let result = scope_check(
         dir.path(),
-        &["src/*.rs".to_string()],
+        &["src/*.rs".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )
@@ -189,7 +174,7 @@ async fn non_ascii_paths_match_their_globs() {
 
     let result = scope_check(
         dir.path(),
-        &["src/*.rs".to_string()],
+        &["src/*.rs".into()],
         &[],
         yunta_engine::process::Supervision::none(),
     )

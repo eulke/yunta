@@ -36,7 +36,7 @@ mod runners;
 mod scopes;
 mod warning;
 
-pub use error::{CheckError, SchemaRangeError};
+pub use error::CheckError;
 pub use refs::check_workflow_refs;
 pub use warning::CheckWarning;
 

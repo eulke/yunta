@@ -5,9 +5,7 @@ use yunta_core::{
     ArtifactSpec, ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind,
     OnFailure, PromptSource, RunnerCandidate, Workflow,
 };
-use yunta_engine::{
-    check as check_against, check_warnings, CheckError, CheckWarning, SchemaRangeError,
-};
+use yunta_engine::{check as check_against, check_warnings, CheckError, CheckWarning};
 
 /// The rules under test here are about the workflow, not about which
 /// adapter would run it: these check against a binary that builds none,
@@ -84,7 +82,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
 
 fn bash_with_scope(id: &str, run: &str, scope: &[&str]) -> Node {
     let mut node = bash(id, run, &[]);
-    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node.scope = scope.iter().map(|s| (*s).into()).collect();
     node
 }
 
@@ -173,7 +171,7 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
 
 fn workflow_with_inputs(
     nodes: Vec<Node>,
-    inputs: std::collections::BTreeMap<String, yunta_core::InputSpec>,
+    inputs: std::collections::BTreeMap<yunta_core::InputName, yunta_core::InputSpec>,
 ) -> Workflow {
     Workflow {
         name: "fixture".into(),
@@ -1006,7 +1004,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
 #[test]
 fn an_enum_input_with_no_values_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "severity".to_string(),
+        "severity".into(),
         input_spec("type: enum\nvalues: []\ndefault: x\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -1019,7 +1017,7 @@ fn an_enum_input_with_no_values_is_a_check_error() {
 #[test]
 fn a_number_input_with_min_above_max_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "n".to_string(),
+        "n".into(),
         input_spec("type: number\nmin: 10\nmax: 1\ndefault: 5\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -1032,7 +1030,7 @@ fn a_number_input_with_min_above_max_is_a_check_error() {
 #[test]
 fn a_string_input_with_an_invalid_regex_pattern_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "branch".to_string(),
+        "branch".into(),
         input_spec("type: string\npattern: \"[\"\ndefault: main\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -1059,7 +1057,7 @@ fn a_template_referencing_an_undeclared_input_is_a_check_error() {
 #[test]
 fn a_template_referencing_a_declared_input_passes_check() {
     let inputs = std::collections::BTreeMap::from([(
-        "idea".to_string(),
+        "idea".into(),
         input_spec("type: string\nrequired: true\n"),
     )]);
     let node = bash("plan", "echo {{inputs.idea}}", &[]);
@@ -1097,7 +1095,7 @@ fn config_with_fanout(max_parallel_nodes: u32) -> ConfigLayer {
 
 fn scoped(id: &str, scope: &[&str], depends_on: &[&str]) -> Node {
     let mut node = bash(id, "true", depends_on);
-    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node.scope = scope.iter().map(|s| (*s).into()).collect();
     node
 }
 
@@ -1174,30 +1172,32 @@ fn scopeless_independent_writers_warn_once_per_component() {
 #[test]
 fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
     let mut wf = workflow(vec![bash("a", "true", &[])]);
-    wf.yunta_schema = Some(">=1 <2".to_string());
+    wf.yunta_schema = Some(">=1 <2".into());
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
 
-    wf.yunta_schema = Some(">=2".to_string());
+    wf.yunta_schema = Some(">=2".into());
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(
-            |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range == ">=2")
+            |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range.as_str() == ">=2")
                 && e.to_string().contains("yunta_schema")
         ),
         "an out-of-range requirement must fail check: {errors:?}"
     );
+}
 
-    wf.yunta_schema = Some("not-a-range".to_string());
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::YuntaSchemaUnreadable {
-                source: SchemaRangeError::NoVersion { comparator },
-                ..
-            } if comparator == "not-a-range"
-        )),
-        "an unparseable range must fail loudly, naming the comparator: {errors:?}"
+/// A range nobody can read never reaches `check`: it is refused where
+/// the workflow is read, naming the comparator that stopped it.
+#[test]
+fn a_yunta_schema_range_that_does_not_parse_is_refused_at_read() {
+    let error = "not-a-range"
+        .parse::<yunta_core::SchemaRange>()
+        .expect_err("a range with no version number should not parse");
+    assert_eq!(
+        error,
+        yunta_core::SchemaRangeError::NoVersion {
+            comparator: "not-a-range".to_string()
+        }
     );
 }
 

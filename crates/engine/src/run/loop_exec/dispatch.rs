@@ -2,6 +2,7 @@
 //! attempt number and the expansions already granted to it.
 
 use std::path::PathBuf;
+use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
 use yunta_core::{CommitSha, Isolation, Node, Task};
@@ -25,7 +26,7 @@ pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> 
 /// Every path a prior `scope_expansion_granted` on the log authorized
 /// for `task_id` — the retry after a human grant derives its
 /// widened scope from here, never from in-memory state.
-fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<String> {
+fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<ScopeGlob> {
     state.grants.paths_for(task_id).to_vec()
 }
 

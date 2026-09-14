@@ -39,7 +39,7 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(on_failure.max_reroutes, 2);
 
     let fix_lint = &workflow.nodes[2];
-    assert_eq!(fix_lint.scope, vec!["src/**".to_string()]);
+    assert_eq!(fix_lint.scope, vec![yunta_core::ScopeGlob::from("src/**")]);
     let hooks = fix_lint.hooks.as_ref().unwrap();
     assert_eq!(hooks.after[0].run, "cargo fmt");
     assert!(hooks.before.is_empty());
@@ -466,7 +466,7 @@ scope_expansion:
         } => {
             let se = scope_expansion.unwrap();
             assert_eq!(se.mode, yunta_core::ScopeExpansionMode::Ask);
-            assert_eq!(se.within, vec!["src/**".to_string()]);
+            assert_eq!(se.within, vec![yunta_core::ScopeGlob::from("src/**")]);
             assert_eq!(se.max_per_run, Some(3));
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -981,7 +981,12 @@ on_finish:
   - distill: [{ node: plan, kind: tasks }]
 "#;
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(
+        wf.yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
     assert_eq!(
         wf.on_finish,
@@ -1020,7 +1025,7 @@ nodes:
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
     assert_eq!(
         wf.node_defaults.unwrap().skills,
-        vec!["conventions".to_string()]
+        vec![yunta_core::SkillName::from("conventions")]
     );
 }
 
@@ -1042,5 +1047,32 @@ nodes:
     assert!(
         text.contains("go ahead") && text.contains("option id"),
         "the refusal names the value and what it had to be: {text}"
+    );
+}
+
+/// A `scope:` pattern globset cannot compile is refused where it is
+/// read, not carried as a string until something tries to match with
+/// it: a ceiling nobody can evaluate is not a ceiling.
+#[test]
+fn an_invalid_glob_is_refused_at_parse() {
+    let yaml = r#"
+name: broken-scope
+nodes:
+  - id: edit
+    kind: prompt
+    prompt: do the thing
+    scope: ["src/[unclosed"]
+"#;
+    let error = serde_norway::from_str::<Workflow>(yaml)
+        .expect_err("a scope that does not compile should not parse");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("src/[unclosed"),
+        "the refusal names the pattern: {text}"
+    );
+    assert!(
+        text.contains("scope glob"),
+        "the refusal names what it was reading: {text}"
     );
 }

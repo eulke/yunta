@@ -32,7 +32,7 @@ use serde::Serialize;
 use yunta_core::events::findings::effective;
 use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
-use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep};
+use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep, WorkflowName};
 
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
@@ -42,7 +42,7 @@ use yunta_core::events::NodeEvent;
 #[derive(Serialize)]
 struct Provenance {
     source_run: String,
-    workflow: String,
+    workflow: WorkflowName,
     workflow_hash: String,
     mode: String,
     distilled_at: String,
@@ -147,7 +147,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
     let dest_dir = ctx
         .worktree
         .join(".yunta/knowledge/distilled")
-        .join(&ctx.manifest.workflow.name)
+        .join(ctx.manifest.workflow.name.as_str())
         .join(ctx.run_id.as_str());
     tokio::fs::create_dir_all(&dest_dir)
         .await

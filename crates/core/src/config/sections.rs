@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName};
+use crate::ids::{
+    AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
+};
 use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
@@ -270,7 +272,7 @@ pub struct SkillsConfig {
     /// Skill names mounted on every session, before any node's own
     /// list.
     #[serde(default)]
-    pub always: Vec<String>,
+    pub always: Vec<SkillName>,
 }
 
 /// One `skills.executors:` entry — `name` is what a `kind: executor`

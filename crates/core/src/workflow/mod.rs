@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ids::{ModeName, NodeId};
+use crate::ids::{InputName, ModeName, NodeId, WorkflowName};
 use crate::inputs::InputSpec;
 use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
@@ -44,7 +44,7 @@ pub use node_kind::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Workflow {
-    pub name: String,
+    pub name: WorkflowName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// `modes:` — an ordered map, free in name and count:
@@ -65,7 +65,7 @@ pub struct Workflow {
     /// output (`list_workflows`, `--help`) and `check` diagnostics
     /// reproducible.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub inputs: BTreeMap<String, InputSpec>,
+    pub inputs: BTreeMap<InputName, InputSpec>,
     /// Workflow-level fallbacks a node inherits when it declares none of
     /// its own — visible in the same file the team reads,
     /// never injected from a config layer.
@@ -78,7 +78,7 @@ pub struct Workflow {
     /// means "whatever this binary speaks" (the reference text's own
     /// rule) — inferred, never an error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yunta_schema: Option<String>,
+    pub yunta_schema: Option<crate::SchemaRange>,
     /// `on_finish:`: close-of-run steps. The engine
     /// imposes the phase order (distill before any cleanup) —
     /// declaration order in the YAML carries no meaning.

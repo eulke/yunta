@@ -36,7 +36,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>, depends_on: &[&str])
     Task {
         id: id.into(),
         title: format!("do {id}"),
-        scope: scope.iter().map(|s| s.to_string()).collect(),
+        scope: scope.iter().map(|s| (*s).into()).collect(),
         criteria,
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         notes: None,

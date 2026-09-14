@@ -18,7 +18,7 @@ use std::path::Path;
 use thiserror::Error;
 use yunta_core::diagnostic::Report;
 use yunta_core::events::ArtifactId;
-use yunta_core::{ArtifactKind, InputSpec};
+use yunta_core::{ArtifactKind, InputName, InputSpec};
 
 use crate::run::{BirthArtifact, BirthOrigin};
 
@@ -29,52 +29,60 @@ pub enum InputsError {
     #[error(
         "unknown input{} `{}` — this workflow declares {}",
         if names.len() > 1 { "s" } else { "" },
-        names.join("`, `"),
-        if declared.is_empty() { "no inputs".to_string() } else { format!("only: {}", declared.join(", ")) }
+        listed(names, "`, `"),
+        if declared.is_empty() { "no inputs".to_string() } else { format!("only: {}", listed(declared, ", ")) }
     )]
     Unknown {
-        names: Vec<String>,
-        declared: Vec<String>,
+        names: Vec<InputName>,
+        declared: Vec<InputName>,
     },
 
     #[error("input `{name}` is required and has no default — pass `--input {name}=...`")]
-    Missing { name: String },
+    Missing { name: InputName },
 
     #[error("input `{name}` expects a finite number, got `{value}`")]
-    InvalidNumber { name: String, value: String },
+    InvalidNumber { name: InputName, value: String },
 
     #[error("input `{name}` expects `true` or `false`, got `{value}`")]
-    InvalidBoolean { name: String, value: String },
+    InvalidBoolean { name: InputName, value: String },
 
     #[error("input `{name}` must be >= {min}, got {value}")]
-    BelowMin { name: String, value: f64, min: f64 },
+    BelowMin {
+        name: InputName,
+        value: f64,
+        min: f64,
+    },
 
     #[error("input `{name}` must be <= {max}, got {value}")]
-    AboveMax { name: String, value: f64, max: f64 },
+    AboveMax {
+        name: InputName,
+        value: f64,
+        max: f64,
+    },
 
     #[error("input `{name}` must be at least {min_length} characters, got {actual}")]
     TooShort {
-        name: String,
+        name: InputName,
         min_length: u32,
         actual: usize,
     },
 
     #[error("input `{name}` must match pattern `{pattern}`, got `{value}`")]
     PatternMismatch {
-        name: String,
+        name: InputName,
         pattern: String,
         value: String,
     },
 
     #[error("input `{name}` must be one of [{}], got `{value}`", values.join(", "))]
     NotInEnum {
-        name: String,
+        name: InputName,
         value: String,
         values: Vec<String>,
     },
 
     #[error("input `{name}` names a path that doesn't exist: `{path}`")]
-    PathNotFound { name: String, path: String },
+    PathNotFound { name: InputName, path: String },
 
     /// A `document` input whose path is there and whose bytes are not: a
     /// directory, or a file the filesystem refuses.
@@ -83,7 +91,7 @@ pub enum InputsError {
          input at the {label} itself"
     )]
     DocumentUnreadable {
-        name: String,
+        name: InputName,
         path: String,
         label: &'static str,
         detail: String,
@@ -96,7 +104,7 @@ pub enum InputsError {
     /// the document's own vocabulary, and one correction answers them
     /// all.
     #[error("input `{name}` is not a {label} this run can hold\n{report}", label = report.document.label())]
-    DocumentRefused { name: String, report: Report },
+    DocumentRefused { name: InputName, report: Report },
 
     /// Reachable only if a bad `pattern:` slipped past `check` (which
     /// validates every pattern compiles) — resolution still
@@ -104,7 +112,7 @@ pub enum InputsError {
     /// author-supplied regex it never got to see statically.
     #[error("input `{name}`'s pattern `{pattern}` is not a valid regex: {detail}")]
     InvalidPattern {
-        name: String,
+        name: InputName,
         pattern: String,
         detail: String,
     },
@@ -121,7 +129,7 @@ pub enum InputsError {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ResolvedInputs {
     /// Every declared input by name, as the manifest freezes it.
-    pub values: BTreeMap<String, String>,
+    pub values: BTreeMap<InputName, String>,
     /// One artifact per `document` input, in declaration order: what the
     /// run holds from birth, before any node runs.
     pub documents: Vec<BirthArtifact>,
@@ -136,12 +144,21 @@ pub struct ResolvedInputs {
 /// against — the run's original checkout, since this runs before any
 /// worktree exists (isolation is a property of the run, not of resolving
 /// its inputs).
+/// Input names run together for one sentence.
+fn listed(names: &[InputName], separator: &str) -> String {
+    names
+        .iter()
+        .map(InputName::as_str)
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
 pub async fn resolve_inputs(
-    specs: &BTreeMap<String, InputSpec>,
-    provided: &HashMap<String, String>,
+    specs: &BTreeMap<InputName, InputSpec>,
+    provided: &HashMap<InputName, String>,
     base_dir: &Path,
 ) -> Result<ResolvedInputs, InputsError> {
-    let mut unknown: Vec<String> = provided
+    let mut unknown: Vec<InputName> = provided
         .keys()
         .filter(|name| !specs.contains_key(*name))
         .cloned()
@@ -192,7 +209,7 @@ enum Resolved {
 /// purpose: the first two are about the file a person typed, the third
 /// about what they wrote in it, and only the third is a report.
 async fn read_document(
-    name: &str,
+    name: &InputName,
     kind: ArtifactKind,
     raw: &str,
     base_dir: &Path,
@@ -200,28 +217,28 @@ async fn read_document(
     let path = base_dir.join(raw);
     if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Err(InputsError::PathNotFound {
-            name: name.to_string(),
+            name: name.clone(),
             path: raw.to_string(),
         });
     }
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|source| InputsError::DocumentUnreadable {
-            name: name.to_string(),
+            name: name.clone(),
             path: raw.to_string(),
             label: kind.label(),
             detail: source.to_string(),
         })?;
     let canonical = crate::artifacts::canonical_document(kind, &bytes, raw).map_err(|report| {
         InputsError::DocumentRefused {
-            name: name.to_string(),
+            name: name.clone(),
             report,
         }
     })?;
     Ok(BirthArtifact {
         artifact: ArtifactId::Interpreted { kind },
         origin: BirthOrigin::Input {
-            input: name.to_string(),
+            input: name.clone(),
         },
         bytes: canonical,
     })
@@ -250,7 +267,7 @@ fn format_number(value: f64) -> String {
 
 /// One input's raw text held to everything its type demands.
 async fn validate(
-    name: &str,
+    name: &InputName,
     spec: &InputSpec,
     raw: &str,
     base_dir: &Path,
@@ -266,7 +283,7 @@ async fn validate(
             "true" | "false" => raw.to_string(),
             other => {
                 return Err(InputsError::InvalidBoolean {
-                    name: name.to_string(),
+                    name: name.clone(),
                     value: other.to_string(),
                 })
             }
@@ -274,7 +291,7 @@ async fn validate(
         InputSpec::Enum { values, .. } => {
             if !values.iter().any(|v| v == raw) {
                 return Err(InputsError::NotInEnum {
-                    name: name.to_string(),
+                    name: name.clone(),
                     value: raw.to_string(),
                     values: values.clone(),
                 });
@@ -287,7 +304,7 @@ async fn validate(
         InputSpec::Path { .. } => {
             if !base_dir.join(raw).exists() {
                 return Err(InputsError::PathNotFound {
-                    name: name.to_string(),
+                    name: name.clone(),
                     path: raw.to_string(),
                 });
             }
@@ -306,7 +323,7 @@ async fn validate(
 }
 
 fn validate_string(
-    name: &str,
+    name: &InputName,
     raw: &str,
     pattern: Option<&str>,
     min_length: Option<u32>,
@@ -314,7 +331,7 @@ fn validate_string(
     if let Some(min_length) = min_length {
         if raw.chars().count() < min_length as usize {
             return Err(InputsError::TooShort {
-                name: name.to_string(),
+                name: name.clone(),
                 min_length,
                 actual: raw.chars().count(),
             });
@@ -322,13 +339,13 @@ fn validate_string(
     }
     if let Some(pattern) = pattern {
         let re = regex::Regex::new(pattern).map_err(|e| InputsError::InvalidPattern {
-            name: name.to_string(),
+            name: name.clone(),
             pattern: pattern.to_string(),
             detail: e.to_string(),
         })?;
         if !re.is_match(raw) {
             return Err(InputsError::PatternMismatch {
-                name: name.to_string(),
+                name: name.clone(),
                 pattern: pattern.to_string(),
                 value: raw.to_string(),
             });
@@ -338,7 +355,7 @@ fn validate_string(
 }
 
 fn validate_number(
-    name: &str,
+    name: &InputName,
     raw: &str,
     min: Option<f64>,
     max: Option<f64>,
@@ -348,19 +365,19 @@ fn validate_number(
         .ok()
         .filter(|number: &f64| number.is_finite())
         .ok_or_else(|| InputsError::InvalidNumber {
-            name: name.to_string(),
+            name: name.clone(),
             value: raw.to_string(),
         })?;
     if let Some(min) = min.filter(|min| value < *min) {
         return Err(InputsError::BelowMin {
-            name: name.to_string(),
+            name: name.clone(),
             value,
             min,
         });
     }
     if let Some(max) = max.filter(|max| value > *max) {
         return Err(InputsError::AboveMax {
-            name: name.to_string(),
+            name: name.clone(),
             value,
             max,
         });

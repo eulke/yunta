@@ -346,7 +346,7 @@
           "type": "object",
           "properties": {
             "input": {
-              "type": "string"
+              "$ref": "#/$defs/InputName"
             },
             "kind": {
               "type": "string",
@@ -1849,6 +1849,11 @@
         "after"
       ]
     },
+    "InputName": {
+      "description": "An input name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "LoopIterationPayload": {
       "type": "object",
       "properties": {
@@ -2329,9 +2334,13 @@
           ]
         },
         "yunta_schema": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SchemaRange"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -2466,6 +2475,11 @@
         "discarded"
       ]
     },
+    "SchemaRange": {
+      "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
+      "type": "string",
+      "minLength": 1
+    },
     "ScopeCheckedPayload": {
       "description": "`task_id` is present for a task's scope check within a loop node;\nabsent for a node-level scope check — either way the envelope's own\n`node_id` already names the node, so it is not repeated here.",
       "type": "object",
@@ -2548,7 +2562,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "task_id": {
@@ -2577,7 +2591,7 @@
         "paths": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "proposed_criterion": {
@@ -2612,6 +2626,11 @@
         "paths",
         "reason"
       ]
+    },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
     },
     "Seq": {
       "description": "A position in a run's log: a positive number",
@@ -2691,7 +2710,7 @@
         "scope": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "task_id": {

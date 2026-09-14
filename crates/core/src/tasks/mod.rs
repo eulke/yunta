@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::{self, CriterionType};
+use crate::glob::ScopeGlob;
 use crate::TaskId;
 
 /// A tasks document — the sole top-level key is `tasks:`, with no
@@ -57,7 +58,7 @@ impl From<&Criterion> for events::Criterion {
 pub struct Task {
     pub id: TaskId,
     pub title: String,
-    pub scope: Vec<String>,
+    pub scope: Vec<ScopeGlob>,
     pub criteria: Vec<Criterion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<TaskId>,

@@ -189,7 +189,7 @@ fn config_with_server(url: &str, auth_env: Option<&str>) -> ConfigLayer {
             }],
         )])),
         mcp_servers: Some(BTreeMap::from([(
-            "toy".to_string(),
+            "toy".into(),
             McpServerConfig {
                 url: url.to_string(),
                 auth_env: auth_env.map(str::to_string),

@@ -154,7 +154,7 @@ async fn run_planted(
                 kind: yunta_core::ArtifactKind::Tasks,
             },
             origin: yunta_engine::BirthOrigin::Input {
-                input: "tasks".to_string(),
+                input: "tasks".into(),
             },
             bytes: canonical_tasks(tasks),
         })

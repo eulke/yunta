@@ -908,7 +908,7 @@ nodes:
     )
     .unwrap();
     let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let provided = HashMap::from([("idea".to_string(), "ship it".to_string())]);
+    let provided = HashMap::from([("idea".into(), "ship it".to_string())]);
     let manifest = build_manifest(
         &workflow,
         &config,
@@ -946,7 +946,7 @@ nodes:
     let frozen: std::collections::BTreeMap<String, serde_json::Value> = manifest
         .inputs
         .iter()
-        .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+        .map(|(name, value)| (name.to_string(), serde_json::Value::String(value.clone())))
         .collect();
     assert_eq!(
         created.inputs, frozen,
@@ -979,7 +979,7 @@ nodes:
     )
     .unwrap();
     let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let provided = HashMap::from([("tasks".to_string(), "plan.yaml".to_string())]);
+    let provided = HashMap::from([("tasks".into(), "plan.yaml".to_string())]);
     let frozen = build_manifest(
         &workflow,
         &config,
@@ -1022,7 +1022,7 @@ nodes:
     assert_eq!(
         accepted[0].origin,
         yunta_core::events::ArtifactOrigin::Input {
-            input: "tasks".to_string()
+            input: "tasks".into()
         }
     );
     assert_eq!(

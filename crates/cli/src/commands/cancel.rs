@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
+use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
 use yunta_core::{describe, events::EventPayload, Pid, RunId};
 use yunta_engine::NodeState;
 
@@ -162,16 +162,10 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
 /// registry wrote down when the engine started, so the answer is the
 /// same one the isolation lock asks of its own holder.
 fn engine_is_alive(registry: &yunta_engine::EngineProcessFile) -> Liveness {
-    let Ok(started_at) = registry.started_at.parse::<chrono::DateTime<chrono::Utc>>() else {
-        // A registry written before the engine recorded its own start,
-        // or one whose stamp no longer parses: the pid is all there is,
-        // and a live one is taken at its word.
-        return liveness(registry.engine_pid);
-    };
     yunta_engine::lock::holder_state(
         &yunta_engine::lock::LockOwner {
             pid: registry.engine_pid,
-            started_at,
+            started_at: registry.started_at,
         },
         &yunta_engine::lock::SystemProbe,
     )

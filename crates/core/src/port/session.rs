@@ -26,8 +26,10 @@ use futures::stream::BoxStream;
 use thiserror::Error;
 
 /// A node's declared write scope, passed through to an adapter with
-/// `edit_hooks` so it can block edits outside it as they happen.
-pub type Glob = String;
+/// `edit_hooks` so it can block edits outside it as they happen. The
+/// same pattern the workflow declared and `check` read, so an adapter
+/// blocks by the rule core compiled, never by one of its own.
+pub type Glob = crate::glob::ScopeGlob;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionProfile {

@@ -52,7 +52,13 @@ fn the_reference_workflow_parses_and_round_trips() {
     let workflow: yunta_core::Workflow =
         serde_norway::from_str(yaml).expect("build-feature.yaml must parse whole");
 
-    assert_eq!(workflow.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(
+        workflow
+            .yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
     assert_eq!(workflow.nodes.len(), 12);
     assert_eq!(workflow.on_finish.len(), 2);
     let grill = &workflow.nodes[0];

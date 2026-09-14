@@ -737,6 +737,11 @@
         "max_mode"
       ]
     },
+    "SkillName": {
+      "description": "A skill name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "SkillsConfig": {
       "description": "`skills:` — currently carries only `executors`, the one\nsub-field `kind: executor` needs to resolve its own `executor:` name\nto a binary on disk. `paths`/`always` (skill discovery and injection\ninto a node's assembled context) are context-assembly work, with\nno consumer yet.",
       "type": "object",
@@ -746,7 +751,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SkillName"
           }
         },
         "executors": {

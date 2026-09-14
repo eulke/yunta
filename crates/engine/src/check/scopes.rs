@@ -1,6 +1,7 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::ScopeGlob;
 
 /// Both the error and warning fan-out checks need the same question answered: which pairs of
 /// top-level nodes have no dependency path between them in either
@@ -196,7 +197,7 @@ pub(crate) fn collect_fanout_warnings(
 /// so `check`'s error and `check_warnings`' warning can never disagree
 /// about what overlaps.
 pub(crate) struct GroupScope<'a> {
-    overlaps: Vec<(&'a Node, &'a Node, &'a str, &'a str)>,
+    overlaps: Vec<(&'a Node, &'a Node, &'a ScopeGlob, &'a ScopeGlob)>,
 }
 
 pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
@@ -209,7 +210,7 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
             for glob_a in &a.scope {
                 for glob_b in &b.scope {
                     if might_overlap(glob_a, glob_b) {
-                        overlaps.push((a, b, glob_a.as_str(), glob_b.as_str()));
+                        overlaps.push((a, b, glob_a, glob_b));
                     }
                 }
             }
@@ -271,8 +272,8 @@ pub(crate) fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>
                     group: node.id.clone(),
                     a: a.id.clone(),
                     b: b.id.clone(),
-                    glob_a: glob_a.to_string(),
-                    glob_b: glob_b.to_string(),
+                    glob_a: glob_a.clone(),
+                    glob_b: glob_b.clone(),
                 });
             }
             check_parallel_scopes(children, errors);

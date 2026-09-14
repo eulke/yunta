@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::glob::ScopeGlob;
 use crate::ids::{Responder, TaskId};
 use crate::policy::ScopeExpansionMode;
 
@@ -22,7 +23,7 @@ pub struct ProposedCriterion {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionRequestedPayload {
     pub task_id: TaskId,
-    pub paths: Vec<String>,
+    pub paths: Vec<ScopeGlob>,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterion>,
@@ -47,7 +48,7 @@ pub struct ScopeExpansionGrantedPayload {
     /// `requested` event that preceded it. `default` for logs written
     /// before the field existed (tolerant reader).
     #[serde(default)]
-    pub paths: Vec<String>,
+    pub paths: Vec<ScopeGlob>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

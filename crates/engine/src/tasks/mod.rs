@@ -10,6 +10,7 @@ use yunta_core::events::{
     self, EventPayload, StoredEvent, TaskLedger, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload,
 };
+use yunta_core::ScopeGlob;
 use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
 
 use crate::run::RunError;
@@ -37,7 +38,7 @@ pub(crate) enum Provenance<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Identity {
     criteria: Vec<events::Criterion>,
-    scope: Vec<String>,
+    scope: Vec<ScopeGlob>,
 }
 
 impl Identity {

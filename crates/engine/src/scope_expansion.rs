@@ -43,6 +43,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
+use yunta_core::ScopeGlob;
 
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
@@ -59,9 +60,11 @@ pub enum ScopeExpansionError {
     Read { path: String, detail: String },
     #[error("`{path}` does not parse as a scope expansion request: {detail}")]
     Malformed { path: String, detail: String },
-    #[error("invalid glob `{glob}` in scope expansion request or `within`")]
-    InvalidGlob {
-        glob: String,
+    /// Every pattern compiled when the request or the config was read,
+    /// so the only failure left is the set's own limit on how many it
+    /// holds.
+    #[error("this scope expansion has more globs than one set can hold")]
+    GlobSet {
         #[source]
         source: globset::Error,
     },
@@ -90,7 +93,7 @@ pub enum ScopeExpansionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionRequest {
-    pub paths: Vec<String>,
+    pub paths: Vec<ScopeGlob>,
     pub reason: String,
     #[serde(default)]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
@@ -212,7 +215,7 @@ impl GrantLedger {
 #[allow(clippy::too_many_arguments)]
 pub async fn evaluate(
     mode: ScopeExpansionMode,
-    within: &[String],
+    within: &[ScopeGlob],
     max_per_run: Option<u32>,
     max_expansion_files: usize,
     grants: &GrantLedger,
@@ -253,7 +256,7 @@ pub async fn evaluate(
 }
 
 async fn evaluate_rules(
-    within: &[String],
+    within: &[ScopeGlob],
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
     max_expansion_files: usize,
@@ -262,14 +265,16 @@ async fn evaluate_rules(
     let ceiling = build_globset(within)?;
     let requested = build_globset(&request.paths)?;
 
-    if !request
+    let outside: Vec<ScopeGlob> = request
         .paths
         .iter()
-        .all(|path| ceiling.is_match(Path::new(path)))
-    {
+        .filter(|path| !ceiling.is_match(Path::new(path.as_str())))
+        .cloned()
+        .collect();
+    if !outside.is_empty() {
         return Ok(Decision::Denied(format!(
-            "requested path(s) fall outside the declared `within` ceiling: {:?}",
-            request.paths
+            "requested path(s) fall outside the declared `within` ceiling: {}",
+            yunta_core::listed_globs(&outside)
         )));
     }
 
@@ -294,9 +299,8 @@ async fn evaluate_rules(
     Ok(Decision::Granted)
 }
 
-fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansionError> {
-    yunta_core::scope_globset(patterns)
-        .map_err(|(glob, source)| ScopeExpansionError::InvalidGlob { glob, source })
+fn build_globset(patterns: &[ScopeGlob]) -> Result<globset::GlobSet, ScopeExpansionError> {
+    yunta_core::scope_globset(patterns).map_err(|source| ScopeExpansionError::GlobSet { source })
 }
 
 async fn run_git(

@@ -93,6 +93,27 @@ fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, CliError> {
     })
 }
 
+/// The schema gate: a pack states the schema major it needs, and a
+/// binary outside that range cannot run its workflows. Refused before
+/// anything is vendored — a pack on disk that no run can use is a
+/// failure discovered later, with a tree to clean up.
+fn enforce_schema_range(manifest: &PackManifest) -> Result<(), CliError> {
+    let Some(range) = &manifest.yunta_schema else {
+        return Ok(());
+    };
+    if range.holds_for(yunta_core::YUNTA_SCHEMA) {
+        return Ok(());
+    }
+    Err(CliError::msg(format!(
+        "`{}/{}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema {} — \
+         install a version of yunta inside that range, or a release of the pack that \
+         accepts this one.",
+        manifest.publisher,
+        manifest.name,
+        yunta_core::YUNTA_SCHEMA,
+    )))
+}
+
 /// The publisher allow-list gate: a non-empty
 /// `permissions.packs.publishers.allow` in the merged config refuses
 /// any publisher outside it, naming the declaring layer(s).
@@ -197,6 +218,7 @@ pub async fn add(
 
     // Policy first: a refused publisher or a denied executor leaves no
     // decision for a person to make, so the audit is not even printed.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, &manifest.publisher)?;
     if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
@@ -251,7 +273,7 @@ pub async fn add(
         manifest.publisher,
         manifest.name,
         manifest.version,
-        &commit[..commit.len().min(12)],
+        commit.abbreviated(),
         dest.display()
     );
 
@@ -309,6 +331,7 @@ pub async fn update(
     // The same policy gates as `add` — a new ref is where new executor
     // code first appears, and an allow-list narrowed since the install
     // must stop pulling from a publisher it no longer trusts.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, pack.publisher())?;
     if !manifest.declares.executors.is_empty() {
@@ -343,10 +366,7 @@ pub async fn update(
     );
     save_lock(&cwd, &lock)?;
 
-    println!(
-        "updated {pack} -> {new_ref} ({})",
-        &commit[..commit.len().min(12)]
-    );
+    println!("updated {pack} -> {new_ref} ({})", commit.abbreviated());
     Ok(Outcome::Success)
 }
 
@@ -391,7 +411,7 @@ pub fn list() -> Result<Outcome, CliError> {
         println!(
             "{key} @ {} ({}) — {status}",
             entry.r#ref,
-            &entry.commit[..entry.commit.len().min(12)]
+            entry.commit.abbreviated()
         );
     }
     println!("lock: {}", lock_path(&cwd).display());

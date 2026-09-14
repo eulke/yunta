@@ -16,7 +16,12 @@ fn the_reference_pack_parses_and_round_trips() {
         Some("Review multi-runner con consolidación de hallazgos")
     );
     assert_eq!(pack.license.as_deref(), Some("MIT"));
-    assert_eq!(pack.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(
+        pack.yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
 
     assert_eq!(pack.requires.runners.len(), 2);
     assert_eq!(pack.requires.runners[0].name, "reviewer");
@@ -109,7 +114,7 @@ fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
             name: "review-pack".into(),
             source: "https://github.com/acme/review-pack".to_string(),
             r#ref: "v1.2.0".to_string(),
-            commit: "abc123def456".to_string(),
+            commit: "abc123def456".into(),
             content_hash: yunta_core::sha256_hex(b"deadbeef"),
         },
     );
@@ -118,4 +123,36 @@ fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
     let reparsed: PackLock = serde_norway::from_str(&yaml).unwrap();
     assert_eq!(lock, reparsed);
     assert_eq!(reparsed.packs[&key].commit, "abc123def456");
+}
+
+/// `yunta_schema:` is a comparator range, and one nobody can evaluate
+/// is refused where the manifest is read: a pack that states a
+/// requirement no version could satisfy or fail has stated nothing.
+#[test]
+fn a_pack_schema_range_that_does_not_parse_is_refused() {
+    let yaml = r#"
+name: broken
+publisher: acme
+version: "1.0.0"
+yunta_schema: "~>1"
+declares: {}
+"#;
+    let error = serde_norway::from_str::<PackManifest>(yaml)
+        .expect_err("a range that does not parse should not parse");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("~>"),
+        "the refusal names the comparator it could not read: {text}"
+    );
+}
+
+/// Every comparator in a range is evaluated against the binary's own
+/// schema major: the whole range holds, or it does not.
+#[test]
+fn a_schema_range_holds_only_when_every_comparator_does() {
+    let range: yunta_core::SchemaRange = ">=1 <2".parse().unwrap();
+    assert!(range.holds_for(1));
+    assert!(!range.holds_for(2));
+    assert_eq!(range.to_string(), ">=1 <2");
 }

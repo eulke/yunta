@@ -2,6 +2,7 @@
 //! it changed, and what it tells `run_task` to do next.
 
 use std::path::{Path, PathBuf};
+use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
@@ -29,7 +30,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) max_expansion_files: usize,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
-    pub(super) already_granted_paths: &'a [String],
+    pub(super) already_granted_paths: &'a [ScopeGlob],
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) cancel: &'a CancellationToken,
     pub(super) setup: &'a SessionSetup,
@@ -101,12 +102,12 @@ pub(super) async fn run_one_attempt(
     }
 
     let expansion_outcome = evaluate_scope_expansion(params).await?;
-    let granted_paths: &[String] = expansion_outcome
+    let granted_paths: &[ScopeGlob] = expansion_outcome
         .as_ref()
         .filter(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted)
         .map(|outcome| outcome.request.paths.as_slice())
         .unwrap_or(&[]);
-    let effective_scope: Vec<String> = task
+    let effective_scope: Vec<ScopeGlob> = task
         .scope
         .iter()
         .cloned()

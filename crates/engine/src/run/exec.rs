@@ -380,7 +380,7 @@ fn build_ctx(
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
         run_dir,
         Pid::current(),
-        clock.now().to_rfc3339(),
+        clock.now(),
     ) {
         Ok(registry) => (Some(registry), None),
         Err(e) => (None, Some(e)),

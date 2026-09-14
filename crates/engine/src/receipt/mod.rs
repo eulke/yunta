@@ -16,7 +16,7 @@ use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalStat
 use yunta_core::ContentHash;
 use yunta_core::{
     AdapterId, ArtifactKind, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId,
-    RunnerName, Seq,
+    RunnerName, Seq, WorkflowName,
 };
 
 use crate::replay::{derive, NodeState};
@@ -110,7 +110,7 @@ pub enum EventChainStatus {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Receipt {
     pub run_id: RunId,
-    pub workflow: String,
+    pub workflow: WorkflowName,
     pub mode: ModeName,
     pub terminal_state: TerminalState,
     pub criteria: CriteriaSummary,

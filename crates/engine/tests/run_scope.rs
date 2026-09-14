@@ -339,7 +339,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     );
     assert_eq!(
         granted.paths,
-        vec!["b.txt".to_string()],
+        vec![yunta_core::ScopeGlob::from("b.txt")],
         "the grant must name exactly what it authorized — self-contained audit"
     );
     // The interaction itself is on the log, same vocabulary as every

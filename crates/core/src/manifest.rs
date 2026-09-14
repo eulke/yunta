@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
+use crate::ids::InputName;
 use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
@@ -98,7 +99,7 @@ pub struct PackProvenance {
     pub name: PackName,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
+    pub commit: Option<CommitSha>,
 }
 
 /// Everything a run needs frozen at creation time. The
@@ -117,7 +118,7 @@ pub struct Manifest {
     /// provided or the spec's own `default`, already validated.
     /// Frozen here so a node never resolves a default itself:
     /// that would be per-node non-deterministic state.
-    pub inputs: BTreeMap<String, String>,
+    pub inputs: BTreeMap<InputName, String>,
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
     pub prompts: BTreeMap<NodeId, String>,

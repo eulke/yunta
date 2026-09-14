@@ -183,7 +183,7 @@ fn task_lifecycle_derives_its_latest_status() {
             EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "graph-cmd".into(),
                 criteria: vec![],
-                scope: vec!["crates/cli/**".to_string()],
+                scope: vec!["crates/cli/**".into()],
                 depends_on: vec![],
             })),
         ),

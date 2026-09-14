@@ -56,7 +56,10 @@ fn org_pack_worktree(root: &Path) -> std::path::PathBuf {
     worktree
 }
 
-async fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manifest {
+async fn build(
+    worktree: &Path,
+    inputs: &HashMap<yunta_core::InputName, String>,
+) -> yunta_core::Manifest {
     let workflow_yaml = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../core/tests/fixtures/promote-knowledge.yaml"
@@ -88,8 +91,8 @@ async fn an_approved_gate_publishes_the_new_version() {
     let root = tempfile::tempdir().unwrap();
     let worktree = org_pack_worktree(root.path());
     let inputs = HashMap::from([
-        ("candidates".to_string(), "candidates.md".to_string()),
-        ("new_version".to_string(), "1.1.0".to_string()),
+        ("candidates".into(), "candidates.md".to_string()),
+        ("new_version".into(), "1.1.0".to_string()),
     ]);
     let manifest = build(&worktree, &inputs).await;
 
@@ -179,8 +182,8 @@ async fn an_unresolved_gate_never_publishes_anything() {
     let root = tempfile::tempdir().unwrap();
     let worktree = org_pack_worktree(root.path());
     let inputs = HashMap::from([
-        ("candidates".to_string(), "candidates.md".to_string()),
-        ("new_version".to_string(), "1.1.0".to_string()),
+        ("candidates".into(), "candidates.md".to_string()),
+        ("new_version".into(), "1.1.0".to_string()),
     ]);
     let manifest = build(&worktree, &inputs).await;
 

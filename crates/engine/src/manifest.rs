@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::{
-    content_hash, CommitSha, ConfigLayer, InvalidId, Manifest, Node, NodeId, NodeKind,
+    content_hash, CommitSha, ConfigLayer, InputName, InvalidId, Manifest, Node, NodeId, NodeKind,
     PromptSource, Workflow,
 };
 
@@ -75,7 +75,7 @@ pub async fn build_manifest(
     config: &ConfigLayer,
     workflow_dir: &Path,
     repo: &Path,
-    provided_inputs: &HashMap<String, String>,
+    provided_inputs: &HashMap<InputName, String>,
 ) -> Result<FrozenRun, ManifestError> {
     let mut workflow = workflow.clone();
     expand_runner_fanout(&mut workflow);

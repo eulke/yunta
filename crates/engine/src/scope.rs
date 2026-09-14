@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::process::Supervision;
+use yunta_core::ScopeGlob;
 
 use thiserror::Error;
 
@@ -26,9 +27,10 @@ pub enum ScopeCheckError {
         status: i32,
         stderr: String,
     },
-    #[error("invalid scope glob `{glob}`")]
-    InvalidGlob {
-        glob: String,
+    /// Every pattern compiled on its own when it was parsed, so the
+    /// only failure left is the set's own limit on how many it holds.
+    #[error("this scope has more globs than one set can hold")]
+    GlobSet {
         #[source]
         source: globset::Error,
     },
@@ -48,12 +50,12 @@ pub struct ScopeCheckResult {
 /// those paths is never a violation, and nothing else is left out.
 pub async fn scope_check(
     cwd: &Path,
-    scope: &[String],
+    scope: &[ScopeGlob],
     staged: &[PathBuf],
     supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
-    let set = yunta_core::scope_globset(scope)
-        .map_err(|(glob, source)| ScopeCheckError::InvalidGlob { glob, source })?;
+    let set =
+        yunta_core::scope_globset(scope).map_err(|source| ScopeCheckError::GlobSet { source })?;
 
     let mut diff = git_diff_names(cwd, supervision).await?;
     diff.extend(git_untracked(cwd, supervision).await?);
@@ -135,7 +137,7 @@ fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
 /// what makes that exemption true rather than assumed: whatever the
 /// session's tools happened to permit, a read-only node that wrote the
 /// project fails for it.
-pub fn audited_scope(node: &yunta_core::Node) -> Option<&[String]> {
+pub fn audited_scope(node: &yunta_core::Node) -> Option<&[ScopeGlob]> {
     if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
         return Some(&[]);
     }

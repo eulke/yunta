@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::node::payloads::Criterion;
+use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
 use crate::ids::{Seq, TaskId};
 
@@ -23,7 +24,7 @@ pub enum TaskStatus {
 pub struct TaskRegisteredPayload {
     pub task_id: TaskId,
     pub criteria: Vec<Criterion>,
-    pub scope: Vec<String>,
+    pub scope: Vec<ScopeGlob>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<TaskId>,
 }

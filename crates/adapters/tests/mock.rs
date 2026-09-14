@@ -127,7 +127,7 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    req.edit_constraints = Some(vec!["src/**".into()]);
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
 
@@ -160,7 +160,7 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    req.edit_constraints = Some(vec!["src/**".into()]);
     let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;
 

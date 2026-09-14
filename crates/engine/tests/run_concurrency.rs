@@ -945,7 +945,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 yunta_core::events::TaskRegisteredPayload {
                     task_id: "task-p".into(),
                     criteria: vec![],
-                    scope: vec!["p.txt".to_string()],
+                    scope: vec!["p.txt".into()],
                     depends_on: vec![],
                 },
             )),
@@ -957,7 +957,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 yunta_core::events::TaskRegisteredPayload {
                     task_id: "task-q".into(),
                     criteria: vec![],
-                    scope: vec!["q.txt".to_string()],
+                    scope: vec!["q.txt".into()],
                     depends_on: vec![],
                 },
             )),

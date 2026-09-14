@@ -6,7 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
 use super::{Artifacts, ContextSpec, Hooks, NodeKind, OnFailure};
-use crate::ids::{AgentName, NodeId, RunnerName};
+use crate::glob::ScopeGlob;
+use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
 
 /// `node_defaults:` — currently carries only `hooks`, the one consumer
@@ -20,7 +21,7 @@ pub struct NodeDefaults {
     /// Skills every node mounts unless it declares its own list
     /// — same replace-wholesale inheritance as `hooks`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
+    pub skills: Vec<SkillName>,
 }
 
 /// A single node. Fields here are the ones currently implemented;
@@ -36,7 +37,7 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<NodeId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scope: Vec<String>,
+    pub scope: Vec<ScopeGlob>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
     /// `runners: [name, name]` — static fan-out: the manifest expands
@@ -102,7 +103,7 @@ pub struct Node {
     /// `skills.paths` (repo first); an adapter with no native mechanism
     /// degrades with `capability_degraded`, never a fatal error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
+    pub skills: Vec<SkillName>,
     /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A
@@ -177,7 +178,7 @@ struct NodeFields {
     #[serde(default)]
     depends_on: Vec<NodeId>,
     #[serde(default)]
-    scope: Vec<String>,
+    scope: Vec<ScopeGlob>,
     #[serde(default)]
     runner: Option<RunnerName>,
     #[serde(default)]
@@ -201,7 +202,7 @@ struct NodeFields {
     #[serde(default)]
     context: Vec<ContextSpec>,
     #[serde(default)]
-    skills: Vec<String>,
+    skills: Vec<SkillName>,
     #[serde(default)]
     invariant: bool,
 }

@@ -3,19 +3,7 @@
 use super::*;
 use thiserror::Error;
 use yunta_core::OptionId;
-
-/// A `yunta_schema:` range the parser cannot read.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum SchemaRangeError {
-    #[error("the range is empty")]
-    Empty,
-    #[error("comparator `{comparator}` has no version number")]
-    NoVersion { comparator: String },
-    #[error("`{text}` is not a whole schema version")]
-    NotAVersion { text: String },
-    #[error("unknown comparator `{op}`")]
-    UnknownOperator { op: String },
-}
+use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
@@ -70,8 +58,8 @@ pub enum CheckError {
         group: NodeId,
         a: NodeId,
         b: NodeId,
-        glob_a: String,
-        glob_b: String,
+        glob_a: ScopeGlob,
+        glob_b: ScopeGlob,
     },
 
     /// `runner:` and `runners:` on one node is a contradiction,
@@ -121,7 +109,7 @@ pub enum CheckError {
         label = .kind.label()
     )]
     InputDocumentAlsoProduced {
-        input: String,
+        input: InputName,
         node: NodeId,
         kind: yunta_core::ArtifactKind,
     },
@@ -148,16 +136,7 @@ pub enum CheckError {
         "`yunta_schema: \"{range}\"` — this binary's schema is outside the required range (this \
          binary speaks schema {binary})"
     )]
-    YuntaSchemaOutside { range: String, binary: u32 },
-
-    /// The workflow's `yunta_schema:` range cannot be read.
-    #[error("`yunta_schema: \"{range}\"` — {source} (this binary speaks schema {binary})")]
-    YuntaSchemaUnreadable {
-        range: String,
-        binary: u32,
-        #[source]
-        source: SchemaRangeError,
-    },
+    YuntaSchemaOutside { range: SchemaRange, binary: u32 },
 
     /// A pack-origin workflow's `pack.yaml` exists but cannot be read —
     /// its `declares.permissions` ceiling is the pack's only governance
@@ -193,8 +172,8 @@ pub enum CheckError {
     OverlappingFanOutScope {
         a: NodeId,
         b: NodeId,
-        glob_a: String,
-        glob_b: String,
+        glob_a: ScopeGlob,
+        glob_b: ScopeGlob,
     },
 
     /// The first enforcement moment: the command as written in
@@ -217,18 +196,18 @@ pub enum CheckError {
     ContextOnUnsupportedNode { node: NodeId },
 
     #[error("input `{name}` is type `enum` with an empty `values` list")]
-    InputEmptyEnumValues { name: String },
+    InputEmptyEnumValues { name: InputName },
 
     #[error("input `{name}`'s `min` ({min}) is greater than its `max` ({max})")]
     InputMinExceedsMax {
-        name: String,
+        name: InputName,
         min: String,
         max: String,
     },
 
     #[error("input `{name}`'s `pattern` `{pattern}` is not a valid regex: {detail}")]
     InputInvalidPattern {
-        name: String,
+        name: InputName,
         pattern: String,
         detail: String,
     },
@@ -240,6 +219,8 @@ pub enum CheckError {
     /// isn't scanned: `check` never reads files (see this module's own
     /// doc comment), so an undeclared reference there still only
     /// surfaces at run time.
+    /// The reference as written: what an author reads back, whether or
+    /// not it could have been an input name at all.
     #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
     UndeclaredInput { node: NodeId, name: String },
 

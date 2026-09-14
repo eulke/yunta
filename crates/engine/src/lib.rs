@@ -85,9 +85,7 @@ pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
-pub use check::{
-    check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
-};
+pub use check::{check, check_warnings, check_workflow_refs, CheckError, CheckWarning};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;

@@ -6,7 +6,7 @@ use super::*;
 /// — independent of anything else in the workflow, so this runs once
 /// over `inputs:` rather than per reference site.
 pub(crate) fn check_input_specs(
-    inputs: &std::collections::BTreeMap<String, InputSpec>,
+    inputs: &std::collections::BTreeMap<yunta_core::InputName, InputSpec>,
     errors: &mut Vec<CheckError>,
 ) {
     for (name, spec) in inputs {

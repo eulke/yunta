@@ -5,7 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{keyed_entry, nested, take};
 use super::ArtifactRefId;
-use crate::ids::NodeId;
+use crate::glob::ScopeGlob;
+use crate::ids::{McpServerName, NodeId};
 use crate::yaml::Mapping;
 
 /// One `context:` entry: a builtin `ContextSource` plus its own
@@ -104,7 +105,7 @@ impl<'de> Deserialize<'de> for ContextSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct McpQueryParams {
-    pub server: String,
+    pub server: McpServerName,
     pub query: String,
 }
 
@@ -235,7 +236,7 @@ pub struct ScopeExpansion {
     #[serde(default)]
     pub mode: crate::policy::ScopeExpansionMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub within: Vec<String>,
+    pub within: Vec<ScopeGlob>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_per_run: Option<u32>,
 }

@@ -95,7 +95,10 @@ async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists()
 
     let provenance = manifest.pack.expect("pack-origin workflow freezes pack");
     assert_eq!(
-        provenance.commit.as_deref(),
+        provenance
+            .commit
+            .as_ref()
+            .map(yunta_core::CommitSha::as_str),
         Some("abcdef0123456789abcdef0123456789abcdef01")
     );
 }

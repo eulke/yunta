@@ -28,7 +28,7 @@
       }
     },
     "name": {
-      "type": "string"
+      "$ref": "#/$defs/WorkflowName"
     },
     "node_defaults": {
       "description": "Workflow-level fallbacks a node inherits when it declares none of\nits own — visible in the same file the team reads,\nnever injected from a config layer.",
@@ -56,9 +56,13 @@
     },
     "yunta_schema": {
       "description": "`yunta_schema: \">=1 <2\"` — a version range the\nbinary's own schema major (`YUNTA_SCHEMA`) is checked against at\n`yunta check`, and frozen resolved into `run_created`. Absent\nmeans \"whatever this binary speaks\" (the reference text's own\nrule) — inferred, never an error.",
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SchemaRange"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
@@ -670,7 +674,7 @@
           "type": "string"
         },
         "server": {
-          "type": "string"
+          "$ref": "#/$defs/McpServerName"
         }
       },
       "additionalProperties": false,
@@ -678,6 +682,11 @@
         "server",
         "query"
       ]
+    },
+    "McpServerName": {
+      "description": "A MCP server name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "ModeInclude": {
       "description": "`all`, or the ids of the nodes the mode includes",
@@ -883,14 +892,14 @@
         "scope": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "skills": {
           "description": "`skills: [names]` — instructions and capabilities\nthe adapter mounts by its native mechanism: *how* to work, where\n`context:` injects *what* to work on. Resolved against\n`skills.paths` (repo first); an adapter with no native mechanism\ndegrades with `capability_degraded`, never a fatal error.",
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SkillName"
           }
         }
       },
@@ -1193,7 +1202,7 @@
           "description": "Skills every node mounts unless it declares its own list\n— same replace-wholesale inheritance as `hooks`.",
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SkillName"
           }
         }
       },
@@ -1350,6 +1359,11 @@
       "type": "string",
       "minLength": 1
     },
+    "SchemaRange": {
+      "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
+      "type": "string",
+      "minLength": 1
+    },
     "ScopeExpansion": {
       "description": "`permissions: read-only | edit | full` at node level — maps 1:1 onto\nthe adapter's session profile. The names come\nstraight from the reference schema's own spelling.\n`scope_expansion:` — governs how a loop's tasks may\ngrow past their own declared scope. `within` is a hard ceiling\n(\"never outside this\") checked in `rules` mode; `max_per_run` caps\nhow many expansions this run may grant before exhaustion escalates\n(\"ten grants in a row are not re-scoping, they are a badly-cut\nplan\") — absent means uncapped.",
       "type": "object",
@@ -1369,7 +1383,7 @@
         "within": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         }
       },
@@ -1384,6 +1398,16 @@
         "deny"
       ]
     },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
+    "SkillName": {
+      "description": "A skill name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "TasksParams": {
       "description": "`tasks: {}` — no parameters in the current resolution\n(the aggregate task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
       "type": "object",
@@ -1396,6 +1420,11 @@
         "worktree",
         "inherit"
       ]
+    },
+    "WorkflowName": {
+      "description": "A workflow name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     }
   }
 }

@@ -512,14 +512,14 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     let org = ConfigLayer {
         mcp_servers: Some(BTreeMap::from([
             (
-                "internal-docs".to_string(),
+                "internal-docs".into(),
                 McpServerConfig {
                     url: "https://org.example.com/mcp".to_string(),
                     auth_env: Some("ORG_TOKEN".to_string()),
                 },
             ),
             (
-                "other".to_string(),
+                "other".into(),
                 McpServerConfig {
                     url: "https://other.example.com/mcp".to_string(),
                     auth_env: None,
@@ -530,7 +530,7 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     };
     let repo = ConfigLayer {
         mcp_servers: Some(BTreeMap::from([(
-            "internal-docs".to_string(),
+            "internal-docs".into(),
             McpServerConfig {
                 url: "http://localhost:8000/mcp".to_string(),
                 auth_env: None,

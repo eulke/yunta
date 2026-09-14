@@ -200,7 +200,7 @@ enum Command {
         run_id: Option<RunId>,
         /// Aggregates every past run of this workflow instead of one run.
         #[arg(long, conflicts_with = "run_id")]
-        workflow: Option<String>,
+        workflow: Option<yunta_core::WorkflowName>,
         /// Prints machine-readable JSON instead of the terminal view.
         #[arg(long)]
         json: bool,
@@ -387,7 +387,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             run_id,
             workflow,
             json,
-        } => commands::stats::stats(run_id.as_ref(), workflow.as_deref(), json),
+        } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json),
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {

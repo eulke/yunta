@@ -533,3 +533,35 @@ fn pack_new_produces_a_pack_that_passes_check_and_test() {
         stdout(&tested)
     );
 }
+
+/// A pack states the schema major it needs. `add` checks it against the
+/// binary's own before vendoring anything: a pack installed under a
+/// binary that cannot run it is a failure the first run discovers, after
+/// the tree is already on disk.
+#[test]
+fn add_refuses_a_pack_whose_schema_range_this_binary_is_outside_of() {
+    let (_root, upstream, repo, home) = setup();
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: review-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         yunta_schema: \">=99\"\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/review.yaml]\n",
+    )
+    .unwrap();
+    commit_all(&upstream, "needs a newer schema");
+
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    let said = stderr(&out);
+    assert!(
+        said.contains(">=99") && said.contains("yunta_schema"),
+        "the refusal names the range it could not satisfy: {said}"
+    );
+    assert!(
+        !repo.join(".yunta/packs/acme/review-pack").exists(),
+        "nothing is vendored under a range this binary is outside of"
+    );
+}

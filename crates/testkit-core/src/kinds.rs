@@ -79,7 +79,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 cmd: "cargo test -p yunta".to_string(),
                 r#type: None,
             }],
-            scope: vec!["crates/cli/**".to_string()],
+            scope: vec!["crates/cli/**".into()],
             depends_on: vec![],
         })),
         EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
@@ -105,7 +105,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
         })),
         EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
             task_id: "graph-cmd".into(),
-            paths: vec!["crates/cli/src/**".to_string()],
+            paths: vec!["crates/cli/src/**".into()],
             reason: "need to touch main.rs too".to_string(),
             proposed_criterion: None,
             proposed_criterion_precheck: None,
@@ -115,7 +115,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             decided_by: Decider::Rule,
             mode: ScopeExpansionMode::Rules,
             count_this_run: 1,
-            paths: vec!["crates/cli/src/**".to_string()],
+            paths: vec!["crates/cli/src/**".into()],
         })),
         EventPayload::Scope(ScopeEvent::Denied(ScopeExpansionDeniedPayload {
             task_id: "graph-cmd".into(),

@@ -52,7 +52,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::port::{Adapter, Forge, ForgeError};
-use yunta_core::{AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId};
+use yunta_core::{
+    AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
+};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -132,7 +134,7 @@ pub enum RunError {
     /// caught, before anything is written.
     #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
     UnknownMode {
-        workflow: String,
+        workflow: WorkflowName,
         mode: ModeName,
         declared: String,
     },

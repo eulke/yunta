@@ -46,7 +46,9 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation};
+use yunta_core::{
+    InputName, Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation,
+};
 
 use crate::replay::derive;
 use yunta_core::template::render_template;
@@ -88,7 +90,7 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
 /// because it is one clause of the node, read together and never apart.
 pub(super) struct WorkflowCall<'a> {
     pub use_name: &'a str,
-    pub inputs: &'a BTreeMap<String, String>,
+    pub inputs: &'a BTreeMap<InputName, String>,
     pub isolation: WorkflowIsolation,
     pub mounts: &'a [MountSpec],
 }
@@ -213,7 +215,7 @@ pub(super) async fn execute_workflow(
     // The parent's frozen contribution: the declared inputs, rendered
     // in the parent's own template scope.
     let vars = template_vars(ctx, node);
-    let mut provided: std::collections::HashMap<String, String> = Default::default();
+    let mut provided: std::collections::HashMap<InputName, String> = Default::default();
     for (name, template) in inputs {
         match render_template(template, &vars) {
             Ok(value) => {

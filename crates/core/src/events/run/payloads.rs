@@ -36,7 +36,7 @@ pub struct RunCreatedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yunta_schema: Option<String>,
+    pub yunta_schema: Option<crate::SchemaRange>,
     pub base_branch: String,
     pub base_commit: CommitSha,
 }

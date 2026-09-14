@@ -9,12 +9,13 @@ use std::collections::BTreeMap;
 
 use crate::events::meta::EventMeta;
 use crate::events::scope::kinds::ScopeEvent;
+use crate::glob::ScopeGlob;
 use crate::ids::TaskId;
 
 /// Every grant this run made, by task.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GrantLedger {
-    per_task: BTreeMap<TaskId, Vec<String>>,
+    per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
     granted: u32,
     denied: u32,
     requested: u32,
@@ -23,7 +24,7 @@ pub struct GrantLedger {
 impl GrantLedger {
     /// The paths granted to `task`, in grant order — what a later
     /// attempt's effective scope adds to what the task declared.
-    pub fn paths_for(&self, task: &TaskId) -> &[String] {
+    pub fn paths_for(&self, task: &TaskId) -> &[ScopeGlob] {
         self.per_task.get(task).map(Vec::as_slice).unwrap_or(&[])
     }
 

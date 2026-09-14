@@ -25,7 +25,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{run_mode, FindingSeverity, StoredEvent, TaskStatus, TokenUsage};
-use yunta_core::{ModeName, NodeId, RunId, Workflow};
+use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
 use crate::history::PriorEstimation;
 use crate::live::live_total_tokens_of;
@@ -85,7 +85,7 @@ pub struct Counter {
 pub struct RunFrame {
     pub run_id: RunId,
     /// The frozen workflow's own `name:`.
-    pub workflow: String,
+    pub workflow: WorkflowName,
     /// The mode frozen in `run_created`.
     pub mode: ModeName,
     pub phase: RunPhase,

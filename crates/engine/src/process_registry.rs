@@ -12,6 +12,7 @@
 //! here degrades to a `tracing` warning, never to a failed run — but it
 //! degrades *loudly*, never silently.
 
+use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -26,7 +27,10 @@ pub struct EngineProcessFile {
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
     pub engine_pid: Pid,
-    pub started_at: String,
+    /// When this engine started, as its own injected clock read it —
+    /// what tells a live pid apart from a number the host handed to
+    /// something else after a crash.
+    pub started_at: DateTime<Utc>,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,
@@ -45,7 +49,7 @@ impl ProcessRegistry {
     pub fn create(
         run_dir: &Path,
         engine_pid: Pid,
-        started_at: String,
+        started_at: DateTime<Utc>,
     ) -> std::io::Result<ProcessRegistry> {
         let state = EngineProcessFile {
             engine_pid,

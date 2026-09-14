@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, nested, take};
 use super::{ArtifactRefId, ArtifactSpec, LoopUntil, Node, ScopeExpansion};
-use crate::ids::{ExecutorName, NodeId, OptionId};
+use crate::ids::{ExecutorName, InputName, NodeId, OptionId};
 use crate::yaml::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -145,7 +145,7 @@ pub enum NodeKind {
         /// before the child validates them against its declared
         /// `inputs:`. Absent means the child must get by on defaults.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        inputs: BTreeMap<String, String>,
+        inputs: BTreeMap<InputName, String>,
         /// `worktree` (default) gives the child its own tree branched
         /// off the parent's HEAD; `inherit` shares the parent's tree
         /// for phases of one piece of work — parallel `inherit`

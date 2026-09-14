@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
-use yunta_core::{Clock, CommitSha, Manifest, ModeName, NodeId, RunId, TaskId, ARTIFACTS_DIR};
+use yunta_core::{
+    Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId, ARTIFACTS_DIR,
+};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
@@ -28,7 +30,7 @@ use yunta_core::events::RunEvent;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BirthOrigin {
     /// A `type: document` input, named by the input it came in as.
-    Input { input: String },
+    Input { input: InputName },
     /// Another run's artifact. `producer` is the node that produced it
     /// there, absent when that run acquired it without a node either.
     Inherited {
@@ -213,7 +215,7 @@ pub async fn create_run(
             inputs: manifest
                 .inputs
                 .iter()
-                .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+                .map(|(name, value)| (name.to_string(), serde_json::Value::String(value.clone())))
                 .collect(),
             mode: mode.clone(),
             promoted_from: promoted_from.cloned(),
@@ -225,7 +227,7 @@ pub async fn create_run(
                     .workflow
                     .yunta_schema
                     .clone()
-                    .unwrap_or_else(|| format!("={}", yunta_core::YUNTA_SCHEMA)),
+                    .unwrap_or_else(|| yunta_core::SchemaRange::exactly(yunta_core::YUNTA_SCHEMA)),
             ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),

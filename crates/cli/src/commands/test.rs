@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths, MOCK_ID};
-use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow};
+use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow, WorkflowName};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -41,7 +41,7 @@ use crate::render::StateWord;
 #[serde(deny_unknown_fields)]
 struct TestCase {
     /// Workflow name, resolved to `.yunta/workflows/<name>.yaml`.
-    workflow: String,
+    workflow: WorkflowName,
     /// Mode the run is created in. Absent runs the whole graph, under
     /// the same `"default"` a workflow with no `modes:` runs under.
     #[serde(default)]
@@ -50,7 +50,7 @@ struct TestCase {
     /// arrives as text and `resolve_inputs` types it against the
     /// declaration, exactly as `yunta run --input` does.
     #[serde(default)]
-    inputs: BTreeMap<String, String>,
+    inputs: BTreeMap<yunta_core::InputName, String>,
     /// Directory whose contents seed the sandbox worktree, relative to
     /// the case file; absent, the sandbox is an empty repository.
     #[serde(default)]
@@ -241,7 +241,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let mock = load_mock_fixture(&fixture_path, &run_dir, &worktree)?;
     let adapters = mock_adapters(&config, mock);
 
-    let provided_inputs: HashMap<String, String> = case.inputs.into_iter().collect();
+    let provided_inputs: HashMap<yunta_core::InputName, String> = case.inputs.into_iter().collect();
     let frozen = yunta_engine::build_manifest(
         &workflow,
         &config,

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use yunta_core::events::StoredEvent;
-use yunta_core::{ContentHash, Manifest, ModeName, RunId};
+use yunta_core::{ContentHash, Manifest, ModeName, RunId, WorkflowName};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
 };
@@ -29,7 +29,7 @@ use crate::render::{
 
 pub fn stats(
     run_id: Option<&RunId>,
-    workflow: Option<&str>,
+    workflow: Option<&WorkflowName>,
     json: bool,
 ) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
@@ -83,7 +83,7 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> {
+fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.storage()?;
 
@@ -125,7 +125,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
 pub(crate) fn collect_history(
     runs_root: &Path,
     storage: &Storage,
-    workflow_name: &str,
+    workflow_name: &WorkflowName,
 ) -> Vec<RunSummary> {
     let run_ids: Vec<RunId> = storage
         .list_runs()
@@ -146,7 +146,7 @@ pub(crate) fn collect_history(
         else {
             continue;
         };
-        if manifest.workflow.name != workflow_name {
+        if manifest.workflow.name != *workflow_name {
             continue;
         }
         let mode = yunta_core::events::run_mode(&events);
@@ -176,7 +176,7 @@ pub(crate) fn collect_history(
 pub(crate) fn collect_raw_history(
     runs_root: &Path,
     storage: &Storage,
-    workflow_name: &str,
+    workflow_name: &WorkflowName,
 ) -> (Vec<Vec<StoredEvent>>, Option<yunta_core::Workflow>) {
     let run_ids: Vec<RunId> = storage
         .list_runs()
@@ -198,7 +198,7 @@ pub(crate) fn collect_raw_history(
         else {
             continue;
         };
-        if manifest.workflow.name != workflow_name {
+        if manifest.workflow.name != *workflow_name {
             continue;
         }
         let is_newer = match &latest_workflow {
@@ -339,7 +339,7 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
     )
 }
 
-fn render_workflow_history(workflow_name: &str, history: &[RunSummary], glyphs: Glyphs) {
+fn render_workflow_history(workflow_name: &WorkflowName, history: &[RunSummary], glyphs: Glyphs) {
     println!("workflow `{workflow_name}` — {} run(s)", history.len());
 
     println!("\nCPTV over time:");
@@ -616,7 +616,7 @@ impl From<&yunta_engine::PriorEstimation> for EstimationJson {
 #[derive(Serialize)]
 struct WorkflowHistoryJson {
     schema_version: u32,
-    workflow: String,
+    workflow: WorkflowName,
     runs: Vec<RunSummaryJson>,
     estimation: Option<EstimationJson>,
     verification_findings: Option<VerificationFindingsJson>,
@@ -624,13 +624,13 @@ struct WorkflowHistoryJson {
 
 impl WorkflowHistoryJson {
     fn from(
-        workflow: &str,
+        workflow: &WorkflowName,
         history: &[RunSummary],
         findings: Option<&yunta_engine::VerificationFindings>,
     ) -> Self {
         Self {
             schema_version: crate::json::SCHEMA_VERSION,
-            workflow: workflow.to_string(),
+            workflow: workflow.clone(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
             estimation: prior_estimation(history).as_ref().map(EstimationJson::from),
             verification_findings: findings.map(VerificationFindingsJson::from),

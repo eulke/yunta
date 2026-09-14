@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::hash::ContentHash;
-use crate::ids::{NodeId, RunId};
+use crate::ids::{InputName, NodeId, RunId};
 
 // A kind nothing in this workspace writes. It is in the log's
 // vocabulary because a log may hold one — written by something that is
@@ -216,7 +216,7 @@ pub enum ArtifactOrigin {
     /// The answers to a questions artifact.
     Answered,
     /// A `type: document` input, named by the input it came in as.
-    Input { input: String },
+    Input { input: InputName },
     /// Another run's artifact: a mount, a child's output, a promotion.
     /// `producer` is the node that produced it there, absent when that
     /// run acquired it without a node either.

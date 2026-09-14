@@ -13,6 +13,7 @@ mod criteria;
 mod session;
 
 use std::path::{Path, PathBuf};
+use yunta_core::ScopeGlob;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -206,7 +207,7 @@ pub struct ScopeGovernance<'a> {
     /// is denied.
     pub max_expansion_files: usize,
     pub grants: &'a crate::scope_expansion::GrantLedger,
-    pub already_granted_paths: &'a [String],
+    pub already_granted_paths: &'a [ScopeGlob],
 }
 
 /// The resources and retry policy one task's attempts run under —

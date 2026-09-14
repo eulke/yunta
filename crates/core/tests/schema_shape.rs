@@ -110,7 +110,8 @@ fn config_maps_are_ordered_by_key() {
     let text = yaml::to_string(&config).unwrap();
     assert!(text.find("alpha").unwrap() < text.find("zeta").unwrap());
     let _: Option<&BTreeMap<AdapterId, AdapterSettings>> = config.adapters.as_ref();
-    let _: Option<&BTreeMap<String, McpServerConfig>> = config.mcp_servers.as_ref();
+    let _: Option<&BTreeMap<yunta_core::McpServerName, McpServerConfig>> =
+        config.mcp_servers.as_ref();
     let _: Option<&BTreeMap<String, PricingEntry>> = config.pricing.as_ref();
 }
 

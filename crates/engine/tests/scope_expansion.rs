@@ -17,7 +17,7 @@ fn repo() -> tempfile::TempDir {
 
 fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
     ScopeExpansionRequest {
-        paths: paths.iter().map(|s| s.to_string()).collect(),
+        paths: paths.iter().map(|s| (*s).into()).collect(),
         reason: "small adjacent fix".to_string(),
         proposed_criterion: criterion.map(|cmd| ProposedCriterionEntry {
             cmd: cmd.to_string(),
@@ -103,7 +103,7 @@ async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
@@ -124,7 +124,7 @@ async fn rules_mode_denies_a_path_outside_within() {
     let req = request(&["outside.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src/**".to_string()],
+        &["src/**".into()],
         None,
         5,
         &GrantLedger::new(0),
@@ -137,7 +137,7 @@ async fn rules_mode_denies_a_path_outside_within() {
     match decision {
         Decision::Denied(reason) => assert_eq!(
             reason,
-            "requested path(s) fall outside the declared `within` ceiling: [\"outside.rs\"]"
+            "requested path(s) fall outside the declared `within` ceiling: outside.rs"
         ),
         other => panic!("expected Denied, got {other:?}"),
     }
@@ -150,7 +150,7 @@ async fn rules_mode_requires_a_proposed_criterion() {
     let req = request(&["src.rs"], None);
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
@@ -177,7 +177,7 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
     let req = request(&["f*.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["f*.rs".to_string()],
+        &["f*.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
@@ -203,7 +203,7 @@ async fn an_exhausted_cap_escalates_even_under_rules_mode() {
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         Some(2),
         5,
         &GrantLedger::new(2), // already at the cap
@@ -227,7 +227,7 @@ async fn a_cap_not_yet_reached_does_not_escalate() {
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         Some(3),
         5,
         &GrantLedger::new(2),

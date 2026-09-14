@@ -381,7 +381,7 @@ async fn a_provided_input_value_freezes_into_the_manifest() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
-    let provided = HashMap::from([("idea".to_string(), "build a thing".to_string())]);
+    let provided = HashMap::from([("idea".into(), "build a thing".to_string())]);
     let manifest = build_manifest(
         &workflow(WORKFLOW_WITH_INPUT),
         &config(CONFIG),

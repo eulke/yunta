@@ -112,6 +112,15 @@ impl CommitSha {
         }
         Self(Cow::Owned(lower_hex(bytes)))
     }
+
+    /// The id as a reader meets it in a line about something else: the
+    /// first twelve digits, or the whole id when git printed a shorter
+    /// one. Prose, not an identifier — what compares, and what a lock
+    /// records, is the whole value.
+    pub fn abbreviated(&self) -> &str {
+        let digits = self.as_str();
+        &digits[..digits.len().min(ABBREVIATED_DIGITS)]
+    }
 }
 
 /// Lowercase-hex SHA-256 of raw bytes — what `artifact_accepted` records

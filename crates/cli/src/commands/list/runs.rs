@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
-use yunta_core::{Clock, Manifest, ModeName, RunId};
+use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
 use yunta_engine::{RunFrame, RunPhase};
 use yunta_storage::Storage;
 
@@ -89,7 +89,7 @@ impl Standing {
 struct RunRow {
     run_id: RunId,
     standing: Standing,
-    workflow: String,
+    workflow: WorkflowName,
     mode: ModeName,
     /// How long the run has been where it is — what the rows of a group
     /// are ordered by.
@@ -287,7 +287,7 @@ mod tests {
         RunRow {
             run_id: RunId::from_static(id),
             standing,
-            workflow: "review".to_string(),
+            workflow: "review".into(),
             mode: ModeName::default(),
             age: Duration::from_secs(age_secs),
             summary: "1/2 nodes · 0 reroutes · running".to_string(),

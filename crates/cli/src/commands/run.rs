@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, Workflow};
+use yunta_core::{AdapterId, Clock, IdSource, InputName, Isolation, Manifest, ModeName, Workflow};
 use yunta_engine::{FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
@@ -38,16 +38,16 @@ use yunta_core::events::RunEvent;
 /// a name is declared, required, or well-typed is `resolve_inputs`'s
 /// job, not this one's, so the two error paths never disagree about who
 /// owns which rule.
-fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
+fn parse_inputs(raw: &[String]) -> Result<HashMap<InputName, String>, String> {
     let mut inputs = HashMap::new();
     for entry in raw {
         let (name, value) = entry
             .split_once('=')
             .ok_or_else(|| format!("--input `{entry}` must have the form `name=value`"))?;
-        if name.is_empty() {
-            return Err(format!("--input `{entry}` has an empty name"));
-        }
-        if inputs.insert(name.to_string(), value.to_string()).is_some() {
+        let name: InputName = name
+            .parse()
+            .map_err(|error| format!("--input `{entry}`: {error}"))?;
+        if inputs.insert(name.clone(), value.to_string()).is_some() {
             return Err(format!("--input `{name}` was given more than once"));
         }
     }
