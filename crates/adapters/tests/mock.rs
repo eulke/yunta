@@ -689,3 +689,46 @@ sessions:
         "a run that opened one session leaves the other two scripts unclaimed"
     );
 }
+
+#[tokio::test]
+async fn a_dropped_session_stops_its_player() {
+    // One step scheduled far enough ahead that the player is still
+    // waiting for it when the session goes away.
+    let adapter = MockAdapter::from_yaml(
+        "sessions:\n  - steps:\n      - { type: note, text: later, after_ms: 3600000 }\n    \
+         outcome: { type: completed, summary: done }\n",
+    )
+    .unwrap();
+    let alive = || {
+        tokio::runtime::Handle::current()
+            .metrics()
+            .num_alive_tasks()
+    };
+
+    let before = alive();
+    let mut session = adapter.spawn(request(std::env::temp_dir())).await.unwrap();
+    {
+        // Reading the opening event proves the player is past it and
+        // into the step it has to wait for.
+        let mut events = session.events();
+        assert!(matches!(
+            events.next().await,
+            Some(AgentEvent::SessionOpened { .. })
+        ));
+    }
+    assert!(
+        alive() > before,
+        "the session's script is played by a task of its own",
+    );
+
+    drop(session);
+    // Cancellation lands when the runtime next drives the task, so the
+    // test hands it the turns rather than waiting a wall-clock interval.
+    for _ in 0..1_000 {
+        if alive() <= before {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("a dropped session leaves its player waiting on a step nobody will read");
+}

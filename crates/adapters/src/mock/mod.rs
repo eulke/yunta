@@ -242,12 +242,13 @@ impl MockAdapter {
             outcome: script.outcome.clone(),
             run_tools_endpoint: req.run_tools_endpoint.clone(),
         };
-        tokio::spawn(script::play(played, events, stops));
+        let player = tokio::spawn(script::play(played, events, stops));
 
         Ok(Box::new(MockSession {
             receiver: Some(receiver),
             interrupt,
             kill,
+            player,
         }))
     }
 
@@ -383,6 +384,17 @@ pub struct MockSession {
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
     interrupt: Arc<Notify>,
     kill: Arc<Notify>,
+    /// The task playing this session's script. A session that ends
+    /// before its script does — a cancelled run, a caller that drops
+    /// the stream — leaves a player waiting on a step that will never
+    /// be read, so the session owns it and takes it down with itself.
+    player: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for MockSession {
+    fn drop(&mut self) {
+        self.player.abort();
+    }
 }
 
 #[async_trait]
