@@ -166,7 +166,7 @@ async fn a_failed_result_ends_the_stream_with_failed_and_retryable() {
 }
 
 #[tokio::test]
-async fn a_tool_use_block_maps_to_tool_use_with_a_readable_digest() {
+async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -189,7 +189,7 @@ async fn a_tool_use_block_maps_to_tool_use_with_a_readable_digest() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "Edit" && target_digest == "src/lib.rs"
+            if name == "Edit" && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").as_str()[..12]
     )));
 }
 
@@ -931,5 +931,50 @@ async fn an_init_line_that_names_no_tool_set_reports_nothing_about_run_tools() {
         run_tools_mounted(&events),
         None,
         "a CLI that says nothing is unknown, never zero: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_tool_use_never_persists_the_command_it_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let command = "psql postgres://admin:hunter2@db.internal/prod -c 'select 1'";
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            &format!(
+                r#"{{"type":"assistant","message":{{"id":"msg-1","content":[{{"type":"tool_use","name":"Bash","input":{{"command":"{command}"}}}}]}}}}"#
+            ),
+            r#"{"type":"result","is_error":false,"result":"ran","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let digests: Vec<&String> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolUse { target_digest, .. } => Some(target_digest),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(digests.len(), 1, "the stream carries the one call it made");
+    for fragment in ["psql", "hunter2", "db.internal", "select"] {
+        assert!(
+            !digests[0].contains(fragment),
+            "`{fragment}` of the command reached the log as `{}`",
+            digests[0],
+        );
+    }
+    assert_eq!(
+        digests[0],
+        &yunta_core::sha256_hex(command.as_bytes()).as_str()[..12],
     );
 }

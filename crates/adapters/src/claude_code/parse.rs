@@ -14,10 +14,10 @@
 //! atomic-turn execution model can't reliably support anyway.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, ModelName, SessionId};
+use yunta_core::{ModelName, SessionId};
 
 use crate::failure;
-use crate::session::{AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
+use crate::session::{target_digest, AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
 
 pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -131,10 +131,10 @@ fn content_event(item: &Value) -> Option<AgentEvent> {
 fn tool_target_digest(input: &Value) -> String {
     for key in ["file_path", "path", "command", "pattern", "url"] {
         if let Some(s) = input.get(key).and_then(Value::as_str) {
-            return s.to_string();
+            return target_digest(s);
         }
     }
-    sha256_hex(input.to_string().as_bytes()).to_string()
+    target_digest(&input.to_string())
 }
 
 fn result_events(value: &Value) -> Vec<AgentEvent> {

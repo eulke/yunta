@@ -206,6 +206,17 @@ pub struct AgentError {
     pub message: String,
 }
 
+/// What the log carries for the thing a tool acted on: the first
+/// twelve hex characters of its digest, and never the thing itself.
+///
+/// A path, a command line or a URL is content: it can name a customer,
+/// carry a token in a query string, or spell out an internal host. A
+/// digest is enough to tell two calls apart and to match one against a
+/// value a reader already holds, which is all a reader of the log needs.
+pub(crate) fn target_digest(target: &str) -> String {
+    yunta_core::sha256_hex(target.as_bytes()).as_str()[..12].to_string()
+}
+
 /// Events a session's stream carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {

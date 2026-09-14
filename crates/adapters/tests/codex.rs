@@ -162,7 +162,7 @@ async fn a_failed_turn_ends_the_stream_with_failed_and_retryable() {
 }
 
 #[tokio::test]
-async fn a_command_execution_item_maps_to_tool_use_with_the_command_as_digest() {
+async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -185,12 +185,13 @@ async fn a_command_execution_item_maps_to_tool_use_with_the_command_as_digest() 
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "command_execution" && target_digest == "cargo test"
+            if name == "command_execution"
+                && target_digest == &yunta_core::sha256_hex(b"cargo test").as_str()[..12]
     )));
 }
 
 #[tokio::test]
-async fn a_file_change_item_maps_to_tool_use_with_the_first_path_as_digest() {
+async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -212,12 +213,13 @@ async fn a_file_change_item_maps_to_tool_use_with_the_first_path_as_digest() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "file_change" && target_digest == "src/lib.rs"
+            if name == "file_change"
+                && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").as_str()[..12]
     )));
 }
 
 #[tokio::test]
-async fn an_mcp_tool_call_item_maps_to_tool_use_with_server_and_tool_as_digest() {
+async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -239,12 +241,13 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_with_server_and_tool_as_digest()
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "mcp_tool_call" && target_digest == "yunta:query"
+            if name == "mcp_tool_call"
+                && target_digest == &yunta_core::sha256_hex(b"yunta:query").as_str()[..12]
     )));
 }
 
 #[tokio::test]
-async fn a_web_search_item_maps_to_tool_use_with_the_query_as_digest() {
+async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -266,7 +269,9 @@ async fn a_web_search_item_maps_to_tool_use_with_the_query_as_digest() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target_digest }
-            if name == "web_search" && target_digest == "codex exec json schema"
+            if name == "web_search"
+                && target_digest
+                    == &yunta_core::sha256_hex(b"codex exec json schema").as_str()[..12]
     )));
 }
 
@@ -957,5 +962,50 @@ async fn no_dead_config_override_reaches_the_cli() {
             .iter()
             .any(|a| a.starts_with("mcp_servers.yunta.bearer_token_env_var=")),
         "the credential is named, not inlined: {args:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_tool_use_never_persists_the_command_it_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let command = "psql postgres://admin:hunter2@db.internal/prod -c 'select 1'";
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            &format!(
+                r#"{{"type":"item.completed","item":{{"id":"item_0","type":"command_execution","command":"{command}","aggregated_output":"ok","exit_code":0,"status":"completed"}}}}"#
+            ),
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let digests: Vec<&String> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolUse { target_digest, .. } => Some(target_digest),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(digests.len(), 1, "the stream carries the one call it made");
+    for fragment in ["psql", "hunter2", "db.internal", "select"] {
+        assert!(
+            !digests[0].contains(fragment),
+            "`{fragment}` of the command reached the log as `{}`",
+            digests[0],
+        );
+    }
+    assert_eq!(
+        digests[0],
+        &yunta_core::sha256_hex(command.as_bytes()).as_str()[..12],
     );
 }

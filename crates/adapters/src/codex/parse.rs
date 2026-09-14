@@ -37,10 +37,10 @@
 //! could be, not wider than what's confirmed.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, SessionId};
+use yunta_core::SessionId;
 
 use crate::failure;
-use crate::session::{AgentError, AgentEvent, AgentOutcome};
+use crate::session::{target_digest, AgentError, AgentEvent, AgentOutcome};
 
 pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -108,8 +108,8 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
 
 fn field_or_hash(item: &Value, key: &str) -> String {
     match item.get(key).and_then(Value::as_str) {
-        Some(s) => s.to_string(),
-        None => sha256_hex(item.to_string().as_bytes()).to_string(),
+        Some(s) => target_digest(s),
+        None => target_digest(&item.to_string()),
     }
 }
 
@@ -123,8 +123,8 @@ fn file_change_digest(item: &Value) -> String {
         .and_then(|changes| changes.first())
         .and_then(|change| change.get("path"))
         .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| sha256_hex(item.to_string().as_bytes()).to_string())
+        .map(target_digest)
+        .unwrap_or_else(|| target_digest(&item.to_string()))
 }
 
 fn mcp_tool_call_digest(item: &Value) -> String {
@@ -132,8 +132,8 @@ fn mcp_tool_call_digest(item: &Value) -> String {
         item.get("server").and_then(Value::as_str),
         item.get("tool").and_then(Value::as_str),
     ) {
-        (Some(server), Some(tool)) => format!("{server}:{tool}"),
-        _ => sha256_hex(item.to_string().as_bytes()).to_string(),
+        (Some(server), Some(tool)) => target_digest(&format!("{server}:{tool}")),
+        _ => target_digest(&item.to_string()),
     }
 }
 
