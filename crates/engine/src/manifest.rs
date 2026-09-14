@@ -78,8 +78,8 @@ pub async fn build_manifest(
     provided_inputs: &HashMap<InputName, String>,
 ) -> Result<FrozenRun, ManifestError> {
     let mut workflow = workflow.clone();
-    expand_runner_fanout(&mut workflow);
-    expand_implicit_dependencies(&mut workflow);
+    yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
+    yunta_core::workflow::read::expand_implicit_dependencies(&mut workflow);
 
     let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo).await?;
     let inputs = resolved.values;
@@ -172,110 +172,6 @@ async fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core:
         version: manifest.version,
         commit,
     })
-}
-
-/// `context: [{ artifact: { node, name } }]` creates an *implicit*
-/// `depends_on` edge onto `node` — folded into the ordinary field here,
-/// once, so `check`'s cycle detection and the scheduler's own readiness
-/// calculation (both already only ever read `Node.depends_on`) need zero
-/// awareness of `context:` existing at all. `check()` calls this too
-/// (its own copy of the workflow, never the manifest's), so a cycle
-/// created purely by two nodes' context-artifact references is still
-/// caught statically rather than deadlocking a real run. Idempotent: a
-/// node that already lists the referenced node explicitly gets no
-/// duplicate.
-/// A node with `runners: [a, b]` becomes one `<id>@<runner>`
-/// node per runner — **statically, in the manifest**, before anything
-/// runs: the fan-out is visible in `status`, each expanded node
-/// resolves its own runner and renders its own `{{runner.name}}`, and
-/// the scheduler needs zero fan-out awareness. Every reference to the
-/// original id follows the expansion: downstream `depends_on` rewires
-/// onto all siblings, and mode include lists name them all (so a mode
-/// that covered `review` still covers the whole review). Re-route and
-/// gate targets onto a fan-out node are check errors — there is no
-/// unambiguous "return control to review" once review is many nodes —
-/// so this function never sees one.
-pub(crate) fn expand_runner_fanout(workflow: &mut Workflow) {
-    let mut expansion: std::collections::HashMap<yunta_core::NodeId, Vec<yunta_core::NodeId>> =
-        std::collections::HashMap::new();
-    let mut nodes = Vec::with_capacity(workflow.nodes.len());
-    for node in workflow.nodes.drain(..) {
-        if node.runners.is_empty() {
-            nodes.push(node);
-            continue;
-        }
-        let mut expanded_ids = Vec::new();
-        for runner in &node.runners {
-            let mut sibling = node.clone();
-            sibling.id = yunta_core::NodeId::fan_out(&node.id, runner);
-            sibling.runner = Some(runner.clone());
-            sibling.runners = Vec::new();
-            expanded_ids.push(sibling.id.clone());
-            nodes.push(sibling);
-        }
-        expansion.insert(node.id.clone(), expanded_ids);
-    }
-    for node in &mut nodes {
-        let mut rewired = Vec::with_capacity(node.depends_on.len());
-        for dep in node.depends_on.drain(..) {
-            match expansion.get(&dep) {
-                Some(siblings) => rewired.extend(siblings.iter().cloned()),
-                None => rewired.push(dep),
-            }
-        }
-        node.depends_on = rewired;
-    }
-    if let Some(modes) = &mut workflow.modes {
-        for spec in modes.values_mut() {
-            if let yunta_core::ModeInclude::Nodes(included) = &mut spec.include {
-                let mut rewritten = Vec::with_capacity(included.len());
-                for id in included.drain(..) {
-                    match expansion.get(&id) {
-                        Some(siblings) => rewritten.extend(siblings.iter().cloned()),
-                        None => rewritten.push(id),
-                    }
-                }
-                *included = rewritten;
-            }
-        }
-    }
-    workflow.nodes = nodes;
-}
-
-pub(crate) fn expand_implicit_dependencies(workflow: &mut Workflow) {
-    for node in &mut workflow.nodes {
-        expand_implicit_dependencies_in(node);
-    }
-}
-
-fn expand_implicit_dependencies_in(node: &mut Node) {
-    if let NodeKind::Parallel { nodes, .. } = &mut node.kind {
-        for child in nodes {
-            expand_implicit_dependencies_in(child);
-        }
-    }
-    // A mount is a read of the referenced node's outcome, so
-    // it orders behind it exactly like a context artifact does — and
-    // it's this edge that guarantees the source node has already
-    // finished at the time the child is born and the copy happens.
-    let mut implied: Vec<NodeId> = Vec::new();
-    if let NodeKind::Workflow { mounts, .. } = &node.kind {
-        implied.extend(mounts.iter().map(|mount| mount.artifact.node.clone()));
-    }
-    for spec in &node.context {
-        if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-            // A node-less reference reads this run's own
-            // artifacts dir — no producer to order behind.
-            if let Some(referenced) = &artifact.node {
-                implied.push(referenced.clone());
-            }
-        }
-    }
-    for referenced in implied {
-        if !node.depends_on.contains(&referenced) {
-            node.depends_on.push(referenced);
-        }
-    }
 }
 
 /// Freezes one node's own file prompt (if any) — `build_manifest` walks

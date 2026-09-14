@@ -15,7 +15,7 @@ mod runs;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use yunta_core::{InputSpec, Workflow};
+use yunta_core::InputSpec;
 use yunta_storage::Storage;
 
 use crate::context::Context;
@@ -88,10 +88,10 @@ pub(crate) fn render_catalog(cwd: &Path, history_source: Option<&(Project, Stora
                 continue;
             }
         };
-        let workflow: Workflow = match yunta_core::yaml::parse(&contents) {
+        let workflow = match yunta_core::workflow::read::read(&contents, &entry.path) {
             Ok(w) => w,
-            Err(e) => {
-                out.push_str(&format!("{name}: fails to parse ({e})\n"));
+            Err(report) => {
+                out.push_str(&format!("{name}: {report}\n"));
                 continue;
             }
         };

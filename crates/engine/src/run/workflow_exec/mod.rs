@@ -46,9 +46,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{
-    InputName, Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation,
-};
+use yunta_core::{InputName, Isolation, Manifest, MountSpec, Node, RunId, WorkflowIsolation};
 
 use crate::replay::derive;
 use yunta_core::template::render_template;
@@ -174,19 +172,10 @@ pub(super) async fn execute_workflow(
             .await;
         }
     };
-    let child_workflow: Workflow = match yunta_core::yaml::parse(&text) {
+    let child_workflow = match yunta_core::workflow::read::read(&text, &resolved.path) {
         Ok(workflow) => workflow,
-        Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "child workflow `{}` does not parse: {e}",
-                    resolved.path.display()
-                ),
-                false,
-            )
-            .await;
+        Err(report) => {
+            return fail(ctx, node, report.to_string(), false).await;
         }
     };
     // The same static gate `yunta run` applies before spending anything

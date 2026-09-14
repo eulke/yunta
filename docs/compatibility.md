@@ -169,6 +169,14 @@ bookkeeping carry the prefix `run:` and are relative to the run directory
 (`run:scratch/engine.json`). A location that does not read is refused where it is
 read, as a `parse` problem at its own key (`findings[0].location`).
 
+A report names the document it is about: its `path`, and its `kind` — one of the
+artifact kinds, or `workflow` for the file a run is created from. A workflow is
+read the same way every other document is, so a graph that breaks its own rules —
+an id declared twice, a reference that reaches nothing, two `parallel` children
+that can touch the same files, a mode that leaves the graph unable to run —
+reaches a reader as the same report a tasks document does. A diagnostic's subject,
+under `of`, names the entry the problem is about; for a workflow that is `node`.
+
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
 read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
@@ -180,8 +188,8 @@ The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
 `unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
 `manual-review-without-justification`, `empty-text`, `empty-detail`,
-`unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`, `missing-answer`
-and `mismatched-answer`. Together with
+`unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`, `missing-answer`,
+`mismatched-answer` and `incoherent-mode`. Together with
 `parse` and the six an artifact fails under, they are every stable code this
 system reports: a receipt counts by one, `status --json` publishes one, and a log
 is grepped by one.

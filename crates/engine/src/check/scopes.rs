@@ -260,27 +260,6 @@ pub(crate) fn check_commands(
     }
 }
 
-pub(crate) fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
-    for node in nodes {
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            let group = evaluate_group_scope(children);
-            for (a, b, glob_a, glob_b) in group.overlaps {
-                errors.push(CheckError::OverlappingParallelScope {
-                    group: node.id.clone(),
-                    a: a.id.clone(),
-                    b: b.id.clone(),
-                    glob_a: glob_a.clone(),
-                    glob_b: glob_b.clone(),
-                });
-            }
-            check_parallel_scopes(children, errors);
-        }
-    }
-}
-
 pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<CheckWarning>) {
     for node in nodes {
         if let NodeKind::Parallel {

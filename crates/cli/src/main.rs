@@ -91,6 +91,16 @@ fn drive(cli: cli::Cli) -> Result<Outcome, CliError> {
 
 /// Reads and parses a YAML file into `T`, naming what it was reading and
 /// where when it can't — the one loader every command reaches for.
+/// The workflow at `path`, read through the one door that holds it to
+/// its own rules — never the bare parser, which would hand back a graph
+/// nobody checked.
+pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliError> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
+    yunta_core::workflow::read::read(&contents, path)
+        .map_err(|report| CliError::msg(report.to_string()))
+}
+
 pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
     path: &Path,
     what: &str,

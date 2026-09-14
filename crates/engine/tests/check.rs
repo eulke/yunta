@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 
-use indexmap::IndexMap;
 use yunta_core::{
-    ArtifactSpec, ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind,
-    OnFailure, PromptSource, RunnerCandidate, Workflow,
+    ArtifactSpec, ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource,
+    RunnerCandidate, Workflow,
 };
 use yunta_engine::{check as check_against, check_warnings, CheckError, CheckWarning};
 
@@ -12,24 +11,6 @@ use yunta_engine::{check as check_against, check_warnings, CheckError, CheckWarn
 /// so a capability nothing declares is a capability nothing can refuse.
 fn check(workflow: &yunta_core::Workflow, config: &yunta_core::ConfigLayer) -> Vec<CheckError> {
     check_against(workflow, config, &|_| None)
-}
-
-fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<ModeName, ModeSpec> {
-    entries
-        .iter()
-        .map(|(name, include)| {
-            (
-                (*name).into(),
-                ModeSpec {
-                    include: include.clone(),
-                },
-            )
-        })
-        .collect()
-}
-
-fn included(ids: &[&str]) -> ModeInclude {
-    ModeInclude::Nodes(ids.iter().map(|&id| id.into()).collect())
 }
 
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
@@ -214,45 +195,6 @@ fn a_well_formed_workflow_has_no_errors() {
 }
 
 #[test]
-fn duplicate_node_id_is_reported() {
-    let wf = workflow(vec![bash("a", "true", &[]), bash("a", "false", &[])]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(errors, vec![CheckError::DuplicateNodeId { id: "a".into() }]);
-}
-
-#[test]
-fn unknown_dependency_is_reported() {
-    let wf = workflow(vec![bash("a", "true", &["ghost"])]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::BrokenReference {
-            node: "a".into(),
-            field: "depends_on".to_string(),
-            target: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
-fn unknown_goto_target_is_reported() {
-    let mut node = bash("a", "true", &[]);
-    node.on_failure = Some(OnFailure {
-        goto: "ghost".into(),
-        max_reroutes: 1,
-    });
-    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::BrokenReference {
-            node: "a".into(),
-            field: "on_failure.goto".to_string(),
-            target: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
 fn depends_on_cycle_is_reported() {
     let wf = workflow(vec![bash("a", "true", &["b"]), bash("b", "true", &["a"])]);
     let errors = check(&wf, &ConfigLayer::default());
@@ -350,154 +292,6 @@ fn external_gate_with_forge_configured_is_accepted() {
     );
 }
 
-fn workflow_with_modes(nodes: Vec<Node>, modes: IndexMap<ModeName, ModeSpec>) -> Workflow {
-    let mut wf = workflow(nodes);
-    wf.modes = Some(modes);
-    wf
-}
-
-#[test]
-fn a_mode_including_all_nodes_has_no_mode_errors() {
-    let wf = workflow_with_modes(
-        vec![bash("a", "true", &[]), bash("b", "true", &["a"])],
-        modes(&[("full", ModeInclude::All)]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors.iter().any(|e| matches!(
-            e,
-            CheckError::ModeReferencesUnknownNode { .. }
-                | CheckError::InvariantNodeExcludedFromMode { .. }
-                | CheckError::RerouteTargetExcludedFromMode { .. }
-        )),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_mode_referencing_an_unknown_node_is_reported() {
-    let wf = workflow_with_modes(
-        vec![bash("a", "true", &[])],
-        modes(&[("quick", included(&["a", "ghost"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::ModeReferencesUnknownNode {
-            mode: "quick".into(),
-            node: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
-fn an_invariant_node_excluded_from_a_mode_is_reported() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.invariant = true;
-    let wf = workflow_with_modes(
-        vec![lint, bash("ship", "true", &[])],
-        modes(&[("quick", included(&["ship"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::InvariantNodeExcludedFromMode {
-            node: "lint".into(),
-            mode: "quick".into(),
-        }]
-    );
-}
-
-#[test]
-fn an_invariant_node_present_in_every_mode_has_no_error() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.invariant = true;
-    let wf = workflow_with_modes(
-        vec![lint, bash("ship", "true", &[])],
-        modes(&[
-            ("quick", included(&["lint", "ship"])),
-            ("full", ModeInclude::All),
-        ]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::InvariantNodeExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_reroute_target_excluded_from_a_mode_is_reported() {
-    // A node in-mode whose on_failure.goto
-    // lands on a node that mode leaves out.
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![lint, bash("fix-lint", "true", &[])],
-        modes(&[("quick", included(&["lint"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::RerouteTargetExcludedFromMode {
-            mode: "quick".into(),
-            node: "lint".into(),
-            goto: "fix-lint".into(),
-        }]
-    );
-}
-
-#[test]
-fn a_reroute_target_included_in_the_same_mode_has_no_error() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![lint, bash("fix-lint", "true", &[])],
-        modes(&[("quick", included(&["lint", "fix-lint"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_re_route_from_a_node_excluded_from_the_mode_is_never_checked() {
-    // The failing node itself isn't in "quick" at all — its goto target
-    // being missing from the same mode isn't this mode's problem.
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![
-            lint,
-            bash("fix-lint", "true", &[]),
-            bash("ship", "true", &[]),
-        ],
-        modes(&[("quick", included(&["ship"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
 fn internal_gate(id: &str, options: &[&str], on: &[(&str, &str)]) -> Node {
     let mut node = gate(id, &[]);
     let NodeKind::Gate {
@@ -542,47 +336,6 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
         vec![CheckError::GateOnUndeclaredOption {
             node: "approve".into(),
             option: "ajustar".into(),
-        }]
-    );
-}
-
-#[test]
-fn a_gate_on_targeting_an_unknown_node_is_reported() {
-    let wf = workflow(vec![internal_gate(
-        "approve",
-        &["ajustar"],
-        &[("ajustar", "ghost")],
-    )]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::BrokenReference {
-            node: "approve".into(),
-            field: "on.ajustar".to_string(),
-            target: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
-fn a_mode_excluding_a_gate_option_target_is_reported() {
-    // "un modo que incluye un nodo cuyo `goto`
-    // u opción de gate apunta a un nodo excluido" — now checkable since
-    // gate options exist in the schema.
-    let wf = workflow_with_modes(
-        vec![
-            bash("plan", "true", &[]),
-            internal_gate("approve", &["ajustar"], &[("ajustar", "plan")]),
-        ],
-        modes(&[("quick", included(&["approve"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::RerouteTargetExcludedFromMode {
-            mode: "quick".into(),
-            node: "approve".into(),
-            goto: "plan".into(),
         }]
     );
 }
@@ -761,44 +514,6 @@ fn a_gate_cannot_be_a_parallel_child() {
 }
 
 #[test]
-fn a_parallel_group_s_child_id_colliding_with_another_node_is_a_duplicate() {
-    // Global uniqueness, not per-group: replay derives node state from a
-    // single flat NodeId -> NodeState map, so a child reusing an id in
-    // use elsewhere would corrupt derivation, not just read oddly.
-    let wf = workflow(vec![
-        bash("shared", "true", &[]),
-        parallel("group", JoinPolicy::All, vec![bash("shared", "true", &[])]),
-    ]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::DuplicateNodeId {
-            id: "shared".into()
-        }]
-    );
-}
-
-#[test]
-fn two_children_with_overlapping_declared_scope_is_an_error() {
-    let wf = workflow(vec![parallel(
-        "group",
-        JoinPolicy::All,
-        vec![
-            bash_with_scope("a", "true", &["src/**"]),
-            bash_with_scope("b", "true", &["src/lib.rs"]),
-        ],
-    )]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::OverlappingParallelScope { group, .. } if group.as_str() == "group"
-        )),
-        "expected an OverlappingParallelScope error, got {errors:?}"
-    );
-}
-
-#[test]
 fn two_children_with_disjoint_declared_scope_has_no_error_or_warning() {
     let wf = workflow(vec![parallel(
         "group",
@@ -844,28 +559,6 @@ fn a_single_child_group_never_warns_about_collision() {
 #[test]
 fn every_error_message_names_its_rule() {
     assert_eq!(
-        CheckError::DuplicateNodeId { id: "a".into() }.to_string(),
-        "duplicate node id `a`"
-    );
-    assert_eq!(
-        CheckError::BrokenReference {
-            node: "a".into(),
-            field: "depends_on".to_string(),
-            target: "b".into()
-        }
-        .to_string(),
-        "node `a`: `depends_on` references unknown node `b`"
-    );
-    assert_eq!(
-        CheckError::BrokenReference {
-            node: "a".into(),
-            field: "on_failure.goto".to_string(),
-            target: "b".into()
-        }
-        .to_string(),
-        "node `a`: `on_failure.goto` references unknown node `b`"
-    );
-    assert_eq!(
         CheckError::DependsOnCycle {
             path: "a -> b -> a".to_string()
         }
@@ -879,14 +572,6 @@ fn every_error_message_names_its_rule() {
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` does not define"
-    );
-    assert_eq!(
-        CheckError::RunnerHasNoCandidates {
-            node: "a".into(),
-            runner: "planner".into()
-        }
-        .to_string(),
-        "node `a` references runner `planner`, which `runners:` defines with zero candidates"
     );
 }
 
@@ -1447,11 +1132,8 @@ nodes:
       - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/**"] }
       - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
 "#;
-    let wf: Workflow = serde_norway::from_str(overlapping).unwrap();
     assert!(
-        check(&wf, &ConfigLayer::default())
-            .iter()
-            .any(|e| matches!(e, CheckError::OverlappingParallelScope { .. })),
+        yunta_core::workflow::read::read(overlapping, std::path::Path::new("wf.yaml")).is_err(),
         "overlapping inherit siblings must be refused"
     );
 }
@@ -1789,30 +1471,6 @@ nodes:
 
 fn parsed(yaml: &str) -> Workflow {
     serde_norway::from_str(yaml).unwrap()
-}
-
-#[test]
-fn a_mount_naming_an_unknown_node_is_refused() {
-    let wf = parsed(
-        r#"
-name: parent
-nodes:
-  - id: cons
-    kind: workflow
-    use: consumer
-    mounts:
-      - artifact: { node: ghost, name: report.md }
-"#,
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::BrokenReference { node, field, target }
-                if node.as_str() == "cons" && field == "mounts" && target.as_str() == "ghost"
-        )),
-        "got: {errors:?}"
-    );
 }
 
 #[test]

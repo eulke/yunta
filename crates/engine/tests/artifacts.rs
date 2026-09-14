@@ -293,7 +293,7 @@ async fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     // document it is about, so a later reader knows which file to open
     // and which kind's rules were asked.
     let report = failures[0].report().expect("a problem with the content");
-    assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks);
+    assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks.into());
     assert_eq!(report.document.path, staged("plan", "tasks.yaml"));
     assert_eq!(codes(&failures), ["parse"]);
 }

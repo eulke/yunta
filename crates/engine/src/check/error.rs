@@ -7,21 +7,6 @@ use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
-    #[error("duplicate node id `{id}`")]
-    DuplicateNodeId { id: NodeId },
-
-    /// A node's field names a target node the workflow doesn't define — the
-    /// one broken-reference error, whatever field carries the reference
-    /// (`depends_on`, `on_failure.goto`, a gate option's `on.<option>`, a
-    /// `mounts` entry). Catching it here means the run never starts having
-    /// silently dropped work its author named.
-    #[error("node `{node}`: `{field}` references unknown node `{target}`")]
-    BrokenReference {
-        node: NodeId,
-        field: String,
-        target: NodeId,
-    },
-
     #[error("cycle in depends_on: {path}")]
     DependsOnCycle { path: String },
 
@@ -46,21 +31,6 @@ pub enum CheckError {
         "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
     )]
     RunnerHasNoCandidates { node: NodeId, runner: RunnerName },
-
-    /// `parallel`'s children share one worktree — a scope
-    /// overlap between two of them is a verifiable-in-advance write
-    /// collision, error rather than warning.
-    #[error(
-        "parallel group `{group}`: children `{a}` and `{b}` declare overlapping scope \
-         (`{glob_a}` / `{glob_b}`) — they run at once and share one worktree"
-    )]
-    OverlappingParallelScope {
-        group: NodeId,
-        a: NodeId,
-        b: NodeId,
-        glob_a: ScopeGlob,
-        glob_b: ScopeGlob,
-    },
 
     /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
@@ -299,32 +269,6 @@ pub enum CheckError {
     /// mapping an undeclared one is a choice no human can ever make.
     #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
     GateOnUndeclaredOption { node: NodeId, option: OptionId },
-
-    /// The same broken-reference class as `BrokenReference` —
-    /// catching it here means the run never starts with a mode that
-    /// silently omits work its own author meant to include.
-    #[error("mode `{mode}` includes unknown node `{node}`")]
-    ModeReferencesUnknownNode { mode: ModeName, node: NodeId },
-
-    /// A mode trims deliberation, never verification — checked
-    /// independent of the mode's name or count.
-    #[error("node `{node}` is `invariant: true` but mode `{mode}` doesn't include it")]
-    InvariantNodeExcludedFromMode { node: NodeId, mode: ModeName },
-
-    /// A mode's own coherence rule, made an error rather than a warning
-    /// for the same reason: it's the same broken-reference class
-    /// `BrokenReference` catches, just scoped to one mode's variant of
-    /// the graph instead of the whole file. The message names both ways
-    /// out.
-    #[error(
-        "node `{node}` is in mode `{mode}`, but its on_failure.goto target `{goto}` isn't — \
-         include `{goto}` in `{mode}`, or drop the re-route there"
-    )]
-    RerouteTargetExcludedFromMode {
-        mode: ModeName,
-        node: NodeId,
-        goto: NodeId,
-    },
 
     /// A `kind: workflow` node never opens a session of its own —
     /// the child's nodes bind their own runners — so a runner binding

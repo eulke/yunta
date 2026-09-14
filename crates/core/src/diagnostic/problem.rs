@@ -100,6 +100,9 @@ rule_codes! {
     MissingAnswer => "missing-answer",
     /// An answer's value is not what its question's `answer_type` allows.
     MismatchedAnswer => "mismatched-answer",
+    /// A `mode` leaves out a node the workflow cannot run without, or a
+    /// node a node it includes reroutes to.
+    IncoherentMode => "incoherent-mode",
 }
 
 impl std::fmt::Display for RuleCode {

@@ -110,14 +110,13 @@ pub(crate) fn collect_push_to_base_warnings(
     }
 }
 
-/// A `kind: gate` with `external:` needs
-/// `forge.github` configured (`external.kind` is a closed enum with one
-/// variant today, so this is a total match); an internal gate's own
-/// `on:` mapping must reference declared options and existing targets —
-/// the same broken-reference class `BrokenReference` already catches.
+/// A `kind: gate` with `external:` needs `forge.github` configured
+/// (`external.kind` is a closed enum with one variant today, so this is
+/// a total match), and an internal gate's `on:` maps only options it
+/// declares. That each `on:` target is a node the workflow declares is
+/// the reading door's, like every other reference.
 pub(crate) fn check_gate(
     node: &Node,
-    known_ids: &HashSet<NodeId>,
     config: &yunta_core::ConfigLayer,
     errors: &mut Vec<CheckError>,
 ) {
@@ -145,18 +144,11 @@ pub(crate) fn check_gate(
             }
         }
     }
-    for (option, target) in on {
+    for option in on.keys() {
         if !options.iter().any(|declared| declared == option) {
             errors.push(CheckError::GateOnUndeclaredOption {
                 node: node.id.clone(),
                 option: option.clone(),
-            });
-        }
-        if !known_ids.contains(target) {
-            errors.push(CheckError::BrokenReference {
-                node: node.id.clone(),
-                field: format!("on.{option}"),
-                target: target.clone(),
             });
         }
     }

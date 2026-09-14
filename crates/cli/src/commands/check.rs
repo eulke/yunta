@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use yunta_core::text::problems;
-use yunta_core::{ConfigLayer, Workflow};
+use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
@@ -19,7 +19,7 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
     // catalog reference, the config layers, and the composition graph.
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
-    let workflow: Workflow = load_yaml(&workflow_path, "workflow")?;
+    let workflow = crate::load_workflow(&workflow_path)?;
 
     // Without `--config`, check sees the project's real layers — the same
     // ones a run would — including the `permissions` layer conflict check

@@ -48,7 +48,7 @@ pub mod shape;
 mod tasks;
 pub mod template;
 pub mod text;
-mod workflow;
+pub mod workflow;
 pub mod yaml;
 
 pub use capabilities::{Capabilities, Capability, FenceLevel};

@@ -14,8 +14,8 @@ use yunta_storage::Storage;
 use crate::commands::{check_or_refuse, resolve_workflow_ref};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::project;
 use crate::render::NodeDisplay;
-use crate::{load_yaml, project};
 
 type Labels = HashMap<NodeId, String>;
 
@@ -36,7 +36,7 @@ pub fn graph(
     // A bare catalog name resolves the same way `check` and `run` resolve
     // it — `graph review` works without spelling out the path.
     let workflow_path = resolve_workflow_ref(&ctx.cwd, workflow_path)?;
-    let workflow: Workflow = load_yaml(&workflow_path, "workflow")?;
+    let workflow = crate::load_workflow(&workflow_path)?;
 
     check_or_refuse(&workflow, &ctx.project.config, &workflow_path)?;
 

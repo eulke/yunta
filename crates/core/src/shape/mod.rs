@@ -254,13 +254,14 @@ mod tests {
         }
     }
 
-    /// Every rule code belongs to some kind's published rules: a rule
-    /// the engine can report is a rule a writer was told about.
+    /// Every rule code belongs to some document's published rules: a
+    /// rule the engine can report is a rule a writer was told about.
     #[test]
     fn every_rule_code_belongs_to_a_published_contract() {
         let published: BTreeSet<crate::diagnostic::RuleCode> = ArtifactKind::ALL
             .into_iter()
             .flat_map(|kind| rules(kind).iter().map(|rule| rule.code))
+            .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))
             .collect();
         for code in crate::diagnostic::RuleCode::ALL {
             assert!(

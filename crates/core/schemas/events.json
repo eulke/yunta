@@ -931,6 +931,20 @@
               "required": [
                 "of"
               ]
+            },
+            {
+              "description": "A node of a workflow, for a rule about the graph the file\ndeclares.",
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "node"
+                }
+              },
+              "$ref": "#/$defs/Named4",
+              "required": [
+                "of"
+              ]
             }
           ]
         },
@@ -996,12 +1010,26 @@
         "reason"
       ]
     },
+    "DocumentKind": {
+      "description": "What kind of document a report is about.\n\nEvery document this system reads is held to a shape and to rules,\nand reports what it found the same way — so a workflow that breaks\nits own rules reaches a reader in the shape a tasks document already\ndoes. The two are separate arms because they are read at different\nmoments by different doors: a workflow before any run, an artifact\nat a node's close.",
+      "anyOf": [
+        {
+          "description": "The workflow file a run is created from.",
+          "type": "string",
+          "const": "workflow"
+        },
+        {
+          "description": "A document a node produces and the engine reads.",
+          "$ref": "#/$defs/ArtifactKind"
+        }
+      ]
+    },
     "DocumentRef": {
       "description": "Which document a report is about: the kind that fixes its shape, and\nwhere a reader opens it.\n\nA document always has a kind. An artifact the engine never\ninterprets has no shape to demand and therefore no content to report\non; what can go wrong with one is a [`FileProblem`] instead. An\nartifact another run owes has no document at all, and names none.",
       "type": "object",
       "properties": {
         "kind": {
-          "$ref": "#/$defs/ArtifactKind"
+          "$ref": "#/$defs/DocumentKind"
         },
         "path": {
           "description": "As a reader would type it to open the file.",
@@ -2033,6 +2061,30 @@
         "index"
       ]
     },
+    "Named4": {
+      "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
     "NodeFailedPayload": {
       "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
@@ -2390,6 +2442,11 @@
           "description": "An answer's value is not what its question's `answer_type` allows.",
           "type": "string",
           "const": "mismatched-answer"
+        },
+        {
+          "description": "A `mode` leaves out a node the workflow cannot run without, or a\nnode a node it includes reroutes to.",
+          "type": "string",
+          "const": "incoherent-mode"
         }
       ]
     },

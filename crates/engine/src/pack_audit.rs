@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{
     AgentName, ContextSpec, ExecutorName, Hooks, Node, NodeKind, PackManifest, PromptSource,
-    Workflow,
 };
 
 /// The full inventory of one installed (or freshly cloned, pre-vendor)
@@ -107,12 +106,12 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
             }
         }
     };
-    let workflow: Workflow = match yunta_core::yaml::parse(&text) {
+    let workflow = match yunta_core::workflow::read::read(&text, &path) {
         Ok(workflow) => workflow,
-        Err(e) => {
+        Err(report) => {
             return WorkflowAudit {
                 declared_path: declared.to_string(),
-                error: Some(format!("`{}` fails to parse: {e}", path.display())),
+                error: Some(report.to_string()),
                 nodes: Vec::new(),
             }
         }

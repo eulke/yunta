@@ -58,20 +58,16 @@ pub(crate) fn check_workflow_nodes(
 /// finished" cannot hold). `MountOnFanOut` lives in
 /// [`check_runner_fanout`], next to the other fan-out target rules.
 pub(crate) fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
-    let known: HashSet<&NodeId> = workflow.iter_nodes().map(|node| &node.id).collect();
     for node in &workflow.nodes {
         if let NodeKind::Workflow { mounts, .. } = &node.kind {
             for mount in mounts {
                 let target = &mount.artifact.node;
+                // That the target exists at all is `read`'s to say;
+                // what is left here is a mount that names its own node,
+                // which reads fine and cannot work.
                 if target == &node.id {
                     errors.push(CheckError::MountOnSelf {
                         node: node.id.clone(),
-                    });
-                } else if !known.contains(target) {
-                    errors.push(CheckError::BrokenReference {
-                        node: node.id.clone(),
-                        field: "mounts".to_string(),
-                        target: target.clone(),
                     });
                 }
             }

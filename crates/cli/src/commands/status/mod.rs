@@ -16,7 +16,7 @@ pub(crate) mod progress;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{ArtifactId, EventPayload, Failure, StoredEvent, TaskStatus};
-use yunta_core::{ArtifactFailure, ArtifactKind, Clock, Diagnostic, FileProblem};
+use yunta_core::{ArtifactFailure, Clock, Diagnostic, FileProblem};
 use yunta_core::{Manifest, NodeId, RunId};
 use yunta_engine::{NodeState, RunPhase, WaitingOn};
 
@@ -269,7 +269,7 @@ pub(crate) struct ArtifactProblems {
     path: Option<String>,
     /// The kind whose shape the content had to meet.
     #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<ArtifactKind>,
+    kind: Option<yunta_core::diagnostic::DocumentKind>,
     /// What is wrong with the file itself — never written, empty, past
     /// the ceiling, refused by the filesystem.
     #[serde(skip_serializing_if = "Option::is_none")]

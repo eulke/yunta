@@ -11,12 +11,12 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode};
+use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
 use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage};
 use yunta_core::ContentHash;
 use yunta_core::{
-    AdapterId, ArtifactKind, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId,
-    RunnerName, Seq, WorkflowName,
+    AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
+    Seq, WorkflowName,
 };
 
 use crate::replay::{derive, NodeState};
@@ -142,7 +142,7 @@ pub struct DiagnosticCount {
     /// The document whose rules were asked. `None` for a problem with
     /// the artifact itself — a file that was never written, and an
     /// artifact another run owes, have no content to have a kind.
-    pub kind: Option<ArtifactKind>,
+    pub kind: Option<DocumentKind>,
     pub code: DiagnosticCode,
     pub occurrences: usize,
 }
@@ -173,7 +173,7 @@ impl std::fmt::Display for DiagnosticCount {
 /// was going to hand over, and `artifact-unheld` the same whatever run
 /// was asked. A document whose content failed is not one problem but
 /// every problem it has, each under the kind it was read against.
-fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, DiagnosticCode)> {
+fn counted(failure: &ArtifactFailure) -> Vec<(Option<DocumentKind>, DiagnosticCode)> {
     match failure {
         // Exhaustive rather than keyed off `report()`, so a fifth way an
         // artifact can fail reaches this decision as a compile error
@@ -197,7 +197,7 @@ fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, DiagnosticCo
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
-    let mut counts: HashMap<(Option<ArtifactKind>, DiagnosticCode), usize> = HashMap::new();
+    let mut counts: HashMap<(Option<DocumentKind>, DiagnosticCode), usize> = HashMap::new();
     let failed = events.iter().filter_map(|event| match event.payload() {
         Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(&p.failure),
         _ => None,
@@ -224,8 +224,8 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
             .then_with(|| a.code.as_str().cmp(b.code.as_str()))
             .then_with(|| {
                 a.kind
-                    .map(ArtifactKind::as_str)
-                    .cmp(&b.kind.map(ArtifactKind::as_str))
+                    .map(DocumentKind::label)
+                    .cmp(&b.kind.map(DocumentKind::label))
             })
     });
     counts

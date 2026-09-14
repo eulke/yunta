@@ -124,8 +124,8 @@ fn malformed_yaml_is_a_clean_error_not_a_panic() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("error: failed to parse workflow at "),
-        "malformed YAML is one clean parse error, not a panic: {stderr}"
+        stderr.contains("workflow.yaml: 1 error") && stderr.contains("does not parse"),
+        "malformed YAML is one clean parse error, named at the file, not a panic: {stderr}"
     );
 }
 

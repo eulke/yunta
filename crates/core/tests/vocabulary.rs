@@ -177,16 +177,24 @@ fn a_documents_kind_is_the_one_its_own_type_declares() {
 
 use std::collections::BTreeSet;
 
-use yunta_core::diagnostic::{Rule, RuleCode};
+use yunta_core::diagnostic::{DocumentKind, Rule, RuleCode};
 
-fn all_rules() -> Vec<(ArtifactKind, &'static Rule)> {
+/// Every rule every document publishes, with the document it belongs
+/// to — a workflow's among them, since a workflow is a document this
+/// system reads and holds to rules like any other.
+fn all_rules() -> Vec<(DocumentKind, &'static Rule)> {
     ArtifactKind::ALL
         .into_iter()
         .flat_map(|kind| {
             yunta_core::shape::rules(kind)
                 .iter()
-                .map(move |rule| (kind, rule))
+                .map(move |rule| (DocumentKind::Artifact(kind), rule))
         })
+        .chain(
+            yunta_core::workflow::read::RULES
+                .iter()
+                .map(|rule| (DocumentKind::Workflow, rule)),
+        )
         .collect()
 }
 

@@ -16,6 +16,7 @@
 
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 mod artifact;
@@ -37,15 +38,15 @@ use crate::ArtifactKind;
 /// artifact another run owes has no document at all, and names none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DocumentRef {
-    pub kind: ArtifactKind,
+    pub kind: DocumentKind,
     /// As a reader would type it to open the file.
     pub path: String,
 }
 
 impl DocumentRef {
-    pub fn new(kind: ArtifactKind, path: impl Into<String>) -> Self {
+    pub fn new(kind: impl Into<DocumentKind>, path: impl Into<String>) -> Self {
         DocumentRef {
-            kind,
+            kind: kind.into(),
             path: path.into(),
         }
     }
@@ -53,6 +54,60 @@ impl DocumentRef {
     /// How the document names itself to a reader.
     pub fn label(&self) -> &'static str {
         self.kind.label()
+    }
+}
+
+/// What kind of document a report is about.
+///
+/// Every document this system reads is held to a shape and to rules,
+/// and reports what it found the same way — so a workflow that breaks
+/// its own rules reaches a reader in the shape a tasks document already
+/// does. The two are separate arms because they are read at different
+/// moments by different doors: a workflow before any run, an artifact
+/// at a node's close.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum DocumentKind {
+    /// The workflow file a run is created from.
+    Workflow,
+    /// A document a node produces and the engine reads.
+    #[serde(untagged)]
+    Artifact(ArtifactKind),
+}
+
+impl DocumentKind {
+    /// How the kind names itself to a reader.
+    pub fn label(self) -> &'static str {
+        match self {
+            DocumentKind::Workflow => "workflow",
+            DocumentKind::Artifact(kind) => kind.label(),
+        }
+    }
+
+    /// The artifact kind this is, absent for a document that is not an
+    /// artifact.
+    pub fn artifact(self) -> Option<ArtifactKind> {
+        match self {
+            DocumentKind::Workflow => None,
+            DocumentKind::Artifact(kind) => Some(kind),
+        }
+    }
+}
+
+impl From<ArtifactKind> for DocumentKind {
+    fn from(kind: ArtifactKind) -> Self {
+        DocumentKind::Artifact(kind)
+    }
+}
+
+impl fmt::Display for DocumentKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DocumentKind::Workflow => f.write_str("workflow"),
+            DocumentKind::Artifact(kind) => fmt::Display::fmt(kind, f),
+        }
     }
 }
 

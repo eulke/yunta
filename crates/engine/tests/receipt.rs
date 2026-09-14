@@ -530,12 +530,12 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
+            kind: Some(ArtifactKind::Tasks.into()),
             code: DiagnosticCode::Parse(ParseCode::Parse),
             occurrences: 2,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
+            kind: Some(ArtifactKind::Tasks.into()),
             code: DiagnosticCode::Rule(RuleCode::NoCriteria),
             occurrences: 1,
         },
@@ -694,12 +694,12 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
+            kind: Some(ArtifactKind::Tasks.into()),
             code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 3,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::Findings),
+            kind: Some(ArtifactKind::Findings.into()),
             code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 1,
         },
@@ -732,7 +732,7 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
 fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
-        kind: Some(ArtifactKind::Tasks),
+        kind: Some(ArtifactKind::Tasks.into()),
         code: DiagnosticCode::Parse(ParseCode::Parse),
         occurrences: 3,
     }];

@@ -2949,3 +2949,40 @@ nodes:
         String::from_utf8_lossy(&output.stderr),
     );
 }
+
+#[test]
+fn yunta_test_refuses_a_workflow_check_refuses() {
+    // A case runs its workflow, so a workflow this binary would refuse
+    // to run is refused before any case does — and the reader is told
+    // what is wrong with the file, not that a file could not be loaded.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/broken.yaml"),
+        r#"
+name: broken
+nodes:
+  - { id: only, kind: bash, run: "true", depends_on: [ghost] }
+"#,
+    );
+    write(
+        &repo.join(".yunta/tests/never-runs.yaml"),
+        "workflow: broken\nfixture: fixtures/none.yaml\nexpect: { final_state: finished }\n",
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/none.yaml"),
+        "sessions: []\n",
+    );
+
+    let out = yunta_in!(&repo, &home, &["test"]);
+    assert!(!out.status.success(), "a broken workflow fails the suite");
+    let text = format!("{}{}", stdout(&out), stderr(&out));
+    assert!(
+        text.contains("`ghost`"),
+        "the refusal names what the workflow reaches for and does not have: {text}"
+    );
+}

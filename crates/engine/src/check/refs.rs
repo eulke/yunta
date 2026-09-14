@@ -130,12 +130,12 @@ pub(crate) fn walk_workflow_refs(
                 continue;
             }
         };
-        let child: Workflow = match yunta_core::yaml::parse(&text) {
+        let child = match yunta_core::workflow::read::read(&text, &resolved.path) {
             Ok(child) => child,
-            Err(e) => {
+            Err(report) => {
                 errors.push(CheckError::WorkflowRefUnparseable {
                     path: resolved.path,
-                    detail: e.to_string(),
+                    detail: report.to_string(),
                 });
                 continue;
             }

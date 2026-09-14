@@ -28,7 +28,6 @@ use super::drive::Prepared;
 use super::Adapters;
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
-use crate::load_yaml;
 use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
@@ -296,7 +295,7 @@ async fn estimate(
 /// extension is taken as a literal path.
 fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
     let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
-    let workflow: Workflow = load_yaml(&resolved, "workflow")?;
+    let workflow = crate::load_workflow(&resolved)?;
     super::check_or_refuse(&workflow, &ctx.project.config, &resolved)?;
     Ok((resolved, workflow))
 }

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths, MOCK_ID};
-use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, Workflow, WorkflowName};
+use yunta_core::{Clock, IdSource, ModeName, SystemClock, SystemIdSource, WorkflowName};
 use yunta_engine::{RunEnv, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
@@ -208,8 +208,10 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     let workflow_path = cwd
         .join(".yunta/workflows")
         .join(format!("{}.yaml", case.workflow));
-    let workflow: Workflow = load_yaml(&workflow_path, "workflow")
-        .map_err(|_| format!("could not load workflow `{}`", workflow_path.display()))?;
+    // A case runs the workflow, so a workflow this binary would refuse
+    // to run is refused here too — with what is wrong with it, not with
+    // a sentence that only says a file could not be loaded.
+    let workflow = crate::load_workflow(&workflow_path).map_err(|error| error.to_string())?;
 
     let config = Context::resolve_in(cwd.to_path_buf())
         .map_err(|e| yunta_core::describe(&e))?

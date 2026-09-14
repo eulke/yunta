@@ -1076,3 +1076,210 @@ nodes:
         "the refusal names what it was reading: {text}"
     );
 }
+
+// --- the reading door: a workflow comes with its rules ---------------
+
+mod reading {
+    use std::path::Path;
+
+    use yunta_core::workflow::read::read;
+
+    const PATH: &str = ".yunta/workflows/ship.yaml";
+
+    fn refuse(yaml: &str) -> String {
+        read(yaml, Path::new(PATH))
+            .expect_err("this workflow breaks a rule")
+            .to_string()
+    }
+
+    fn reads(yaml: &str) {
+        read(yaml, Path::new(PATH)).expect("this workflow is well formed");
+    }
+
+    #[test]
+    fn a_workflow_cannot_be_obtained_without_its_rules() {
+        // The defect this door closes: a workflow used to parse without
+        // anyone asking the graph anything, so a file with two nodes of
+        // one id reached a run and was found out at replay.
+        let two_of_one = "\
+name: ship
+nodes:
+  - { id: a, kind: bash, run: \"true\" }
+  - { id: a, kind: bash, run: \"false\" }
+";
+        assert!(serde_norway::from_str::<yunta_core::Workflow>(two_of_one).is_ok());
+        let text = refuse(two_of_one);
+        assert!(
+            text.contains("duplicate-id") || text.contains("already carries this id"),
+            "{text}"
+        );
+        assert!(
+            text.contains(PATH),
+            "a report names the file to fix: {text}"
+        );
+        assert!(text.contains("node `a`"), "and the node: {text}");
+    }
+
+    #[test]
+    fn a_reference_that_reaches_nothing_is_refused_wherever_it_is_written() {
+        for (yaml, field) in [
+            (
+                "name: ship\nnodes:\n  - { id: a, kind: bash, run: \"true\", depends_on: [ghost] }\n",
+                "depends_on",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n    \
+                 on_failure: { goto: ghost, max_reroutes: 1 }\n",
+                "on_failure.goto",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: gate\n    assignee: me\n    \
+                 options: [retry]\n    on: { retry: ghost }\n",
+                "on",
+            ),
+        ] {
+            let text = refuse(yaml);
+            assert!(text.contains("`ghost`"), "names what is missing: {text}");
+            assert!(text.contains(field), "and where it was written: {text}");
+        }
+    }
+
+    #[test]
+    fn two_parallel_children_never_reach_for_the_same_files() {
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"src/lib.rs\"] }
+",
+        );
+        assert!(text.contains("`a`") && text.contains("`b`"), "{text}");
+        assert!(text.contains("same files"), "{text}");
+
+        reads(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"docs/**\"] }
+",
+        );
+    }
+
+    #[test]
+    fn a_mode_leaves_a_graph_that_still_runs() {
+        let nodes = "\
+nodes:
+  - { id: lint, kind: bash, run: \"true\", invariant: true }
+  - { id: ship, kind: bash, run: \"true\" }
+";
+        // A mode naming a node nobody declared.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, ghost]\n"
+        ));
+        assert!(text.contains("`ghost`"), "{text}");
+
+        // A mode leaving out what the workflow cannot run without.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [ship]\n"
+        ));
+        assert!(
+            text.contains("invariant") && text.contains("quick"),
+            "{text}"
+        );
+
+        // A mode that keeps a node keeps what it reroutes to.
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [lint]
+",
+        );
+        assert!(text.contains("`fix`") && text.contains("quick"), "{text}");
+
+        // `include: all` holds every one of those vacuously, and a mode
+        // that keeps both ends is fine.
+        reads(&format!(
+            "name: ship\n{nodes}modes:\n  full:\n    include: all\n  quick:\n    \
+             include: [lint, ship]\n"
+        ));
+    }
+
+    #[test]
+    fn a_reroute_from_a_node_the_mode_leaves_out_is_not_that_modes_problem() {
+        reads(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+  - { id: ship, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [ship]
+",
+        );
+    }
+
+    #[test]
+    fn a_fan_out_is_expanded_before_the_rules_read_the_graph() {
+        // `review` becomes one node per runner, and what depended on
+        // `review` depends on all of them — so the rules see the graph a
+        // run would build rather than the one the author typed.
+        let workflow = read(
+            "\
+name: ship
+nodes:
+  - { id: review, kind: prompt, runners: [a, b], prompt: \"look\" }
+  - { id: ship, kind: bash, run: \"true\", depends_on: [review] }
+",
+            Path::new(PATH),
+        )
+        .expect("a fan-out reads");
+        let ids: Vec<String> = workflow
+            .iter_nodes()
+            .map(|node| node.id.to_string())
+            .collect();
+        assert_eq!(ids, ["review@a", "review@b", "ship"]);
+        let ship = workflow
+            .nodes
+            .iter()
+            .find(|node| node.id.as_str() == "ship")
+            .expect("ship stands");
+        assert_eq!(
+            ship.depends_on
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>(),
+            ["review@a", "review@b"]
+        );
+    }
+
+    #[test]
+    fn bytes_that_are_not_a_workflow_fail_as_the_document_they_are_not() {
+        let text = refuse("name: ship\nnodes: \"not a list\"\n");
+        assert!(text.contains(PATH), "{text}");
+        assert!(
+            text.contains("nodes"),
+            "at the value that stopped it: {text}"
+        );
+    }
+}
