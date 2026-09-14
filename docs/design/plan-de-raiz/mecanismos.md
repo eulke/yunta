@@ -858,6 +858,12 @@ workflows generados de 1–4 nodos bash con fixture determinista);
 | `test_fns_over_50_lines` | fns en `tests/` > 50 | — |
 | `numeric_const_without_adr` | `const NAME: <int> = <literal>;` sin `D\d+` en el rustdoc adyacente | según P7 |
 
+**Sembrado.** 0-03: `banned_vocabulary` y `tense_markers` en
+`xtask/src/smells/prose.rs`, con el corpus que cada uno lee y su lista
+blanca; el ratchet los mide desde la fase 0 para que ningún ítem de las
+fases siguientes los suba. `smells/shape.rs` separa la lectura de forma
+(módulos de test, literales, cuerpos de función) de los contadores.
+
 `[workspace.lints.rust]` y `[workspace.lints.clippy]` en `Cargo.toml` con el
 bloque de deny; los 5 `#![deny]` de los crate roots pasan a `[lints]
 workspace = true`. `clippy.toml:3` dice la verdad.

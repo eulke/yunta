@@ -803,7 +803,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-11 | un nodo que pregunta, pregunta (`preguntas.md` §9): `Node::asks`, las reglas de `check`, `interactive` retirado, `questions_asked`, la derivación, `close_node`/`finish_node`/`FinishAnswered`, `answers::record`, el corte `grill`/`brief` | P10 | cerrado(45aa682) |
 | 0-01 | `cargo xtask adr --check` (índice generado, huecos, citas, recíprocos); D164–D171 ya escritos | — | cerrado(ebd4d16) |
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002, rfc-0003) | — | cerrado(d9306bf) |
-| 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | pendiente |
+| 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | cerrado(8edcdeb) |
 | 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | pendiente |
 | 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | pendiente |
 | 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
