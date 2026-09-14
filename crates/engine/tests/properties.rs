@@ -1,8 +1,8 @@
 //! Property tests for the replay guarantees the whole engine rests on:
 //! `derive` is a pure, deterministic, prefix-monotonic fold of the event
-//! log; every event round-trips through its JSON wire form; and a run
-//! interrupted at any point and resumed derives the same final state as one
-//! that never stopped.
+//! log, at every length and not just at the full log; every event
+//! round-trips through its JSON wire form; and verifying a run's
+//! artifacts against an intact store changes nothing.
 //!
 //! The generator emits well-formed *events* (a valid payload per known
 //! kind, `seq` in order) but does not enforce a valid *lifecycle* — `derive`
@@ -237,22 +237,19 @@ proptest! {
         }
     }
 
-    /// A run interrupted at any event and resumed derives the same final
-    /// state as one that never stopped. Resume reloads the whole persisted
-    /// log and re-derives, so deriving a prefix first (the crash) must not
-    /// change the result of deriving the full log (the resume) — which holds
-    /// exactly because `derive` is pure.
+    /// `derive` is deterministic at every length, not just at the full
+    /// log: the same prefix derived twice is the same state. Nothing
+    /// outside the events — an iteration order, a clock, a counter kept
+    /// between calls — reaches the result of a partial log either.
     #[test]
-    fn an_interrupted_run_resumes_to_the_same_final_state(
+    fn derive_is_deterministic_from_any_prefix(
         (log, k) in log().prop_flat_map(|log| {
             let n = log.len();
             (Just(log), 0..=n)
         })
     ) {
-        let uninterrupted = derive(&log);
-        let _crashed_at_k = derive(&log[..k]);
-        let resumed = derive(&log);
-        prop_assert_eq!(resumed, uninterrupted);
+        let prefix = &log[..k];
+        prop_assert_eq!(derive(prefix), derive(prefix));
     }
 
     /// Verifying a run's artifacts against an intact store finds nothing
